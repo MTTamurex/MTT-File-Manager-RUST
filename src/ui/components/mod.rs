@@ -4,6 +4,7 @@ pub mod backend_settings;
 pub mod batch_rename_modal;
 pub mod breadcrumb;
 pub mod drag_move_confirmation_modal;
+pub mod explorer_integration_settings;
 pub mod gif_manager;
 pub mod gif_player;
 pub mod item_slot;

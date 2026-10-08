@@ -6,6 +6,10 @@
     name="MTT.FileManager"
     type="win32"
   />
+  <msix xmlns="urn:schemas-microsoft-com:msix.v1"
+        publisher="CN=MTT"
+        packageName="MTT.FileManager"
+        applicationId="MTTFileManager" />
 
   <!-- Per-Monitor V2 DPI awareness: avoids DWM bitmap-scaling overhead
        and ensures crisp rendering on high-DPI displays. -->

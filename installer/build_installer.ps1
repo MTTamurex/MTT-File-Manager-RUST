@@ -37,6 +37,21 @@ if (-not $SkipBuild) {
     Write-Host "`n[1/3] Skipping cargo build (-SkipBuild)" -ForegroundColor DarkGray
 }
 
+if ($SkipBuild -and $env:MTT_MSIX_SIGNING_PFX -and $env:MTT_MSIX_PUBLISHER) {
+    throw 'SkipBuild cannot be used when creating a signed sparse package; rebuild the executable with the configured publisher.'
+}
+
+$modernMenuPackageReady = $false
+$modernMenuPackagePath = "$RepoRoot\target\release\mtt-file-manager.identity.msix"
+$packageBuildResult = & "$RepoRoot\installer\build_sparse_package.ps1" -OutputPath $modernMenuPackagePath
+if ($packageBuildResult -eq 0 -and (Test-Path -LiteralPath $modernMenuPackagePath -PathType Leaf)) {
+    $modernMenuPackageReady = $true
+} elseif ($packageBuildResult -eq 10) {
+    Write-Host "Modern Explorer menu is not signed; the installer will use the classic context-menu fallback." -ForegroundColor Yellow
+} else {
+    throw "Sparse package build returned an unexpected status: $packageBuildResult"
+}
+
 # ── Step 2: Validate required files and directories ───────────────────
 Write-Host "`n[2/3] Validating required files and directories..." -ForegroundColor Yellow
 
@@ -44,6 +59,7 @@ $requiredDirectories = @(
     "$RepoRoot\mpv_ui\portable_config\scripts",
     "$RepoRoot\mpv_ui\portable_config\script-opts",
     "$RepoRoot\mpv_ui\portable_config\fonts",
+    "$RepoRoot\installer\sparse",
     "$RepoRoot\third_party_licenses",
     "$RepoRoot\third_party_licenses\pdfium-win-x64",
     "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses"
@@ -51,6 +67,7 @@ $requiredDirectories = @(
 
 $requiredFiles = @(
     "$RepoRoot\target\release\mtt-file-manager.exe",
+    "$RepoRoot\target\release\mtt_explorer_command.dll",
     "$RepoRoot\target\release\mtt-search-service.exe",
     "$RepoRoot\target\release\libmpv-2.dll",
     "$RepoRoot\target\release\pdfium.dll",
@@ -93,6 +110,13 @@ $requiredFiles = @(
     "$RepoRoot\third_party_licenses\ZLIB-RS-LICENSE.txt",
     "$RepoRoot\third_party_licenses\MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt",
     "$RepoRoot\appicon.ico",
+    "$RepoRoot\appicon.png",
+    "$RepoRoot\installer\build_sparse_package.ps1",
+    "$RepoRoot\installer\cleanup_shell_integration.ps1",
+    "$RepoRoot\installer\cleanup_folder_delegate.ps1",
+    "$RepoRoot\installer\register_sparse_package.ps1",
+    "$RepoRoot\installer\unregister_sparse_package.ps1",
+    "$RepoRoot\installer\sparse\AppxManifest.xml",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",
     "$RepoRoot\mpv_ui\portable_config\input.conf",
     "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
@@ -173,7 +197,11 @@ Or download:     https://jrsoftware.org/isdl.php
 Write-Host "  Using: $isccCandidates" -ForegroundColor DarkGray
 
 $issFile = "$RepoRoot\installer\setup.iss"
-& $isccCandidates $issFile
+if ($modernMenuPackageReady) {
+    & $isccCandidates "/DModernMenuPackageEnabled=1" $issFile
+} else {
+    & $isccCandidates $issFile
+}
 if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed (exit code $LASTEXITCODE)" }
 
 # ── Done ──────────────────────────────────────────────────────────────

@@ -70,6 +70,16 @@ Source: "{#SrcRoot}\target\release\pdfium.dll"; DestDir: "{app}"; Flags: ignorev
 ; Search service
 Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
 
+Source: "{#SrcRoot}\installer\cleanup_shell_integration.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\installer\cleanup_folder_delegate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\target\release\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
+#ifdef ModernMenuPackageEnabled
+Source: "{#SrcRoot}\appicon.png"; DestDir: "{app}\Assets"; Flags: ignoreversion
+Source: "{#SrcRoot}\target\release\mtt-file-manager.identity.msix"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\installer\register_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+
 ; mpv portable config (scripts, settings)
 Source: "{#SrcRoot}\mpv_ui\portable_config\mpv.conf";            DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
 Source: "{#SrcRoot}\mpv_ui\portable_config\input.conf";          DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
@@ -84,15 +94,13 @@ Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; Working
 Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Run]
-; (Re)install and start the search indexer Windows service.
-; The service was already stopped in CurStepChanged(ssInstall) before files
-; were copied, so "install" here is idempotent for fresh installs and safe
-; for upgrades.
+#ifdef ModernMenuPackageEnabled
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\register_sparse_package.ps1"" -PackagePath ""{app}\mtt-file-manager.identity.msix"" -ExternalLocation ""{app}"" -PackageName ""MTT.FileManager"" -PackageVersion ""{#MyAppVersion}.0"""; Flags: runhidden waituntilterminated runasoriginaluser
+#endif
 Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "{cm:InstallSearchService}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "{cm:StartSearchService}"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
-; Stop and remove the search service before files are deleted
 Filename: "{sys}\sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchService"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
 
@@ -139,6 +147,26 @@ begin
   Result := CompareText(
     ExpandConstant('{app}'),
     ExpandConstant('{autopf}\{#MyAppName}')) = 0;
+end;
+
+function InitializeUninstall: Boolean;
+var
+  ResultCode: Integer;
+  Parameters: String;
+begin
+  Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\cleanup_shell_integration.ps1') + '" -ApplicationDirectory "' +
+    ExpandConstant('{app}') + '" -PackageName "MTT.FileManager"';
+  ResultCode := -1;
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Parameters,
+    ExpandConstant('{app}'),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) and (ResultCode = 0);
+  if not Result then
+    MsgBox(CustomMessage('ShellIntegrationCleanupError'), mbError, MB_OK);
 end;
 
 function StartSearchServiceAfterFailedCleanup: Boolean;
@@ -280,6 +308,7 @@ english.StartSearchService=Starting search service...
 english.SecureInstallDirectoryError=MTT File Manager must be installed in its protected Program Files directory.
 english.SearchServiceStopTimeout=The search service did not stop within 30 seconds. Setup was stopped before updating any files.
 english.CacheCleanupError=Unable to securely remove the previous search index cache. Setup was stopped before installing the update.
+english.ShellIntegrationCleanupError=Unable to safely restore Windows shell integrations. Uninstall was cancelled to avoid leaving references to a removed executable.
 english.VCRedistWarning=Warning: Microsoft Visual C++ Redistributable (x64) does not appear to be installed.
 english.VCRedistRequired=The application requires it to run.
 english.VCRedistDownload=You can download it from:
@@ -289,6 +318,7 @@ portuguese.StartSearchService=Iniciando o serviço de busca...
 portuguese.SecureInstallDirectoryError=O MTT File Manager deve ser instalado na pasta protegida Arquivos de Programas.
 portuguese.SearchServiceStopTimeout=O serviço de busca não foi interrompido em 30 segundos. A instalação foi interrompida antes da atualização dos arquivos.
 portuguese.CacheCleanupError=Não foi possível remover com segurança o cache anterior do índice de busca. A instalação foi interrompida antes da atualização.
+portuguese.ShellIntegrationCleanupError=Não foi possível restaurar com segurança as integrações do Windows. A desinstalação foi cancelada para evitar referências a um executável removido.
 portuguese.VCRedistWarning=Aviso: o Microsoft Visual C++ Redistributable (x64) não parece estar instalado.
 portuguese.VCRedistRequired=O aplicativo precisa desse componente para ser executado.
 portuguese.VCRedistDownload=Você pode baixá-lo em:
@@ -298,6 +328,7 @@ chinese.StartSearchService=正在启动搜索服务...
 chinese.SecureInstallDirectoryError=MTT File Manager 必须安装在受保护的“程序文件”目录中。
 chinese.SearchServiceStopTimeout=搜索服务未能在 30 秒内停止。安装程序已停止，尚未更新任何文件。
 chinese.CacheCleanupError=无法安全删除之前的搜索索引缓存。安装程序已停止，尚未安装更新。
+chinese.ShellIntegrationCleanupError=无法安全还原 Windows Shell 集成。已取消卸载，以避免留下指向已删除可执行文件的引用。
 chinese.VCRedistWarning=警告：未检测到 Microsoft Visual C++ Redistributable (x64)。
 chinese.VCRedistRequired=应用程序需要此组件才能运行。
 chinese.VCRedistDownload=您可以从以下地址下载：
@@ -307,6 +338,7 @@ russian.StartSearchService=Запуск службы поиска...
 russian.SecureInstallDirectoryError=MTT File Manager необходимо установить в защищённую папку Program Files.
 russian.SearchServiceStopTimeout=Служба поиска не остановилась за 30 секунд. Установка прервана до обновления файлов.
 russian.CacheCleanupError=Не удалось безопасно удалить предыдущий кэш индекса поиска. Установка прервана до установки обновления.
+russian.ShellIntegrationCleanupError=Не удалось безопасно восстановить интеграцию с оболочкой Windows. Удаление отменено, чтобы не оставить ссылки на удалённый исполняемый файл.
 russian.VCRedistWarning=Предупреждение: Microsoft Visual C++ Redistributable (x64) не найден.
 russian.VCRedistRequired=Для работы приложения требуется этот компонент.
 russian.VCRedistDownload=Скачать его можно по адресу:

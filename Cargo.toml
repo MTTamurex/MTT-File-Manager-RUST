@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "crates/mtt-search-protocol", "crates/mtt-search-service"]
+members = [
+    ".",
+    "crates/mtt-explorer-command",
+    "crates/mtt-search-protocol",
+    "crates/mtt-search-service",
+]
 resolver = "2"
 
 [workspace.dependencies]

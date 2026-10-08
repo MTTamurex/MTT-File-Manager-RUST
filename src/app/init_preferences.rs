@@ -31,6 +31,8 @@ pub(super) struct StartupPreferences {
     pub(super) show_quick_access: bool,
     pub(super) quick_access_placement: QuickAccessPlacement,
     pub(super) show_tags: bool,
+    pub(super) use_mtt_as_default_file_manager: bool,
+    pub(super) add_open_in_mtt_context_menu: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
@@ -209,6 +211,14 @@ impl StartupPreferences {
             .unwrap_or_default();
 
         let show_tags = prefs.get("show_tags").map(|s| s != "false").unwrap_or(true);
+        let use_mtt_as_default_file_manager = prefs
+            .get("mtt_default_file_manager")
+            .map(|value| value == "true")
+            .unwrap_or(false);
+        let add_open_in_mtt_context_menu = prefs
+            .get("mtt_context_menu_enabled")
+            .map(|value| value == "true")
+            .unwrap_or(false);
 
         let language = if let Some(saved) = prefs.get("language").cloned() {
             saved
@@ -365,6 +375,8 @@ impl StartupPreferences {
             show_quick_access,
             quick_access_placement,
             show_tags,
+            use_mtt_as_default_file_manager,
+            add_open_in_mtt_context_menu,
             language,
             theme_mode,
             gpu_backend_preference,
@@ -414,6 +426,22 @@ mod tests {
         db.set_preference("show_quick_access", "false").unwrap();
 
         assert!(!StartupPreferences::load(&db).show_quick_access);
+    }
+
+    #[test]
+    fn shell_integration_preferences_default_to_disabled_and_round_trip() {
+        let db = test_db();
+        let defaults = StartupPreferences::load(&db);
+        assert!(!defaults.use_mtt_as_default_file_manager);
+        assert!(!defaults.add_open_in_mtt_context_menu);
+
+        db.set_preference("mtt_default_file_manager", "true")
+            .unwrap();
+        db.set_preference("mtt_context_menu_enabled", "false")
+            .unwrap();
+        let loaded = StartupPreferences::load(&db);
+        assert!(loaded.use_mtt_as_default_file_manager);
+        assert!(!loaded.add_open_in_mtt_context_menu);
     }
 
     #[test]

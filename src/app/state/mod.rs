@@ -313,10 +313,12 @@ pub struct ImageViewerApp {
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
     pub show_quick_access: bool, // Show Quick Access
     pub quick_access_placement: QuickAccessPlacement,
-    pub show_tags: bool,               // Show Tags section in sidebar
-    pub collapse_quick_access: bool,   // Collapse Quick Access section in sidebar
-    pub collapse_cloud_drives: bool,   // Collapse Cloud Drives section in sidebar
-    pub collapse_local_disks: bool,    // Collapse Local Disks section in sidebar
+    pub show_tags: bool, // Show Tags section in sidebar
+    pub use_mtt_as_default_file_manager: bool,
+    pub add_open_in_mtt_context_menu: bool,
+    pub collapse_quick_access: bool, // Collapse Quick Access section in sidebar
+    pub collapse_cloud_drives: bool, // Collapse Cloud Drives section in sidebar
+    pub collapse_local_disks: bool,  // Collapse Local Disks section in sidebar
     pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.

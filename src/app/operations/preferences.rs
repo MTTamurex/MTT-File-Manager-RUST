@@ -190,6 +190,14 @@ impl ImageViewerApp {
             "show_tags",
             (if self.show_tags { "true" } else { "false" }).to_string(),
         ));
+        prefs.push((
+            "mtt_default_file_manager",
+            self.use_mtt_as_default_file_manager.to_string(),
+        ));
+        prefs.push((
+            "mtt_context_menu_enabled",
+            self.add_open_in_mtt_context_menu.to_string(),
+        ));
         prefs.push(("upload_budget_ms", self.upload_budget_ms.to_string()));
         prefs.push((
             "active_tag_filter",

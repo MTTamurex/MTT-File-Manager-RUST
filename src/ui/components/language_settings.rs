@@ -102,4 +102,28 @@ mod tests {
             "Элементов: 3"
         );
     }
+
+    #[test]
+    fn explorer_integration_strings_exist_in_all_supported_locales() {
+        macro_rules! assert_localized {
+            ($key:literal) => {
+                for locale in ["en", "pt-BR", "ru", "zh-CN"] {
+                    let translated = rust_i18n::t!($key, locale = locale).to_string();
+                    assert!(!translated.is_empty());
+                    assert_ne!(translated, $key);
+                }
+            };
+        }
+
+        assert_localized!("settings.explorer_integration");
+        assert_localized!("settings.explorer_integration_title");
+        assert_localized!("settings.explorer_integration_description");
+        assert_localized!("settings.default_file_manager");
+        assert_localized!("settings.default_file_manager_description");
+        assert_localized!("settings.open_in_mtt_context_menu");
+        assert_localized!("settings.open_in_mtt_context_menu_description");
+        assert_localized!("settings.shell_integration_failed");
+        assert_localized!("settings.shell_integration_save_failed");
+        assert_localized!("context_menu.open_in_mtt");
+    }
 }

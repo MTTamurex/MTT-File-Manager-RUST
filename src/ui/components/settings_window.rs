@@ -20,6 +20,8 @@ pub struct SettingsWindowOutput {
     pub recycle_bin_changed: bool,
     pub tags_changed: bool,
     pub diagnostic_mode_changed: bool,
+    pub default_file_manager_changed: bool,
+    pub context_menu_changed: bool,
     pub open_diagnostic_folder: bool,
 }
 
@@ -66,6 +68,8 @@ pub fn render_settings_window(
     let mut recycle_bin_changed = false;
     let mut tags_changed = false;
     let mut diagnostic_mode_changed = false;
+    let mut default_file_manager_changed = false;
+    let mut context_menu_changed = false;
     let mut open_diagnostic_folder = false;
 
     if close_from_backdrop {
@@ -228,6 +232,15 @@ pub fn render_settings_window(
                                                 recycle_bin_changed = true;
                                             }
                                         }
+                                        SettingsSection::ExplorerIntegration => {
+                                            let output = crate::ui::components::explorer_integration_settings::render_explorer_integration_settings_section(
+                                                ui,
+                                                &mut app.use_mtt_as_default_file_manager,
+                                                &mut app.add_open_in_mtt_context_menu,
+                                            );
+                                            default_file_manager_changed |= output.default_file_manager_changed;
+                                            context_menu_changed |= output.context_menu_changed;
+                                        }
                                         SettingsSection::Diagnostics => {
                                             settings_ui::section_header(ui, &t!("settings.diagnostics"), &t!("settings.diagnostics_description"));
                                             if settings_ui::toggle_row(ui, &t!("settings.diagnostics_enable"), &mut app.diagnostic_mode) {
@@ -308,6 +321,8 @@ pub fn render_settings_window(
         recycle_bin_changed,
         tags_changed,
         diagnostic_mode_changed,
+        default_file_manager_changed,
+        context_menu_changed,
         open_diagnostic_folder,
     }
 }
@@ -424,6 +439,13 @@ fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSecti
         *active_section == SettingsSection::General,
     ) {
         *active_section = SettingsSection::General;
+    }
+    if settings_ui::nav_item(
+        ui,
+        &t!("settings.explorer_integration"),
+        *active_section == SettingsSection::ExplorerIntegration,
+    ) {
+        *active_section = SettingsSection::ExplorerIntegration;
     }
     if settings_ui::nav_item(
         ui,

@@ -146,6 +146,13 @@ fn write_pending_open_request(path: &str) -> i32 {
     }
 }
 
+fn positional_startup_path(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
+    let mut args = args.into_iter();
+    let _executable = args.next()?;
+    let path = args.next()?;
+    (!path.to_string_lossy().starts_with("--")).then(|| PathBuf::from(path))
+}
+
 #[cfg(target_os = "windows")]
 fn start_temporary_startup_priority_boost() {
     use std::time::Duration;
@@ -286,6 +293,7 @@ fn native_options_for_renderer(
 fn run_main_app_attempt(
     viewport: egui::ViewportBuilder,
     renderer: StartupRenderer,
+    startup_path: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
     let app_started = std::rc::Rc::new(std::cell::Cell::new(false));
     let app_started_in_creator = std::rc::Rc::clone(&app_started);
@@ -295,7 +303,7 @@ fn run_main_app_attempt(
         Box::new(move |cc| {
             app_started_in_creator.set(true);
             let app_new_start = Instant::now();
-            let app = ImageViewerApp::new(cc);
+            let app = ImageViewerApp::new(cc, startup_path);
             log::info!(
                 "[STARTUP] ImageViewerApp::new elapsed_ms={}",
                 app_new_start.elapsed().as_millis()
@@ -309,10 +317,12 @@ fn run_main_app_attempt(
 fn run_main_app_with_fallback(
     viewport: &egui::ViewportBuilder,
     preference: Option<&str>,
+    startup_path: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
     let renderers = startup_renderers(preference);
     for (index, renderer) in renderers.iter().copied().enumerate() {
-        let (result, app_started) = run_main_app_attempt(viewport.clone(), renderer);
+        let (result, app_started) =
+            run_main_app_attempt(viewport.clone(), renderer, startup_path.clone());
         match result {
             Ok(()) => return (Ok(()), app_started),
             Err(error) if !app_started && index + 1 < renderers.len() => {
@@ -562,6 +572,8 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    let startup_path = positional_startup_path(std::env::args_os());
+
     log::info!("MTT File Manager starting");
     start_temporary_startup_priority_boost();
 
@@ -613,7 +625,8 @@ fn main() -> eframe::Result<()> {
         startup_start.elapsed().as_millis()
     );
 
-    let (result, app_started) = run_main_app_with_fallback(&viewport, gpu_backend_pref.as_deref());
+    let (result, app_started) =
+        run_main_app_with_fallback(&viewport, gpu_backend_pref.as_deref(), startup_path);
 
     // Belt-and-suspenders: if eframe returned (window closed) but the process
     // is still alive (background threads stuck in kernel), force-kill immediately.
@@ -634,7 +647,32 @@ fn main() -> eframe::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{startup_renderers, StartupRenderer};
+    use super::{positional_startup_path, startup_renderers, StartupRenderer};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn positional_path_is_preserved() {
+        let path = OsString::from(r"C:\Users\user\Documents\Work Folder");
+        assert_eq!(
+            positional_startup_path([OsString::from("mtt-file-manager.exe"), path.clone()]),
+            Some(PathBuf::from(path))
+        );
+    }
+
+    #[test]
+    fn mode_flags_are_not_parsed_as_startup_paths() {
+        for flag in ["--image-viewer", "--pdf-viewer", "--open-path"] {
+            assert_eq!(
+                positional_startup_path([
+                    OsString::from("mtt-file-manager.exe"),
+                    OsString::from(flag),
+                    OsString::from(r"C:\Users\user\Documents\item"),
+                ]),
+                None
+            );
+        }
+    }
 
     #[test]
     fn automatic_renderer_has_vulkan_and_glow_fallbacks() {

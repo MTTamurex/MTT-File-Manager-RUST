@@ -11,7 +11,7 @@ use crate::domain::special_paths::{
     is_tag_view_path, is_virtual_path, tag_view_path, COMPUTER_VIEW_ID,
 };
 use crate::ui::cache::FxHashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
@@ -53,8 +53,24 @@ fn is_valid_startup_folder_path(path: &str) -> bool {
     onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf)
 }
 
-/// Determines the initial path based on the last saved folder
-/// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
+fn startup_location_from_argument(path: &Path) -> Option<(String, Option<PathBuf>)> {
+    let path_text = path.to_string_lossy();
+    if is_valid_startup_folder_path(&path_text) {
+        return Some((path_text.into_owned(), None));
+    }
+
+    if !onedrive::fast_path_exists(path) || onedrive::fast_is_dir(path) {
+        return None;
+    }
+
+    let parent = path.parent()?;
+    let parent_text = parent.to_string_lossy();
+    is_valid_startup_folder_path(&parent_text)
+        .then(|| (parent_text.into_owned(), Some(path.to_path_buf())))
+}
+
+/// Determines the initial path based on the last saved folder.
+/// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC".
 fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
     // Try to load last folder from database
     if let Some(last_folder) = app_state_db.get_preference("last_folder") {
@@ -110,7 +126,7 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
 // Function removed: using crate::infrastructure::windows::get_all_drives instead
 
 impl ImageViewerApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, startup_path: Option<PathBuf>) -> Self {
         let ctx = cc.egui_ctx.clone();
         ctx.set_fonts(font_definitions_with_embedded_icons());
 
@@ -215,6 +231,8 @@ impl ImageViewerApp {
             show_quick_access,
             quick_access_placement,
             show_tags,
+            use_mtt_as_default_file_manager,
+            add_open_in_mtt_context_menu,
             language,
             theme_mode,
             gpu_backend_preference,
@@ -277,12 +295,23 @@ impl ImageViewerApp {
         let active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
 
-        // Determine initial path based on last saved folder
         let (mut initial_path, mut is_computer_view_initial) =
             determine_initial_path(&app_state_db);
         if let Some(tag_id) = active_tag_filter {
             initial_path = tag_view_path(tag_id);
             is_computer_view_initial = false;
+        }
+
+        let mut startup_selection = None;
+        if let Some(startup_path) = startup_path.as_deref() {
+            if let Some((folder_path, selected_path)) = startup_location_from_argument(startup_path)
+            {
+                initial_path = folder_path;
+                is_computer_view_initial = false;
+                startup_selection = selected_path;
+            } else {
+                log::warn!("[INIT] Ignoring an invalid startup path argument");
+            }
         }
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
@@ -427,6 +456,8 @@ impl ImageViewerApp {
             show_quick_access,      // Loaded from SQLite
             quick_access_placement, // Loaded from SQLite
             show_tags,              // Loaded from SQLite
+            use_mtt_as_default_file_manager,
+            add_open_in_mtt_context_menu,
             collapse_quick_access: false,
             collapse_cloud_drives: false,
             collapse_local_disks: false,
@@ -590,7 +621,7 @@ impl ImageViewerApp {
             // SCROLL TO SELECTED (for keyboard navigation)
             scroll_to_selected: false,
             selection_anchor: None,
-            pending_select_path: None,
+            pending_select_path: startup_selection,
 
             // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
             last_keyboard_nav: Instant::now(),
@@ -892,6 +923,28 @@ impl ImageViewerApp {
             }
         }
 
+        if let Err(error) =
+            crate::infrastructure::windows::shell_integration::set_default_file_manager_enabled_for_current_user(
+                &app.app_state_db,
+                app.use_mtt_as_default_file_manager,
+            )
+        {
+            app.notifications.error(
+                rust_i18n::t!("settings.shell_integration_failed", error = error).to_string(),
+            );
+        }
+        let context_menu_label = rust_i18n::t!("context_menu.open_in_mtt").to_string();
+        if let Err(error) =
+            crate::infrastructure::windows::shell_integration::set_open_in_mtt_context_menu_enabled(
+                app.add_open_in_mtt_context_menu,
+                &context_menu_label,
+            )
+        {
+            app.notifications.error(
+                rust_i18n::t!("settings.shell_integration_failed", error = error).to_string(),
+            );
+        }
+
         if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
             app.set_diagnostic_mode(true);
         } else if diagnostic_mode_needs_persist {
@@ -973,5 +1026,34 @@ impl ImageViewerApp {
         }
 
         app
+    }
+}
+
+#[cfg(test)]
+mod startup_path_tests {
+    use super::startup_location_from_argument;
+    use std::fs;
+
+    #[test]
+    fn directory_argument_becomes_the_initial_folder() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let (initial_folder, selected_path) =
+            startup_location_from_argument(directory.path()).unwrap();
+
+        assert_eq!(initial_folder, directory.path().to_string_lossy());
+        assert_eq!(selected_path, None);
+    }
+
+    #[test]
+    fn file_argument_uses_its_parent_and_selects_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("item.txt");
+        fs::write(&file, "content").unwrap();
+
+        let (initial_folder, selected_path) = startup_location_from_argument(&file).unwrap();
+
+        assert_eq!(initial_folder, directory.path().to_string_lossy());
+        assert_eq!(selected_path, Some(file));
     }
 }

@@ -603,6 +603,14 @@ impl eframe::App for ImageViewerApp {
             if output.language_changed {
                 self.save_preferences();
                 self.force_save_preferences();
+                if self.add_open_in_mtt_context_menu {
+                    let label = rust_i18n::t!("context_menu.open_in_mtt").to_string();
+                    if let Err(error) = crate::infrastructure::windows::shell_integration::set_open_in_mtt_context_menu_enabled(true, &label) {
+                        self.notifications.error(
+                            rust_i18n::t!("settings.shell_integration_failed", error = error).to_string(),
+                        );
+                    }
+                }
             }
             if output.backend_changed {
                 self.save_preferences();
@@ -627,6 +635,12 @@ impl eframe::App for ImageViewerApp {
             if output.tags_changed {
                 self.save_preferences();
                 self.force_save_preferences();
+            }
+            if output.default_file_manager_changed || output.context_menu_changed {
+                self.apply_shell_integration_setting_changes(
+                    output.default_file_manager_changed,
+                    output.context_menu_changed,
+                );
             }
             if output.diagnostic_mode_changed {
                 self.set_diagnostic_mode(self.diagnostic_mode);

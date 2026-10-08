@@ -29,6 +29,7 @@ impl ThemeMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsSection {
     General,
+    ExplorerIntegration,
     Diagnostics,
     Graphics,
     Shortcuts,

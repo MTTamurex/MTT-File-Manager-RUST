@@ -27,8 +27,26 @@ fn main() {
             // bitmap-scaling which adds overhead and visual blur.
             let manifest_path = PathBuf::from(&manifest_dir).join("app.manifest");
             if manifest_path.exists() {
-                res.set_manifest_file(manifest_path.to_str().unwrap());
                 println!("cargo:rerun-if-changed={}", manifest_path.display());
+                println!("cargo:rerun-if-env-changed=MTT_MSIX_PUBLISHER");
+                let publisher =
+                    env::var("MTT_MSIX_PUBLISHER").unwrap_or_else(|_| "CN=MTT".to_string());
+                let source = std::fs::read_to_string(&manifest_path).unwrap();
+                let marker = "publisher=\"CN=MTT\"";
+                if !source.contains(marker) {
+                    panic!("app.manifest is missing its MSIX publisher attribute");
+                }
+                let publisher = publisher
+                    .replace('&', "&amp;")
+                    .replace('"', "&quot;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;");
+                let embedded_manifest =
+                    source.replace(marker, &format!("publisher=\"{publisher}\""));
+                let generated_manifest =
+                    PathBuf::from(env::var("OUT_DIR").unwrap()).join("mtt-app.manifest");
+                std::fs::write(&generated_manifest, embedded_manifest).unwrap();
+                res.set_manifest_file(generated_manifest.to_str().unwrap());
             }
 
             // Compile the resource

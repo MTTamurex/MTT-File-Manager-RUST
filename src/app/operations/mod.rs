@@ -46,6 +46,7 @@ pub mod preferences;
 pub mod rectangle_selection;
 pub mod recycle_bin_ops;
 pub mod selection;
+pub mod shell_integration;
 pub mod shutdown;
 pub mod tabs;
 pub mod tag_ops;
