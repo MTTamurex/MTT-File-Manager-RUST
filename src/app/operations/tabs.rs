@@ -49,8 +49,10 @@ impl ImageViewerApp {
         active.scroll_offset_x = self.scroll_offset_x;
         active.total_items = self.total_items;
         active.view_mode = self.view_mode;
-        // PERF: Move instead of clone for multi_selection (same pattern as all_items)
-        active.multi_selection = std::mem::take(&mut self.multi_selection);
+        // Clone instead of moving: sync_to_tab is also called by flows that do
+        // not switch tabs (drive info/health refresh, startup, drive rename),
+        // and those keep rendering from the live selection.
+        active.multi_selection = self.multi_selection.clone();
         active.sort_mode = self.sort_mode;
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
