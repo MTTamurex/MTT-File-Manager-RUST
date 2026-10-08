@@ -5,9 +5,9 @@ use super::registry::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub(super) const CLSID_TEXT: &str = "{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}";
-const THREADING_MODEL: &str = "Apartment";
-const DLL_NAME: &str = "mtt_explorer_command.dll";
+pub(super) const CLSID_TEXT: &str = "{2e6a41d7-54b3-4f0e-b8c2-9d17a3e5c6b8}";
+const LEGACY_CLSID_TEXT: &str = "{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}";
+const SERVER_NAME: &str = "mtt-shell-command.exe";
 const APP_NAME: &str = "mtt-file-manager.exe";
 const INSTALL_DIRECTORY_NAME: &str = "MTT File Manager";
 
@@ -22,12 +22,20 @@ pub(super) struct FolderDelegateSnapshot {
     pub(super) delegate_execute: Option<RegistryValueSnapshot>,
     pub(super) clsid_root_key_existed: bool,
     pub(super) clsid_key_existed: bool,
-    pub(super) inproc_key_existed: bool,
-    pub(super) inproc_server: Option<RegistryValueSnapshot>,
-    pub(super) threading_model: Option<RegistryValueSnapshot>,
+    #[serde(default)]
+    pub(super) local_server_key_existed: bool,
+    #[serde(default)]
+    pub(super) local_server: Option<RegistryValueSnapshot>,
     pub(super) installed_folder_command: String,
     pub(super) installed_clsid: String,
-    pub(super) installed_server_path: String,
+    #[serde(default)]
+    pub(super) installed_server_command: String,
+    #[serde(
+        default,
+        rename = "installed_server_path",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) legacy_installed_server_path: Option<String>,
 }
 
 fn folder_shell_key_path() -> String {
@@ -46,12 +54,25 @@ fn clsid_key_path() -> String {
     format!("{REGISTRY_CLASSES_ROOT}\\CLSID\\{CLSID_TEXT}")
 }
 
-fn inproc_server_key_path() -> String {
-    format!("{}\\InprocServer32", clsid_key_path())
+fn local_server_key_path() -> String {
+    format!("{}\\LocalServer32", clsid_key_path())
+}
+
+fn legacy_clsid_key_path() -> String {
+    format!("{REGISTRY_CLASSES_ROOT}\\CLSID\\{LEGACY_CLSID_TEXT}")
 }
 
 fn registry_value_matches_string(value: &Option<RegistryValueSnapshot>, text: &str) -> bool {
     value.as_ref().and_then(registry_string_text).as_deref() == Some(text)
+}
+
+fn current_folder_values(
+) -> Result<(Option<RegistryValueSnapshot>, Option<RegistryValueSnapshot>), String> {
+    let folder_command = folder_command_key_path();
+    Ok((
+        read_value(&folder_command, None)?,
+        read_value(&folder_command, Some("DelegateExecute"))?,
+    ))
 }
 
 pub(super) fn current_handler_points_to_mtt(command: &str) -> Result<bool, String> {
@@ -67,7 +88,9 @@ pub(super) fn current_handler_points_to_mtt(command: &str) -> Result<bool, Strin
         .and_then(registry_string_text)
         .map(|current| current.to_ascii_lowercase().contains(&executable))
         .unwrap_or(false);
-    Ok(command_references_mtt || registry_value_matches_string(&delegate_execute, CLSID_TEXT))
+    Ok(command_references_mtt
+        || registry_value_matches_string(&delegate_execute, CLSID_TEXT)
+        || registry_value_matches_string(&delegate_execute, LEGACY_CLSID_TEXT))
 }
 
 fn require_protected_install(executable: &Path) -> Result<PathBuf, String> {
@@ -97,7 +120,7 @@ fn require_protected_install(executable: &Path) -> Result<PathBuf, String> {
     {
         return Err("The Folder handler requires MTT to be installed in its protected Program Files directory.".to_string());
     }
-    let server_path = actual_directory.join(DLL_NAME);
+    let server_path = actual_directory.join(SERVER_NAME);
     if !server_path.is_file() {
         return Err(
             "The MTT Folder COM server is missing from the protected installation directory."
@@ -107,14 +130,51 @@ fn require_protected_install(executable: &Path) -> Result<PathBuf, String> {
     Ok(server_path)
 }
 
+fn remove_legacy_registration(snapshot: &FolderDelegateSnapshot) -> Result<(), String> {
+    let Some(installed_server_path) = &snapshot.legacy_installed_server_path else {
+        return Ok(());
+    };
+    let legacy_clsid = legacy_clsid_key_path();
+    let legacy_inproc = format!("{legacy_clsid}\\InprocServer32");
+    let current_server = read_value(&legacy_inproc, None)?;
+    if registry_value_matches_string(&current_server, installed_server_path) {
+        delete_value(&legacy_inproc, None)?;
+        if registry_value_matches_string(
+            &read_value(&legacy_inproc, Some("ThreadingModel"))?,
+            "Apartment",
+        ) {
+            delete_value(&legacy_inproc, Some("ThreadingModel"))?;
+        }
+    }
+    delete_key_if_empty(&legacy_inproc)?;
+    delete_key_if_empty(&legacy_clsid)?;
+    Ok(())
+}
+
+fn legacy_references_mtt(
+    default_command: &Option<RegistryValueSnapshot>,
+    delegate_execute: &Option<RegistryValueSnapshot>,
+) -> bool {
+    registry_value_matches_string(delegate_execute, LEGACY_CLSID_TEXT)
+        || default_command
+            .as_ref()
+            .and_then(registry_string_text)
+            .map(|command| {
+                command
+                    .to_ascii_lowercase()
+                    .contains(&APP_NAME.to_ascii_lowercase())
+            })
+            .unwrap_or(false)
+}
+
 pub(super) fn capture(
     executable: &Path,
     installed_folder_command: String,
 ) -> Result<FolderDelegateSnapshot, String> {
     let server_path = require_protected_install(executable)?;
     let clsid_path = clsid_key_path();
-    let inproc_path = inproc_server_key_path();
-    if key_exists(&clsid_path)? || key_exists(&inproc_path)? {
+    let local_server_path = local_server_key_path();
+    if key_exists(&clsid_path)? || key_exists(&local_server_path)? {
         return Err(
             "The MTT Folder COM class identifier is already registered; it was left untouched."
                 .to_string(),
@@ -126,52 +186,47 @@ pub(super) fn capture(
     let folder_open = folder_open_key_path();
     let folder_command_key = folder_command_key_path();
     let clsid_root = format!("{REGISTRY_CLASSES_ROOT}\\CLSID");
+    let current_default = read_value(&folder_command_key, None)?;
+    let current_delegate = read_value(&folder_command_key, Some("DelegateExecute"))?;
+    if legacy_references_mtt(&current_default, &current_delegate) {
+        return Err("The previous MTT Folder delegate is still active but its recovery snapshot is missing.".to_string());
+    }
     Ok(FolderDelegateSnapshot {
         classes_root_key_existed: key_exists(&classes_root)?,
         folder_key_existed: key_exists(&folder_key)?,
         shell_key_existed: key_exists(&folder_shell)?,
         open_key_existed: key_exists(&folder_open)?,
         command_key_existed: key_exists(&folder_command_key)?,
-        default_command: read_value(&folder_command_key, None)?,
-        delegate_execute: read_value(&folder_command_key, Some("DelegateExecute"))?,
+        default_command: current_default,
+        delegate_execute: current_delegate,
         clsid_root_key_existed: key_exists(&clsid_root)?,
         clsid_key_existed: false,
-        inproc_key_existed: false,
-        inproc_server: None,
-        threading_model: None,
+        local_server_key_existed: false,
+        local_server: None,
         installed_folder_command,
         installed_clsid: CLSID_TEXT.to_string(),
-        installed_server_path: server_path.to_string_lossy().into_owned(),
+        installed_server_command: format!("\"{}\"", server_path.to_string_lossy()),
+        legacy_installed_server_path: None,
     })
 }
 
-fn current_folder_values(
-) -> Result<(Option<RegistryValueSnapshot>, Option<RegistryValueSnapshot>), String> {
-    let folder_command = folder_command_key_path();
-    Ok((
-        read_value(&folder_command, None)?,
-        read_value(&folder_command, Some("DelegateExecute"))?,
-    ))
+fn current_com_values() -> Result<Option<RegistryValueSnapshot>, String> {
+    read_value(&local_server_key_path(), None)
 }
 
-fn current_com_values(
-) -> Result<(Option<RegistryValueSnapshot>, Option<RegistryValueSnapshot>), String> {
-    let inproc_path = inproc_server_key_path();
-    Ok((
-        read_value(&inproc_path, None)?,
-        read_value(&inproc_path, Some("ThreadingModel"))?,
-    ))
+fn value_still_installed(current: &Option<RegistryValueSnapshot>, installed_string: &str) -> bool {
+    registry_value_matches_string(current, installed_string)
 }
 
 fn validate_folder_values(snapshot: &FolderDelegateSnapshot) -> Result<(), String> {
     let (default_command, delegate_execute) = current_folder_values()?;
-    let command_is_original = default_command == snapshot.default_command;
-    let command_is_owned =
-        registry_value_matches_string(&default_command, &snapshot.installed_folder_command);
-    let delegate_is_original = delegate_execute == snapshot.delegate_execute;
-    let delegate_is_owned =
-        registry_value_matches_string(&delegate_execute, &snapshot.installed_clsid);
-    if (!command_is_original && !command_is_owned) || (!delegate_is_original && !delegate_is_owned)
+    let command_is_installed =
+        value_still_installed(&default_command, &snapshot.installed_folder_command);
+    let delegate_is_installed = value_still_installed(&delegate_execute, &snapshot.installed_clsid);
+    let command_is_untouched = default_command == snapshot.default_command;
+    let delegate_is_untouched = delegate_execute == snapshot.delegate_execute;
+    if (!command_is_installed && !command_is_untouched)
+        || (!delegate_is_installed && !delegate_is_untouched)
     {
         return Err(
             "The Folder open command changed outside MTT; it was left untouched.".to_string(),
@@ -181,13 +236,10 @@ fn validate_folder_values(snapshot: &FolderDelegateSnapshot) -> Result<(), Strin
 }
 
 fn validate_com_values(snapshot: &FolderDelegateSnapshot) -> Result<(), String> {
-    let (server, threading_model) = current_com_values()?;
-    let server_is_original = server == snapshot.inproc_server;
-    let server_is_owned = registry_value_matches_string(&server, &snapshot.installed_server_path);
-    let threading_is_original = threading_model == snapshot.threading_model;
-    let threading_is_owned = registry_value_matches_string(&threading_model, THREADING_MODEL);
-    if (!server_is_original && !server_is_owned) || (!threading_is_original && !threading_is_owned)
-    {
+    let server = current_com_values()?;
+    let server_is_installed = value_still_installed(&server, &snapshot.installed_server_command);
+    let server_is_untouched = server == snapshot.local_server;
+    if !server_is_installed && !server_is_untouched {
         return Err(
             "The MTT Folder COM registration changed outside MTT; it was left untouched."
                 .to_string(),
@@ -203,9 +255,11 @@ pub(super) fn validate(snapshot: &FolderDelegateSnapshot) -> Result<(), String> 
 
 pub(super) fn enable(snapshot: &FolderDelegateSnapshot) -> Result<(), String> {
     validate(snapshot)?;
-    let inproc_path = inproc_server_key_path();
-    write_string(&inproc_path, None, &snapshot.installed_server_path)?;
-    write_string(&inproc_path, Some("ThreadingModel"), THREADING_MODEL)?;
+    write_string(
+        &local_server_key_path(),
+        None,
+        &snapshot.installed_server_command,
+    )?;
 
     let folder_command = folder_command_key_path();
     write_string(&folder_command, None, &snapshot.installed_folder_command)?;
@@ -216,14 +270,14 @@ pub(super) fn enable(snapshot: &FolderDelegateSnapshot) -> Result<(), String> {
     )
 }
 
-fn restore_value_if_owned(
+fn restore_value_if_installed(
     key_path: &str,
     value_name: Option<&str>,
     current: &Option<RegistryValueSnapshot>,
     original: &Option<RegistryValueSnapshot>,
     installed_string: &str,
 ) -> Result<bool, String> {
-    if registry_value_matches_string(current, installed_string) {
+    if value_still_installed(current, installed_string) {
         match original {
             Some(value) => write_value(key_path, value_name, value)?,
             None => delete_value(key_path, value_name)?,
@@ -239,14 +293,14 @@ pub(super) fn restore(snapshot: &FolderDelegateSnapshot) -> Result<bool, String>
     let mut changed = false;
     let restore_result: Result<(), String> = (|| {
         let (current_folder_default, current_folder_delegate) = current_folder_values()?;
-        changed |= restore_value_if_owned(
+        changed |= restore_value_if_installed(
             &folder_command,
             None,
             &current_folder_default,
             &snapshot.default_command,
             &snapshot.installed_folder_command,
         )?;
-        changed |= restore_value_if_owned(
+        changed |= restore_value_if_installed(
             &folder_command,
             Some("DelegateExecute"),
             &current_folder_delegate,
@@ -260,26 +314,20 @@ pub(super) fn restore(snapshot: &FolderDelegateSnapshot) -> Result<bool, String>
                     .to_string(),
             );
         }
+        remove_legacy_registration(snapshot)?;
 
-        let inproc_path = inproc_server_key_path();
-        let (current_server, current_threading) = current_com_values()?;
-        changed |= restore_value_if_owned(
-            &inproc_path,
+        let local_server_path = local_server_key_path();
+        let current_server = current_com_values()?;
+        changed |= restore_value_if_installed(
+            &local_server_path,
             None,
             &current_server,
-            &snapshot.inproc_server,
-            &snapshot.installed_server_path,
-        )?;
-        changed |= restore_value_if_owned(
-            &inproc_path,
-            Some("ThreadingModel"),
-            &current_threading,
-            &snapshot.threading_model,
-            THREADING_MODEL,
+            &snapshot.local_server,
+            &snapshot.installed_server_command,
         )?;
 
-        if !snapshot.inproc_key_existed {
-            delete_key_if_empty(&inproc_path)?;
+        if !snapshot.local_server_key_existed {
+            delete_key_if_empty(&local_server_path)?;
         }
         if !snapshot.clsid_key_existed {
             delete_key_if_empty(&clsid_key_path())?;
@@ -328,14 +376,14 @@ mod tests {
             delegate_execute: Some(registry_string("{stock-folder-delegate}")),
             clsid_root_key_existed: true,
             clsid_key_existed: false,
-            inproc_key_existed: false,
-            inproc_server: None,
-            threading_model: None,
+            local_server_key_existed: false,
+            local_server: None,
             installed_folder_command:
                 r#""C:\\Program Files\\Example App\\mtt-file-manager.exe" "%1""#.to_string(),
             installed_clsid: CLSID_TEXT.to_string(),
-            installed_server_path: r"C:\\Program Files\\Example App\\mtt_explorer_command.dll"
+            installed_server_command: r#""C:\\Program Files\\Example App\\mtt-shell-command.exe""#
                 .to_string(),
+            legacy_installed_server_path: None,
         };
         let encoded = serde_json::to_string(&snapshot).unwrap();
         let decoded: FolderDelegateSnapshot = serde_json::from_str(&encoded).unwrap();

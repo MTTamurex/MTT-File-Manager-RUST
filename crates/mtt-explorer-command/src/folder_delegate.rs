@@ -12,15 +12,17 @@ use windows::Win32::UI::Shell::{
 };
 
 use super::{
-    ShellAllocatedString, E_FAIL_HR, E_INVALIDARG_HR, E_NOINTERFACE_HR, E_POINTER_HR, LIVE_OBJECTS,
-    MAX_SHELL_PATH_UNITS,
+    record_command_release, record_command_served, ShellAllocatedString, E_FAIL_HR,
+    E_INVALIDARG_HR, E_NOINTERFACE_HR, E_POINTER_HR, LIVE_OBJECTS, MAX_SHELL_PATH_UNITS,
 };
 
 pub(crate) const CLSID_MTT_FOLDER_DELEGATE: GUID =
-    GUID::from_u128(0x7b9f6e73_c8a1_4c2d_9f18_26b47e5f9c31);
+    GUID::from_u128(0x2e6a41d7_54b3_4f0e_b8c2_9d17a3e5c6b8);
 
-const INPROC_SERVER_KEY_PATH: &str =
-    "Software\\Classes\\CLSID\\{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}\\InprocServer32";
+const LOCAL_SERVER_KEY_PATH: &str =
+    "Software\\Classes\\CLSID\\{2e6a41d7-54b3-4f0e-b8c2-9d17a3e5c6b8}\\LocalServer32";
+const SERVER_EXECUTABLE_NAME: &str = "mtt-shell-command.exe";
+const APP_EXECUTABLE_NAME: &str = "mtt-file-manager.exe";
 
 #[implement(IExecuteCommand, IObjectWithSelection)]
 pub(crate) struct FolderOpenCommand {
@@ -31,6 +33,7 @@ pub(crate) struct FolderOpenCommand {
 impl FolderOpenCommand {
     pub(crate) fn new() -> Self {
         LIVE_OBJECTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        record_command_served();
         Self {
             selection: Mutex::new(None),
             parameters: Mutex::new(None),
@@ -40,6 +43,7 @@ impl FolderOpenCommand {
 
 impl Drop for FolderOpenCommand {
     fn drop(&mut self) {
+        record_command_release();
         LIVE_OBJECTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -93,13 +97,29 @@ fn shell_item_name(
 }
 
 fn mtt_executable() -> windows::core::Result<PathBuf> {
-    let server_path = super::read_registry_string(INPROC_SERVER_KEY_PATH, None)?
-        .ok_or_else(|| Error::from_hresult(E_FAIL_HR))?;
-    let executable = PathBuf::from(server_path).with_file_name("mtt-file-manager.exe");
-    if !executable.is_file() {
-        return Err(Error::from_hresult(E_FAIL_HR));
+    let mut candidates = Vec::new();
+    if let Ok(server) = std::env::current_exe() {
+        if let Some(directory) = server.parent() {
+            candidates.push(directory.join(APP_EXECUTABLE_NAME));
+        }
     }
-    Ok(executable)
+    if let Ok(Some(server_path)) = super::read_registry_string(LOCAL_SERVER_KEY_PATH, None) {
+        let server = PathBuf::from(super::strip_command_quotes(&server_path));
+        if server
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case(SERVER_EXECUTABLE_NAME))
+            .unwrap_or(false)
+        {
+            if let Some(directory) = server.parent() {
+                candidates.push(directory.join(APP_EXECUTABLE_NAME));
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| Error::from_hresult(E_FAIL_HR))
 }
 
 fn launch_mtt(path: PathBuf) -> windows::core::Result<()> {

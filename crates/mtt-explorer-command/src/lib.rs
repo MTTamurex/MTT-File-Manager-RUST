@@ -23,7 +23,10 @@ use windows::Win32::UI::Shell::{
 };
 
 mod folder_delegate;
+mod local_server;
 use folder_delegate::{FolderOpenCommand, CLSID_MTT_FOLDER_DELEGATE};
+
+pub use local_server::run_local_server;
 
 const CLSID_MTT_EXPLORER_COMMAND: GUID = GUID::from_u128(0x9f2265b8_8c7a_4b65_93a7_fae34ccb0347);
 const MENU_KEY: &str = "Software\\Classes\\Directory\\shell\\MTT.FileManager.OpenInMTT";
@@ -42,7 +45,25 @@ const CLASS_E_NOAGGREGATION_HR: HRESULT = HRESULT(0x80040110u32 as i32);
 const CLASS_E_CLASSNOTAVAILABLE_HR: HRESULT = HRESULT(0x80040111u32 as i32);
 
 static LIVE_OBJECTS: AtomicU32 = AtomicU32::new(0);
+static LIVE_SERVER_COMMANDS: AtomicU32 = AtomicU32::new(0);
 static SERVER_LOCKS: AtomicU32 = AtomicU32::new(0);
+static COMMANDS_SERVED: AtomicU32 = AtomicU32::new(0);
+static LAST_COMMAND_ACTIVITY: AtomicU32 = AtomicU32::new(0);
+
+fn current_tick_milliseconds() -> u32 {
+    unsafe { windows::Win32::System::SystemInformation::GetTickCount() }
+}
+
+fn record_command_served() {
+    LIVE_SERVER_COMMANDS.fetch_add(1, Ordering::SeqCst);
+    COMMANDS_SERVED.fetch_add(1, Ordering::SeqCst);
+    LAST_COMMAND_ACTIVITY.store(current_tick_milliseconds(), Ordering::SeqCst);
+}
+
+fn record_command_release() {
+    LAST_COMMAND_ACTIVITY.store(current_tick_milliseconds(), Ordering::SeqCst);
+    LIVE_SERVER_COMMANDS.fetch_sub(1, Ordering::SeqCst);
+}
 
 fn win32_hresult(code: WIN32_ERROR) -> HRESULT {
     if code.0 == 0 {
@@ -130,6 +151,14 @@ fn allocate_wide(value: &str) -> windows::core::Result<PWSTR> {
         ptr::copy_nonoverlapping(units.as_ptr(), allocation.cast::<u16>(), units.len());
     }
     Ok(PWSTR(allocation.cast()))
+}
+
+fn strip_command_quotes(command: &str) -> &str {
+    let trimmed = command.trim();
+    match trimmed.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or(rest),
+        None => trimmed.split(' ').next().unwrap_or(trimmed),
+    }
 }
 
 fn command_is_enabled() -> bool {
@@ -321,13 +350,13 @@ impl IClassFactory_Impl for ClassFactory_Impl {
                     unsafe { *object = command.as_raw() };
                     std::mem::forget(command);
                 } else if requested_iid == IObjectWithSelection::IID {
-                    let selection: IObjectWithSelection = FolderOpenCommand::new().into();
-                    unsafe { *object = selection.as_raw() };
-                    std::mem::forget(selection);
+                    let command: IObjectWithSelection = FolderOpenCommand::new().into();
+                    unsafe { *object = command.as_raw() };
+                    std::mem::forget(command);
                 } else if requested_iid == IUnknown::IID {
-                    let unknown: IUnknown = FolderOpenCommand::new().into();
-                    unsafe { *object = unknown.as_raw() };
-                    std::mem::forget(unknown);
+                    let command: IUnknown = FolderOpenCommand::new().into();
+                    unsafe { *object = command.as_raw() };
+                    std::mem::forget(command);
                 } else {
                     return Err(Error::from_hresult(E_NOINTERFACE_HR));
                 }
@@ -387,7 +416,8 @@ pub extern "system" fn DllCanUnloadNow() -> HRESULT {
 #[cfg(test)]
 mod tests {
     use super::{
-        class_kind_for_id, ClassKind, CLSID_MTT_EXPLORER_COMMAND, CLSID_MTT_FOLDER_DELEGATE,
+        class_kind_for_id, strip_command_quotes, ClassKind, CLSID_MTT_EXPLORER_COMMAND,
+        CLSID_MTT_FOLDER_DELEGATE,
     };
 
     #[test]
@@ -399,6 +429,20 @@ mod tests {
         assert_eq!(
             class_kind_for_id(CLSID_MTT_FOLDER_DELEGATE),
             Some(ClassKind::FolderDelegate)
+        );
+    }
+
+    #[test]
+    fn extracts_the_executable_from_a_local_server_command() {
+        assert_eq!(
+            strip_command_quotes(
+                r#""C:\Program Files\MTT File Manager\mtt-shell-command.exe" -Embedding"#
+            ),
+            r"C:\Program Files\MTT File Manager\mtt-shell-command.exe"
+        );
+        assert_eq!(
+            strip_command_quotes(r"C:\MTT\mtt-shell-command.exe -Embedding"),
+            r"C:\MTT\mtt-shell-command.exe"
         );
     }
 }

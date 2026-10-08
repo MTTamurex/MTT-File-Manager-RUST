@@ -6,7 +6,7 @@
 ; ==========================================================================
 
 #define MyAppName      "MTT File Manager"
-#define MyAppVersion   "0.2.6"
+#define MyAppVersion   "0.2.7"
 #define MyAppPublisher "MTT"
 #define MyAppExeName   "mtt-file-manager.exe"
 #define MySearchSvc    "mtt-search-service.exe"
@@ -70,11 +70,13 @@ Source: "{#SrcRoot}\target\release\pdfium.dll"; DestDir: "{app}"; Flags: ignorev
 ; Search service
 Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
 
+Source: "{#SrcRoot}\target\release\mtt-shell-command.exe"; DestDir: "{app}"; Flags: ignoreversion
+
 Source: "{#SrcRoot}\installer\cleanup_shell_integration.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\cleanup_folder_delegate.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\target\release\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
 #ifdef ModernMenuPackageEnabled
+Source: "{#SrcRoot}\target\release\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\appicon.png"; DestDir: "{app}\Assets"; Flags: ignoreversion
 Source: "{#SrcRoot}\target\release\mtt-file-manager.identity.msix"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\register_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -88,6 +90,9 @@ Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\modernH.lua";  DestDir: "{app
 Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\vsr.lua";      DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion
 Source: "{#SrcRoot}\mpv_ui\portable_config\script-opts\*";       DestDir: "{app}\mpv_ui\portable_config\script-opts"; Flags: ignoreversion recursesubdirs
 Source: "{#SrcRoot}\mpv_ui\portable_config\fonts\*";              DestDir: "{app}\mpv_ui\portable_config\fonts"; Flags: ignoreversion recursesubdirs
+
+[InstallDelete]
+Type: files; Name: "{app}\mtt_explorer_command.dll"
 
 [Icons]
 Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

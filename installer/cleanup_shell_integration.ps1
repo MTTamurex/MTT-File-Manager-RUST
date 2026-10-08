@@ -171,7 +171,7 @@ function Cleanup-UserHive([Microsoft.Win32.RegistryKey]$Root) {
             throw 'The saved Shell handler snapshot has an unexpected registry type.'
         }
         $snapshot = $snapshotRecord.Value | ConvertFrom-Json
-        if ([int]$snapshot.version -notin @(1, 2)) { throw 'The saved Shell handler snapshot version is unsupported.' }
+        if ([int]$snapshot.version -notin @(1, 2, 3)) { throw 'The saved Shell handler snapshot version is unsupported.' }
     }
 
     $expectedDefaultCommand = '"' + $applicationExe + '" "%1"'

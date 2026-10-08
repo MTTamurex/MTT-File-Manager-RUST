@@ -1,4 +1,4 @@
-function Test-FolderDelegateString($Record, [string]$Expected) {
+function Test-RegistryStringEquals($Record, [string]$Expected) {
     return $Record -and
         $Record.Kind -in @([int][Microsoft.Win32.RegistryValueKind]::String, [int][Microsoft.Win32.RegistryValueKind]::ExpandString) -and
         [string]::Equals([string]$Record.Value, $Expected, [StringComparison]::OrdinalIgnoreCase)
@@ -65,28 +65,107 @@ function Restore-FolderDelegateSnapshot {
     )
 
     $applicationExe = Join-Path $ApplicationDirectory 'mtt-file-manager.exe'
-    $serverPath = Join-Path $ApplicationDirectory 'mtt_explorer_command.dll'
-    $clsid = '{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}'
+    $serverExe = Join-Path $ApplicationDirectory 'mtt-shell-command.exe'
+    $legacyServerDll = Join-Path $ApplicationDirectory 'mtt_explorer_command.dll'
+    $clsid = '{2e6a41d7-54b3-4f0e-b8c2-9d17a3e5c6b8}'
+    $legacyClsid = '{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}'
     $folderCommandPath = "$RegistryClassesRoot\Folder\shell\open\command"
     $clsidPath = "$RegistryClassesRoot\CLSID\$clsid"
-    $inprocPath = "$clsidPath\InprocServer32"
+    $localServerPath = "$clsidPath\LocalServer32"
+    $legacyClsidPath = "$RegistryClassesRoot\CLSID\$legacyClsid"
+    $legacyInprocPath = "$legacyClsidPath\InprocServer32"
     $currentFolderDefault = Get-RegistryValueRecord $Root $folderCommandPath ''
     $currentFolderDelegate = Get-RegistryValueRecord $Root $folderCommandPath 'DelegateExecute'
-    $currentServer = Get-RegistryValueRecord $Root $inprocPath ''
-    $currentThreading = Get-RegistryValueRecord $Root $inprocPath 'ThreadingModel'
 
     if ($null -eq $Snapshot) {
+        $currentServerCommand = Get-RegistryValueRecord $Root $localServerPath ''
+        $currentLegacyServer = Get-RegistryValueRecord $Root $legacyInprocPath ''
         if ((Test-FolderCommandUsesExecutable $currentFolderDefault $applicationExe) -or
-            (Test-FolderDelegateString $currentFolderDelegate $clsid) -or
-            (Test-RegistryPathRecord $currentServer $serverPath)) {
+            (Test-RegistryStringEquals $currentFolderDelegate $clsid) -or
+            (Test-FolderCommandUsesExecutable $currentServerCommand $serverExe) -or
+            (Test-RegistryStringEquals $currentFolderDelegate $legacyClsid) -or
+            (Test-RegistryPathRecord $currentLegacyServer $legacyServerDll)) {
             throw 'An MTT Folder COM handler is active but its restoration snapshot is missing.'
         }
         return
     }
 
-    if (-not (Test-SameInstallPath ([string]$Snapshot.installed_server_path) $serverPath)) {
-        if ((Test-FolderDelegateString $currentFolderDelegate $clsid) -or
-            (Test-RegistryPathRecord $currentServer ([string]$Snapshot.installed_server_path))) {
+    if ($Snapshot.PSObject.Properties['installed_server_path']) {
+        $installedLegacyServer = [string]$Snapshot.installed_server_path
+        $currentLegacyServer = Get-RegistryValueRecord $Root $legacyInprocPath ''
+        $currentLegacyThreading = Get-RegistryValueRecord $Root $legacyInprocPath 'ThreadingModel'
+        if (-not (Test-SameInstallPath $installedLegacyServer $legacyServerDll)) {
+            if ((Test-RegistryStringEquals $currentFolderDelegate $legacyClsid) -or
+                (Test-RegistryPathRecord $currentLegacyServer $installedLegacyServer)) {
+                throw 'The legacy Folder COM snapshot belongs to another installation but is still active.'
+            }
+            return
+        }
+        if ([string]$Snapshot.installed_clsid -ne $legacyClsid -or
+            -not (Test-FolderCommandLineTargetsPath ([string]$Snapshot.installed_folder_command) $applicationExe)) {
+            throw 'The saved legacy Folder COM snapshot does not match this installation.'
+        }
+
+        if (Test-RegistryStringEquals $currentFolderDefault ([string]$Snapshot.installed_folder_command)) {
+            Set-RegistryValueFromSnapshot $Root $folderCommandPath '' $Snapshot.default_command
+        }
+        if (Test-RegistryStringEquals $currentFolderDelegate ([string]$Snapshot.installed_clsid)) {
+            Set-RegistryValueFromSnapshot $Root $folderCommandPath 'DelegateExecute' $Snapshot.delegate_execute
+        }
+        $remainingFolderDefault = Get-RegistryValueRecord $Root $folderCommandPath ''
+        $remainingFolderDelegate = Get-RegistryValueRecord $Root $folderCommandPath 'DelegateExecute'
+        if ((Test-FolderCommandUsesExecutable $remainingFolderDefault $applicationExe) -or
+            (Test-RegistryStringEquals $remainingFolderDelegate $legacyClsid)) {
+            throw 'The legacy Folder handler still references MTT; its COM registration was retained.'
+        }
+
+        if (Test-RegistryPathRecord $currentLegacyServer $installedLegacyServer) {
+            Set-RegistryValueFromSnapshot $Root $legacyInprocPath '' $Snapshot.inproc_server
+            if (Test-RegistryStringEquals $currentLegacyThreading 'Apartment') {
+                Set-RegistryValueFromSnapshot $Root $legacyInprocPath 'ThreadingModel' $Snapshot.threading_model
+            }
+        }
+        $remainingLegacyServer = Get-RegistryValueRecord $Root $legacyInprocPath ''
+        if (Test-RegistryPathRecord $remainingLegacyServer $installedLegacyServer) {
+            throw 'The legacy Folder COM registration still points to the MTT DLL; it was retained.'
+        }
+
+        if (-not $Snapshot.inproc_key_existed) {
+            Remove-EmptySubKey $Root $legacyClsidPath 'InprocServer32'
+        }
+        if (-not $Snapshot.clsid_key_existed) {
+            Remove-EmptySubKey $Root "$RegistryClassesRoot\CLSID" $legacyClsid
+        }
+        if (-not $Snapshot.command_key_existed) {
+            Remove-EmptySubKey $Root "$RegistryClassesRoot\Folder\shell\open" 'command'
+        }
+        if (-not $Snapshot.open_key_existed) {
+            Remove-EmptySubKey $Root "$RegistryClassesRoot\Folder\shell" 'open'
+        }
+        if (-not $Snapshot.shell_key_existed) {
+            Remove-EmptySubKey $Root "$RegistryClassesRoot\Folder" 'shell'
+        }
+        if (-not $Snapshot.folder_key_existed) {
+            Remove-EmptySubKey $Root $RegistryClassesRoot 'Folder'
+        }
+        if (-not $Snapshot.clsid_root_key_existed) {
+            Remove-EmptySubKey $Root $RegistryClassesRoot 'CLSID'
+        }
+        if (-not $Snapshot.classes_root_key_existed) {
+            Remove-EmptySubKey $Root 'Software' 'Classes'
+        }
+        Notify-ShellAssociationChanged
+        return
+    }
+
+    $installedServerCommand = if ($Snapshot.PSObject.Properties['installed_server_command']) { [string]$Snapshot.installed_server_command } else { $null }
+    if (-not $installedServerCommand) {
+        throw 'The saved Folder COM snapshot does not match this installation.'
+    }
+    if (-not (Test-FolderCommandLineTargetsPath $installedServerCommand $serverExe)) {
+        $currentServerCommand = Get-RegistryValueRecord $Root $localServerPath ''
+        if ((Test-RegistryStringEquals $currentFolderDelegate $clsid) -or
+            (Test-FolderCommandUsesExecutable $currentServerCommand $serverExe)) {
             throw 'The Folder COM snapshot belongs to another installation but is still active.'
         }
         return
@@ -97,37 +176,32 @@ function Restore-FolderDelegateSnapshot {
         throw 'The saved Folder COM snapshot does not match this installation.'
     }
 
-    $folderDefaultOwned = Test-FolderDelegateString $currentFolderDefault ([string]$Snapshot.installed_folder_command)
-    $folderDelegateOwned = Test-FolderDelegateString $currentFolderDelegate ([string]$Snapshot.installed_clsid)
-    if ($folderDefaultOwned) {
+    $currentServerCommand = Get-RegistryValueRecord $Root $localServerPath ''
+    if (Test-RegistryStringEquals $currentFolderDefault ([string]$Snapshot.installed_folder_command)) {
         Set-RegistryValueFromSnapshot $Root $folderCommandPath '' $Snapshot.default_command
     }
-    if ($folderDelegateOwned) {
+    if (Test-RegistryStringEquals $currentFolderDelegate ([string]$Snapshot.installed_clsid)) {
         Set-RegistryValueFromSnapshot $Root $folderCommandPath 'DelegateExecute' $Snapshot.delegate_execute
     }
 
     $remainingFolderDefault = Get-RegistryValueRecord $Root $folderCommandPath ''
     $remainingFolderDelegate = Get-RegistryValueRecord $Root $folderCommandPath 'DelegateExecute'
     if ((Test-FolderCommandUsesExecutable $remainingFolderDefault $applicationExe) -or
-        (Test-FolderDelegateString $remainingFolderDelegate $clsid)) {
+        (Test-RegistryStringEquals $remainingFolderDelegate $clsid) -or
+        (Test-RegistryStringEquals $remainingFolderDelegate $legacyClsid)) {
         throw 'The Folder handler still references MTT; its COM registration was retained.'
     }
 
-    $serverOwned = Test-RegistryPathRecord $currentServer $serverPath
-    $threadingOwned = Test-FolderDelegateString $currentThreading 'Apartment'
-    if ($serverOwned) {
-        Set-RegistryValueFromSnapshot $Root $inprocPath '' $Snapshot.inproc_server
+    if (Test-RegistryStringEquals $currentServerCommand $installedServerCommand) {
+        Set-RegistryValueFromSnapshot $Root $localServerPath '' $Snapshot.local_server
     }
-    if ($threadingOwned) {
-        Set-RegistryValueFromSnapshot $Root $inprocPath 'ThreadingModel' $Snapshot.threading_model
-    }
-    $remainingServer = Get-RegistryValueRecord $Root $inprocPath ''
-    if (Test-RegistryPathRecord $remainingServer $serverPath) {
-        throw 'The Folder COM registration still points to the MTT DLL; it was retained.'
+    $remainingServerCommand = Get-RegistryValueRecord $Root $localServerPath ''
+    if (Test-FolderCommandUsesExecutable $remainingServerCommand $serverExe) {
+        throw 'The Folder COM registration still points to the MTT server; it was retained.'
     }
 
-    if (-not $Snapshot.inproc_key_existed) {
-        Remove-EmptySubKey $Root $clsidPath 'InprocServer32'
+    if (-not $Snapshot.local_server_key_existed) {
+        Remove-EmptySubKey $Root $clsidPath 'LocalServer32'
     }
     if (-not $Snapshot.clsid_key_existed) {
         Remove-EmptySubKey $Root "$RegistryClassesRoot\CLSID" $clsid

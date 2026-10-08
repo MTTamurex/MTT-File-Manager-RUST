@@ -7,7 +7,7 @@
          xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
          xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
          xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5">
-  <Identity Name="MTT.FileManager" Publisher="CN=MTT" Version="0.2.6.0" ProcessorArchitecture="neutral" />
+  <Identity Name="MTT.FileManager" Publisher="CN=MTT" Version="0.2.7.0" ProcessorArchitecture="neutral" />
   <Properties>
     <DisplayName>MTT File Manager</DisplayName>
     <PublisherDisplayName>MTT</PublisherDisplayName>

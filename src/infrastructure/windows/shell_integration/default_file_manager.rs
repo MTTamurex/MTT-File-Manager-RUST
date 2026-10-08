@@ -83,7 +83,7 @@ fn capture_default_handler_snapshot(
         .collect::<Result<Vec<_>, _>>()?;
     let folder_delegate = folder_delegate::capture(executable, command.clone())?;
     Ok(DefaultHandlerSnapshot {
-        version: 2,
+        version: 3,
         installed_commands: vec![command],
         verbs,
         folder_delegate: Some(folder_delegate),
@@ -106,7 +106,7 @@ fn load_default_handler_snapshot(
     };
     let snapshot: DefaultHandlerSnapshot = serde_json::from_str(&raw)
         .map_err(|error| format!("Could not read the saved folder-handler snapshot: {error}"))?;
-    if snapshot.version != 1 && snapshot.version != 2 {
+    if snapshot.version != 1 && snapshot.version != 2 && snapshot.version != 3 {
         return Err("The saved folder-handler snapshot has an unsupported version".to_string());
     }
     Ok(Some(snapshot))
@@ -145,10 +145,6 @@ fn restore_default_file_manager(
     db: &AppStateDb,
     snapshot: &DefaultHandlerSnapshot,
 ) -> Result<(), String> {
-    if snapshot.verbs.is_empty() {
-        return Ok(());
-    }
-
     let mut states = Vec::with_capacity(snapshot.verbs.len());
     for verb in &snapshot.verbs {
         if snapshot_is_owned(snapshot, verb)? {
@@ -213,6 +209,12 @@ fn set_default_file_manager_enabled(db: &AppStateDb, enabled: bool) -> Result<()
 
     if enabled {
         let mut snapshot = match load_default_handler_snapshot(db)? {
+            Some(snapshot) if snapshot.version < 3 || snapshot.folder_delegate.is_none() => {
+                restore_default_file_manager(db, &snapshot)?;
+                let snapshot = capture_default_handler_snapshot(&executable, command.clone())?;
+                save_default_handler_snapshot(db, &snapshot)?;
+                snapshot
+            }
             Some(snapshot) => snapshot,
             None => {
                 let snapshot = capture_default_handler_snapshot(&executable, command.clone())?;
@@ -220,15 +222,6 @@ fn set_default_file_manager_enabled(db: &AppStateDb, enabled: bool) -> Result<()
                 snapshot
             }
         };
-        if snapshot.folder_delegate.is_none() {
-            snapshot.folder_delegate =
-                Some(folder_delegate::capture(&executable, command.clone())?);
-            snapshot.version = 2;
-            save_default_handler_snapshot(db, &snapshot)?;
-        } else if snapshot.version == 1 {
-            snapshot.version = 2;
-            save_default_handler_snapshot(db, &snapshot)?;
-        }
 
         for verb in &snapshot.verbs {
             if !snapshot_is_owned(&snapshot, verb)? && !snapshot_is_original(verb)? {
@@ -309,18 +302,33 @@ mod tests {
     }
 
     #[test]
-    fn version_one_snapshot_migrates_without_a_folder_delegate() {
-        let snapshot: DefaultHandlerSnapshot =
+    fn version_one_snapshot_loads_without_a_folder_delegate() {
+        let legacy: DefaultHandlerSnapshot =
             serde_json::from_str(r#"{"version":1,"installed_commands":[],"verbs":[]}"#).unwrap();
-        assert_eq!(snapshot.version, 1);
-        assert!(snapshot.folder_delegate.is_none());
+        assert_eq!(legacy.version, 1);
+        assert!(legacy.folder_delegate.is_none());
     }
 
     #[test]
-    fn version_two_snapshot_round_trips_folder_delegate_state() {
+    fn version_two_snapshot_keeps_legacy_inproc_server_path() {
+        let legacy: DefaultHandlerSnapshot = serde_json::from_str(
+            r#"{"version":2,"installed_commands":[],"verbs":[],"folder_delegate":{"classes_root_key_existed":true,"folder_key_existed":true,"shell_key_existed":true,"open_key_existed":true,"command_key_existed":true,"default_command":null,"delegate_execute":null,"clsid_root_key_existed":true,"clsid_key_existed":false,"inproc_key_existed":false,"inproc_server":null,"threading_model":null,"installed_folder_command":"\"C:\\Program Files\\Example App\\mtt-file-manager.exe\" \"%1\"","installed_clsid":"{7b9f6e73-c8a1-4c2d-9f18-26b47e5f9c31}","installed_server_path":"C:\\Program Files\\Example App\\mtt_explorer_command.dll"}}"#,
+        )
+        .unwrap();
+        let folder_delegate = legacy.folder_delegate.unwrap();
+        assert_eq!(legacy.version, 2);
+        assert_eq!(
+            folder_delegate.legacy_installed_server_path.as_deref(),
+            Some(r"C:\Program Files\Example App\mtt_explorer_command.dll")
+        );
+        assert!(folder_delegate.installed_server_command.is_empty());
+    }
+
+    #[test]
+    fn current_snapshot_round_trips_folder_delegate_state() {
         let command = r#""C:\Program Files\Example App\mtt-file-manager.exe" "%1""#.to_string();
         let snapshot = DefaultHandlerSnapshot {
-            version: 2,
+            version: 3,
             installed_commands: vec![command.clone()],
             verbs: Vec::new(),
             folder_delegate: Some(FolderDelegateSnapshot {
@@ -333,13 +341,13 @@ mod tests {
                 delegate_execute: None,
                 clsid_root_key_existed: true,
                 clsid_key_existed: false,
-                inproc_key_existed: false,
-                inproc_server: None,
-                threading_model: None,
+                local_server_key_existed: false,
+                local_server: None,
                 installed_folder_command: command,
                 installed_clsid: CLSID_TEXT.to_string(),
-                installed_server_path: r"C:\Program Files\Example App\mtt_explorer_command.dll"
+                installed_server_command: r#""C:\Program Files\Example App\mtt-shell-command.exe""#
                     .to_string(),
+                legacy_installed_server_path: None,
             }),
         };
         let encoded = serde_json::to_string(&snapshot).unwrap();

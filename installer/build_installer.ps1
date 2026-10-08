@@ -67,7 +67,7 @@ $requiredDirectories = @(
 
 $requiredFiles = @(
     "$RepoRoot\target\release\mtt-file-manager.exe",
-    "$RepoRoot\target\release\mtt_explorer_command.dll",
+    "$RepoRoot\target\release\mtt-shell-command.exe",
     "$RepoRoot\target\release\mtt-search-service.exe",
     "$RepoRoot\target\release\libmpv-2.dll",
     "$RepoRoot\target\release\pdfium.dll",
