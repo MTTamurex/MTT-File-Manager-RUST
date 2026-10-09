@@ -152,7 +152,7 @@ fn trim_working_set_series(
         let after = capture_resource_snapshot();
         if result.is_ok() {
             crate::infrastructure::diagnostic_logger::diag_info(
-                "image_viewer_memory",
+                "memory_trim",
                 "working_set_trim",
                 &[
                     crate::infrastructure::diagnostic_logger::field_u64(

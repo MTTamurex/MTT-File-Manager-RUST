@@ -85,6 +85,11 @@ struct DiskAnalyzerApp {
     dark_mode: bool,
     revealed: bool,
     last_theme_poll: std::time::Instant,
+    last_memory_activity: std::time::Instant,
+    last_memory_trim_check: std::time::Instant,
+    last_memory_trim_request: std::time::Instant,
+    memory_trim_was_pending: bool,
+    memory_activity_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl DiskAnalyzerApp {
@@ -92,11 +97,89 @@ impl DiskAnalyzerApp {
         let mut state = DiskAnalysisState::new();
         state.drives = crate::app::disk_analysis_state::collect_drive_summaries();
         state.request(drive_letter);
+        let now = std::time::Instant::now();
         Self {
             state,
             dark_mode,
             revealed: false,
-            last_theme_poll: std::time::Instant::now(),
+            last_theme_poll: now,
+            last_memory_activity: now,
+            last_memory_trim_check: now,
+            last_memory_trim_request: now
+                .checked_sub(std::time::Duration::from_secs(10))
+                .unwrap_or(now),
+            memory_trim_was_pending: true,
+            memory_activity_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
+
+    fn run_idle_working_set_trim(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        if ctx.input(|input| !input.raw.events.is_empty()) {
+            self.last_memory_activity = now;
+            self.memory_activity_generation
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+
+        let has_pending_work = self.state.memory_trim_has_pending_work();
+        if has_pending_work {
+            if !self.memory_trim_was_pending {
+                self.memory_activity_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                self.last_memory_activity = now;
+            }
+            self.memory_trim_was_pending = true;
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        } else if self.memory_trim_was_pending {
+            self.memory_trim_was_pending = false;
+            self.last_memory_activity = now;
+        }
+
+        let trim_check_interval = crate::image_viewer::metrics::working_set_trim_check_interval();
+        let since_last_check = now.duration_since(self.last_memory_trim_check);
+        if since_last_check < trim_check_interval {
+            if !has_pending_work {
+                ctx.request_repaint_after(trim_check_interval - since_last_check);
+            }
+            return;
+        }
+        self.last_memory_trim_check = now;
+
+        let working_set_bytes = crate::image_viewer::metrics::current_working_set_bytes();
+        if !crate::image_viewer::metrics::idle_trim_is_due(
+            now,
+            self.last_memory_activity,
+            self.last_memory_trim_request,
+            working_set_bytes,
+            has_pending_work,
+        ) {
+            if !has_pending_work
+                && working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes()
+            {
+                let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                    now,
+                    self.last_memory_activity,
+                    self.last_memory_trim_request,
+                );
+                ctx.request_repaint_after(wait.max(trim_check_interval));
+            }
+            return;
+        }
+
+        let generation = self
+            .memory_activity_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if crate::image_viewer::metrics::request_idle_working_set_trim(
+            std::sync::Arc::clone(&self.memory_activity_generation),
+            generation,
+        ) {
+            self.last_memory_trim_request = now;
+            let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                now,
+                self.last_memory_activity,
+                now,
+            );
+            ctx.request_repaint_after(wait.max(trim_check_interval));
         }
     }
 }
@@ -148,5 +231,6 @@ impl eframe::App for DiskAnalyzerApp {
         }
 
         crate::ui::disk_analysis::render_analyzer_body(&mut self.state, ui);
+        self.run_idle_working_set_trim(&ctx);
     }
 }

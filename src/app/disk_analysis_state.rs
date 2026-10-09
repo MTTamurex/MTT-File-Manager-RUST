@@ -703,6 +703,10 @@ impl DiskAnalysisState {
             || self.duplicates.is_running()
     }
 
+    pub fn memory_trim_has_pending_work(&self) -> bool {
+        self.has_background_work() || self.query_repaint_after().is_some()
+    }
+
     pub fn filter_is_updating(&self) -> bool {
         self.filter.is_active() && self.active_weights.is_none()
     }
@@ -1206,6 +1210,30 @@ mod tests {
 
         assert!(!state.search_worker_pending);
         assert!(!state.has_background_work());
+    }
+
+    #[test]
+    fn memory_trim_waits_for_pending_analysis_and_debounced_queries() {
+        let mut state = DiskAnalysisState::new();
+        assert!(!state.memory_trim_has_pending_work());
+
+        state.phase = DiskAnalysisPhase::Fetching;
+        assert!(state.memory_trim_has_pending_work());
+        state.phase = DiskAnalysisPhase::Idle;
+
+        state.weights_pending = true;
+        assert!(state.memory_trim_has_pending_work());
+        state.weights_pending = false;
+
+        state.filter_pending_at = Some(Instant::now());
+        assert!(state.memory_trim_has_pending_work());
+        state.filter_pending_at = None;
+
+        state.search_pending_at = Some(Instant::now());
+        assert!(state.memory_trim_has_pending_work());
+        state.search_pending_at = None;
+
+        assert!(!state.memory_trim_has_pending_work());
     }
 
     #[test]
