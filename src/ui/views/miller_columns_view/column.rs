@@ -125,18 +125,30 @@ pub fn render_miller_column(
     ui.spacing_mut().item_spacing.y = 0.0;
 
     let scroll_id = ui.make_persistent_id(column_id);
-    let max_scroll = (ctx.items.len() as f32 * COL_ROW_HEIGHT - rect.height()).max(0.0);
-    let mut scroll_offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
-        .map(|state| state.offset.y)
-        .unwrap_or(0.0)
-        .clamp(0.0, max_scroll);
-    if !ctx.scroll_interpolation_enabled
-        && ui.rect_contains_pointer(rect)
-        && ui.ctx().dragged_id().is_none()
+    let custom_wheel_offset = if !ctx.scroll_interpolation_enabled && ui.rect_contains_pointer(rect)
     {
-        let raw_delta =
-            ui.input(|input| crate::ui::views::common::raw_wheel_delta(input, rect.height()).y);
-        scroll_offset = (scroll_offset - raw_delta).clamp(0.0, max_scroll);
+        let dragged_id = ui.ctx().dragged_id();
+        if dragged_id.is_none() {
+            let wheel_delta = ui
+                .input(|input| crate::ui::views::common::raw_wheel_delta(input, rect.height()))
+                .y;
+            let current_offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
+                .map(|state| state.offset.y)
+                .unwrap_or(0.0);
+            let max_scroll = (ctx.items.len() as f32 * COL_ROW_HEIGHT - rect.height()).max(0.0);
+            raw_wheel_scroll_offset(current_offset, wheel_delta, max_scroll)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if custom_wheel_offset.is_some() {
+        // The enclosing horizontal Miller strip also sees wheel input. Consume
+        // the vertical delta here so it cannot turn this column's wheel scroll
+        // into horizontal movement of the entire strip.
+        ui.ctx()
+            .input_mut(|input| input.smooth_scroll_delta.y = 0.0);
     }
 
     let scroll_source = if ctx.scroll_interpolation_enabled {
@@ -144,13 +156,18 @@ pub fn render_miller_column(
     } else {
         egui::scroll_area::ScrollSource::SCROLL_BAR
     };
-    let scroll_output = egui::ScrollArea::vertical()
+    let scroll_area = egui::ScrollArea::vertical()
         .id_salt(column_id)
         .auto_shrink([false, false])
-        .vertical_scroll_offset(scroll_offset)
         .scroll_source(scroll_source)
-        .animated(ctx.scroll_interpolation_enabled)
-        .show_rows(ui, COL_ROW_HEIGHT, ctx.items.len(), |ui, row_range| {
+        .animated(ctx.scroll_interpolation_enabled);
+    let scroll_area = if let Some(offset) = custom_wheel_offset {
+        scroll_area.vertical_scroll_offset(offset)
+    } else {
+        scroll_area
+    };
+    let scroll_output =
+        scroll_area.show_rows(ui, COL_ROW_HEIGHT, ctx.items.len(), |ui, row_range| {
             for index in row_range {
                 let Some(item) = ctx.items.get(index) else {
                     continue;
@@ -206,6 +223,11 @@ pub fn render_miller_column(
         rectangle_selection_frame,
         rename_update,
     }
+}
+
+fn raw_wheel_scroll_offset(current_offset: f32, wheel_delta: f32, max_offset: f32) -> Option<f32> {
+    let next_offset = (current_offset - wheel_delta).clamp(0.0, max_offset);
+    (wheel_delta != 0.0 && next_offset != current_offset).then_some(next_offset)
 }
 
 fn render_row(
@@ -508,5 +530,19 @@ fn background_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnA
         Some(MillerColumnAction::EmptyClicked)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raw_wheel_scroll_offset;
+
+    #[test]
+    fn raw_wheel_scroll_changes_only_the_column_offset() {
+        assert_eq!(raw_wheel_scroll_offset(20.0, -15.0, 100.0), Some(35.0));
+        assert_eq!(raw_wheel_scroll_offset(20.0, 15.0, 100.0), Some(5.0));
+        assert_eq!(raw_wheel_scroll_offset(0.0, 15.0, 100.0), None);
+        assert_eq!(raw_wheel_scroll_offset(95.0, -15.0, 100.0), Some(100.0));
+        assert_eq!(raw_wheel_scroll_offset(20.0, 0.0, 100.0), None);
     }
 }
