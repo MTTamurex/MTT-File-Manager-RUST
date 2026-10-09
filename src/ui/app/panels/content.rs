@@ -931,7 +931,10 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app.drag_hovered_folder = None;
         app.external_drop_inactive_folder = None;
 
-        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+        let external_pointer_pos = app
+            .external_drop_pointer_pos
+            .or_else(|| ui.input(|i| i.pointer.hover_pos()));
+        if let Some(pos) = external_pointer_pos {
             let inactive_header = match active {
                 ActivePanel::Left => right_header_rect,
                 ActivePanel::Right => left_header_rect,

@@ -459,6 +459,7 @@ impl ImageViewerApp {
             pending_drag_move_confirmation: None,
             drag_icon_cache: None,
             external_drop_active: false,
+            external_drop_pointer_pos: None,
             external_drop_inactive_folder: None,
             total_items: 0,
             // Search & Navigation (NEW)

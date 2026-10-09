@@ -64,6 +64,7 @@ pub struct MillerColumnContext<'a> {
     pub icon_requests: &'a mut Vec<PathBuf>,
     pub is_item_dragging: bool,
     pub drop_target: &'a mut Option<PathBuf>,
+    pub external_drop_pointer_pos: Option<egui::Pos2>,
     pub is_loading: bool,
     pub scroll_interpolation_enabled: bool,
 }
@@ -82,11 +83,10 @@ pub fn render_miller_column(
     let background_response =
         ui.interact(rect, column_id.with("background"), Sense::click_and_drag());
 
-    if ctx.is_item_dragging
-        && ui
-            .input(|input| input.pointer.hover_pos())
-            .is_some_and(|position| rect.contains(position))
-    {
+    let pointer_pos = ctx
+        .external_drop_pointer_pos
+        .or_else(|| ui.input(|input| input.pointer.hover_pos()));
+    if ctx.is_item_dragging && pointer_pos.is_some_and(|position| rect.contains(position)) {
         *ctx.drop_target = Some(ctx.directory.to_path_buf());
     }
 
@@ -226,7 +226,11 @@ fn render_row(
             .map(|state| state.preview_contains(index)),
     );
 
-    let is_drop_candidate = ctx.is_item_dragging && response.contains_pointer() && item.is_dir;
+    let pointer_over_row = ctx
+        .external_drop_pointer_pos
+        .map(|position| row_rect.contains(position))
+        .unwrap_or_else(|| response.contains_pointer());
+    let is_drop_candidate = ctx.is_item_dragging && pointer_over_row && item.is_dir;
     if is_drop_candidate {
         *ctx.drop_target = Some(item.path.clone());
     }

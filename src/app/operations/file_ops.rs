@@ -194,14 +194,17 @@ impl ImageViewerApp {
         self.thumbnail_queue.remove_paths(&paths);
     }
 
-    pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty()
-            || paths.iter().any(|path| {
+    pub(crate) fn can_delete_with_shell_paths(&self, paths: &[PathBuf]) -> bool {
+        !paths.is_empty()
+            && !paths.iter().any(|path| {
                 crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })
-        {
-            return;
+    }
+
+    pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) -> bool {
+        if !self.can_delete_with_shell_paths(paths) {
+            return false;
         }
 
         // Send request to background worker (BATCH)
@@ -222,6 +225,7 @@ impl ImageViewerApp {
                 .file_ops_in_progress
                 .saturating_sub(1);
             log::warn!("[FileOps] H-3: worker channel closed on delete");
+            return false;
         }
 
         // Track pending deletions to suppress thumbnail extraction for these files
@@ -231,6 +235,7 @@ impl ImageViewerApp {
                 .insert(path.clone(), ());
         }
         self.thumbnail_queue.remove_paths(paths);
+        true
     }
 
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {

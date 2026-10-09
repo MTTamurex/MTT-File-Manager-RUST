@@ -200,7 +200,13 @@ fn render_column_item(
                 }
             }
         }
-        if response.contains_pointer() && item.is_dir {
+        let pointer_over_drop_candidate = ctx.is_item_dragging
+            && item.is_dir
+            && ctx
+                .external_drop_pointer_pos
+                .map(|position| rect.contains(position))
+                .unwrap_or_else(|| response.contains_pointer());
+        if pointer_over_drop_candidate {
             *ctx.drag_hovered_item = Some(index);
         }
 
@@ -226,7 +232,7 @@ fn render_column_item(
             );
         }
 
-        if ctx.is_item_dragging && item.is_dir && response.contains_pointer() {
+        if pointer_over_drop_candidate {
             ui.painter().rect_stroke(
                 visual_rect.shrink(1.0),
                 4.0,

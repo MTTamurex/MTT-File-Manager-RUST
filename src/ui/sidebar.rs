@@ -58,6 +58,7 @@ pub struct SidebarContext<'a> {
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub pinned_folders: &'a [PinnedFolder],
     pub is_item_dragging: bool, // ANY item (file or folder) is being dragged
+    pub can_drop_items_to_recycle_bin: bool,
     pub is_folder_dragging: bool, // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
     pub show_recycle_bin: bool,
@@ -119,6 +120,8 @@ pub enum SidebarAction {
     ToggleTags,
     /// Items were dropped onto a sidebar folder/drive (move or copy)
     DropItemsTo(String),
+    /// Items were dropped onto the Recycle Bin quick-access row.
+    DropItemsToRecycleBin,
 }
 
 /// Renders the fixed This PC section at the top of the sidebar.
@@ -272,6 +275,10 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
 
             rect.min.x = ui.clip_rect().min.x;
             rect.max.x = ui.clip_rect().max.x;
+            let pointer_over_drop_target = ctx.can_drop_items_to_recycle_bin
+                && ui
+                    .input(|input| input.pointer.hover_pos())
+                    .is_some_and(|position| rect.contains(position));
 
             if ui.is_rect_visible(rect) {
                 let dark_mode = ui.visuals().dark_mode;
@@ -286,6 +293,15 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
                         rect,
                         0.0,
                         crate::ui::theme::selection_hover_color(dark_mode),
+                    );
+                }
+
+                if pointer_over_drop_target {
+                    ui.painter().rect_stroke(
+                        rect,
+                        0.0,
+                        egui::Stroke::new(2.0, Color32::from_rgb(24, 122, 255)),
+                        egui::StrokeKind::Inside,
                     );
                 }
 
@@ -323,7 +339,11 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
                 );
             }
 
-            if response.clicked() && !ctx.is_renaming {
+            let released_over_drop_target = pointer_over_drop_target
+                && ui.ctx().input(|input| input.pointer.primary_released());
+            if released_over_drop_target && !ctx.is_renaming {
+                action = Some(SidebarAction::DropItemsToRecycleBin);
+            } else if response.clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::NavigateToRecycleBin);
             }
         }

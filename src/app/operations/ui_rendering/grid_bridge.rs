@@ -291,10 +291,17 @@ impl ImageViewerApp {
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
         let mut rectangle_selection_frame = RectangleSelectionFrame::default();
-        let external_drop_over_this_panel = self.external_drop_active
-            && ui
-                .input(|i| i.pointer.hover_pos())
-                .is_some_and(|pos| ui.clip_rect().contains(pos));
+        let external_drop_pointer_pos = self
+            .external_drop_active
+            .then_some(self.external_drop_pointer_pos)
+            .flatten()
+            .or_else(|| {
+                self.external_drop_active
+                    .then(|| ui.input(|i| i.pointer.hover_pos()))
+                    .flatten()
+            });
+        let external_drop_over_this_panel = external_drop_pointer_pos
+            .is_some_and(|pos| self.external_drop_active && ui.max_rect().contains(pos));
         let rectangle_selection_state = self
             .rectangle_selection_state
             .as_ref()
@@ -349,6 +356,8 @@ impl ImageViewerApp {
             visible_group_paths: &mut self.visible_group_paths,
             is_item_dragging: self.is_item_dragging || external_drop_over_this_panel,
             drag_target_folder: self.drag_target_folder.clone(),
+            external_drop_pointer_pos: external_drop_pointer_pos
+                .filter(|_| self.external_drop_active),
             drag_started_item: &mut drag_started_item,
             drag_hovered_item: &mut drag_hovered_item,
             rectangle_selection_state,

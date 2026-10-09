@@ -294,6 +294,36 @@ impl ImageViewerApp {
         self.ui_ctx.request_repaint();
     }
 
+    pub fn can_drop_drag_payload_to_recycle_bin(&self) -> bool {
+        self.is_item_dragging
+            && !self.file_panel_input_blocked_by_drag_move_confirmation()
+            && self.can_delete_with_shell_paths(&self.drag_payload_paths)
+    }
+
+    pub fn complete_item_drag_to_recycle_bin(&mut self) {
+        if !self.can_drop_drag_payload_to_recycle_bin() {
+            self.cancel_item_drag();
+            self.ui_ctx.request_repaint();
+            return;
+        }
+
+        let origin = self.item_drag_origin;
+        let source_folder = self.drag_source_folder.clone();
+        let paths = std::mem::take(&mut self.drag_payload_paths);
+        let queued = self.delete_with_shell_for_paths(&paths);
+        self.cancel_item_drag();
+
+        if queued {
+            if origin == ItemDragOrigin::GlobalSearch {
+                self.close_global_search();
+            } else {
+                self.clear_selection_after_drag_file_operation(source_folder.as_deref());
+            }
+        }
+
+        self.ui_ctx.request_repaint();
+    }
+
     pub fn confirm_pending_drag_move(&mut self) {
         let Some(pending) = self.pending_drag_move_confirmation.take() else {
             return;
@@ -473,6 +503,7 @@ impl ImageViewerApp {
     /// window or after a drop has been processed.
     pub fn reset_external_drop_state(&mut self) {
         self.external_drop_active = false;
+        self.external_drop_pointer_pos = None;
         self.external_drop_inactive_folder = None;
         if !self.is_item_dragging {
             self.drag_hovered_folder = None;

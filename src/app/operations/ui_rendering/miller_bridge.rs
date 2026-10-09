@@ -151,6 +151,12 @@ impl ImageViewerApp {
         let mut ancestor_outputs = Vec::new();
         let mut icon_requests = Vec::new();
         let mut column_drop_target = None;
+        let external_drop_pointer_pos = if self.external_drop_active {
+            self.external_drop_pointer_pos
+                .or_else(|| ui.input(|input| input.pointer.hover_pos()))
+        } else {
+            None
+        };
         let scroll_output = ui.scope(|ui| {
             // The global scrollbar style is fully transparent while dormant.
             // Keep this navigation scrollbar visible whenever it is needed.
@@ -201,8 +207,10 @@ impl ImageViewerApp {
                                         loading_icons: &self.loading_icons,
                                         failed_icons: &self.failed_icons,
                                         icon_requests: &mut icon_requests,
-                                        is_item_dragging: self.is_item_dragging,
+                                        is_item_dragging: self.is_item_dragging
+                                            || self.external_drop_active,
                                         drop_target: &mut column_drop_target,
+                                        external_drop_pointer_pos,
                                         is_loading: *loading,
                                         scroll_interpolation_enabled,
                                     };
@@ -227,6 +235,11 @@ impl ImageViewerApp {
                             if self.drag_target_folder.is_some() && primary_released {
                                 self.complete_item_drag(ctrl, shift);
                             }
+                        } else if self.external_drop_active {
+                            self.drag_target_folder = column_drop_target
+                                .as_ref()
+                                .filter(|target| !Self::path_is_archive_namespace(target))
+                                .cloned();
                         }
 
                         // Focused (rightmost) column: the current directory, using

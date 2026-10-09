@@ -95,6 +95,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
     // Resize is handled via manual drag handles rendered separately
     let dark_mode = root_ui.visuals().dark_mode;
     let ctx = root_ui.ctx().clone();
+    let can_drop_items_to_recycle_bin = app.can_drop_drag_payload_to_recycle_bin();
     let sidebar_response = egui::Panel::left("sidebar")
         .exact_size(target_width)
         .resizable(false) // Resize handled manually via drag handles
@@ -185,6 +186,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     icon_loader: &mut app.item_icon_loader,
                     pinned_folders: &app.pinned_folders,
                     is_item_dragging: app.is_item_dragging,
+                    can_drop_items_to_recycle_bin,
                     is_folder_dragging,
                     dragging_path,
                     show_recycle_bin: app.show_recycle_bin,
@@ -258,6 +260,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     icon_loader: &mut app.item_icon_loader,
                     pinned_folders: &app.pinned_folders,
                     is_item_dragging: app.is_item_dragging,
+                    can_drop_items_to_recycle_bin,
                     is_folder_dragging,
                     dragging_path,
                     show_recycle_bin: app.show_recycle_bin,
@@ -436,6 +439,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 icon_loader: &mut app.item_icon_loader,
                 pinned_folders: &app.pinned_folders,
                 is_item_dragging: app.is_item_dragging,
+                can_drop_items_to_recycle_bin,
                 is_folder_dragging,
                 dragging_path,
                 show_recycle_bin: app.show_recycle_bin,
@@ -720,6 +724,13 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
                 } else {
                     app.cancel_item_drag();
                 }
+            }
+        }
+        SidebarAction::DropItemsToRecycleBin => {
+            if app.can_drop_drag_payload_to_recycle_bin() {
+                app.complete_item_drag_to_recycle_bin();
+            } else {
+                app.cancel_item_drag();
             }
         }
     }

@@ -247,6 +247,8 @@ pub struct ListViewContext<'a> {
     pub is_item_dragging: bool,
     /// Current folder path under drop target highlight
     pub drag_target_folder: Option<PathBuf>,
+    /// Native cursor position used while an external Windows file drag is active.
+    pub external_drop_pointer_pos: Option<eframe::egui::Pos2>,
     /// Output: item where drag started this frame
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag

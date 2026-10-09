@@ -530,6 +530,15 @@ impl eframe::App for ImageViewerApp {
             });
             if has_external_hover || has_external_drop {
                 self.external_drop_active = true;
+                let native_cursor_pos = self.native_hwnd.and_then(
+                    crate::infrastructure::windows::outbound_file_drag::cursor_client_position,
+                );
+                let egui_cursor_pos = ctx.input(|i| i.pointer.hover_pos());
+                self.external_drop_pointer_pos = resolve_external_drop_pointer_position(
+                    native_cursor_pos,
+                    egui_cursor_pos,
+                    ctx.pixels_per_point(),
+                );
                 self.drag_target_folder = None;
                 self.drag_hovered_folder = None;
                 self.external_drop_inactive_folder = None;
@@ -766,22 +775,48 @@ impl eframe::App for ImageViewerApp {
 }
 
 fn resolve_external_drop_destination(app: &ImageViewerApp) -> Option<PathBuf> {
-    app.drag_target_folder
-        .clone()
+    let current_folder =
+        if app.navigation_state.is_recycle_bin_view || app.navigation_state.is_computer_view {
+            None
+        } else {
+            Some(PathBuf::from(&app.navigation_state.current_path))
+        };
+
+    resolve_external_drop_destination_candidates(
+        app.drag_target_folder.clone(),
+        app.external_drop_inactive_folder.clone(),
+        current_folder,
+    )
+}
+
+fn resolve_external_drop_destination_candidates(
+    hovered_folder: Option<PathBuf>,
+    inactive_panel_folder: Option<PathBuf>,
+    current_folder: Option<PathBuf>,
+) -> Option<PathBuf> {
+    hovered_folder
         .filter(|target| is_valid_external_drop_destination(target))
         .or_else(|| {
-            app.external_drop_inactive_folder
-                .clone()
-                .filter(|target| is_valid_external_drop_destination(target))
+            inactive_panel_folder.filter(|target| is_valid_external_drop_destination(target))
         })
-        .or_else(|| {
-            if app.navigation_state.is_recycle_bin_view || app.navigation_state.is_computer_view {
-                return None;
-            }
+        .or_else(|| current_folder.filter(|target| is_valid_external_drop_destination(target)))
+}
 
-            let current = PathBuf::from(&app.navigation_state.current_path);
-            is_valid_external_drop_destination(&current).then_some(current)
-        })
+fn resolve_external_drop_pointer_position(
+    native_client_pixels: Option<(i32, i32)>,
+    egui_pointer_pos: Option<egui::Pos2>,
+    pixels_per_point: f32,
+) -> Option<egui::Pos2> {
+    if let Some((x, y)) = native_client_pixels {
+        if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
+            return Some(egui::pos2(
+                x as f32 / pixels_per_point,
+                y as f32 / pixels_per_point,
+            ));
+        }
+    }
+
+    egui_pointer_pos
 }
 
 fn is_valid_external_drop_destination(target: &Path) -> bool {
@@ -878,6 +913,50 @@ mod tests {
         assert!(should_run_hidden_updates(true, true));
         assert!(should_run_hidden_updates(false, false));
         assert!(!should_run_hidden_updates(true, false));
+    }
+
+    #[test]
+    fn external_drop_uses_native_cursor_position_over_stale_egui_position() {
+        let position = resolve_external_drop_pointer_position(
+            Some((300, 180)),
+            Some(egui::pos2(12.0, 24.0)),
+            1.5,
+        );
+
+        assert_eq!(position, Some(egui::pos2(200.0, 120.0)));
+    }
+
+    #[test]
+    fn external_drop_falls_back_to_egui_when_native_position_is_unavailable() {
+        let egui_position = egui::pos2(12.0, 24.0);
+        let position = resolve_external_drop_pointer_position(None, Some(egui_position), 1.5);
+
+        assert_eq!(position, Some(egui_position));
+    }
+
+    #[test]
+    fn external_drop_prefers_hovered_subfolder_to_current_folder() {
+        let subfolder = PathBuf::from("parent/subfolder");
+        let current_folder = PathBuf::from("parent");
+
+        assert_eq!(
+            resolve_external_drop_destination_candidates(
+                Some(subfolder.clone()),
+                None,
+                Some(current_folder),
+            ),
+            Some(subfolder)
+        );
+    }
+
+    #[test]
+    fn external_drop_falls_back_to_current_folder_without_hovered_subfolder() {
+        let current_folder = PathBuf::from("parent");
+
+        assert_eq!(
+            resolve_external_drop_destination_candidates(None, None, Some(current_folder.clone())),
+            Some(current_folder)
+        );
     }
 
     #[test]

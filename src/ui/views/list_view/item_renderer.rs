@@ -173,12 +173,19 @@ pub(super) fn render_list_item(
                 *ctx.drag_started_item = Some(i);
             }
         }
-        let is_pointer_over = response.contains_pointer() || response.hovered();
-        // For drag-hover detection use ONLY contains_pointer() (geometric check).
-        // response.hovered() stays locked to the drag-source widget in egui,
-        // so when the source is rendered AFTER the real target (target is above),
-        // it would overwrite drag_hovered_item → wrong target → denied cursor.
-        if response.contains_pointer() && item.is_dir {
+        let is_pointer_over = if let Some(pointer_pos) = ctx.external_drop_pointer_pos {
+            rect.contains(pointer_pos)
+        } else {
+            response.contains_pointer() || response.hovered()
+        };
+        // During an internal drag, response.hovered() can stay locked to the
+        // source widget; use its geometric hit test. External OLE drags use the
+        // native cursor position above because egui may not receive pointer moves.
+        let drag_pointer_over = ctx
+            .external_drop_pointer_pos
+            .map(|pointer_pos| rect.contains(pointer_pos))
+            .unwrap_or_else(|| response.contains_pointer());
+        if drag_pointer_over && item.is_dir {
             *ctx.drag_hovered_item = Some(i);
         }
 

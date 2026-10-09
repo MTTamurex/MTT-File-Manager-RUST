@@ -35,6 +35,8 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
     let mut pin_path = None;
     let mut pin_current_path = None;
     let mut cancel_drag_on_bar = false;
+    let mut drop_to_recycle_bin = false;
+    let can_drop_items_to_recycle_bin = app.can_drop_drag_payload_to_recycle_bin();
 
     egui::Panel::top("quick_access_bar")
         .show_separator_line(false)
@@ -71,6 +73,8 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
+                        let pointer = ui.input(|input| input.pointer.hover_pos());
+                        let viewport = ui.clip_rect();
 
                         let current_path = app.navigation_state.current_path.clone();
                         let current_path_is_pinned = app
@@ -128,6 +132,10 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             let (rect, response) =
                                 ui.allocate_exact_size(egui::vec2(width, 26.0), Sense::click());
                             recycle_bin_rect = Some(rect);
+                            let pointer_over_recycle_bin =
+                                pointer.is_some_and(|position| rect.contains(position));
+                            let can_drop_here =
+                                can_drop_items_to_recycle_bin && pointer_over_recycle_bin;
                             let icon = app.item_icon_loader.ensure_recycle_bin_icon(ui.ctx());
                             paint_chip(
                                 ui,
@@ -135,17 +143,26 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 &label,
                                 icon.as_ref(),
                                 app.navigation_state.is_recycle_bin_view,
-                                response.hovered(),
+                                response.hovered() || can_drop_here,
                             );
-                            if response.clicked() && app.renaming_state.is_none() {
+                            if can_drop_here {
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    5.0,
+                                    egui::Stroke::new(2.0, Color32::from_rgb(24, 122, 255)),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            if response.clicked()
+                                && !app.is_item_dragging
+                                && app.renaming_state.is_none()
+                            {
                                 navigate = Some(None);
                             }
                         }
 
                         let drag_id = egui::Id::new("qa_bar_reorder_drag");
                         let drag_src: Option<usize> = ui.ctx().data(|data| data.get_temp(drag_id));
-                        let pointer = ui.input(|input| input.pointer.hover_pos());
-                        let viewport = ui.clip_rect();
                         let mut pointer_over_item = None;
                         let pointer_over_recycle_bin = pointer.is_some_and(|position| {
                             recycle_bin_rect.is_some_and(|rect| rect.contains(position))
@@ -333,18 +350,22 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 let released =
                                     ui.ctx().input(|input| input.pointer.primary_released());
                                 if released {
-                                    cancel_drag_on_bar = true;
-                                    if is_folder_drop {
-                                        pin_path = app
-                                            .drag_payload_paths
-                                            .first()
-                                            .and_then(|path| path.to_str())
-                                            .filter(|path| {
-                                                !folder_items
-                                                    .iter()
-                                                    .any(|(pinned, _)| pinned == *path)
-                                            })
-                                            .map(str::to_string);
+                                    if can_drop_items_to_recycle_bin && pointer_over_recycle_bin {
+                                        drop_to_recycle_bin = true;
+                                    } else {
+                                        cancel_drag_on_bar = true;
+                                        if is_folder_drop {
+                                            pin_path = app
+                                                .drag_payload_paths
+                                                .first()
+                                                .and_then(|path| path.to_str())
+                                                .filter(|path| {
+                                                    !folder_items
+                                                        .iter()
+                                                        .any(|(pinned, _)| pinned == *path)
+                                                })
+                                                .map(str::to_string);
+                                        }
                                     }
                                 }
                             }
@@ -353,6 +374,9 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                 });
         });
 
+    if drop_to_recycle_bin {
+        app.complete_item_drag_to_recycle_bin();
+    }
     if cancel_drag_on_bar {
         app.cancel_item_drag();
     }

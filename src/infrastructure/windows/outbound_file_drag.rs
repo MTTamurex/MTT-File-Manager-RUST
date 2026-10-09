@@ -36,23 +36,40 @@ fn cursor_inside_client(hwnd: HWND) -> Option<bool> {
         return None;
     }
 
-    let mut cursor = POINT::default();
+    let (cursor_x, cursor_y) = cursor_client_position(hwnd)?;
     let mut client = RECT::default();
     unsafe {
-        if GetCursorPos(&mut cursor).is_err()
-            || GetClientRect(hwnd, &mut client).is_err()
-            || !ScreenToClient(hwnd, &mut cursor).as_bool()
-        {
+        if GetClientRect(hwnd, &mut client).is_err() {
             return None;
         }
     }
 
     Some(
-        cursor.x >= client.left
-            && cursor.y >= client.top
-            && cursor.x < client.right
-            && cursor.y < client.bottom,
+        cursor_x >= client.left
+            && cursor_y >= client.top
+            && cursor_x < client.right
+            && cursor_y < client.bottom,
     )
+}
+
+/// Returns the native cursor position in the window's client-area pixels.
+///
+/// egui may not receive pointer-move events while an external OLE file drag is
+/// active, so callers that need a live drop target can use this position as a
+/// fallback to egui's pointer state.
+pub fn cursor_client_position(hwnd: HWND) -> Option<(i32, i32)> {
+    if hwnd.0.is_null() {
+        return None;
+    }
+
+    let mut cursor = POINT::default();
+    unsafe {
+        if GetCursorPos(&mut cursor).is_err() || !ScreenToClient(hwnd, &mut cursor).as_bool() {
+            return None;
+        }
+    }
+
+    Some((cursor.x, cursor.y))
 }
 
 fn source_window_is_under_cursor(source_hwnd: HWND) -> Option<bool> {

@@ -367,6 +367,8 @@ pub struct ImageViewerApp {
     /// Icon pre-loaded when drag starts â€” avoids blocking Shell calls in the render loop.
     pub drag_icon_cache: Option<egui::TextureHandle>,
     pub external_drop_active: bool,
+    /// Cursor position in egui points while Windows is dragging files over the window.
+    pub external_drop_pointer_pos: Option<egui::Pos2>,
     pub external_drop_inactive_folder: Option<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
