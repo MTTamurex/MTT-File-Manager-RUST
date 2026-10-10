@@ -41,6 +41,7 @@ pub mod image_conversion;
 pub mod message_handler;
 pub mod metadata;
 pub mod navigation;
+pub mod panel_tab_ops;
 pub mod pinned_folder_ops;
 pub mod preferences;
 pub mod rectangle_selection;

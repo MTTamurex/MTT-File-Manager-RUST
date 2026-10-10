@@ -2,9 +2,10 @@
 //!
 //! This module handles syncing state between the active tab and the main application state.
 
-use crate::app::dual_panel::PanelListColumnWidths;
+use crate::app::dual_panel::{ActivePanel, PanelListColumnWidths, PanelSnapshot};
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
+use crate::tabs::DualPanelTabs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
@@ -13,6 +14,21 @@ impl ImageViewerApp {
     pub fn sync_to_tab(&mut self) {
         let current_tag_title =
             self.tag_view_display_name_for_path(&self.navigation_state.current_path);
+        let panel_tab_snapshots = if self.dual_panel_enabled {
+            self.dual_panel_inactive_state.as_ref().map(|inactive| {
+                let mut active = PanelSnapshot::from_app(self);
+                active.compact_for_storage();
+                let mut inactive = inactive.clone();
+                inactive.compact_for_storage();
+                (self.dual_panel_active, active, Some(inactive))
+            })
+        } else if self.tab_manager.active().dual_panel_tabs.is_some() {
+            let mut active = PanelSnapshot::from_app(self);
+            active.compact_for_storage();
+            Some((self.dual_panel_active, active, None))
+        } else {
+            None
+        };
         let active = self.tab_manager.active_mut();
         active.path = self.navigation_state.current_path.clone();
         active.path_input = self.navigation_state.path_input.clone();
@@ -82,6 +98,32 @@ impl ImageViewerApp {
                 snapshot
             });
 
+        if active.dual_panel_tabs.is_none() {
+            if let Some((current_panel, current, Some(inactive))) = &panel_tab_snapshots {
+                let (left, right) = match current_panel {
+                    ActivePanel::Left => (current.clone(), inactive.clone()),
+                    ActivePanel::Right => (inactive.clone(), current.clone()),
+                };
+                active.dual_panel_tabs = Some(DualPanelTabs::new(left, right));
+            }
+        }
+        if let (Some(tabs), Some((current_panel, current, inactive))) =
+            (&mut active.dual_panel_tabs, panel_tab_snapshots)
+        {
+            let (current_tabs, other_tabs) = match current_panel {
+                ActivePanel::Left => (&mut tabs.left, &mut tabs.right),
+                ActivePanel::Right => (&mut tabs.right, &mut tabs.left),
+            };
+            if let Some(tab) = current_tabs.active_mut() {
+                tab.snapshot = current;
+            }
+            if let Some(inactive) = inactive {
+                if let Some(tab) = other_tabs.active_mut() {
+                    tab.snapshot = inactive;
+                }
+            }
+        }
+
         // Save per-tab sidebar state (expanded nodes + scroll position)
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
         active.sidebar_scroll_y = self.sidebar_tree.snapshot_scroll_y();
@@ -133,6 +175,7 @@ impl ImageViewerApp {
 
         {
             let active = self.tab_manager.active_mut();
+            let panel_tabs = active.dual_panel_tabs.clone();
             self.navigation_state.current_path = active.path.clone();
             self.navigation_state.path_input = active.path_input.clone();
             self.navigation_state.is_computer_view = active.is_computer_view;
@@ -239,6 +282,17 @@ impl ImageViewerApp {
                     snapshot.restore_from_storage();
                     snapshot
                 });
+            if active.dual_panel_enabled {
+                if let Some(snapshot) = panel_tabs
+                    .as_ref()
+                    .and_then(|tabs| tabs.panel(self.dual_panel_active.other()).active())
+                    .map(|tab| tab.snapshot.clone())
+                {
+                    let mut snapshot = snapshot;
+                    snapshot.restore_from_storage();
+                    self.dual_panel_inactive_state = Some(snapshot);
+                }
+            }
         }
 
         for folder_path in confirmed_folder_cover_removals {

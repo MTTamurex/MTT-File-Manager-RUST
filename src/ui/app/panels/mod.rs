@@ -4,6 +4,7 @@ use crate::ui::sidebar::SidebarAction;
 use eframe::egui;
 
 mod content;
+mod panel_tab_bar;
 
 // Sidebar width constraints
 const LEFT_SIDEBAR_MIN: f32 = 150.0;

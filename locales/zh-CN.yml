@@ -1046,6 +1046,8 @@ notifications:
   initial_indexing_completed: "初始索引完成。全局搜索及相关功能现已可用。"
 tabs:
   max_reached: "已达到标签上限（最多%{max}个），请关闭一个标签再打开新页面。"
+  panel_new: "新建面板标签页"
+  panel_close: "关闭面板标签页"
 disk_analysis:
   analyze: "分析磁盘占用"
   title: "磁盘占用分析"

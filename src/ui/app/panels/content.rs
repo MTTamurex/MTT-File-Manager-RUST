@@ -1,3 +1,4 @@
+use super::panel_tab_bar::{render_panel_tab_bar, PanelTabAction};
 use crate::app::dual_panel::ActivePanel;
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
@@ -6,7 +7,7 @@ use crate::infrastructure::windows as windows_infra;
 use eframe::egui;
 use rust_i18n::t;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
 // Keyed by (current_path, modified_hint, created_hint, drive_info_epoch);
@@ -779,16 +780,44 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             path.to_string()
         }
     };
+    let tab_title = |path: &str| -> String {
+        if path == COMPUTER_VIEW_ID {
+            t!("nav.computer").to_string()
+        } else if path == RECYCLE_BIN_VIEW_ID {
+            t!("nav.recycle_bin").to_string()
+        } else if let Some(display) = app.tag_view_display_name_for_path(path) {
+            display
+        } else {
+            Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string())
+        }
+    };
     let active_path = path_display(&app.navigation_state.current_path);
     let inactive_path = app
         .dual_panel_inactive_state
         .as_ref()
         .map(|s| path_display(&s.path))
         .unwrap_or_default();
+    let inactive_live_path = app
+        .dual_panel_inactive_state
+        .as_ref()
+        .map(|snapshot| snapshot.path.as_str());
 
     let (left_path, right_path) = match active {
         ActivePanel::Left => (active_path, inactive_path),
         ActivePanel::Right => (inactive_path, active_path),
+    };
+    let (left_live_path, right_live_path) = match active {
+        ActivePanel::Left => (
+            Some(app.navigation_state.current_path.as_str()),
+            inactive_live_path,
+        ),
+        ActivePanel::Right => (
+            inactive_live_path,
+            Some(app.navigation_state.current_path.as_str()),
+        ),
     };
 
     let header_text_color = if dark {
@@ -861,13 +890,99 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     }
     let close_clicked = close_panel.is_some();
 
+    let tab_strip_height = 28.0;
+    let left_tab_strip_rect = egui::Rect::from_min_size(
+        egui::pos2(left_rect.min.x, left_rect.min.y + header_height),
+        egui::vec2(left_rect.width(), tab_strip_height),
+    );
+    let right_tab_strip_rect = egui::Rect::from_min_size(
+        egui::pos2(right_rect.min.x, right_rect.min.y + header_height),
+        egui::vec2(right_rect.width(), tab_strip_height),
+    );
+    let tab_strip_bg = if dark {
+        egui::Color32::from_rgb(40, 40, 40)
+    } else {
+        egui::Color32::from_rgb(235, 235, 235)
+    };
+    ui.painter()
+        .rect_filled(left_tab_strip_rect, 0.0, tab_strip_bg);
+    ui.painter()
+        .rect_filled(right_tab_strip_rect, 0.0, tab_strip_bg);
+
+    let mut panel_tab_action = None;
+    if let Some(panel_tabs) = app.tab_manager.active().dual_panel_tabs.as_ref() {
+        let workspace_id = app.tab_manager.active().id;
+        let left_titles = panel_tabs
+            .left
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let path = if index == panel_tabs.left.active_tab {
+                    left_live_path.unwrap_or(&tab.snapshot.path)
+                } else {
+                    &tab.snapshot.path
+                };
+                tab_title(path)
+            })
+            .collect::<Vec<_>>();
+        let right_titles = panel_tabs
+            .right
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let path = if index == panel_tabs.right.active_tab {
+                    right_live_path.unwrap_or(&tab.snapshot.path)
+                } else {
+                    &tab.snapshot.path
+                };
+                tab_title(path)
+            })
+            .collect::<Vec<_>>();
+        if let Some(action) = render_panel_tab_bar(
+            ui,
+            left_tab_strip_rect,
+            workspace_id,
+            ActivePanel::Left,
+            &panel_tabs.left,
+            &left_titles,
+            left_live_path,
+            app.cache_manager.computer_icon.as_ref(),
+            &mut app.svg_icon_manager,
+            &mut app.item_icon_loader,
+        ) {
+            panel_tab_action = Some(action);
+        }
+        if let Some(action) = render_panel_tab_bar(
+            ui,
+            right_tab_strip_rect,
+            workspace_id,
+            ActivePanel::Right,
+            &panel_tabs.right,
+            &right_titles,
+            right_live_path,
+            app.cache_manager.computer_icon.as_ref(),
+            &mut app.svg_icon_manager,
+            &mut app.item_icon_loader,
+        ) {
+            panel_tab_action = Some(action);
+        }
+    }
+
     // ── Content areas (below header) ──
     let left_content_rect = egui::Rect::from_min_max(
-        egui::pos2(left_rect.min.x, left_rect.min.y + header_height),
+        egui::pos2(
+            left_rect.min.x,
+            left_rect.min.y + header_height + tab_strip_height,
+        ),
         left_rect.max,
     );
     let right_content_rect = egui::Rect::from_min_max(
-        egui::pos2(right_rect.min.x, right_rect.min.y + header_height),
+        egui::pos2(
+            right_rect.min.x,
+            right_rect.min.y + header_height + tab_strip_height,
+        ),
         right_rect.max,
     );
 
@@ -991,6 +1106,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let (pointer_pos, primary_clicked) =
         ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked()));
     if primary_clicked
+        && panel_tab_action.is_none()
         && !app.global_search.active
         && !app.navigation_state.show_settings_window
         && !file_panel_input_blocked
@@ -1003,8 +1119,29 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 ActivePanel::Left => right_header_rect,
                 ActivePanel::Right => left_header_rect,
             };
-            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+            let inactive_tab_strip = match active {
+                ActivePanel::Left => right_tab_strip_rect,
+                ActivePanel::Right => left_tab_strip_rect,
+            };
+            if inactive_content_rect.contains(pos)
+                || inactive_header.contains(pos)
+                || inactive_tab_strip.contains(pos)
+            {
                 app.dual_panel_switch_active();
+            }
+        }
+    }
+
+    if let Some(action) = panel_tab_action {
+        match action {
+            PanelTabAction::Select(panel, index) => {
+                app.dual_panel_select_tab(panel, index);
+            }
+            PanelTabAction::Add(panel) => {
+                app.dual_panel_add_tab(panel);
+            }
+            PanelTabAction::Close(panel, index) => {
+                app.dual_panel_close_tab(panel, index);
             }
         }
     }

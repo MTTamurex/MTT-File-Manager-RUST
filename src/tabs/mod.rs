@@ -15,6 +15,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod panel_tabs;
+pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};
+
 fn tab_title_for_path(path: &str) -> String {
     Path::new(path)
         .file_name()
@@ -27,7 +30,8 @@ fn tab_title_for_path(path: &str) -> String {
 /// Each background tab retains its full `items`/`all_items` listings
 /// (~20-30 MB per 100k-entry folder, doubled with dual panel), which was the
 /// largest unbounded RAM growth vector in long sessions. Creation paths must
-/// check `TabManager::can_add_tab` and surface the limit to the user.
+/// check `TabManager::can_add_tab` and surface the limit to the user. Dual-panel
+/// workspaces have a separate shared cap for their left/right pane tabs.
 pub const MAX_TABS: usize = 20;
 
 /// Represents a single browser tab
@@ -127,6 +131,8 @@ pub struct TabState {
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
     pub dual_panel_split_ratio: f32,
     pub dual_panel_active_list_column_widths: Option<PanelListColumnWidths>,
+    /// Per-physical-panel tabs retained for this outer workspace.
+    pub dual_panel_tabs: Option<DualPanelTabs>,
 }
 
 impl TabState {
@@ -185,6 +191,7 @@ impl TabState {
             dual_panel_inactive_state: None,
             dual_panel_split_ratio: 0.5,
             dual_panel_active_list_column_widths: None,
+            dual_panel_tabs: None,
         }
     }
 
@@ -245,6 +252,7 @@ impl TabState {
             dual_panel_inactive_state: None,
             dual_panel_split_ratio: 0.5,
             dual_panel_active_list_column_widths: None,
+            dual_panel_tabs: None,
         }
     }
 
@@ -412,6 +420,7 @@ impl TabState {
         self.dual_panel_inactive_state = None;
         self.dual_panel_split_ratio = 0.5;
         self.dual_panel_active_list_column_widths = None;
+        self.dual_panel_tabs = None;
         self
     }
 }
@@ -471,6 +480,9 @@ impl TabManager {
         for tab in self.tabs.iter_mut().chain(self.closed_tabs.iter_mut()) {
             if tab.navigation.remove_paths_under(deleted_paths) {
                 tab.redirect_to_history_current();
+            }
+            if let Some(panel_tabs) = tab.dual_panel_tabs.as_mut() {
+                panel_tabs.remove_deleted_paths_from_histories(deleted_paths);
             }
         }
     }

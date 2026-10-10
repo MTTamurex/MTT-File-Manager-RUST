@@ -1050,6 +1050,8 @@ notifications:
 
 tabs:
   max_reached: "Limite de %{max} abas atingido. Feche uma aba para abrir outra."
+  panel_new: "Nova aba do painel"
+  panel_close: "Fechar aba do painel"
 
 disk_analysis:
   analyze: "Analisar uso do disco"

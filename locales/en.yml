@@ -1050,6 +1050,8 @@ notifications:
 
 tabs:
   max_reached: "Tab limit (%{max}) reached. Close a tab to open another."
+  panel_new: "New panel tab"
+  panel_close: "Close panel tab"
 
 disk_analysis:
   analyze: "Analyze disk usage"

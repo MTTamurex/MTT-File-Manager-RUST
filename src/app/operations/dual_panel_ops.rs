@@ -2,6 +2,7 @@
 
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::state::ImageViewerApp;
+use crate::tabs::DualPanelTabs;
 
 impl ImageViewerApp {
     fn dual_panel_enable_impl(&mut self, persist: bool) {
@@ -10,6 +11,68 @@ impl ImageViewerApp {
         }
         self.context_menu.close();
         log::info!("[DualPanel] Enabling dual panel mode");
+
+        if self.tab_manager.active().dual_panel_tabs.is_some() {
+            self.sync_to_tab();
+            let current_panel = self.dual_panel_active;
+            let tabs = self
+                .tab_manager
+                .active()
+                .dual_panel_tabs
+                .clone()
+                .expect("checked above");
+            let Some(mut inactive_snapshot) = tabs
+                .panel(current_panel.other())
+                .active()
+                .map(|tab| tab.snapshot.clone())
+            else {
+                return;
+            };
+            inactive_snapshot
+                .folder_load_generation
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            inactive_snapshot.generation =
+                crate::app::operations::folder_loading::allocate_folder_load_generation();
+            inactive_snapshot.folder_load_generation = std::sync::Arc::new(
+                std::sync::atomic::AtomicUsize::new(inactive_snapshot.generation),
+            );
+            self.dual_panel_inactive_state = Some(inactive_snapshot);
+            self.dual_panel_enabled = true;
+            self.current_generation
+                .store(self.generation, std::sync::atomic::Ordering::Relaxed);
+            self.watch_current_folder();
+
+            let inactive_needs_reload =
+                self.dual_panel_inactive_state
+                    .as_ref()
+                    .is_some_and(|snapshot| {
+                        snapshot.is_loading_folder
+                            || (snapshot.items.is_empty() && snapshot.all_items.is_empty())
+                    });
+            if inactive_needs_reload {
+                self.with_inactive_panel(|app| {
+                    app.loaded_path.clear();
+                    if app.navigation_state.is_computer_view {
+                        app.setup_computer_view();
+                    } else if app.navigation_state.is_recycle_bin_view {
+                        app.setup_recycle_bin_view();
+                    } else if let Some(tag_id) =
+                        crate::domain::special_paths::tag_id_from_view_path(
+                            &app.navigation_state.current_path,
+                        )
+                    {
+                        app.setup_tag_view(tag_id);
+                    } else {
+                        app.load_folder_for_inactive();
+                    }
+                });
+            }
+            self.sync_to_tab();
+            if persist {
+                self.save_preferences();
+            }
+            return;
+        }
 
         // Current state becomes left panel (stays in app fields).
         // Right panel starts as a snapshot of the current state.
@@ -32,6 +95,16 @@ impl ImageViewerApp {
         snapshot.inactive_final_items_rebuild_pending = false;
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_enabled = true;
+        let mut left = PanelSnapshot::from_app(self);
+        left.compact_for_storage();
+        let mut right = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .expect("right panel snapshot was initialized")
+            .clone();
+        right.compact_for_storage();
+        self.tab_manager.active_mut().dual_panel_tabs = Some(DualPanelTabs::new(left, right));
+        self.sync_to_tab();
         if persist {
             self.save_preferences();
         }
@@ -147,6 +220,7 @@ impl ImageViewerApp {
         if !self.dual_panel_enabled {
             return;
         }
+        self.sync_to_tab();
         self.context_menu.close();
         log::info!("[DualPanel] Disabling dual panel mode");
 
@@ -165,6 +239,7 @@ impl ImageViewerApp {
         // Columns were likely shrunk by scale_column_widths for the narrow dual
         // panel; this expands them back to content-appropriate widths.
         self.pending_list_column_autofit = true;
+        self.sync_to_tab();
         self.save_preferences();
     }
 
