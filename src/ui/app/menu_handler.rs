@@ -344,6 +344,17 @@ fn context_origin_is_inactive(origin_panel_is_left: Option<bool>, active_is_left
     origin_panel_is_left.is_some_and(|origin_is_left| origin_is_left != active_is_left)
 }
 
+fn context_origin_panel(
+    origin_panel_is_left: Option<bool>,
+    active_panel: crate::app::dual_panel::ActivePanel,
+) -> crate::app::dual_panel::ActivePanel {
+    match origin_panel_is_left {
+        Some(true) => crate::app::dual_panel::ActivePanel::Left,
+        Some(false) => crate::app::dual_panel::ActivePanel::Right,
+        None => active_panel,
+    }
+}
+
 fn apply_cloud_files_pin(
     app: &mut ImageViewerApp,
     target_paths: &[PathBuf],
@@ -772,21 +783,28 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -21 => {
                     if let Some((path, is_directory)) = primary_context_target(&context_menu) {
-                        // PERF-05: enforce the tab cap before touching tab state.
-                        if !app.tab_manager.can_add_tab() {
+                        let target = if is_directory {
+                            path.to_path_buf()
+                        } else {
+                            path.parent()
+                                .map(Path::to_path_buf)
+                                .unwrap_or_else(|| path.to_path_buf())
+                        };
+
+                        if app.dual_panel_enabled {
+                            let origin_panel = context_origin_panel(
+                                context_menu.origin_panel_is_left,
+                                app.dual_panel_active,
+                            );
+                            let target = target.to_string_lossy().into_owned();
+                            app.dual_panel_add_tab_at(origin_panel, &target);
+                        } else if !app.tab_manager.can_add_tab() {
+                            // PERF-05: enforce the outer-tab cap before touching tab state.
                             app.notifications.warning(
                                 rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS)
                                     .to_string(),
                             );
                         } else {
-                            let target = if is_directory {
-                                path.to_path_buf()
-                            } else {
-                                path.parent()
-                                    .map(Path::to_path_buf)
-                                    .unwrap_or_else(|| path.to_path_buf())
-                            };
-
                             let prev_view_mode = app.view_mode;
                             let prev_sort_mode = app.sort_mode;
                             let prev_sort_descending = app.sort_descending;
@@ -962,10 +980,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::{
-        base64_encode, context_origin_is_inactive, powershell_location_script,
-        primary_context_target, system_powershell_path, terminal_executables, utf16le_base64,
-        wide_null, windows_parameters, windows_terminal_path_from_local_app_data,
-        TerminalExecutable,
+        base64_encode, context_origin_is_inactive, context_origin_panel,
+        powershell_location_script, primary_context_target, system_powershell_path,
+        terminal_executables, utf16le_base64, wide_null, windows_parameters,
+        windows_terminal_path_from_local_app_data, TerminalExecutable,
     };
     use crate::application::context_menu::ContextMenuState;
     use std::ffi::OsStr;
@@ -1072,6 +1090,24 @@ mod tests {
         assert!(context_origin_is_inactive(Some(false), true));
         assert!(!context_origin_is_inactive(Some(false), false));
         assert!(!context_origin_is_inactive(None, true));
+    }
+
+    #[test]
+    fn new_panel_tab_uses_context_origin_or_focused_panel_fallback() {
+        use crate::app::dual_panel::ActivePanel;
+
+        assert_eq!(
+            context_origin_panel(Some(false), ActivePanel::Left),
+            ActivePanel::Right
+        );
+        assert_eq!(
+            context_origin_panel(Some(true), ActivePanel::Right),
+            ActivePanel::Left
+        );
+        assert_eq!(
+            context_origin_panel(None, ActivePanel::Right),
+            ActivePanel::Right
+        );
     }
 
     #[test]

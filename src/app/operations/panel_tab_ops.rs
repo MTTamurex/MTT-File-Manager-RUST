@@ -6,11 +6,14 @@ use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 
 impl ImageViewerApp {
-    fn new_panel_tab_snapshot(&mut self) -> PanelSnapshot {
+    fn new_panel_tab_snapshot(&mut self, path: &str) -> PanelSnapshot {
         let mut snapshot = PanelSnapshot::from_app(self);
-        let path = snapshot.path.clone();
+        let path = path.to_owned();
 
         snapshot.path_input = path.clone();
+        snapshot.path = path.clone();
+        snapshot.is_computer_view = path == crate::domain::special_paths::COMPUTER_VIEW_ID;
+        snapshot.is_recycle_bin_view = path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
         snapshot.navigation = NavigationHistory::new(path);
         snapshot.items = Arc::new(Vec::new());
         snapshot.all_items = Arc::new(Vec::new());
@@ -164,6 +167,18 @@ impl ImageViewerApp {
     }
 
     pub fn dual_panel_add_tab(&mut self, panel: ActivePanel) -> bool {
+        self.dual_panel_add_tab_to_path(panel, None)
+    }
+
+    pub fn dual_panel_add_tab_at(&mut self, panel: ActivePanel, path: &str) -> bool {
+        self.dual_panel_add_tab_to_path(panel, Some(path))
+    }
+
+    fn dual_panel_add_tab_to_path(
+        &mut self,
+        panel: ActivePanel,
+        target_path: Option<&str>,
+    ) -> bool {
         if !self.dual_panel_enabled {
             return false;
         }
@@ -183,7 +198,10 @@ impl ImageViewerApp {
             return false;
         }
 
-        let snapshot = self.new_panel_tab_snapshot();
+        let path = target_path
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.navigation_state.current_path.clone());
+        let snapshot = self.new_panel_tab_snapshot(&path);
         let index = {
             let tabs = self
                 .tab_manager
