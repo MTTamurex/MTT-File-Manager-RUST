@@ -47,9 +47,6 @@ pub(crate) const MPV_OSD_GLYPH_LIMIT: i64 = 1;
 pub(crate) const MPV_OSD_BITMAP_MAX_SIZE_MB: i64 = 1;
 pub(crate) const MPV_OSD_SHAPER: &str = "simple";
 
-/// Maximum file size for the video player (50 GB).
-const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
-
 const VOLUME_SAVE_DEBOUNCE: Duration = Duration::from_millis(750);
 
 #[derive(Debug)]
@@ -168,7 +165,7 @@ pub(crate) fn build_mpv_osc_script_opts(base_opts: &str) -> String {
 }
 
 /// SEC: Validate the video/audio path before opening. Blocks null bytes, path traversal,
-/// UNC/network paths, non-media extensions, and oversized files.
+/// UNC/network paths, and non-media extensions.
 fn validate_video_path(path: &Path) -> Result<(), String> {
     let path_str = path.to_string_lossy();
 
@@ -210,17 +207,6 @@ fn validate_video_path(path: &Path) -> Result<(), String> {
     // 5. File existence
     if !path.is_file() {
         return Err(format!("File not found: '{}'", path.display()));
-    }
-
-    // 6. File size
-    if let Ok(meta) = std::fs::metadata(path) {
-        if meta.len() > MAX_VIDEO_FILE_SIZE {
-            return Err(format!(
-                "File too large: {:.1} GB (max {} GB)",
-                meta.len() as f64 / (1024.0 * 1024.0 * 1024.0),
-                MAX_VIDEO_FILE_SIZE / (1024 * 1024 * 1024)
-            ));
-        }
     }
 
     Ok(())
