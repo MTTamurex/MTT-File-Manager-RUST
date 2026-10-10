@@ -24,6 +24,7 @@ mod dual_panel_events;
 mod file_op_events;
 mod global_search_events;
 mod helpers;
+mod panel_tab_cache;
 mod rebuild_events;
 mod thumbnail_events;
 mod thumbnail_rebuild;
@@ -42,6 +43,29 @@ fn should_clear_pending_deletions(
 }
 
 impl ImageViewerApp {
+    pub(in crate::app::operations) fn invalidate_panel_tab_snapshots_for_path(
+        &mut self,
+        path: &Path,
+    ) {
+        let path_norm = Self::normalize_for_match(path);
+        panel_tab_cache::invalidate_cached_panel_tab_listings(self, &path_norm);
+    }
+
+    pub(in crate::app::operations) fn invalidate_panel_tab_snapshots_for_paths(
+        &mut self,
+        paths: &[PathBuf],
+    ) {
+        panel_tab_cache::invalidate_cached_panel_tab_listings_for_paths(self, paths);
+    }
+
+    pub(in crate::app::operations) fn invalidate_all_inactive_panel_tab_snapshots(&mut self) {
+        panel_tab_cache::invalidate_all_inactive_panel_tab_listings(self);
+    }
+
+    pub(in crate::app::operations) fn has_panel_tab_snapshot_for_path(&self, path: &Path) -> bool {
+        panel_tab_cache::has_panel_tab_snapshot_for_path(self, path)
+    }
+
     pub(super) fn maybe_clear_pending_deletions(&self) {
         let inactive_load_in_progress = self
             .dual_panel_inactive_state

@@ -206,6 +206,7 @@ impl ImageViewerApp {
                     self.directory_dirty_registry.mark_dirty(path);
                     self.watcher_overflow_reload_inactive_for = Some(path.clone());
                 }
+                self.invalidate_all_inactive_panel_tab_snapshots();
                 self.watcher_overflow_reload_for = Some(current);
                 continue;
             }

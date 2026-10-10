@@ -724,6 +724,7 @@ impl ImageViewerApp {
     ) {
         let parent_str = Self::normalize_for_match(parent_folder.as_path());
         self.invalidate_folder_and_tab_caches(&parent_folder);
+        self.invalidate_panel_tab_snapshots_for_path(&path);
         let new_path =
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
         self.move_tag_assignments_for_path(&path, &new_path);
@@ -851,6 +852,7 @@ impl ImageViewerApp {
         // deleted folder may also have its own cached listing. Drop that exact
         // entry so a later navigation cannot resurrect its old contents. Do
         // not take a SQLite writer lock for every deleted file in a batch.
+        self.invalidate_panel_tab_snapshots_for_paths(&deleted_paths);
         for path in &deleted_paths {
             if self.is_known_directory_path(path)
                 || Self::normalize_for_match(path) == current_path_norm
@@ -972,6 +974,7 @@ impl ImageViewerApp {
     ) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
         self.invalidate_folder_listing_and_tab_caches(&dest_folder);
+        self.invalidate_panel_tab_snapshots_for_paths(&copied_dests);
 
         // Retry files that previously failed thumbnail extraction while copy was in progress.
         self.cache_manager.clear_failed();
@@ -1083,6 +1086,10 @@ impl ImageViewerApp {
 
         self.invalidate_folder_listing_and_tab_caches(&source_folder);
         self.invalidate_folder_listing_and_tab_caches(&dest_folder);
+        self.invalidate_panel_tab_snapshots_for_path(&source_path);
+        if let Some(dest_path) = moved_dest.as_ref() {
+            self.invalidate_panel_tab_snapshots_for_path(dest_path);
+        }
 
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
@@ -1164,6 +1171,12 @@ impl ImageViewerApp {
             self.invalidate_folder_listing_and_tab_caches(source_folder);
         }
         self.invalidate_folder_listing_and_tab_caches(&dest_folder);
+        let moved_paths: Vec<PathBuf> = moved_files
+            .iter()
+            .chain(moved_dests.iter())
+            .cloned()
+            .collect();
+        self.invalidate_panel_tab_snapshots_for_paths(&moved_paths);
 
         // If any moved file was a folder cover, force re-discovery.
         match self.app_state_db.try_get_folder_covers(&source_folders) {
@@ -1268,6 +1281,7 @@ impl ImageViewerApp {
                 log::info!("[FILE-OP] Invalidating cache for current={:?}", current);
                 self.directory_dirty_registry.mark_dirty(&current);
                 self.directory_cache.invalidate(&current);
+                self.invalidate_panel_tab_snapshots_for_path(&current);
                 if let Some(ref di) = self.directory_index {
                     let _ = di.invalidate(&current);
                 }
@@ -1285,6 +1299,7 @@ impl ImageViewerApp {
                     let parent_buf = parent.to_path_buf();
                     self.directory_dirty_registry.mark_dirty(&parent_buf);
                     self.directory_cache.invalidate(&parent_buf);
+                    self.invalidate_panel_tab_snapshots_for_path(&parent_buf);
                     if let Some(ref di) = self.directory_index {
                         let _ = di.invalidate(&parent_buf);
                     }
@@ -1300,6 +1315,7 @@ impl ImageViewerApp {
                         let inactive_path = PathBuf::from(&snapshot.path);
                         self.directory_dirty_registry.mark_dirty(&inactive_path);
                         self.directory_cache.invalidate(&inactive_path);
+                        self.invalidate_panel_tab_snapshots_for_path(&inactive_path);
                         if let Some(ref di) = self.directory_index {
                             let _ = di.invalidate(&inactive_path);
                         }

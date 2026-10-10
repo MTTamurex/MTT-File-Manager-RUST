@@ -11,6 +11,46 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 impl ImageViewerApp {
+    pub(crate) fn tab_path_staleness(&self, path: &Path) -> (bool, bool, bool) {
+        let is_dirty = self.directory_dirty_registry.is_dirty(path);
+        if is_dirty {
+            return (true, true, false);
+        }
+
+        if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
+            let path_buf = path.to_path_buf();
+            let is_stale = self
+                .directory_cache
+                .cached_at_ms(&path_buf)
+                .map(|cached_at_ms| {
+                    !crate::infrastructure::onedrive::directory_cache_is_recent(cached_at_ms)
+                })
+                .unwrap_or(true);
+            return (false, is_stale, false);
+        }
+
+        if self.global_search.available {
+            let path_string = path.to_string_lossy().into_owned();
+            return match crate::infrastructure::global_search::check_paths_modified(
+                &[path_string],
+                120,
+            ) {
+                Ok(modified) => (false, !modified.is_empty(), true),
+                Err(error) => {
+                    log::debug!(
+                        "[TAB] Search service check_paths_modified failed; skipping UI-thread mtime fallback: {}",
+                        error
+                    );
+                    (false, false, false)
+                }
+            };
+        }
+
+        // Never call filesystem metadata on the UI thread when the directory
+        // cache has no entry; watcher and consistency probes handle that case.
+        (false, false, false)
+    }
+
     pub fn sync_to_tab(&mut self) {
         let current_tag_title =
             self.tag_view_display_name_for_path(&self.navigation_state.current_path);
@@ -438,48 +478,9 @@ impl ImageViewerApp {
         {
             let tab_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
-            // 1) Check in-memory dirty registry (free, no I/O)
-            let is_dirty = self.directory_dirty_registry.is_dirty(&tab_path);
-
-            // 2) Fast-path for NTFS: ask the search service (no disk I/O).
-            //    The service runs with admin privileges and tracks USN journal
-            //    changes with dir_modified_at timestamps per directory FRN.
-            //    Threshold of 120s covers any reasonable tab-away duration.
-            let mut service_checked = false;
-            let is_stale = if is_dirty {
-                true
-            } else if crate::infrastructure::onedrive::is_cloud_sync_path(&tab_path) {
-                self.directory_cache
-                    .cached_at_ms(&tab_path)
-                    .map(|cached_at_ms| {
-                        !crate::infrastructure::onedrive::directory_cache_is_recent(cached_at_ms)
-                    })
-                    .unwrap_or(true)
-            } else if self.global_search.available {
-                // Try the search service first (NTFS fast path, ~1-2ms via named pipe)
-                let path_str = self.navigation_state.current_path.clone();
-                match crate::infrastructure::global_search::check_paths_modified(&[path_str], 120) {
-                    Ok(modified) => {
-                        service_checked = true;
-                        !modified.is_empty()
-                    }
-                    Err(e) => {
-                        log::debug!(
-                            "[TAB] Search service check_paths_modified failed; skipping UI-thread mtime fallback: {}",
-                            e
-                        );
-                        false
-                    }
-                }
-            } else if self.directory_cache.cached_at_ms(&tab_path).is_some() {
-                // Never call std::fs::metadata() on the UI thread here. If the
-                // tab path was deleted or the disk is waking up, metadata can
-                // stall the whole app; watcher/consistency probes will catch up.
-                false
-            } else {
-                // No cache entry at all — load_folder will handle it
-                false
-            };
+            // Check the in-memory dirty registry first, then use the same
+            // non-blocking/cloud-aware probe policy as panel-tab restoration.
+            let (is_dirty, is_stale, service_checked) = self.tab_path_staleness(&tab_path);
 
             if is_stale {
                 log::info!(

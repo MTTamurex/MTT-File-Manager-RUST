@@ -62,9 +62,27 @@ impl ImageViewerApp {
         let restored_path = snapshot.path.clone();
         let restart_incomplete_load = snapshot.is_loading_folder;
         let current_outer_tab_id = self.tab_manager.active().id;
-        let restored_path_is_dirty = self
-            .directory_dirty_registry
-            .is_dirty(&std::path::PathBuf::from(&restored_path));
+        let restored_path_buf = std::path::PathBuf::from(&restored_path);
+        let snapshot_has_listing = !snapshot.items.is_empty() || !snapshot.all_items.is_empty();
+        let (path_is_dirty, path_is_stale, service_checked) = if snapshot_has_listing
+            && !restart_incomplete_load
+            && !crate::domain::special_paths::is_virtual_path(&restored_path)
+        {
+            self.tab_path_staleness(&restored_path_buf)
+        } else {
+            let dirty = self.directory_dirty_registry.is_dirty(&restored_path_buf);
+            (dirty, dirty, false)
+        };
+        if path_is_stale && !path_is_dirty {
+            log::info!(
+                "[PANEL-TAB] Cached directory changed while inactive; reloading (service_checked={})",
+                service_checked
+            );
+            self.directory_dirty_registry
+                .mark_dirty(std::path::Path::new(&restored_path));
+            self.directory_cache.invalidate(&restored_path_buf);
+        }
+        let restored_path_needs_reload = path_is_dirty || path_is_stale;
 
         if self.media_preview_owner_tab_id == Some(current_outer_tab_id) {
             self.destroy_media_preview();
@@ -106,7 +124,7 @@ impl ImageViewerApp {
         self.watch_current_folder();
 
         let needs_reload = restart_incomplete_load
-            || restored_path_is_dirty
+            || restored_path_needs_reload
             || (self.items.is_empty() && self.all_items.is_empty());
 
         if needs_reload {

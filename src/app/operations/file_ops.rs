@@ -298,6 +298,7 @@ impl ImageViewerApp {
                 if let Some(parent) = full_path.parent() {
                     self.directory_dirty_registry.mark_dirty(parent);
                     self.directory_cache.invalidate(&parent.to_path_buf());
+                    self.invalidate_panel_tab_snapshots_for_path(parent);
                     if let Some(directory_index) = &self.directory_index {
                         let _ = directory_index.invalidate(parent);
                     }
@@ -306,6 +307,7 @@ impl ImageViewerApp {
                         snapshot.miller_columns.invalidate(parent);
                     }
                 }
+                self.invalidate_panel_tab_snapshots_for_path(&full_path);
 
                 self.ui_ctx.request_repaint();
             }

@@ -18,6 +18,8 @@ mod new_tab_area;
 mod tabs_renderer;
 mod window_controls;
 
+pub(crate) use drag_dwell::should_activate_tab_on_drag_hover;
+
 /// Result of tab bar interaction
 pub enum TabBarAction {
     None,

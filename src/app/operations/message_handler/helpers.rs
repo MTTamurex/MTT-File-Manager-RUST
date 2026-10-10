@@ -342,6 +342,7 @@ impl ImageViewerApp {
             || self.selected_file.as_ref().is_some_and(|item| {
                 item.is_dir && Self::path_matches_normalized(&item.path, &path_norm)
             })
+            || self.has_panel_tab_snapshot_for_path(path)
     }
 
     pub(super) fn register_changed_folder_for_path(
@@ -530,6 +531,8 @@ impl ImageViewerApp {
         if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
             snapshot.miller_columns.invalidate(path);
         }
+        let path_norm = Self::normalize_for_match(path);
+        super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &path_norm);
         // A directory cache invalidation means the folder's contents may have
         // changed. Invalidate folder-size caches here too so callers do not
         // need to remember to clear size separately from cover/listing state.
@@ -966,6 +969,7 @@ impl ImageViewerApp {
         for folder_path in &folders_with_changed_contents {
             self.invalidate_folder_size_cache(folder_path);
             let folder_norm = Self::normalize_for_match(folder_path);
+            super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &folder_norm);
             if folder_norm != current_path_norm {
                 self.directory_cache.invalidate(folder_path);
                 self.clear_tab_cache_for_normalized_path(&folder_norm);
@@ -978,6 +982,10 @@ impl ImageViewerApp {
                 if !folders_with_changed_contents.contains(&parent_buf) {
                     let parent_norm = Self::normalize_for_match(parent);
                     self.directory_cache.invalidate(&parent_buf);
+                    super::panel_tab_cache::invalidate_cached_panel_tab_listings(
+                        self,
+                        &parent_norm,
+                    );
                     self.clear_tab_cache_for_normalized_path(&parent_norm);
                 }
             }
@@ -1196,6 +1204,7 @@ impl ImageViewerApp {
             let current_path_buf = PathBuf::from(&self.navigation_state.current_path);
             self.directory_dirty_registry.mark_dirty(&current_path_buf);
             self.directory_cache.invalidate(&current_path_buf);
+            self.invalidate_panel_tab_snapshots_for_path(&current_path_buf);
             if let Some(di) = &self.directory_index {
                 let _ = di.invalidate(&current_path_buf);
             }

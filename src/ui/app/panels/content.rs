@@ -740,11 +740,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     }
 
     // Determine which panel is active vs inactive
-    let active = app.dual_panel_active;
-    let (active_rect, _inactive_rect) = match active {
-        ActivePanel::Left => (left_rect, right_rect),
-        ActivePanel::Right => (right_rect, left_rect),
-    };
+    let mut active = app.dual_panel_active;
 
     // ── Focus indicator geometry for the active panel ──
     let focus_stroke_width = 2.0;
@@ -975,9 +971,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             left_tab_strip_rect,
             workspace_id,
             ActivePanel::Left,
+            active,
             &panel_tabs.left,
             &left_titles,
             left_live_path,
+            app.is_item_dragging,
             app.cache_manager.computer_icon.as_ref(),
             &mut app.svg_icon_manager,
             &mut app.item_icon_loader,
@@ -989,9 +987,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             right_tab_strip_rect,
             workspace_id,
             ActivePanel::Right,
+            active,
             &panel_tabs.right,
             &right_titles,
             right_live_path,
+            app.is_item_dragging,
             app.cache_manager.computer_icon.as_ref(),
             &mut app.svg_icon_manager,
             &mut app.item_icon_loader,
@@ -999,6 +999,25 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             panel_tab_action = Some(action);
         }
     }
+
+    // During an item drag, activate a dwell-hovered pane tab before rendering
+    // either grid. A release on the same frame then targets the new folder.
+    if app.is_item_dragging
+        && !app.file_panel_input_blocked_by_drag_move_confirmation()
+        && !app.navigation_state.show_settings_window
+        && !app.context_menu.is_open
+    {
+        if let Some(PanelTabAction::Select(panel, index)) = panel_tab_action.take() {
+            app.dual_panel_select_tab(panel, index);
+            active = app.dual_panel_active;
+            ui.ctx().request_repaint();
+        }
+    }
+
+    let active_rect = match active {
+        ActivePanel::Left => left_rect,
+        ActivePanel::Right => right_rect,
+    };
 
     // ── Content areas (below header) ──
     let left_content_rect = egui::Rect::from_min_max(

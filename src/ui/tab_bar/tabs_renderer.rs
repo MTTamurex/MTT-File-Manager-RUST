@@ -109,7 +109,7 @@ pub(super) fn render_tabs(
         }
         if drag_dwell::should_activate_tab_on_drag_hover(
             ui,
-            idx,
+            egui::Id::new("drag_tab_dwell").with(idx),
             is_item_dragging,
             is_active,
             response.contains_pointer(),

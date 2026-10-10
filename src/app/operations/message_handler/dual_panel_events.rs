@@ -177,12 +177,15 @@ impl ImageViewerApp {
         let deleted_path = deleted_path.to_path_buf();
         let target_parent = parent_path_for_deleted_panel(&deleted_path);
         self.directory_cache.invalidate_children(&deleted_path);
+        self.invalidate_panel_tab_snapshots_for_path(&deleted_path);
         if let Some(ref di) = self.directory_index {
             let _ = di.invalidate_recursive(&deleted_path);
         }
         if let Some(parent) = target_parent.as_deref().map(PathBuf::from) {
             self.directory_dirty_registry.mark_dirty(&parent);
             self.directory_cache.invalidate(&parent);
+            let parent_norm = Self::normalize_for_match(&parent);
+            super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &parent_norm);
             if let Some(ref di) = self.directory_index {
                 let _ = di.invalidate(&parent);
             }
@@ -256,6 +259,8 @@ impl ImageViewerApp {
 
         self.directory_dirty_registry.mark_dirty(&reload_folder);
         self.directory_cache.invalidate(&reload_folder);
+        let reload_folder_norm = Self::normalize_for_match(&reload_folder);
+        super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &reload_folder_norm);
         if let Some(ref di) = self.directory_index {
             let _ = di.invalidate(&reload_folder);
         }

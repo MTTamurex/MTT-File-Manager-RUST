@@ -286,11 +286,13 @@ impl ImageViewerApp {
         }
 
         for folder_path in &result.changed_folder_contents {
-            self.invalidate_folder_size_cache(folder_path);
+            self.invalidate_directory_listing_caches(folder_path);
         }
 
         self.directory_dirty_registry.mark_dirty(&result.path);
         self.directory_cache.invalidate(&result.path);
+        let path_norm = Self::normalize_for_match(&result.path);
+        super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &path_norm);
         if let Some(di) = &self.directory_index {
             let _ = di.invalidate(&result.path);
         }
@@ -458,6 +460,8 @@ impl ImageViewerApp {
             );
             self.directory_dirty_registry.mark_dirty(&current_path);
             self.directory_cache.invalidate(&current_path);
+            let path_norm = Self::normalize_for_match(&current_path);
+            super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &path_norm);
             if let Some(di) = &self.directory_index {
                 let _ = di.invalidate(&current_path);
             }
@@ -546,7 +550,7 @@ impl ImageViewerApp {
                     result.path.file_name().unwrap_or_default()
                 );
                 for folder_path in &result.changed_folder_contents {
-                    self.invalidate_folder_size_cache(folder_path);
+                    self.invalidate_directory_listing_caches(folder_path);
                 }
             }
 
@@ -597,6 +601,8 @@ impl ImageViewerApp {
 
             self.directory_dirty_registry.mark_dirty(&result.path);
             self.directory_cache.invalidate(&result.path);
+            let path_norm = Self::normalize_for_match(&result.path);
+            super::panel_tab_cache::invalidate_cached_panel_tab_listings(self, &path_norm);
             if let Some(di) = &self.directory_index {
                 let _ = di.invalidate(&result.path);
             }

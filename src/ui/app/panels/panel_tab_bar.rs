@@ -3,6 +3,7 @@ use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::tabs::PanelTabSet;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
+use crate::ui::tab_bar::should_activate_tab_on_drag_hover;
 use eframe::egui;
 
 const TAB_CORNER_RADIUS: u8 = 7;
@@ -89,9 +90,11 @@ pub(super) fn render_panel_tab_bar(
     rect: egui::Rect,
     workspace_id: usize,
     panel: ActivePanel,
+    active_panel: ActivePanel,
     tabs: &PanelTabSet,
     titles: &[String],
     live_path: Option<&str>,
+    is_item_dragging: bool,
     computer_icon: Option<&egui::TextureHandle>,
     svg_icons: &mut SvgIconManager,
     icon_loader: &mut IconLoader,
@@ -189,11 +192,24 @@ pub(super) fn render_panel_tab_bar(
                                     ui.id().with("panel_tab_select"),
                                     egui::Sense::click(),
                                 );
+                                let active_panel_tab = selected && panel == active_panel;
+                                let drag_hovering = is_item_dragging
+                                    && !active_panel_tab
+                                    && tab_response.contains_pointer();
+                                let activate_on_drag = should_activate_tab_on_drag_hover(
+                                    ui,
+                                    ui.id().with("panel_tab_drag_dwell"),
+                                    is_item_dragging,
+                                    active_panel_tab,
+                                    tab_response.contains_pointer(),
+                                );
                                 if tab_response.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
 
-                                let fill = if selected {
+                                let fill = if drag_hovering {
+                                    egui::Color32::from_rgba_unmultiplied(60, 130, 220, 90)
+                                } else if selected {
                                     active_bg
                                 } else if tab_response.hovered() {
                                     hover_bg
@@ -201,7 +217,7 @@ pub(super) fn render_panel_tab_bar(
                                     inactive_bg
                                 };
                                 paint_tab_background(ui, tab_rect, fill);
-                                if tab_response.clicked() {
+                                if tab_response.clicked() || activate_on_drag {
                                     action = Some(PanelTabAction::Select(panel, index));
                                 }
 
