@@ -347,13 +347,22 @@ pub(super) fn render_preview_panel_layout(
                                             // hundreds of GB, so it waits for an idle
                                             // UI instead of competing with the scroll
                                             // the user is doing right after opening a
-                                            // folder. The panel re-emits this action
-                                            // every frame while the size is unknown,
-                                            // so the size still appears on its own.
-                                            let ui_busy = app.is_loading_folder
-                                                || app.thumbnail_scroll_is_settling()
-                                                || !app.pending_thumbnails.is_empty()
-                                                || !app.cache_manager.pending_upload_set.is_empty();
+                                             // folder. The panel re-emits this action
+                                             // every frame while the size is unknown,
+                                             // so the size still appears on its own.
+                                            // In dual mode, pending visual uploads from
+                                            // the unfocused pane must not keep this request
+                                            // deferred indefinitely.
+                                            let ui_busy = should_defer_folder_size_walk(
+                                                app.dual_panel_enabled,
+                                                app.is_loading_folder,
+                                                app.thumbnail_scroll_is_settling(),
+                                                app.generation,
+                                                app.pending_thumbnails
+                                                    .iter()
+                                                    .map(|thumbnail| thumbnail.generation),
+                                                !app.cache_manager.pending_upload_set.is_empty(),
+                                            );
                                             if !ui_busy {
                                                 // Cancel any in-progress calculation before starting new one
                                                 app.folder_size_state.cancel
@@ -597,6 +606,25 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
         && !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
         && file.is_dir
         && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
+}
+
+fn should_defer_folder_size_walk(
+    dual_panel_enabled: bool,
+    folder_loading: bool,
+    thumbnail_scroll_is_settling: bool,
+    active_generation: usize,
+    mut pending_thumbnail_generations: impl Iterator<Item = usize>,
+    has_pending_uploads: bool,
+) -> bool {
+    if folder_loading || thumbnail_scroll_is_settling {
+        return true;
+    }
+
+    if dual_panel_enabled {
+        pending_thumbnail_generations.any(|generation| generation == active_generation)
+    } else {
+        has_pending_uploads || pending_thumbnail_generations.next().is_some()
+    }
 }
 
 fn physical_panel_ui_id(parent_id: egui::Id, panel: ActivePanel) -> egui::Id {
@@ -1310,7 +1338,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::physical_panel_ui_id;
+    use super::{physical_panel_ui_id, should_defer_folder_size_walk};
     use crate::app::dual_panel::ActivePanel;
     use eframe::egui;
 
@@ -1323,5 +1351,65 @@ mod tests {
 
         assert_eq!(mono_left, dual_left);
         assert_ne!(mono_left, right);
+    }
+
+    #[test]
+    fn inactive_panel_thumbnail_work_does_not_block_folder_size_in_dual_mode() {
+        assert!(!should_defer_folder_size_walk(
+            true,
+            false,
+            false,
+            10,
+            [11].into_iter(),
+            true,
+        ));
+        assert!(should_defer_folder_size_walk(
+            true,
+            false,
+            false,
+            10,
+            [10].into_iter(),
+            false,
+        ));
+    }
+
+    #[test]
+    fn dual_panel_folder_size_still_waits_for_loading_or_active_scroll() {
+        assert!(should_defer_folder_size_walk(
+            true,
+            true,
+            false,
+            10,
+            std::iter::empty(),
+            false,
+        ));
+        assert!(should_defer_folder_size_walk(
+            true,
+            false,
+            true,
+            10,
+            std::iter::empty(),
+            false,
+        ));
+    }
+
+    #[test]
+    fn single_panel_folder_size_keeps_waiting_for_pending_visual_work() {
+        assert!(should_defer_folder_size_walk(
+            false,
+            false,
+            false,
+            10,
+            [11].into_iter(),
+            false,
+        ));
+        assert!(should_defer_folder_size_walk(
+            false,
+            false,
+            false,
+            10,
+            std::iter::empty(),
+            true,
+        ));
     }
 }
