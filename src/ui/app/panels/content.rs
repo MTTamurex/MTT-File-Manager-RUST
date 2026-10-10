@@ -890,7 +890,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     }
     let close_clicked = close_panel.is_some();
 
-    let tab_strip_height = 28.0;
+    let tab_strip_height = super::panel_tab_bar::TAB_STRIP_HEIGHT;
     let left_tab_strip_rect = egui::Rect::from_min_size(
         egui::pos2(left_rect.min.x, left_rect.min.y + header_height),
         egui::vec2(left_rect.width(), tab_strip_height),
@@ -899,10 +899,12 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         egui::pos2(right_rect.min.x, right_rect.min.y + header_height),
         egui::vec2(right_rect.width(), tab_strip_height),
     );
+    // The lower strip meets the file area; the tab bar paints its own inactive
+    // surface above this so gaps between neighboring tabs stay inactive-colored.
     let tab_strip_bg = if dark {
-        egui::Color32::from_rgb(40, 40, 40)
+        egui::Color32::from_rgb(45, 45, 45)
     } else {
-        egui::Color32::from_rgb(235, 235, 235)
+        egui::Color32::WHITE
     };
     ui.painter()
         .rect_filled(left_tab_strip_rect, 0.0, tab_strip_bg);
