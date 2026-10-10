@@ -80,6 +80,7 @@ impl ImageViewerApp {
             self.folder_load_generation.as_ref(),
             active_generation,
         );
+        self.sync_thumbnail_generation_gate();
     }
 
     pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {

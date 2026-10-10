@@ -60,6 +60,8 @@ pub(in crate::app) struct AppBootstrap {
 
     pub(in crate::app) thumbnail_queue: Arc<PriorityThumbnailQueue>,
     pub(in crate::app) shared_gen: Arc<AtomicUsize>,
+    pub(in crate::app) thumbnail_generation_gate:
+        Arc<crate::workers::thumbnail::ThumbnailGenerationGate>,
     pub(in crate::app) img_rx: crossbeam_channel::Receiver<crate::domain::thumbnail::ThumbnailData>,
     /// EST-05: shutdown flag observed by the thumbnail deferred-retry loop so
     /// the worker fleet can terminate cooperatively (defense in depth on top
@@ -385,6 +387,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
     let thumbnail_pipeline_shutdown = Arc::new(AtomicBool::new(false));
     let shared_gen = Arc::new(AtomicUsize::new(0));
+    let thumbnail_generation_gate =
+        Arc::new(crate::workers::thumbnail::ThumbnailGenerationGate::default());
     let bulk_thumbnail_progress = new_shared_bulk_thumbnail_progress();
     let bulk_thumbnail_scanning = Arc::new(AtomicBool::new(false));
     let bulk_thumbnail_total = Arc::new(AtomicUsize::new(0));
@@ -402,7 +406,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         thumbnail_queue.clone(),
         img_tx,
         ctx.clone(),
-        shared_gen.clone(),
+        thumbnail_generation_gate.clone(),
         disk_cache.clone(),
         pending_deletions.clone(),
         bulk_thumbnail_progress.clone(),
@@ -413,7 +417,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     log_bootstrap_step!("thumbnail_workers");
 
     spawn_file_icon_cache_gc_worker(icon_disk_cache.clone());
-    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
+    let (icon_req_tx, icon_res_rx) =
+        spawn_icon_worker(ctx, thumbnail_generation_gate.clone(), icon_disk_cache);
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
@@ -525,6 +530,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         thumbnail_queue,
         thumbnail_pipeline_shutdown,
         shared_gen,
+        thumbnail_generation_gate,
         img_rx,
         pending_deletions,
         bulk_thumbnail_progress,

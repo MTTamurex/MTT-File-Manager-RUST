@@ -23,6 +23,50 @@ pub use queue::PriorityThumbnailQueue;
 pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
 
+/// Generations accepted by visual workers for the two currently visible
+/// physical panels. Updated together so switching panel focus never briefly
+/// invalidates work for the other visible panel.
+#[derive(Default)]
+pub struct ThumbnailGenerationGate {
+    visible: parking_lot::RwLock<[usize; 2]>,
+}
+
+impl ThumbnailGenerationGate {
+    pub fn set_visible_generations(&self, active: usize, inactive: usize) {
+        *self.visible.write() = [active, inactive];
+    }
+
+    pub fn accepts(&self, generation: usize) -> bool {
+        self.visible.read().contains(&generation)
+    }
+}
+
+#[cfg(test)]
+mod generation_gate_tests {
+    use super::ThumbnailGenerationGate;
+
+    #[test]
+    fn accepts_both_visible_panel_generations() {
+        let gate = ThumbnailGenerationGate::default();
+        gate.set_visible_generations(11, 12);
+
+        assert!(gate.accepts(11));
+        assert!(gate.accepts(12));
+        assert!(!gate.accepts(10));
+    }
+
+    #[test]
+    fn switching_one_panel_keeps_the_other_panel_generation_valid() {
+        let gate = ThumbnailGenerationGate::default();
+        gate.set_visible_generations(11, 12);
+        gate.set_visible_generations(13, 12);
+
+        assert!(!gate.accepts(11));
+        assert!(gate.accepts(12));
+        assert!(gate.accepts(13));
+    }
+}
+
 use lru::LruCache;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;

@@ -402,6 +402,28 @@ impl ImageViewerApp {
         self.pending_items_count = 0;
     }
 
+    pub(crate) fn sync_thumbnail_generation_gate(&self) {
+        let active_generation = if self.in_inactive_panel_context {
+            self.current_generation.load(Ordering::Relaxed)
+        } else {
+            self.generation
+        };
+        let inactive_generation = if self.in_inactive_panel_context {
+            self.generation
+        } else if self.dual_panel_enabled {
+            self.dual_panel_inactive_state
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.generation)
+        } else {
+            0
+        };
+
+        self.current_generation
+            .store(active_generation, Ordering::Relaxed);
+        self.thumbnail_generation_gate
+            .set_visible_generations(active_generation, inactive_generation);
+    }
+
     pub(crate) fn invalidate_active_items_rebuild(&mut self) {
         self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
         self.items_rebuild_in_flight = false;
@@ -1675,8 +1697,10 @@ impl ImageViewerApp {
         let pending_removed = pending_before.saturating_sub(self.pending_thumbnails.len());
 
         let loading_before = self.cache_manager.loading_set.len();
-        self.cache_manager.loading_set.clear();
-        let loading_removed = loading_before;
+        self.cache_manager
+            .loading_set
+            .retain(|path| visible_paths.contains(path));
+        let loading_removed = loading_before.saturating_sub(self.cache_manager.loading_set.len());
 
         let pending_upload_before = self.cache_manager.pending_upload_set.len();
         self.cache_manager

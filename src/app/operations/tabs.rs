@@ -309,8 +309,7 @@ impl ImageViewerApp {
         self.folder_load_generation
             .fetch_add(1, AtomicOrdering::Relaxed);
         self.folder_load_generation = Arc::new(AtomicUsize::new(self.generation));
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed);
+        self.sync_thumbnail_generation_gate();
         self.visible_group_paths.clear();
 
         // A tab's streamed load was cancelled when it stopped being current.

@@ -411,7 +411,9 @@ pub struct ImageViewerApp {
     pub search_query: String,                 // Search text
     pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
     pub generation: usize,                    // Local counter (Main Thread)
-    pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
+    pub current_generation: Arc<AtomicUsize>, // Active folder/preload generation
+    /// Worker gate allowing requests from both currently visible physical panes.
+    pub thumbnail_generation_gate: Arc<crate::workers::thumbnail::ThumbnailGenerationGate>,
     /// Per-physical-panel cancellation token for folder listing jobs.
     pub folder_load_generation: Arc<AtomicUsize>,
     pub ui_ctx: egui::Context, // Reference to UI context for async repaints
@@ -645,12 +647,6 @@ pub struct ImageViewerApp {
     pub dual_panel_enabled: bool,
     pub dual_panel_active: ActivePanel,
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
-    /// When true, `request_thumbnail_load_internal` submits requests using
-    /// the active panel's generation (via `current_generation`) while keeping
-    /// the caller-supplied priority. Set while drawing the unfocused dual pane
-    /// so both visible panes can load thumbnails normally through the shared
-    /// worker generation gate.
-    pub use_active_generation_for_thumbnail_requests: bool,
     /// Set while executing code against `dual_panel_inactive_state` via
     /// `with_inactive_panel`. Folder/tag loads in that context must not update
     /// the active panel's shared generation tracker.

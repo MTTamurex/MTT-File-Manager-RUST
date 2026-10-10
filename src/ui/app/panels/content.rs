@@ -1073,8 +1073,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // ── Render INACTIVE panel content with unique ID scope ──
     app.with_inactive_panel(|app_with_inactive| {
         // The unfocused pane is still visible; only route its thumbnail requests
-        // through the active generation so the shared workers accept them.
-        app_with_inactive.use_active_generation_for_thumbnail_requests = true;
+        // through its own generation, accepted alongside the active pane's generation.
         app_with_inactive.suppress_file_panel_keyboard = true;
         app_with_inactive.drag_drop_cross_panel_context = true;
 
@@ -1086,7 +1085,6 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             central_clip,
         );
         app_with_inactive.drag_drop_cross_panel_context = false;
-        app_with_inactive.use_active_generation_for_thumbnail_requests = false;
         app_with_inactive.suppress_file_panel_keyboard = false;
     });
 

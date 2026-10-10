@@ -139,6 +139,7 @@ impl ImageViewerApp {
             thumbnail_queue,
             thumbnail_pipeline_shutdown,
             shared_gen,
+            thumbnail_generation_gate,
             img_rx,
             pending_deletions,
             bulk_thumbnail_progress,
@@ -469,6 +470,7 @@ impl ImageViewerApp {
             last_grid_cols: 1,
             generation: 0,
             current_generation: shared_gen,
+            thumbnail_generation_gate,
             folder_load_generation: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             ui_ctx: ctx.clone(),
             last_items_rebuild: Instant::now(),
@@ -672,7 +674,6 @@ impl ImageViewerApp {
             dual_panel_enabled: false,
             dual_panel_active: crate::app::dual_panel::ActivePanel::Left,
             dual_panel_inactive_state: None,
-            use_active_generation_for_thumbnail_requests: false,
             in_inactive_panel_context: false,
             suppress_file_panel_keyboard: false,
 

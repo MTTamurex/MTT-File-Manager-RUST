@@ -114,7 +114,7 @@ pub fn spawn_thumbnail_workers(
     queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
-    gen_tracker: Arc<AtomicUsize>,
+    generation_gate: Arc<super::ThumbnailGenerationGate>,
     disk_cache: Arc<ThumbnailDiskCache>,
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
     bulk_thumbnail_progress: SharedBulkThumbnailProgress,
@@ -158,7 +158,7 @@ pub fn spawn_thumbnail_workers(
     for worker_id in 0..worker_count {
         let queue = queue.clone();
         let tx = tx.clone();
-        let gen_tracker = gen_tracker.clone();
+        let generation_gate = generation_gate.clone();
         let ctx = ctx.clone();
         let disk_cache = disk_cache.clone();
         let semaphore = semaphore.clone();
@@ -177,7 +177,7 @@ pub fn spawn_thumbnail_workers(
                     queue,
                     tx,
                     ctx,
-                    gen_tracker,
+                    generation_gate,
                     disk_cache,
                     semaphore,
                     virtual_drive_semaphore,
@@ -208,14 +208,14 @@ pub fn spawn_thumbnail_workers(
         let queue = queue.clone();
         let tx = tx.clone();
         let ctx = ctx.clone();
-        let gen_tracker = gen_tracker.clone();
+        let generation_gate = generation_gate.clone();
         let retry_shutdown = shutdown.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name("thumb-deferred-retry".to_string())
             .stack_size(256 * 1024)
             .spawn(move || {
-                deferred_retry_loop(queue, tx, ctx, gen_tracker, retry_shutdown);
+                deferred_retry_loop(queue, tx, ctx, generation_gate, retry_shutdown);
             });
 
         if let Err(e) = spawn_result {
@@ -282,7 +282,7 @@ fn deferred_retry_loop(
     queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
-    gen_tracker: Arc<AtomicUsize>,
+    generation_gate: Arc<super::ThumbnailGenerationGate>,
     shutdown: Arc<AtomicBool>,
 ) {
     use crate::infrastructure::windows::file_flags::{classify_file_read_safety, FileReadSafety};
@@ -341,16 +341,15 @@ fn deferred_retry_loop(
             continue;
         }
 
-        let current_gen = gen_tracker.load(Ordering::Relaxed);
         let mut saw_hdd_path = false;
 
         for (path, entry) in entries {
             if !crate::infrastructure::io_priority::is_ssd(&path) {
                 saw_hdd_path = true;
             }
-            if entry.req_generation != current_gen {
+            if !generation_gate.accepts(entry.req_generation) {
                 log::debug!(
-                    "[THUMB-RETRY] Dropping stale deferred entry: {:?}",
+                    "[THUMB-RETRY] Dropping deferred entry outside visible panels: {:?}",
                     path.file_name()
                 );
                 notify_dropped_entry(&path, &entry);
@@ -380,7 +379,7 @@ fn deferred_retry_loop(
                     // appear within one worker cycle (~tens of ms).
                     queue.push(
                         path.clone(),
-                        current_gen,
+                        entry.req_generation,
                         entry.req_size,
                         entry.req_priority,
                         entry.req_modified,
@@ -432,7 +431,7 @@ fn thumbnail_worker_loop(
     queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
-    gen_tracker: Arc<AtomicUsize>,
+    generation_gate: Arc<super::ThumbnailGenerationGate>,
     disk_cache: Arc<ThumbnailDiskCache>,
     semaphore: Arc<Semaphore>,
     virtual_drive_semaphore: Arc<Semaphore>,
@@ -497,11 +496,10 @@ fn thumbnail_worker_loop(
             continue;
         }
 
-        // Check generation match. If stale, still notify the UI so any
-        // caller-side loading_set marker for this path is cleared; otherwise a
-        // request dropped during a dual-panel generation race can block retries
-        // until a manual refresh.
-        if !participates_in_bulk_scan && req_gen != gen_tracker.load(Ordering::Relaxed) {
+        // Check that the request still belongs to a visible physical panel. If
+        // stale, notify the UI so any caller-side loading marker is cleared;
+        // otherwise a dropped request can block retries until a manual refresh.
+        if !participates_in_bulk_scan && !generation_gate.accepts(req_gen) {
             let _ = tx.send(ThumbnailData {
                 path: path.clone(),
                 image_data: std::sync::Arc::new(Vec::new()),

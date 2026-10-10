@@ -132,14 +132,7 @@ impl ImageViewerApp {
 
         let effective_size_px = self.effective_thumbnail_request_size_px(size_px);
 
-        // When rendering the unfocused dual-panel pane, use the active generation
-        // accepted by the shared thumbnail workers while preserving caller priority.
-        let effective_gen = if self.use_active_generation_for_thumbnail_requests {
-            self.current_generation
-                .load(std::sync::atomic::Ordering::Relaxed)
-        } else {
-            self.generation
-        };
+        let effective_gen = self.generation;
         let effective_priority = priority;
         let request_epoch = self
             .thumbnail_request_epochs
@@ -430,12 +423,7 @@ impl ImageViewerApp {
             return IconRequestOutcome::Skipped;
         }
 
-        let effective_gen = if self.use_active_generation_for_thumbnail_requests {
-            self.current_generation
-                .load(std::sync::atomic::Ordering::Relaxed)
-        } else {
-            self.generation
-        };
+        let effective_gen = self.generation;
         self.next_icon_request_id = self.next_icon_request_id.wrapping_add(1).max(1);
         let request_id = self.next_icon_request_id;
 

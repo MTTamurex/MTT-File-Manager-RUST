@@ -275,8 +275,6 @@ impl PanelSnapshot {
         self.renaming_state = None;
         self.focus_rename = false;
         self.generation = self.generation.wrapping_add(1);
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed);
         self.folder_load_generation
             .store(self.generation, AtomicOrdering::Relaxed);
         self.pending_all_items_clear = false;

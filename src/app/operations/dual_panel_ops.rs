@@ -38,8 +38,7 @@ impl ImageViewerApp {
             );
             self.dual_panel_inactive_state = Some(inactive_snapshot);
             self.dual_panel_enabled = true;
-            self.current_generation
-                .store(self.generation, std::sync::atomic::Ordering::Relaxed);
+            self.sync_thumbnail_generation_gate();
             self.watch_current_folder();
 
             let inactive_needs_reload =
@@ -78,10 +77,9 @@ impl ImageViewerApp {
         // Right panel starts as a snapshot of the current state.
         self.dual_panel_active = ActivePanel::Left;
         let mut snapshot = PanelSnapshot::from_app(self);
-        // Keep the SAME current_generation Arc so thumbnail workers stay
-        // synchronized with whichever panel is active. Folder listing
-        // cancellation and result routing are per physical panel, so the new
-        // right panel needs both a distinct token and a globally unique ID.
+        // Keep the SAME active-generation tracker for folder loading while the
+        // visual worker gate accepts independent generations from both panes.
+        // The new right panel still needs a globally unique folder generation.
         snapshot.generation =
             crate::app::operations::folder_loading::allocate_folder_load_generation();
         snapshot.folder_load_generation =
@@ -104,6 +102,7 @@ impl ImageViewerApp {
             .clone();
         right.compact_for_storage();
         self.tab_manager.active_mut().dual_panel_tabs = Some(DualPanelTabs::new(left, right));
+        self.sync_thumbnail_generation_gate();
         self.sync_to_tab();
         if persist {
             self.save_preferences();
@@ -163,10 +162,8 @@ impl ImageViewerApp {
             self.pending_items_count = pending_items_count;
         }
 
-        // Sync the shared gen tracker with the newly active panel's generation
-        // so thumbnail workers accept requests from the now-active panel.
-        self.current_generation
-            .store(self.generation, std::sync::atomic::Ordering::Relaxed);
+        // Update both accepted visual generations after the focus swap.
+        self.sync_thumbnail_generation_gate();
 
         // Re-watch the new active folder so watcher events go to the right place
         self.watch_current_folder();
@@ -232,6 +229,7 @@ impl ImageViewerApp {
         }
         self.dual_panel_inactive_state = None;
         self.dual_panel_enabled = false;
+        self.sync_thumbnail_generation_gate();
         // The wider single-panel layout can change grid column count. Reconcile
         // the preserved offset once so the surviving selection remains visible.
         self.scroll_to_selected = self.selected_item.is_some();
@@ -270,8 +268,8 @@ impl ImageViewerApp {
     /// folder-load cancellation token; results are routed by generation in
     /// `process_streaming_and_thumbnail_events`.
     ///
-    /// `current_generation` remains aligned with the active panel so shared
-    /// thumbnail workers keep accepting its requests.
+    /// The visual worker gate remains keyed to the two physical panes while
+    /// app fields are temporarily swapped.
     pub fn with_inactive_panel<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> Option<R> {
         if !self.dual_panel_enabled {
             return None;
@@ -291,14 +289,9 @@ impl ImageViewerApp {
         // Swap back: restore active state into app fields
         snapshot.swap_with_app(self);
 
-        // Keep current_generation aligned with the ACTIVE panel. Inactive panel
-        // folder/tag loads have their own generation for result routing, but must
-        // not cancel an active-panel folder load that may still be starting.
-        self.current_generation
-            .store(self.generation, std::sync::atomic::Ordering::Relaxed);
-
         // Put snapshot back
         self.dual_panel_inactive_state = Some(snapshot);
+        self.sync_thumbnail_generation_gate();
 
         Some(result)
     }

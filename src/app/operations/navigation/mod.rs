@@ -263,6 +263,8 @@ impl ImageViewerApp {
             }
         }
 
+        self.sync_thumbnail_generation_gate();
+
         active_current_removed
     }
 

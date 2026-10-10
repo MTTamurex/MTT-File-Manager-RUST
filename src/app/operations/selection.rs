@@ -220,12 +220,7 @@ impl ImageViewerApp {
                 if self.cache_manager.is_loading(&path)
                     && !self.cache_manager.is_pending_upload(&path)
                 {
-                    let effective_gen = if self.use_active_generation_for_thumbnail_requests {
-                        self.current_generation
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                    } else {
-                        self.generation
-                    };
+                    let effective_gen = self.generation;
                     let request_epoch = self
                         .thumbnail_request_epochs
                         .get(&path)

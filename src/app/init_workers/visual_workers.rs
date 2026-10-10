@@ -116,7 +116,7 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
 
 pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
-    current_generation: Arc<AtomicUsize>,
+    generation_gate: Arc<crate::workers::thumbnail::ThumbnailGenerationGate>,
     icon_disk_cache: Arc<IconDiskCache>,
 ) -> (
     crossbeam_channel::Sender<IconRequest>,
@@ -164,7 +164,7 @@ pub(in crate::app) fn spawn_icon_worker(
         let icon_req_rx = icon_req_rx.clone();
         let icon_res_tx = icon_res_tx.clone();
         let persist_tx = persist_tx.clone();
-        let generation_ref = current_generation.clone();
+        let generation_gate = generation_gate.clone();
         let ext_cache = shared_ext_cache.clone();
         let disk_cache = icon_disk_cache.clone();
 
@@ -202,12 +202,12 @@ pub(in crate::app) fn spawn_icon_worker(
 
                 while let Ok((path, req_generation, icon_size, request_id)) = icon_req_rx.recv() {
 
-                    // Drop stale requests quickly when user has already navigated away.
+                    // Drop requests for panels that are no longer visible.
                     // usize::MAX = pre-warm requests (always process).
                     // Still emit a terminal empty response so the UI releases this
                     // path's loading_icons / loading_extensions markers and can retry.
                     if req_generation != usize::MAX
-                        && req_generation != generation_ref.load(AtomicOrdering::Relaxed)
+                        && !generation_gate.accepts(req_generation)
                     {
                         let _ = icon_res_tx.send((
                             path,

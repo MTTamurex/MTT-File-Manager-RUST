@@ -87,13 +87,16 @@ impl ImageViewerApp {
         snapshot.restore_from_storage();
         snapshot.is_loading_folder = false;
         snapshot.apply_to(self);
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed);
+        self.sync_thumbnail_generation_gate();
         self.visible_group_paths.clear();
 
         let path_changed = self.navigation_state.current_path != old_path;
         if path_changed {
-            self.discard_thumbnail_pipeline_for_navigation("panel-tab-switch", true);
+            if self.dual_panel_enabled {
+                self.prune_thumbnail_pipeline_for_dual_panel_navigation("panel-tab-switch");
+            } else {
+                self.discard_thumbnail_pipeline_for_navigation("panel-tab-switch", true);
+            }
         }
 
         self.apply_folder_lock_on_tab_restore();
