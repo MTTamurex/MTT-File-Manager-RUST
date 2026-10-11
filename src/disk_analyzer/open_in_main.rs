@@ -13,15 +13,28 @@ const MAX_REQUEST_BYTES: usize = 8192;
 /// Ask the main app to navigate to `path`, revealing it when it is a file.
 /// Never fails visibly: both channels are best-effort with logging.
 pub fn open_path_in_main_app(path: &str, is_dir: bool) {
-    let request = crate::app::operations::external_open::encode_target_request(path, is_dir);
-
-    #[cfg(target_os = "windows")]
-    if send_to_main_window(&request) {
+    if try_send_open_request_to_main_app(path, is_dir) {
         log::info!("[DISK-ANALYZER] open-in-main request sent: {path}");
         return;
     }
 
+    let request = crate::app::operations::external_open::encode_target_request(path, is_dir);
     spawn_open_path_helper(&request);
+}
+
+/// Try to route an open request to the existing main window without spawning a
+/// helper. Shell folder activations use this before creating a new app window.
+pub fn try_send_open_request_to_main_app(path: &str, is_dir: bool) -> bool {
+    let request = crate::app::operations::external_open::encode_target_request(path, is_dir);
+    #[cfg(target_os = "windows")]
+    {
+        send_to_main_window(&request)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = request;
+        false
+    }
 }
 
 #[cfg(target_os = "windows")]

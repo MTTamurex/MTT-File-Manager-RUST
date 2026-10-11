@@ -8,6 +8,7 @@
 
 pub mod batch_rename;
 pub mod cache_state;
+pub mod default_file_manager_state;
 pub mod disk_analysis_duplicates;
 pub mod disk_analysis_model;
 pub mod disk_analysis_query;
@@ -36,6 +37,7 @@ pub(crate) mod organizer_conflict_state;
 pub(crate) mod organizer_history_state;
 pub mod organizer_state;
 pub mod shortcuts;
+pub mod startup_folder;
 pub mod state;
 pub mod ui_state;
 

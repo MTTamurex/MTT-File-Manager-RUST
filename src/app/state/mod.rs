@@ -46,6 +46,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
+use crate::app::default_file_manager_state::DefaultFileManagerSettingsState;
 use crate::app::drag_drop_state::{OutboundDragInputGuard, PendingDragMoveConfirmation};
 use crate::app::drive_state::DriveState;
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
@@ -312,6 +313,7 @@ pub struct ImageViewerApp {
     pub show_hidden_files: bool, // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
     pub show_quick_access: bool, // Show Quick Access
+    pub default_file_manager_settings: DefaultFileManagerSettingsState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar
     pub collapse_quick_access: bool,   // Collapse Quick Access section in sidebar

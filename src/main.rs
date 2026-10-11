@@ -286,6 +286,7 @@ fn native_options_for_renderer(
 fn run_main_app_attempt(
     viewport: egui::ViewportBuilder,
     renderer: StartupRenderer,
+    startup_folder: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
     let app_started = std::rc::Rc::new(std::cell::Cell::new(false));
     let app_started_in_creator = std::rc::Rc::clone(&app_started);
@@ -295,9 +296,9 @@ fn run_main_app_attempt(
         Box::new(move |cc| {
             app_started_in_creator.set(true);
             let app_new_start = Instant::now();
-            let app = ImageViewerApp::new(cc);
+            let app = ImageViewerApp::new_with_startup_folder(cc, startup_folder.clone());
             log::info!(
-                "[STARTUP] ImageViewerApp::new elapsed_ms={}",
+                "[STARTUP] ImageViewerApp initialization elapsed_ms={}",
                 app_new_start.elapsed().as_millis()
             );
             Ok(Box::new(app))
@@ -309,10 +310,12 @@ fn run_main_app_attempt(
 fn run_main_app_with_fallback(
     viewport: &egui::ViewportBuilder,
     preference: Option<&str>,
+    startup_folder: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
     let renderers = startup_renderers(preference);
     for (index, renderer) in renderers.iter().copied().enumerate() {
-        let (result, app_started) = run_main_app_attempt(viewport.clone(), renderer);
+        let (result, app_started) =
+            run_main_app_attempt(viewport.clone(), renderer, startup_folder.clone());
         match result {
             Ok(()) => return (Ok(()), app_started),
             Err(error) if !app_started && index + 1 < renderers.len() => {
@@ -436,6 +439,7 @@ fn main() -> eframe::Result<()> {
     }
 
     // Standalone dedicated image viewer mode (separate process).
+    let mut startup_folder = None;
     let mut args = std::env::args_os();
     let _exe = args.next();
     if let Some(flag) = args.next() {
@@ -523,6 +527,20 @@ fn main() -> eframe::Result<()> {
             };
             let exit_code = write_pending_open_request(&path_arg.to_string_lossy());
             std::process::exit(exit_code);
+        }
+        if flag_str.eq_ignore_ascii_case("--open-folder") {
+            let Some(path_arg) = args.next() else {
+                log::error!("[OPEN-FOLDER] missing path argument for --open-folder");
+                std::process::exit(2);
+            };
+            let path = PathBuf::from(path_arg);
+            if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_request_to_main_app(
+                &path.to_string_lossy(),
+                true,
+            ) {
+                std::process::exit(0);
+            }
+            startup_folder = Some(path);
         }
         if flag_str.eq_ignore_ascii_case("--video-player") {
             if let Some(path_arg) = args.next() {
@@ -613,7 +631,8 @@ fn main() -> eframe::Result<()> {
         startup_start.elapsed().as_millis()
     );
 
-    let (result, app_started) = run_main_app_with_fallback(&viewport, gpu_backend_pref.as_deref());
+    let (result, app_started) =
+        run_main_app_with_fallback(&viewport, gpu_backend_pref.as_deref(), startup_folder);
 
     // Belt-and-suspenders: if eframe returned (window closed) but the process
     // is still alive (background threads stuck in kernel), force-kill immediately.

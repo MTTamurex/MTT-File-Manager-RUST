@@ -7,9 +7,8 @@
 use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
-use crate::domain::special_paths::{
-    is_tag_view_path, is_virtual_path, tag_view_path, COMPUTER_VIEW_ID,
-};
+use crate::app::startup_folder::{is_valid_startup_folder_path, validate_requested_folder};
+use crate::domain::special_paths::{is_virtual_path, tag_view_path, COMPUTER_VIEW_ID};
 use crate::ui::cache::FxHashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -19,7 +18,6 @@ use std::time::Instant;
 use crate::application::ClipboardManager;
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::diagnostic_logger::{diag_info, diag_warn, field_label};
-use crate::infrastructure::onedrive;
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
@@ -35,23 +33,6 @@ use super::init_state_builders::{
 use super::init_workers::font_definitions_with_embedded_icons;
 use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, LastInput};
-
-fn is_valid_startup_folder_path(path: &str) -> bool {
-    if path == COMPUTER_VIEW_ID {
-        return true;
-    }
-
-    if is_tag_view_path(path) {
-        return true;
-    }
-
-    if path.is_empty() || path.starts_with("shell:") || is_virtual_path(path) {
-        return false;
-    }
-
-    let path_buf = PathBuf::from(path);
-    onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf)
-}
 
 /// Determines the initial path based on the last saved folder
 /// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
@@ -111,6 +92,13 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
 
 impl ImageViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self::new_with_startup_folder(cc, None)
+    }
+
+    pub fn new_with_startup_folder(
+        cc: &eframe::CreationContext<'_>,
+        startup_folder: Option<PathBuf>,
+    ) -> Self {
         let ctx = cc.egui_ctx.clone();
         ctx.set_fonts(font_definitions_with_embedded_icons());
 
@@ -275,7 +263,7 @@ impl ImageViewerApp {
             organizer_rules,
             ctx.clone(),
         );
-        let active_tag_filter =
+        let mut active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
 
         // Determine initial path based on last saved folder
@@ -284,6 +272,16 @@ impl ImageViewerApp {
         if let Some(tag_id) = active_tag_filter {
             initial_path = tag_view_path(tag_id);
             is_computer_view_initial = false;
+        }
+        if let Some(startup_folder) = startup_folder {
+            if let Ok(requested_path) = validate_requested_folder(startup_folder) {
+                initial_path = requested_path;
+                is_computer_view_initial = false;
+                active_tag_filter = None;
+                log::info!("[INIT] Using folder requested by the Windows shell");
+            } else {
+                log::warn!("[INIT] Ignoring an invalid folder requested by the Windows shell");
+            }
         }
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
@@ -422,10 +420,12 @@ impl ImageViewerApp {
             video_player_close_in_progress: false,
             pending_video_player_action: None,
             selected_metadata: None,
-            show_left_sidebar,      // Loaded from SQLite
-            show_preview_panel,     // Loaded from SQLite
-            show_recycle_bin,       // Loaded from SQLite
-            show_quick_access,      // Loaded from SQLite
+            show_left_sidebar,  // Loaded from SQLite
+            show_preview_panel, // Loaded from SQLite
+            show_recycle_bin,   // Loaded from SQLite
+            show_quick_access,  // Loaded from SQLite
+            default_file_manager_settings:
+                crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
             quick_access_placement, // Loaded from SQLite
             show_tags,              // Loaded from SQLite
             collapse_quick_access: false,

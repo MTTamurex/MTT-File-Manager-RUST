@@ -208,6 +208,7 @@ impl ImageViewerApp {
 
 impl eframe::App for ImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.poll_default_file_manager_action();
         // Real inter-frame interval tracking (captures hitches that stable_dt
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
         self.track_frame_interval();
@@ -642,6 +643,9 @@ impl eframe::App for ImageViewerApp {
             }
             if output.open_diagnostic_folder {
                 self.open_diagnostic_log_folder();
+            }
+            if let Some(enable) = output.default_file_manager_action {
+                self.start_default_file_manager_action(enable);
             }
         }
 

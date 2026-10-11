@@ -99,6 +99,57 @@ Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "Uninstall
 [Code]
 const
   ProgramDataCacheDir = 'C:\ProgramData\MTT-File-Manager';
+  DefaultFolderOpenCommandKey = 'Software\Classes\Folder\shell\open\command';
+  DefaultFolderExploreCommandKey = 'Software\Classes\Folder\shell\explore\command';
+  DefaultWinECommandKey = 'Software\Classes\CLSID\{52205fd8-5dfb-447d-801a-d0b52f2e83e1}\shell\opennewwindow\command';
+  ExplorerDelegateExecute = '{11dbb47c-a525-400b-9e80-a54615a090c0}';
+
+function MTTFolderCommand: String;
+begin
+  Result := '"' + ExpandConstant('{app}\{#MyAppExeName}') + '" --open-folder "%1"';
+end;
+
+function MTTWinECommand: String;
+begin
+  Result := '"' + ExpandConstant('{app}\{#MyAppExeName}') + '"';
+end;
+
+procedure RestoreExplorerDefaultManagerIfOwned;
+var
+  CurrentCommand: String;
+begin
+  if RegQueryStringValue(HKCU, DefaultFolderOpenCommandKey, '', CurrentCommand) and
+    (CompareText(CurrentCommand, MTTFolderCommand) = 0) then
+  begin
+    RegWriteStringValue(HKCU, 'Software\Classes\Folder\shell\open',
+      'MultiSelectModel', 'Document');
+    RegWriteExpandStringValue(HKCU, DefaultFolderOpenCommandKey, '',
+      '%SystemRoot%\Explorer.exe');
+    RegWriteStringValue(HKCU, DefaultFolderOpenCommandKey,
+      'DelegateExecute', ExplorerDelegateExecute);
+  end;
+
+  if RegQueryStringValue(HKCU, DefaultFolderExploreCommandKey, '', CurrentCommand) and
+    (CompareText(CurrentCommand, MTTFolderCommand) = 0) then
+  begin
+    RegWriteDWordValue(HKCU, 'Software\Classes\Folder\shell\explore',
+      'LaunchExplorerFlags', $18);
+    RegWriteStringValue(HKCU, 'Software\Classes\Folder\shell\explore',
+      'MultiSelectModel', 'Document');
+    RegWriteStringValue(HKCU, 'Software\Classes\Folder\shell\explore',
+      'ProgrammaticAccessOnly', '');
+    RegDeleteValue(HKCU, DefaultFolderExploreCommandKey, '');
+    RegWriteStringValue(HKCU, DefaultFolderExploreCommandKey,
+      'DelegateExecute', ExplorerDelegateExecute);
+  end;
+
+  if RegQueryStringValue(HKCU, DefaultWinECommandKey, '', CurrentCommand) and
+    (CompareText(CurrentCommand, MTTWinECommand) = 0) then
+  begin
+    RegDeleteValue(HKCU, DefaultWinECommandKey, '');
+    RegDeleteValue(HKCU, DefaultWinECommandKey, 'DelegateExecute');
+  end;
+end;
 
 // Check if VC++ Redistributable 2015-2022 (x64) is installed
 function IsVCRedistInstalled: Boolean;
@@ -252,6 +303,9 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+    RestoreExplorerDefaultManagerIfOwned;
+
   if CurUninstallStep = usPostUninstall then
   begin
     if not DeleteProgramDataCache then

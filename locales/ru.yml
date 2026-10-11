@@ -395,6 +395,8 @@ settings:
   quick_access_position_sidebar: "Боковая панель (вертикально)"
   quick_access_position_horizontal: "Горизонтальная панель"
   show_recycle_bin: "Показывать корзину в быстром доступе"
+  default_file_manager_description: "Назначить MTT для открытия папок из Проводника и по сочетанию Win+E."
+  default_file_manager_experimental_note: "Экспериментальная функция: она изменяет реестр Windows. Некоторые антивирусы могут ошибочно распознать это поведение как вредоносное ПО."
   diagnostics: "Диагностика"
   diagnostics_description: "Записывать в файл только анонимные технические данные, без имён файлов, папок и полных путей."
   diagnostics_enable: "Включить режим диагностики"

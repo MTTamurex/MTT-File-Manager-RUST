@@ -395,6 +395,8 @@ settings:
   quick_access_position_sidebar: "侧边栏（垂直）"
   quick_access_position_horizontal: "水平栏"
   show_recycle_bin: "在快速访问中显示回收站"
+  default_file_manager_description: "将文件资源管理器打开的文件夹和 Win+E 操作交由 MTT 处理。"
+  default_file_manager_experimental_note: "实验性功能：此功能会修改 Windows 注册表。某些杀毒软件可能会将此行为误报为恶意软件。"
   diagnostics: "诊断"
   diagnostics_description: "仅向文件写入匿名技术诊断数据，不含文件名、文件夹名、完整路径。"
   diagnostics_enable: "启用诊断模式"

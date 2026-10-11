@@ -395,6 +395,8 @@ settings:
   quick_access_position_sidebar: "Barra lateral (vertical)"
   quick_access_position_horizontal: "Barra horizontal"
   show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"
+  default_file_manager_description: "Define o MTT para abrir pastas chamadas pelo Explorer e pelo atalho Win+E."
+  default_file_manager_experimental_note: "Experimental: este recurso altera o Registro do Windows. Alguns antivírus podem detectar esse comportamento como malware (falso positivo)."
   graphics: "Gráficos"
   graphics_description: "Configure o backend de renderização gráfica."
   backend_title: "Backend Gráfico"

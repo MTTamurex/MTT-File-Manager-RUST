@@ -1,4 +1,4 @@
-use crate::app::navigation_state::{QuickAccessPlacement, SettingsSection};
+use crate::app::navigation_state::SettingsSection;
 use crate::app::ImageViewerApp;
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
@@ -21,6 +21,7 @@ pub struct SettingsWindowOutput {
     pub tags_changed: bool,
     pub diagnostic_mode_changed: bool,
     pub open_diagnostic_folder: bool,
+    pub default_file_manager_action: Option<bool>,
 }
 
 /// Render the modal backdrop BEFORE panels to block their input.
@@ -67,6 +68,7 @@ pub fn render_settings_window(
     let mut tags_changed = false;
     let mut diagnostic_mode_changed = false;
     let mut open_diagnostic_folder = false;
+    let mut default_file_manager_action = None;
 
     if close_from_backdrop {
         keep_open = false;
@@ -194,39 +196,12 @@ pub fn render_settings_window(
                                         ui.set_max_width(ui.available_width() - 14.0);
                                         match current_section {
                                         SettingsSection::General => {
-                                            language_changed |= crate::ui::components::language_settings::render_language_settings_section(ui);
-                                            ui.add_space(20.0);
-                                            theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, &mut app.theme_mode);
-                                            ui.add_space(20.0);
-                                            if settings_ui::toggle_row(ui, &t!("settings.show_quick_access_sidebar"), &mut app.show_quick_access) {
-                                                quick_access_changed = true;
-                                            }
-                                            ui.add_space(6.0);
-                                            ui.label(
-                                                RichText::new(t!("settings.quick_access_position"))
-                                                    .size(13.0)
-                                                    .color(theme::secondary_text_color(dark_mode)),
-                                            );
-                                            let placements: [(QuickAccessPlacement, &str); 2] = [
-                                                (QuickAccessPlacement::Sidebar, &t!("settings.quick_access_position_sidebar")),
-                                                (QuickAccessPlacement::Horizontal, &t!("settings.quick_access_position_horizontal")),
-                                            ];
-                                            let selected = placements
-                                                .iter()
-                                                .position(|(placement, _)| *placement == app.quick_access_placement)
-                                                .unwrap_or(0);
-                                            let labels: Vec<&str> = placements
-                                                .iter()
-                                                .map(|(_, label)| *label)
-                                                .collect();
-                                            if let Some(index) = settings_ui::segmented_choice(ui, &labels, selected) {
-                                                app.quick_access_placement = placements[index].0;
-                                                quick_access_changed = true;
-                                            }
-                                            ui.add_space(10.0);
-                                            if settings_ui::toggle_row(ui, &t!("settings.show_recycle_bin"), &mut app.show_recycle_bin) {
-                                                recycle_bin_changed = true;
-                                            }
+                                            let general = crate::ui::components::general_settings::render_general_settings_section(ui, app);
+                                            language_changed |= general.language_changed;
+                                            theme_changed |= general.theme_changed;
+                                            quick_access_changed |= general.quick_access_changed;
+                                            recycle_bin_changed |= general.recycle_bin_changed;
+                                            default_file_manager_action = general.default_file_manager_action;
                                         }
                                         SettingsSection::Diagnostics => {
                                             settings_ui::section_header(ui, &t!("settings.diagnostics"), &t!("settings.diagnostics_description"));
@@ -309,6 +284,7 @@ pub fn render_settings_window(
         tags_changed,
         diagnostic_mode_changed,
         open_diagnostic_folder,
+        default_file_manager_action,
     }
 }
 
