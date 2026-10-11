@@ -30,7 +30,7 @@ static CAPABILITIES: OnceLock<HardwareCapabilities> = OnceLock::new();
 /// This runs once per application lifecycle and caches the result.
 pub fn get_capabilities() -> &'static HardwareCapabilities {
     CAPABILITIES.get_or_init(|| {
-        println!("[HardwareDetection] Probing and VALIDATING capabilities...");
+        log::info!("[HardwareDetection] Probing and validating capabilities");
         detect_capabilities()
     })
 }
@@ -45,42 +45,42 @@ fn detect_capabilities() -> HardwareCapabilities {
 
     // --- QSV ---
     if encoders_output.contains("h264_qsv") {
-        println!("[HardwareDetection] Testing QSV...");
+        log::info!("[HardwareDetection] Testing QSV");
         if smoke_test_backend(TranscodeBackend::QSV) {
-            println!("[HardwareDetection] QSV smoke test passed.");
+            log::info!("[HardwareDetection] QSV smoke test passed");
             caps.has_qsv = true;
         } else {
-            println!("[HardwareDetection] QSV smoke test failed.");
+            log::warn!("[HardwareDetection] QSV smoke test failed");
         }
     } else {
-        println!("[HardwareDetection] QSV encoder not found in ffmpeg.");
+        log::info!("[HardwareDetection] QSV encoder not found in ffmpeg");
     }
 
     // --- NVENC ---
     if encoders_output.contains("h264_nvenc") || encoders_output.contains("hevc_nvenc") {
-        println!("[HardwareDetection] Testing NVENC...");
+        log::info!("[HardwareDetection] Testing NVENC");
         if smoke_test_backend(TranscodeBackend::NVENC) {
-            println!("[HardwareDetection] NVENC smoke test passed.");
+            log::info!("[HardwareDetection] NVENC smoke test passed");
             caps.has_nvenc = true;
         } else {
-            println!("[HardwareDetection] NVENC smoke test failed.");
+            log::warn!("[HardwareDetection] NVENC smoke test failed");
         }
     } else {
-        println!("[HardwareDetection] NVENC encoder not found in ffmpeg.");
+        log::info!("[HardwareDetection] NVENC encoder not found in ffmpeg");
     }
 
     // --- AMF ---
     if encoders_output.contains("h264_amf") || encoders_output.contains("hevc_amf") {
-        println!("[HardwareDetection] Testing AMF...");
+        log::info!("[HardwareDetection] Testing AMF");
         if smoke_test_backend(TranscodeBackend::AMF) {
-            println!("[HardwareDetection] AMF smoke test passed.");
+            log::info!("[HardwareDetection] AMF smoke test passed");
             caps.has_amf = true;
         } else {
-            println!("[HardwareDetection] AMF smoke test failed.");
+            log::warn!("[HardwareDetection] AMF smoke test failed");
         }
     }
 
-    println!("[HardwareDetection] Final Capabilities: {:?}", caps);
+    log::info!("[HardwareDetection] Final capabilities: {:?}", caps);
     caps
 }
 
@@ -188,19 +188,20 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
                 true
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                // Log the confusing failure for debugging
-                // We print to stdout so it shows in the app console logs
-                println!(
+                // Log the failure through the shared, privacy-filtered logger.
+                log::warn!(
                     "[HardwareDetection] Backend {:?} failed: {}",
-                    backend, stderr
+                    backend,
+                    stderr
                 );
                 false
             }
         }
         Err(e) => {
-            println!(
+            log::warn!(
                 "[HardwareDetection] Backend {:?} failed to spawn: {}",
-                backend, e
+                backend,
+                e
             );
             false
         }

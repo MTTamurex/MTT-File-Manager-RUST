@@ -404,7 +404,7 @@ fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNo
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
         Err(e) => {
-            eprintln!("sidebar-tree: cannot read {}: {}", parent.display(), e);
+            log::warn!("sidebar-tree: cannot read '{}': {}", parent.display(), e);
             return None;
         }
     };

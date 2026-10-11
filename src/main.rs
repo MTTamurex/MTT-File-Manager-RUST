@@ -349,12 +349,6 @@ fn main() -> eframe::Result<()> {
         }
     }
 
-    // Dark-mode opt-in must happen before any window is created: child
-    // processes launched by the file manager inherit this app mode on
-    // Windows 10, which is what makes egui apps follow the system theme.
-    #[cfg(target_os = "windows")]
-    mtt_file_manager::infrastructure::windows::app_theme::init_windows_dark_mode();
-
     // When running without a console (installed binary launched from shortcut),
     // reduce the default log level. Background worker threads continuously emit
     // log::info! which formats a String and acquires the global Stderr mutex.
@@ -376,12 +370,17 @@ fn main() -> eframe::Result<()> {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter));
     log_builder.format_timestamp_millis();
     let console_logger = log_builder.build();
-    mtt_file_manager::infrastructure::diagnostic_logger::init(console_logger)
-        .expect("global logger should initialize exactly once");
-    log::info!(
-        "[STARTUP] logger initialized elapsed_ms={}",
-        startup_start.elapsed().as_millis()
+
+    // Diagnostic mode uses the same default verbosity as the console runner,
+    // independently of whether this GUI process has a console attached. It
+    // remains dormant unless the user has enabled diagnostic mode.
+    let mut diagnostic_builder = env_logger::Builder::from_env(
+        env_logger::Env::default()
+            .default_filter_or("warn,wgpu_hal::vulkan::conv=error,mtt_file_manager=info"),
     );
+    let diagnostic_filter = diagnostic_builder.build();
+    mtt_file_manager::infrastructure::diagnostic_logger::init(console_logger, diagnostic_filter)
+        .expect("global logger should initialize exactly once");
 
     let early_prefs_start = Instant::now();
     let early_prefs = read_early_preferences(&[
@@ -389,11 +388,7 @@ fn main() -> eframe::Result<()> {
         mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
         "gpu_backend",
     ]);
-    log::info!(
-        "[STARTUP] early preferences loaded count={} elapsed_ms={}",
-        early_prefs.len(),
-        early_prefs_start.elapsed().as_millis()
-    );
+    let early_prefs_elapsed_ms = early_prefs_start.elapsed().as_millis();
 
     let diagnostic_mode_requested = early_prefs
         .get(mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_KEY)
@@ -437,6 +432,22 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
+
+    log::info!(
+        "[STARTUP] logger initialized elapsed_ms={}",
+        startup_start.elapsed().as_millis()
+    );
+    log::info!(
+        "[STARTUP] early preferences loaded count={} elapsed_ms={}",
+        early_prefs.len(),
+        early_prefs_elapsed_ms
+    );
+
+    // Dark-mode opt-in must happen before any window is created: child
+    // processes launched by the file manager inherit this app mode on
+    // Windows 10, which is what makes egui apps follow the system theme.
+    #[cfg(target_os = "windows")]
+    mtt_file_manager::infrastructure::windows::app_theme::init_windows_dark_mode();
 
     // Standalone dedicated image viewer mode (separate process).
     let mut startup_folder = None;

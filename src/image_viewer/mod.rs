@@ -208,11 +208,14 @@ fn open_image_viewer_blocking(path: &Path) {
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     // Capture panics so we can diagnose shutdown crashes even when stderr
-    // is not attached (GUI-subsystem binary launched from shortcut).
+    // is not attached (GUI-subsystem binary launched from shortcut). Avoid
+    // the default raw stderr hook while privacy-filtered diagnostics are active.
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("[IMAGE-VIEWER] PANIC: {}", info);
-        default_panic(info);
+        if !crate::infrastructure::diagnostic_logger::is_enabled() {
+            default_panic(info);
+        }
     }));
 
     log::info!(

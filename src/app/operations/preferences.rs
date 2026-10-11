@@ -428,8 +428,11 @@ impl ImageViewerApp {
     }
 
     fn set_diagnostic_mode_with_reason(&mut self, enabled: bool, disable_reason: &'static str) {
-        let logger_matches_state =
-            self.diagnostic_mode == enabled && (!enabled || diagnostic_logger::is_enabled());
+        // The settings checkbox updates `self.diagnostic_mode` before calling
+        // this method, so that field alone cannot tell whether the logger still
+        // needs to transition. Compare the requested value with the logger's
+        // actual state so a disable request closes the active file.
+        let logger_matches_state = diagnostic_logger::is_enabled() == enabled;
         if logger_matches_state {
             return;
         }
