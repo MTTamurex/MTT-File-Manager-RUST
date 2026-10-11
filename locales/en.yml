@@ -395,7 +395,7 @@ settings:
   quick_access_position_sidebar: "Sidebar (vertical)"
   quick_access_position_horizontal: "Horizontal bar"
   show_recycle_bin: "Show Recycle Bin in Quick Access"
-  default_file_manager_description: "Set MTT to open folders launched from File Explorer and Win+E."
+  default_file_manager_description: "Set MTT as your default file manager (Win+E opens it)."
   default_file_manager_experimental_note: "Experimental: this feature changes the Windows Registry. Some antivirus products may flag this behavior as malware (a false positive)."
   diagnostics: "Diagnostics"
   diagnostics_description: "Write only anonymous technical diagnostics to the file, without file names, folder names, or full paths."
