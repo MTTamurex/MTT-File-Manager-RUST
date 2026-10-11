@@ -87,6 +87,12 @@ impl DocxViewerApp {
                     .get(page_index)
                     .map_or(1.0, |(width, _)| geometry.size.x / *width);
                 self.paint_search_highlights(ui.painter(), page_index, rect, page_scale);
+                let response = ui.interact(
+                    rect,
+                    ui.id().with(("docx_page_selection", page_index)),
+                    egui::Sense::click_and_drag(),
+                );
+                self.handle_page_selection(ui, &response, page_index, rect, page_scale);
             }
             if let Some((page_index, _)) = geometries
                 .iter()

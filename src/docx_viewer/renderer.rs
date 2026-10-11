@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use super::fonts::RegisteredFonts;
 use super::images;
 use super::raster_scale::{high_resolution_scale, scale_display_page};
+use super::search::SearchBounds;
 
 const MAX_PAGE_SIDE: f64 = 16_384.0;
 
@@ -109,6 +110,10 @@ impl DocxRenderer {
 
     pub fn search_display_list(&self) -> Arc<DisplayList> {
         Arc::clone(&self.display_list)
+    }
+
+    pub fn selected_text(&self, page_index: usize, bounds: SearchBounds) -> String {
+        super::text_selection::selected_text(&self.display_list, page_index, bounds)
     }
 
     pub fn trim_caches(&mut self) {

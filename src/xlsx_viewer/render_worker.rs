@@ -27,13 +27,30 @@ pub(super) enum WorkerEvent {
         query: String,
         matches: Vec<XlsxSearchMatch>,
     },
+    RangeSelected {
+        generation: u64,
+        sheet_index: usize,
+        result: Result<super::cell_selection::CellSelection, String>,
+    },
     Failed(String),
 }
 
 enum WorkerRequest {
     SelectSheet(usize),
-    Render { generation: u64, key: RenderKey },
-    Search { generation: u64, query: String },
+    Render {
+        generation: u64,
+        key: RenderKey,
+    },
+    Search {
+        generation: u64,
+        query: String,
+    },
+    SelectRange {
+        generation: u64,
+        sheet_index: usize,
+        start: (f32, f32),
+        end: (f32, f32),
+    },
 }
 
 pub(super) struct XlsxRenderWorker {
@@ -72,6 +89,23 @@ impl XlsxRenderWorker {
     pub fn request_search(&self, generation: u64, query: String) -> bool {
         self.request_tx
             .try_send(WorkerRequest::Search { generation, query })
+            .is_ok()
+    }
+
+    pub fn request_range_selection(
+        &self,
+        generation: u64,
+        sheet_index: usize,
+        start: (f32, f32),
+        end: (f32, f32),
+    ) -> bool {
+        self.request_tx
+            .try_send(WorkerRequest::SelectRange {
+                generation,
+                sheet_index,
+                start,
+                end,
+            })
             .is_ok()
     }
 
@@ -136,6 +170,21 @@ fn worker_loop(
                 generation,
                 matches: renderer.search(&query),
                 query,
+            },
+            WorkerRequest::SelectRange {
+                generation,
+                sheet_index,
+                start,
+                end,
+            } => WorkerEvent::RangeSelected {
+                generation,
+                sheet_index,
+                result: super::cell_selection::select_range(
+                    &renderer.workbook,
+                    sheet_index,
+                    start,
+                    end,
+                ),
             },
         };
         if event_tx.send(event).is_err() {

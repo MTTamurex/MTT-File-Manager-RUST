@@ -53,7 +53,7 @@ struct SearchSheetGeometry {
 }
 
 pub(super) struct XlsxRenderer {
-    workbook: Workbook,
+    pub(super) workbook: Workbook,
     sheet_count: usize,
 }
 

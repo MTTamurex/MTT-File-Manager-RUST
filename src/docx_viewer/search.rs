@@ -14,7 +14,7 @@ pub(super) struct SearchBounds {
 }
 
 impl SearchBounds {
-    fn new(left: f32, top: f32, right: f32, bottom: f32) -> Option<Self> {
+    pub(super) fn new(left: f32, top: f32, right: f32, bottom: f32) -> Option<Self> {
         (left.is_finite()
             && top.is_finite()
             && right.is_finite()
@@ -27,6 +27,13 @@ impl SearchBounds {
                 right,
                 bottom,
             })
+    }
+
+    pub(super) fn overlaps(self, other: Self) -> bool {
+        self.left <= other.right
+            && self.right >= other.left
+            && self.top <= other.bottom
+            && self.bottom >= other.top
     }
 
     fn union(self, other: Self) -> Self {
@@ -286,7 +293,9 @@ fn primitive_characters(primitive: &Primitive) -> Option<Vec<(char, Option<Searc
     }
 }
 
-fn text_run_bounds(run: &docx_layout::display_list::TextRunPrimitive) -> Option<SearchBounds> {
+pub(super) fn text_run_bounds(
+    run: &docx_layout::display_list::TextRunPrimitive,
+) -> Option<SearchBounds> {
     let left = run.x.as_f64()? as f32;
     let baseline = run.baseline_y.as_f64()? as f32;
     let width = run.width.as_f64()? as f32;
@@ -307,7 +316,7 @@ fn css_font_size(font: &str) -> Option<f32> {
     })
 }
 
-fn glyph_character_bounds(
+pub(super) fn glyph_character_bounds(
     run: &docx_layout::display_list::GlyphRunPrimitive,
 ) -> Vec<Option<SearchBounds>> {
     let size = run.size as f32;

@@ -14,6 +14,7 @@ mod raster_scale;
 mod render_worker;
 mod renderer;
 mod search;
+mod text_selection;
 mod viewer_app;
 
 const MAX_DOCX_FILE_SIZE: u64 = 512 * 1024 * 1024;

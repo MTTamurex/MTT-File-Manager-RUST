@@ -14,7 +14,10 @@ use super::renderer::{XlsxSearchMatch, XlsxViewportTile};
 
 mod rendering;
 mod search;
+mod selection;
 mod toolbar;
+
+use selection::{DragSelection, SheetSelection};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct RenderKey {
@@ -75,6 +78,9 @@ pub(super) struct XlsxViewerApp {
     last_memory_trim_request: Instant,
     memory_trim_was_pending: bool,
     memory_activity_generation: Arc<AtomicU64>,
+    drag_selection: Option<DragSelection>,
+    selection: Option<SheetSelection>,
+    selection_generation: u64,
 }
 
 impl XlsxViewerApp {
@@ -112,6 +118,9 @@ impl XlsxViewerApp {
             last_memory_trim_request: now.checked_sub(Duration::from_secs(10)).unwrap_or(now),
             memory_trim_was_pending: true,
             memory_activity_generation: Arc::new(AtomicU64::new(0)),
+            drag_selection: None,
+            selection: None,
+            selection_generation: 0,
         }
     }
 
@@ -177,6 +186,11 @@ impl XlsxViewerApp {
                     query,
                     matches,
                 } => self.accept_search_result(generation, query, matches),
+                WorkerEvent::RangeSelected {
+                    generation,
+                    sheet_index,
+                    result,
+                } => self.accept_range_selection(generation, sheet_index, result),
                 WorkerEvent::Failed(error) => self.status = ViewerStatus::Failed(error),
             }
         }
@@ -318,6 +332,9 @@ impl XlsxViewerApp {
         if sheet_index == self.selected_sheet || sheet_index >= self.sheet_names.len() {
             return;
         }
+        self.selection_generation = self.selection_generation.wrapping_add(1);
+        self.drag_selection = None;
+        self.selection = None;
         let requested = self
             .worker
             .as_ref()
@@ -347,6 +364,21 @@ impl XlsxViewerApp {
                 self.scroll_to_position = Some(position);
                 self.pending_search_navigation = None;
             }
+        }
+    }
+
+    fn accept_range_selection(
+        &mut self,
+        generation: u64,
+        sheet_index: usize,
+        result: Result<super::cell_selection::CellSelection, String>,
+    ) {
+        if generation != self.selection_generation || sheet_index != self.selected_sheet {
+            return;
+        }
+        match result {
+            Ok(selection) => self.selection = Some(SheetSelection::from(selection)),
+            Err(error) => log::warn!("[XLSX-VIEWER] could not copy selected range: {error}"),
         }
     }
 }
@@ -407,6 +439,7 @@ impl eframe::App for XlsxViewerApp {
         }
 
         self.handle_search_shortcuts(&ctx);
+        self.handle_selection_shortcuts(&ctx);
         self.handle_keyboard(&ctx);
         self.show_toolbar_frames(ui);
         self.show_search_bar(ui);

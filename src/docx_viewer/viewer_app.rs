@@ -9,7 +9,10 @@ use super::render_worker::{DocxRenderWorker, WorkerEvent};
 use super::search::SearchMatch;
 mod rendering;
 mod search;
+mod selection;
 mod toolbar;
+
+use selection::{DragSelection, TextSelection};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ZoomMode {
@@ -68,6 +71,9 @@ pub(super) struct DocxViewerApp {
     memory_trim_was_pending: bool,
     memory_activity_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     skipped_images: usize,
+    drag_selection: Option<DragSelection>,
+    selection: Option<TextSelection>,
+    selection_generation: u64,
 }
 
 impl DocxViewerApp {
@@ -106,6 +112,9 @@ impl DocxViewerApp {
             memory_trim_was_pending: true,
             memory_activity_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             skipped_images: 0,
+            drag_selection: None,
+            selection: None,
+            selection_generation: 0,
         }
     }
 
@@ -150,6 +159,11 @@ impl DocxViewerApp {
                     self.cache_bytes = self.cache_bytes.saturating_add(bytes);
                     self.skipped_images = self.skipped_images.saturating_add(page.skipped_images);
                 }
+                WorkerEvent::TextSelected {
+                    page_index,
+                    generation,
+                    text,
+                } => self.receive_selected_text(page_index, generation, text),
                 WorkerEvent::PageFailed { page_index, error } => {
                     self.pending.remove(&page_index);
                     self.failed_pages.insert(page_index, error);
@@ -345,6 +359,7 @@ impl eframe::App for DocxViewerApp {
         }
 
         self.handle_search_shortcuts(&ctx);
+        self.handle_selection_shortcuts(&ctx);
         self.handle_keyboard(&ctx);
         self.show_toolbar_frame(ui);
         self.show_search_bar(ui);

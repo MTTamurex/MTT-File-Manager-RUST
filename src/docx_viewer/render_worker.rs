@@ -4,17 +4,32 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::egui;
 
 use super::renderer::{DocxPagePixels, DocxRenderer};
-use super::search::{DocxSearchIndex, SearchRequest, SearchResult};
+use super::search::{DocxSearchIndex, SearchBounds, SearchRequest, SearchResult};
 
 pub(super) enum WorkerEvent {
-    Opened { page_sizes: Vec<(f32, f32)> },
+    Opened {
+        page_sizes: Vec<(f32, f32)>,
+    },
     Rendered(DocxPagePixels),
-    PageFailed { page_index: usize, error: String },
+    TextSelected {
+        page_index: usize,
+        generation: u64,
+        text: String,
+    },
+    PageFailed {
+        page_index: usize,
+        error: String,
+    },
     Failed(String),
 }
 
 enum RenderRequest {
     Page(usize),
+    SelectText {
+        page_index: usize,
+        bounds: SearchBounds,
+        generation: u64,
+    },
     TrimCaches,
 }
 
@@ -59,6 +74,21 @@ impl DocxRenderWorker {
     pub fn request_page(&self, page_index: usize) -> bool {
         self.request_tx
             .try_send(RenderRequest::Page(page_index))
+            .is_ok()
+    }
+
+    pub fn request_text_selection(
+        &self,
+        page_index: usize,
+        bounds: SearchBounds,
+        generation: u64,
+    ) -> bool {
+        self.request_tx
+            .try_send(RenderRequest::SelectText {
+                page_index,
+                bounds,
+                generation,
+            })
             .is_ok()
     }
 
@@ -141,6 +171,23 @@ fn worker_loop(
                     Err(error) => WorkerEvent::PageFailed { page_index, error },
                 };
                 if event_tx.send(event).is_err() {
+                    break;
+                }
+                repaint.request_repaint();
+            }
+            RenderRequest::SelectText {
+                page_index,
+                bounds,
+                generation,
+            } => {
+                if event_tx
+                    .send(WorkerEvent::TextSelected {
+                        page_index,
+                        generation,
+                        text: renderer.selected_text(page_index, bounds),
+                    })
+                    .is_err()
+                {
                     break;
                 }
                 repaint.request_repaint();

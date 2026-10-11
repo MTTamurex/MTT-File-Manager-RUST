@@ -128,6 +128,25 @@ impl XlsxViewerApp {
                     );
                 }
                 self.paint_search_highlights(ui, key, pixels_per_point);
+                let selection_response = ui.interact(
+                    ui.max_rect().intersect(ui.clip_rect()),
+                    ui.id().with(("xlsx_range_selection", key.sheet_index)),
+                    egui::Sense::click_and_drag(),
+                );
+                let (frozen_width, frozen_height) = texture
+                    .tiles
+                    .first()
+                    .map(|tile| (tile.frozen_width, tile.frozen_height))
+                    .unwrap_or_default();
+                self.handle_sheet_selection(
+                    ui,
+                    &selection_response,
+                    key,
+                    clip_origin,
+                    pixels_per_point,
+                    frozen_width,
+                    frozen_height,
+                );
                 if stale_render {
                     self.request_render(key);
                 }

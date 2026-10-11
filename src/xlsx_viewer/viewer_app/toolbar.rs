@@ -89,6 +89,18 @@ impl XlsxViewerApp {
                         self.change_zoom(1.2);
                     }
                     ui.separator();
+                    let copy = ui.add_enabled(
+                        self.has_text_selection(),
+                        egui::Button::new(t!("xlsxviewer.copy_selection").to_string()),
+                    );
+                    if copy.clicked() {
+                        if let Err(error) = self.copy_selected_text() {
+                            log::warn!("[XLSX-VIEWER] copy selection failed: {error}");
+                        }
+                    }
+                    copy.on_hover_text(t!("xlsxviewer.copy_selection_hint"));
+                    ui.label(self.selection_summary());
+                    ui.separator();
                     let search_hint = if self.search_active {
                         t!("xlsxviewer.search_close")
                     } else {
