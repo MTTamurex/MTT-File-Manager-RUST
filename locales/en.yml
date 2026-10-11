@@ -684,6 +684,8 @@ pdfviewer:
   view_single_short: "1 page"
   view_two_page: "Two-page spread"
   view_two_page_short: "2 pages"
+  view_two_page_cover: "Two-page spread with a separate cover"
+  view_two_page_cover_short: "2p+cover"
   rotate_ccw: "Rotate counter-clockwise  (Shift+R)"
   rotate_cw: "Rotate clockwise  (R)"
   copy_selection: "Copy"

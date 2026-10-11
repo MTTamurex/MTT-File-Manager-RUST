@@ -684,6 +684,8 @@ pdfviewer:
   view_single_short: "1页"
   view_two_page: "双页对开"
   view_two_page_short: "2页"
+  view_two_page_cover: "双页对开，封面单独显示"
+  view_two_page_cover_short: "2页+封面"
   rotate_ccw: "逆时针旋转（Shift+R）"
   rotate_cw: "顺时针旋转（R）"
   copy_selection: "复制"

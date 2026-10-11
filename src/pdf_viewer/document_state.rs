@@ -126,12 +126,32 @@ fn page_layout_to_str(layout: PdfPageLayout) -> &'static str {
     match layout {
         PdfPageLayout::OnePage => "one_page",
         PdfPageLayout::TwoPage => "two_page",
+        PdfPageLayout::TwoPageWithCover => "two_page_cover",
     }
 }
 
 fn page_layout_from_str(value: &str) -> PdfPageLayout {
     match value {
         "two_page" => PdfPageLayout::TwoPage,
+        "two_page_cover" => PdfPageLayout::TwoPageWithCover,
         _ => PdfPageLayout::OnePage,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_layout_state_round_trips_and_keeps_legacy_two_page_value() {
+        assert_eq!(
+            page_layout_to_str(PdfPageLayout::TwoPageWithCover),
+            "two_page_cover"
+        );
+        assert_eq!(
+            page_layout_from_str("two_page_cover"),
+            PdfPageLayout::TwoPageWithCover
+        );
+        assert_eq!(page_layout_from_str("two_page"), PdfPageLayout::TwoPage);
     }
 }

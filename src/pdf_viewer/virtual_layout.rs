@@ -69,7 +69,8 @@ impl VariableRows {
 pub(super) struct PageRows {
     pages: Vec<PageGeometry>,
     rows: VariableRows,
-    columns: usize,
+    row_pages: Vec<Range<usize>>,
+    page_rows: Vec<usize>,
     horizontal_gap: f32,
     max_row_width: f32,
 }
@@ -82,17 +83,54 @@ impl PageRows {
         vertical_gap: f32,
     ) -> Self {
         debug_assert!((1..=2).contains(&columns));
-        let horizontal_gap = horizontal_gap.max(0.0);
-        let mut heights = Vec::with_capacity(pages.len().div_ceil(columns));
-        let mut max_row_width = 0.0_f32;
+        let row_pages = (0..pages.len())
+            .step_by(columns)
+            .map(|start| start..(start + columns).min(pages.len()))
+            .collect();
 
-        for row_pages in pages.chunks(columns) {
-            let height = row_pages
-                .iter()
-                .map(|page| page.size.y)
-                .fold(0.0_f32, f32::max);
-            let width = row_pages.iter().map(|page| page.size.x).sum::<f32>()
-                + horizontal_gap * row_pages.len().saturating_sub(1) as f32;
+        Self::from_row_pages(pages, row_pages, horizontal_gap, vertical_gap)
+    }
+
+    pub(super) fn with_cover_page(
+        pages: Vec<PageGeometry>,
+        horizontal_gap: f32,
+        vertical_gap: f32,
+    ) -> Self {
+        let mut row_pages = Vec::with_capacity(pages.len().div_ceil(2) + 1);
+        if !pages.is_empty() {
+            row_pages.push(0..1);
+        }
+
+        let mut start = 1;
+        while start < pages.len() {
+            let end = (start + 2).min(pages.len());
+            row_pages.push(start..end);
+            start = end;
+        }
+
+        Self::from_row_pages(pages, row_pages, horizontal_gap, vertical_gap)
+    }
+
+    fn from_row_pages(
+        pages: Vec<PageGeometry>,
+        row_pages: Vec<Range<usize>>,
+        horizontal_gap: f32,
+        vertical_gap: f32,
+    ) -> Self {
+        let horizontal_gap = horizontal_gap.max(0.0);
+        let mut heights = Vec::with_capacity(row_pages.len());
+        let mut max_row_width = 0.0_f32;
+        let mut page_rows = vec![0; pages.len()];
+
+        for (row_idx, row_range) in row_pages.iter().enumerate() {
+            let row = &pages[row_range.clone()];
+            for page_row in &mut page_rows[row_range.clone()] {
+                *page_row = row_idx;
+            }
+
+            let height = row.iter().map(|page| page.size.y).fold(0.0_f32, f32::max);
+            let width = row.iter().map(|page| page.size.x).sum::<f32>()
+                + horizontal_gap * row.len().saturating_sub(1) as f32;
             heights.push(height);
             max_row_width = max_row_width.max(width);
         }
@@ -100,7 +138,8 @@ impl PageRows {
         Self {
             pages,
             rows: VariableRows::new(heights, vertical_gap),
-            columns,
+            row_pages,
+            page_rows,
             horizontal_gap,
             max_row_width,
         }
@@ -119,8 +158,10 @@ impl PageRows {
     }
 
     pub(super) fn pages_in_row(&self, row: usize) -> Range<usize> {
-        let start = row * self.columns;
-        start..(start + self.columns).min(self.pages.len())
+        self.row_pages
+            .get(row)
+            .cloned()
+            .unwrap_or(self.pages.len()..self.pages.len())
     }
 
     pub(super) fn page(&self, page: usize) -> Option<PageGeometry> {
@@ -129,7 +170,7 @@ impl PageRows {
 
     pub(super) fn page_top(&self, page: usize) -> Option<f32> {
         let geometry = self.pages.get(page)?;
-        let row = page / self.columns;
+        let row = *self.page_rows.get(page)?;
         let row_top = self.rows.top(row)?;
         let row_height = self.rows.height(row)?;
         Some(row_top + (row_height - geometry.size.y) * 0.5)
@@ -137,19 +178,18 @@ impl PageRows {
 
     pub(super) fn page_rect(&self, page: usize, content_width: f32) -> Option<egui::Rect> {
         let geometry = *self.pages.get(page)?;
-        let row = page / self.columns;
-        let row_start = row * self.columns;
-        let row_end = (row_start + self.columns).min(self.pages.len());
-        let row_pages = &self.pages[row_start..row_end];
+        let row = *self.page_rows.get(page)?;
+        let row_range = self.row_pages.get(row)?;
+        let row_pages = &self.pages[row_range.clone()];
         let row_width = row_pages.iter().map(|page| page.size.x).sum::<f32>()
             + self.horizontal_gap * row_pages.len().saturating_sub(1) as f32;
-        let preceding_width = self.pages[row_start..page]
+        let preceding_width = self.pages[row_range.start..page]
             .iter()
             .map(|page| page.size.x)
             .sum::<f32>();
         let x = ((content_width - row_width) * 0.5).max(0.0)
             + preceding_width
-            + self.horizontal_gap * (page - row_start) as f32;
+            + self.horizontal_gap * (page - row_range.start) as f32;
 
         Some(egui::Rect::from_min_size(
             egui::pos2(x, self.page_top(page)?),
@@ -191,6 +231,34 @@ mod tests {
         assert_eq!(rows.page_top(1), Some(50.0));
         assert_eq!(rows.page_top(2), Some(208.0));
         assert_eq!(rows.pages_in_row(1), 2..3);
+    }
+
+    #[test]
+    fn cover_page_rows_start_with_a_single_page_then_pair_the_rest() {
+        let rows = PageRows::with_cover_page(
+            vec![
+                page(100.0, 200.0),
+                page(100.0, 100.0),
+                page(100.0, 150.0),
+                page(100.0, 120.0),
+                page(100.0, 160.0),
+                page(100.0, 110.0),
+            ],
+            12.0,
+            8.0,
+        );
+
+        assert_eq!(rows.pages_in_row(0), 0..1);
+        assert_eq!(rows.pages_in_row(1), 1..3);
+        assert_eq!(rows.pages_in_row(2), 3..5);
+        assert_eq!(rows.pages_in_row(3), 5..6);
+        assert_eq!(rows.page_top(0), Some(0.0));
+        assert_eq!(rows.page_top(1), Some(233.0));
+        assert_eq!(rows.page_top(3), Some(386.0));
+        assert_eq!(rows.page_top(5), Some(534.0));
+
+        let cover_rect = rows.page_rect(0, rows.content_width(0.0)).unwrap();
+        assert_eq!(cover_rect.min.x, 56.0);
     }
 
     #[test]

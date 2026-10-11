@@ -684,6 +684,8 @@ pdfviewer:
   view_single_short: "1 страница"
   view_two_page: "Разворот из двух страниц"
   view_two_page_short: "2 страницы"
+  view_two_page_cover: "Разворот из двух страниц с отдельной обложкой"
+  view_two_page_cover_short: "2стр+обл"
   rotate_ccw: "Повернуть против часовой стрелки (Shift+R)"
   rotate_cw: "Повернуть по часовой стрелке (R)"
   copy_selection: "Копировать"

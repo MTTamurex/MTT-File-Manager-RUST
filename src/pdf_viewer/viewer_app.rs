@@ -64,10 +64,17 @@ pub(super) enum ZoomMode {
     Custom,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum PdfPageLayout {
     OnePage,
     TwoPage,
+    TwoPageWithCover,
+}
+
+impl PdfPageLayout {
+    fn uses_two_pages(self) -> bool {
+        matches!(self, Self::TwoPage | Self::TwoPageWithCover)
+    }
 }
 
 /// GPU-uploaded page texture with render-resolution metadata.
@@ -878,24 +885,47 @@ impl PdfViewerApp {
             return;
         }
 
-        if self.page_layout == PdfPageLayout::TwoPage {
-            let spread_start = self.current_page.saturating_sub(self.current_page % 2);
-            self.go_to_page(spread_start.saturating_sub(2));
+        if self.page_layout.uses_two_pages() {
+            let spread_start = self.spread_start(self.current_page);
+            let previous_start =
+                if self.page_layout == PdfPageLayout::TwoPageWithCover && spread_start == 1 {
+                    0
+                } else {
+                    spread_start.saturating_sub(2)
+                };
+            self.go_to_page(previous_start);
         } else {
             self.go_to_page(self.current_page - 1);
         }
     }
 
     pub(super) fn next_page(&mut self) {
-        if self.current_page + 1 >= self.total_pages {
-            return;
-        }
+        if self.page_layout.uses_two_pages() {
+            if self.page_layout == PdfPageLayout::TwoPageWithCover && self.current_page == 0 {
+                if self.total_pages > 1 {
+                    self.go_to_page(1);
+                }
+                return;
+            }
 
-        if self.page_layout == PdfPageLayout::TwoPage {
-            let spread_start = self.current_page.saturating_sub(self.current_page % 2);
-            self.go_to_page((spread_start + 2).min(self.total_pages.saturating_sub(1)));
+            let next_start = self.spread_start(self.current_page).saturating_add(2);
+            if next_start < self.total_pages {
+                self.go_to_page(next_start);
+            }
         } else {
-            self.go_to_page(self.current_page + 1);
+            let next = self.current_page.saturating_add(1);
+            if next < self.total_pages {
+                self.go_to_page(next);
+            }
+        }
+    }
+
+    fn spread_start(&self, page: u32) -> u32 {
+        match self.page_layout {
+            PdfPageLayout::OnePage => page,
+            PdfPageLayout::TwoPage => page - page % 2,
+            PdfPageLayout::TwoPageWithCover if page == 0 => 0,
+            PdfPageLayout::TwoPageWithCover => 1 + ((page - 1) / 2) * 2,
         }
     }
 
@@ -1034,7 +1064,7 @@ impl PdfViewerApp {
     }
 
     fn build_page_rows(&self, aw: f32, ah: f32, vertical_gap: f32) -> PageRows {
-        let columns = if self.page_layout == PdfPageLayout::TwoPage {
+        let columns = if self.page_layout.uses_two_pages() {
             2
         } else {
             1
@@ -1055,7 +1085,10 @@ impl PdfViewerApp {
             })
             .collect();
 
-        PageRows::new(pages, columns, 12.0, vertical_gap)
+        match self.page_layout {
+            PdfPageLayout::TwoPageWithCover => PageRows::with_cover_page(pages, 12.0, vertical_gap),
+            _ => PageRows::new(pages, columns, 12.0, vertical_gap),
+        }
     }
 
     fn show_pages(
@@ -1121,7 +1154,7 @@ impl PdfViewerApp {
         // Update current-page indicator from scroll position
         if let Some(fv) = first_visible {
             if self.scroll_to_page.is_none() && !self.page_input_has_focus {
-                let page = if self.page_layout == PdfPageLayout::TwoPage
+                let page = if self.page_layout.uses_two_pages()
                     && self.current_page >= fv
                     && self.current_page <= last_visible
                 {
@@ -1320,7 +1353,7 @@ impl eframe::App for PdfViewerApp {
 
             if self.total_pages > 0 {
                 let zoom_page = self.current_page.min(self.total_pages.saturating_sub(1));
-                let zoom_aw = if self.page_layout == PdfPageLayout::TwoPage {
+                let zoom_aw = if self.page_layout.uses_two_pages() {
                     ((aw - 12.0) * 0.5).max(100.0)
                 } else {
                     aw
@@ -1432,5 +1465,42 @@ mod tests {
 
         assert!(app.zoom_mode == ZoomMode::Custom);
         assert!((app.zoom - 0.64).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn two_page_cover_navigation_moves_between_spreads_and_stops_at_the_end() {
+        let mut app = PdfViewerApp::new(PathBuf::new(), false).unwrap();
+        app.total_pages = 5;
+        app.page_layout = PdfPageLayout::TwoPageWithCover;
+
+        app.next_page();
+        assert_eq!(app.current_page, 1);
+        app.next_page();
+        assert_eq!(app.current_page, 3);
+        app.next_page();
+        assert_eq!(app.current_page, 3);
+
+        app.go_to_page(4);
+        app.next_page();
+        assert_eq!(app.current_page, 4);
+
+        app.prev_page();
+        assert_eq!(app.current_page, 1);
+        app.prev_page();
+        assert_eq!(app.current_page, 0);
+        app.prev_page();
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn one_page_document_has_no_cover_spread_to_navigate_to() {
+        let mut app = PdfViewerApp::new(PathBuf::new(), false).unwrap();
+        app.total_pages = 1;
+        app.page_layout = PdfPageLayout::TwoPageWithCover;
+
+        app.next_page();
+        app.prev_page();
+
+        assert_eq!(app.current_page, 0);
     }
 }

@@ -200,6 +200,17 @@ impl PdfViewerApp {
         {
             self.set_page_layout(PdfPageLayout::TwoPage);
         }
+
+        if ui
+            .selectable_label(
+                self.page_layout == PdfPageLayout::TwoPageWithCover,
+                t!("pdfviewer.view_two_page_cover_short"),
+            )
+            .on_hover_text(t!("pdfviewer.view_two_page_cover"))
+            .clicked()
+        {
+            self.set_page_layout(PdfPageLayout::TwoPageWithCover);
+        }
     }
 
     fn toolbar_selection(&mut self, ui: &mut egui::Ui) {
