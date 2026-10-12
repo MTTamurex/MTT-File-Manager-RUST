@@ -245,6 +245,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Fixar pasta atual no Acesso Rápido"
 context_menu:
+  open_in_mtt: "Abrir no MTT"
   open: "Abrir"
   open_with: "Abrir com..."
   analyze_disk_usage: "Analisar uso do disco"
@@ -395,8 +396,10 @@ settings:
   quick_access_position_sidebar: "Barra lateral (vertical)"
   quick_access_position_horizontal: "Barra horizontal"
   show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"
-  default_file_manager_description: "Definir o MTT como gerenciador padrão (Win+E abre o MTT)."
-  default_file_manager_experimental_note: "Experimental: este recurso altera o Registro do Windows. Alguns antivírus podem detectar esse comportamento como malware (falso positivo)."
+  default_file_manager_description: "Definir MTT como gerenciador padrão"
+  default_file_manager_experimental_note: "Experimental: as pastas serão abertas no MTT e “Abrir no MTT” será adicionado ao menu de contexto. O recurso altera o Registro do Windows e pode gerar falso positivo em alguns antivírus."
+  win_e_open_mtt_description: "Usar o MTT ao pressionar Win+E e em solicitações para abrir o Explorer."
+  win_e_open_mtt_experimental_note: "Experimental e com riscos: Win+E e as inicializações do explorer.exe abrirão o MTT no lugar do Windows Explorer. Se o MTT não iniciar, o Explorer não abrirá. Desative esta opção para restaurar o Explorer. Ela altera o Registro do usuário."
   graphics: "Gráficos"
   graphics_description: "Configure o backend de renderização gráfica."
   backend_title: "Backend Gráfico"

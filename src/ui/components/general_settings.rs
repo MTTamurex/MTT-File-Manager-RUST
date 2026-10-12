@@ -11,6 +11,7 @@ pub struct GeneralSettingsOutput {
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
     pub default_file_manager_action: Option<bool>,
+    pub win_e_action: Option<bool>,
 }
 
 pub fn render_general_settings_section(
@@ -24,6 +25,7 @@ pub fn render_general_settings_section(
         quick_access_changed: false,
         recycle_bin_changed: false,
         default_file_manager_action: None,
+        win_e_action: None,
     };
 
     output.language_changed |=
@@ -76,12 +78,14 @@ pub fn render_general_settings_section(
         output.recycle_bin_changed = true;
     }
     ui.add_space(20.0);
-    output.default_file_manager_action =
+    let default_file_manager_settings =
         crate::ui::components::default_file_manager_settings::render_default_file_manager_settings_section(
             ui,
             app.default_file_manager_settings.status,
             app.default_file_manager_settings.result_receiver.is_some(),
         );
+    output.default_file_manager_action = default_file_manager_settings.folder_action;
+    output.win_e_action = default_file_manager_settings.win_e_action;
 
     output
 }

@@ -22,6 +22,7 @@ pub struct SettingsWindowOutput {
     pub diagnostic_mode_changed: bool,
     pub open_diagnostic_folder: bool,
     pub default_file_manager_action: Option<bool>,
+    pub win_e_action: Option<bool>,
 }
 
 /// Render the modal backdrop BEFORE panels to block their input.
@@ -69,6 +70,7 @@ pub fn render_settings_window(
     let mut diagnostic_mode_changed = false;
     let mut open_diagnostic_folder = false;
     let mut default_file_manager_action = None;
+    let mut win_e_action = None;
 
     if close_from_backdrop {
         keep_open = false;
@@ -202,6 +204,7 @@ pub fn render_settings_window(
                                             quick_access_changed |= general.quick_access_changed;
                                             recycle_bin_changed |= general.recycle_bin_changed;
                                             default_file_manager_action = general.default_file_manager_action;
+                                            win_e_action = general.win_e_action;
                                         }
                                         SettingsSection::Diagnostics => {
                                             settings_ui::section_header(ui, &t!("settings.diagnostics"), &t!("settings.diagnostics_description"));
@@ -285,6 +288,7 @@ pub fn render_settings_window(
         diagnostic_mode_changed,
         open_diagnostic_folder,
         default_file_manager_action,
+        win_e_action,
     }
 }
 

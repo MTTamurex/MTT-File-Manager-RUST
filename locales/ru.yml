@@ -245,6 +245,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Закрепить текущую папку в быстром доступе"
 context_menu:
+  open_in_mtt: "Открыть в MTT"
   open: "Открыть"
   open_with: "Открыть с помощью..."
   analyze_disk_usage: "Проанализировать использование диска"
@@ -395,8 +396,10 @@ settings:
   quick_access_position_sidebar: "Боковая панель (вертикально)"
   quick_access_position_horizontal: "Горизонтальная панель"
   show_recycle_bin: "Показывать корзину в быстром доступе"
-  default_file_manager_description: "Назначить MTT файловым менеджером по умолчанию (Win+E открывает MTT)."
-  default_file_manager_experimental_note: "Экспериментальная функция: она изменяет реестр Windows. Некоторые антивирусы могут ошибочно распознать это поведение как вредоносное ПО."
+  default_file_manager_description: "Назначить MTT файловым менеджером по умолчанию"
+  default_file_manager_experimental_note: "Экспериментальная функция: папки будут открываться в MTT, а в контекстное меню добавится команда «Открыть в MTT». Изменяется реестр Windows; некоторые антивирусы могут ошибочно распознать это поведение как вредоносное ПО."
+  win_e_open_mtt_description: "Открывать MTT по Win+E и при запросах запуска Проводника."
+  win_e_open_mtt_experimental_note: "Экспериментальная функция с рисками: Win+E и запуск explorer.exe будут открывать MTT вместо Проводника Windows. Если MTT не запустится, Проводник не откроется. Отключите этот параметр, чтобы восстановить Проводник. Изменяется реестр текущего пользователя."
   diagnostics: "Диагностика"
   diagnostics_description: "Записывать в файл только анонимные технические данные, без имён файлов, папок и полных путей."
   diagnostics_enable: "Включить режим диагностики"

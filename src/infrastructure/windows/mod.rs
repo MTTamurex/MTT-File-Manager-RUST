@@ -33,6 +33,7 @@ pub mod physical_drive_info;
 mod physical_drive_protocol;
 pub mod process_snapshot;
 pub mod recycle_bin;
+pub mod shell_context_menu;
 pub mod shell_folder;
 pub mod shell_new;
 pub mod shell_operations;

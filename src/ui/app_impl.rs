@@ -647,6 +647,9 @@ impl eframe::App for ImageViewerApp {
             if let Some(enable) = output.default_file_manager_action {
                 self.start_default_file_manager_action(enable);
             }
+            if let Some(enable) = output.win_e_action {
+                self.start_win_e_action(enable);
+            }
         }
 
         // 13. Batch Rename Modal

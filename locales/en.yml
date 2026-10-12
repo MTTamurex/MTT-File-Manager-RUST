@@ -245,6 +245,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Pin current folder to quick access"
 context_menu:
+  open_in_mtt: "Open in MTT"
   open: "Open"
   open_with: "Open with..."
   analyze_disk_usage: "Analyze disk usage"
@@ -395,8 +396,10 @@ settings:
   quick_access_position_sidebar: "Sidebar (vertical)"
   quick_access_position_horizontal: "Horizontal bar"
   show_recycle_bin: "Show Recycle Bin in Quick Access"
-  default_file_manager_description: "Set MTT as your default file manager (Win+E opens it)."
-  default_file_manager_experimental_note: "Experimental: this feature changes the Windows Registry. Some antivirus products may flag this behavior as malware (a false positive)."
+  default_file_manager_description: "Set MTT as your default file manager"
+  default_file_manager_experimental_note: "Experimental: folder opens will use MTT and Open in MTT will be added to folder menus. This changes the Windows Registry; some antivirus products may flag it as malware (a false positive)."
+  win_e_open_mtt_description: "Use MTT for Win+E and Explorer launch requests."
+  win_e_open_mtt_experimental_note: "Experimental and risky: Win+E and launches of explorer.exe will open MTT instead of Windows Explorer. If MTT cannot start, Explorer will not open. Turn this off to restore Explorer. This changes current-user Registry settings."
   diagnostics: "Diagnostics"
   diagnostics_description: "Write only anonymous technical diagnostics to the file, without file names, folder names, or full paths."
   diagnostics_enable: "Enable diagnostic mode"

@@ -13,8 +13,10 @@ const EXPLORER_DELEGATE_EXECUTE: &str = "{11dbb47c-a525-400b-9e80-a54615a090c0}"
 
 #[derive(Clone, Copy)]
 pub(super) enum RegistryAction {
-    Enable,
-    RestoreExplorer,
+    EnableFolders,
+    RestoreFolders,
+    EnableWinE,
+    RestoreWinE,
 }
 
 pub(super) fn folder_command(executable: &Path) -> String {
@@ -32,9 +34,8 @@ pub(super) fn registry_script(
 ) -> String {
     let mut sections = Vec::new();
     match action {
-        RegistryAction::Enable => {
+        RegistryAction::EnableFolders => {
             let command = folder_command(executable);
-            let win_e = win_e_command(executable);
             sections.push(format!(
                 "[{USER_CLASSES}\\Folder\\shell\\open\\command]\n@={}\n\"DelegateExecute\"=\"\"",
                 registry_string(&command)
@@ -43,12 +44,8 @@ pub(super) fn registry_script(
                 "[{USER_CLASSES}\\Folder\\shell\\explore\\command]\n@={}\n\"DelegateExecute\"=\"\"",
                 registry_string(&command)
             ));
-            sections.push(format!(
-                "[{WIN_E_COMMAND_KEY}]\n@={}\n\"DelegateExecute\"=\"\"",
-                registry_string(&win_e)
-            ));
         }
-        RegistryAction::RestoreExplorer => {
+        RegistryAction::RestoreFolders => {
             if status.folder_open {
                 sections.push(format!(
                     "[{USER_CLASSES}\\Folder\\shell\\open]\n\"MultiSelectModel\"=\"Document\"\n\n[{FOLDER_OPEN_COMMAND_KEY}]\n@={}\n\"DelegateExecute\"=\"{EXPLORER_DELEGATE_EXECUTE}\"",
@@ -60,6 +57,15 @@ pub(super) fn registry_script(
                     "[{USER_CLASSES}\\Folder\\shell\\explore]\n\"LaunchExplorerFlags\"=dword:00000018\n\"MultiSelectModel\"=\"Document\"\n\"ProgrammaticAccessOnly\"=\"\"\n\n[{FOLDER_EXPLORE_COMMAND_KEY}]\n@=-\n\"DelegateExecute\"=\"{EXPLORER_DELEGATE_EXECUTE}\""
                 ));
             }
+        }
+        RegistryAction::EnableWinE => {
+            let win_e = win_e_command(executable);
+            sections.push(format!(
+                "[{WIN_E_COMMAND_KEY}]\n@={}\n\"DelegateExecute\"=\"\"",
+                registry_string(&win_e)
+            ));
+        }
+        RegistryAction::RestoreWinE => {
             if status.win_e {
                 sections.push(format!("[{WIN_E_COMMAND_KEY}]\n@=-\n\"DelegateExecute\"=-"));
             }
@@ -120,10 +126,10 @@ mod tests {
     }
 
     #[test]
-    fn enable_script_only_targets_current_user_folder_and_win_e_classes() {
+    fn folder_default_script_only_targets_current_user_folder_classes() {
         let executable = Path::new(r"C:\Program Files\Example\mtt-file-manager.exe");
         let script = registry_script(
-            RegistryAction::Enable,
+            RegistryAction::EnableFolders,
             executable,
             super::super::RegistrationStatus::default(),
         );
@@ -133,9 +139,21 @@ mod tests {
         );
         assert!(script
             .contains("[HKEY_CURRENT_USER\\Software\\Classes\\Folder\\shell\\explore\\command]"));
-        assert!(script.contains(
-            "[HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{52205fd8-5dfb-447d-801a-d0b52f2e83e1}"
-        ));
+        assert!(!script.contains("opennewwindow"));
+        assert!(!script.contains("HKEY_LOCAL_MACHINE"));
+    }
+
+    #[test]
+    fn win_e_enable_script_only_targets_the_current_user_opennewwindow_command() {
+        let executable = Path::new(r"C:\Program Files\Example\mtt-file-manager.exe");
+        let script = registry_script(
+            RegistryAction::EnableWinE,
+            executable,
+            super::super::RegistrationStatus::default(),
+        );
+
+        assert!(script.contains("opennewwindow\\command"));
+        assert!(!script.contains("Folder\\shell\\open\\command"));
         assert!(!script.contains("HKEY_LOCAL_MACHINE"));
     }
 
@@ -143,18 +161,36 @@ mod tests {
     fn restore_script_changes_only_values_still_owned_by_mtt() {
         let executable = Path::new(r"C:\Program Files\Example\mtt-file-manager.exe");
         let script = registry_script(
-            RegistryAction::RestoreExplorer,
+            RegistryAction::RestoreFolders,
             executable,
             super::super::RegistrationStatus {
                 folder_open: true,
                 folder_explore: false,
+                context_menu: false,
                 win_e: true,
             },
         );
 
         assert!(script.contains("Folder\\shell\\open\\command"));
         assert!(script.contains(&registry_expand_string("%SystemRoot%\\Explorer.exe")));
-        assert!(script.contains("{52205fd8-5dfb-447d-801a-d0b52f2e83e1}"));
+        assert!(!script.contains("opennewwindow"));
         assert!(!script.contains("Folder\\shell\\explore\\command"));
+    }
+
+    #[test]
+    fn win_e_restore_script_only_removes_the_mtt_opennewwindow_override() {
+        let executable = Path::new(r"C:\Program Files\Example\mtt-file-manager.exe");
+        let script = registry_script(
+            RegistryAction::RestoreWinE,
+            executable,
+            super::super::RegistrationStatus {
+                win_e: true,
+                ..super::super::RegistrationStatus::default()
+            },
+        );
+
+        assert!(script.contains("opennewwindow\\command"));
+        assert!(script.contains("@=-"));
+        assert!(!script.contains("Folder\\shell\\open\\command"));
     }
 }

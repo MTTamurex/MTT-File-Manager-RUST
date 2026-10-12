@@ -3,8 +3,22 @@ use std::sync::mpsc::{self, TryRecvError};
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::default_file_manager::{self, RegistryActionError};
 
+#[derive(Clone, Copy)]
+enum RegistryOperation {
+    FolderDefault(bool),
+    WinE(bool),
+}
+
 impl ImageViewerApp {
     pub fn start_default_file_manager_action(&mut self, enable: bool) {
+        self.start_default_file_manager_registry_action(RegistryOperation::FolderDefault(enable));
+    }
+
+    pub fn start_win_e_action(&mut self, enable: bool) {
+        self.start_default_file_manager_registry_action(RegistryOperation::WinE(enable));
+    }
+
+    fn start_default_file_manager_registry_action(&mut self, action: RegistryOperation) {
         if self.default_file_manager_settings.result_receiver.is_some() {
             return;
         }
@@ -12,14 +26,21 @@ impl ImageViewerApp {
         let (sender, receiver) = mpsc::channel();
         self.default_file_manager_settings.result_receiver = Some(receiver);
         let owner_window = self.native_hwnd.map(|hwnd| hwnd.0 as isize);
+        let context_menu_label = rust_i18n::t!("context_menu.open_in_mtt").to_string();
         let ctx = self.ui_ctx.clone();
         let worker = std::thread::Builder::new()
             .name("default-file-manager-registry".to_string())
             .spawn(move || {
-                let result = if enable {
-                    default_file_manager::set_as_default(owner_window)
-                } else {
-                    default_file_manager::restore_explorer(owner_window)
+                let result = match action {
+                    RegistryOperation::FolderDefault(true) => {
+                        default_file_manager::set_as_default(owner_window, &context_menu_label)
+                    }
+                    RegistryOperation::FolderDefault(false) => {
+                        default_file_manager::restore_explorer(owner_window, &context_menu_label)
+                    }
+                    RegistryOperation::WinE(enable) => {
+                        default_file_manager::set_win_e_enabled(enable, owner_window)
+                    }
                 };
                 let _ = sender.send(result);
                 ctx.request_repaint();
