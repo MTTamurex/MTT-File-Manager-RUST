@@ -7,17 +7,21 @@
 ## Key Features
 
 ### Interface & Navigation
-- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
+- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, DOCX, XLSX, and text viewers with native title bar support via DWM
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
-- **Tabbed navigation** — Multiple tabs with independent history
+- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
 - **File grouping** — Group items by name, date, type, or size in supported views; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
-- **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
+- **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
+
+### Windows Integration
+- **Default folder handling (experimental)** — In Settings > General, optionally route Windows folder-open requests to MTT, add **Open in MTT** to folder context menus, or route Win+E and Explorer launch requests to MTT. These options modify Windows Registry settings and may prompt for UAC confirmation. Win+E redirection is experimental and can prevent Explorer from opening if MTT cannot start; turning the option off restores Explorer.
+- **Windows 11 compact context menu** — Installer builds configured with a trusted signing certificate can register **Open in MTT** in Explorer's modern context menu through a sparse package. Builds without that package retain the classic context-menu integration.
 
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
@@ -32,15 +36,16 @@
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Animated preview on details panel
 
-### Image, PDF, DOCX & Text Viewers
-- **Consistent dedicated windows** — Images, PDF documents, DOCX documents, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
+### Image, PDF, DOCX, XLSX & Text Viewers
+- **Consistent dedicated windows** — Images, PDF documents, DOCX documents, XLSX workbooks, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
 - **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, crop with a rotation-aware selection and safe save workflow, or switch to full screen with F11. Crops can replace supported raster images after confirmation or be saved as PNG, JPEG, WebP, BMP, or TIFF; animated GIFs export the displayed frame
-- **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
-- **DOCX viewer** — Uses BetterOffice's native OOXML parsing, pagination, and raster renderer in a read-only window with zoom and page navigation; double-click continues to open the Windows default application
-- **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with search and go-to-line controls
+- **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar; supports single-page, two-page, and two-page-with-cover layouts
+- **DOCX viewer** — Uses BetterOffice's native OOXML parsing, pagination, and raster renderer in a read-only window with zoom and page navigation; supports document search and text selection/copying. Double-click continues to open the Windows default application
+- **XLSX viewer** — Uses BetterOffice's native workbook model and rendering in a read-only window with worksheet tabs, zoom, workbook search, and cell-range selection/copying
+- **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with go-to-line controls and search that highlights and navigates individual matches
 
 ### Video Player
-- **Standalone playback** — Opens video and audio files in an mpv-based player with a D3D11 GPU pipeline
+- **Standalone playback** — Opens video and audio files in an mpv-based player with a D3D11 GPU pipeline, without an app-imposed file-size limit
 - **Audio visualization** — Displays a real-time waveform while playing audio-only files
 - **Playback controls** — Supports 5% volume steps with Up/Down and five-second seeking with the mouse wheel
 - **Optical media playback** — Plays DVDs and Blu-rays from an optical drive's context menu
@@ -60,7 +65,7 @@
 - **Standalone NTFS analysis** — Launch **Analyze disk usage** from a local NTFS drive's context menu to open an independent analyzer window backed by a full-volume snapshot from the `mtt-search-service` index
 - **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
-- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ
+- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ; Largest Items supports file-count ranking, filter-adjusted values, and multi-column sorting
 - **Duplicate detection** — Run an on-demand, cancelable two-stage scan that groups candidates by size and confirms matches with full BLAKE3 hashes; configurable size limits, hardlink awareness, and recoverable-space totals keep the report accurate
 
 ### Global Search
@@ -74,7 +79,7 @@
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 - **Initial indexing feedback** — After an installer-driven index rebuild, a persistent notification reports preparation and live item counts until every indexed volume is ready
 
-> **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
+> **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights. The optional shell integration in Settings > General separately prompts for an elevated Registry Editor operation when enabled.
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
@@ -84,7 +89,7 @@
 - **Archive extraction** — Access the Windows Shell **Extract All** action directly from the context menu for supported archive files
 - **External drag-and-drop** — Drag files from MTT File Manager to Windows Explorer and other compatible Windows applications
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
-- **Recycle Bin** — Browse, restore, and permanently delete
+- **Recycle Bin** — Browse, restore, and permanently delete; drag selected items to the Recycle Bin target in Quick Access to send them there
 - **Cloud Files support** — Sync status badges for cloud-only, locally available, syncing, and pinned files; supports Windows Cloud Files actions such as "Always keep on this device" and "Free up space"
 - **ISO mounting** — Mount ISO files as virtual drives, detect images mounted before the app starts, and eject them from the sidebar
 
@@ -105,6 +110,7 @@
 - **Async workers** — Background processing keeps UI responsive
 - **UI virtualization** — Efficient rendering of large directories
 - **Bounded background work** — Folder loading, thumbnail generation, and search rescans use concurrency limits to avoid resource spikes and improve shutdown behavior
+- **Idle memory trimming** — Trims the Windows process working set after idle periods when it exceeds a configured threshold
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`; event bursts are coalesced into debounced reloads
 
 ## Graphics Backend
@@ -130,12 +136,12 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 ## Prerequisites
 
 - **Windows 10 or newer, 64-bit** — The installer targets x64-compatible Windows systems.
-- **Rust 1.85 or newer for source builds** — The pinned BetterOffice DOCX crates use the Rust 2024 edition; the application package itself remains edition 2021.
+- **Rust 1.85 or newer for source builds** — The pinned BetterOffice DOCX and XLSX crates use the Rust 2024 edition; the application package itself remains edition 2021.
 - **Microsoft Visual C++ Redistributable 2015-2022 (x64)** — Required by the native runtime dependencies. The official Microsoft installer is available at: https://aka.ms/vs/17/release/vc_redist.x64.exe
 - **Administrator permission during installation** — Required to install and start the Global Search and drive telemetry Windows Service (`mtt-search-service.exe`).
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).
 
-The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated permission is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
+The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated service access is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated. Optional folder and Win+E integration uses a separate UAC-confirmed Registry Editor operation when enabled.
 
 ## Technologies
 
@@ -150,6 +156,7 @@ The main file manager does not need to run as administrator for normal file brow
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
 | **DOCX** | BetterOffice DOCX parse/layout/raster | 0.3.0 | Native OOXML pagination and read-only page rendering |
+| **XLSX** | BetterOffice XLSX model/parse/render/raster | 0.3.0 | Native workbook reading and read-only sheet rendering |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
 | **Images** | image crate | 0.25 | Image processing |
 | **Archives** | zip + sevenz-rust/sevenz-rust2 + tar + flate2/bzip2/xz2/zstd | 2 / 0.6/0.20 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive browsing plus ZIP/7Z creation |
@@ -166,11 +173,10 @@ The main file manager does not need to run as administrator for normal file brow
 
 ## Diagnostic Mode Privacy Notes
 
-- `Settings > Diagnostics` writes a privacy-filtered diagnostic file intended for technical troubleshooting with data minimization by design.
-- The diagnostic file is meant to keep only technical information relevant to application behavior.
-- File names, folder names, full paths, search text, and other sensitive or private user identifiers should not be exposed in this artifact. The log file is in plain text, so you can check it yourself to see all info collected and decied for yourself if you want to share or not.
+- `Settings > Diagnostics` writes a local, privacy-filtered diagnostic file intended for technical troubleshooting.
+- The logger redacts recognized paths, filenames, search terms, and other sensitive identifiers; inspect the plain-text file before sharing it.
 - Nothing is sent automatically outside the application. The diagnostic file stays local unless the user chooses to share it.
-- The feature auto-disables after 24 hours and keeps only the latest 10 MiB of filtered diagnostic events.
+- The feature auto-disables after 24 hours and caps the file at 10 MiB while retaining recent filtered events.
 - This is a technical privacy measure for minimization and safer troubleshooting. It is not a standalone legal certification of LGPD or any other regulatory compliance.
 
 ## Temporary GPU Recovery Tests
@@ -213,6 +219,7 @@ This project includes and builds upon work from the following projects:
 
 - [ModernH](https://github.com/HarkeshBhatia/ModernH), by Harkesh Bhatia. Our OSC file originated from this project and is used here with small modifications.
 - [RTX HDR / RTX VSR toggle gist](https://gist.github.com/anthonybaldwin/1e49b28b49babf64f159cb793c506333), by anthonybaldwin. This gist served as an early development reference while experimenting with RTX HDR / RTX VSR behavior in mpv; the current repository implementation has since been reworked independently.
+- [BetterOffice](https://github.com/openooxml/betteroffice), by Elia Hilse and The OpenOOXML Project. MTT uses its Apache-2.0 DOCX and XLSX engines for the read-only document and workbook viewers; the upstream attribution notice is included in `third_party_licenses/` and public installers.
 
 ### Translations
 
@@ -233,11 +240,11 @@ This repository also contains or redistributes third-party components that remai
 - `target\release\pdfium.dll`, which carries upstream PDFium licensing and notice obligations independent of the Rust bindings.
 - `mpv_ui/portable_config/fonts/Material-Design-Iconic-Font.ttf`, which has its own upstream asset license.
 - `unrar`, whose Rust wrapper is permissive but whose embedded UnRAR sources retain the upstream UnRAR license.
-- BetterOffice's DOCX engine, under Apache-2.0, and its Yrs 0.27.3 dependency,
-  under MIT. Their attributions and license texts are included with the
-  installer; Yrs contains a small stable-Rust compatibility change. The
-  raster/ZIP dependencies also retain their BSD-3-Clause and Zlib notices in
-  `third_party_licenses/`.
+- BetterOffice's DOCX and XLSX engines, under Apache-2.0, and the shared Yrs
+  0.27.3 dependency, under MIT. The upstream attribution notice and applicable
+  license texts are included with the installer; the vendored Yrs copy contains
+  a documented stable-Rust compatibility change. Raster/ZIP dependencies also
+  retain their BSD-3-Clause, MIT, and Zlib notices in `third_party_licenses/`.
 
 The official Windows installer is therefore a multi-license distribution, not
 an Apache-only artifact. Public redistribution is intended to be allowed when

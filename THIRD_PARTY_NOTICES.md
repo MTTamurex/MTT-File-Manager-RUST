@@ -182,30 +182,38 @@ Notes:
 - The matching package license bundle is copied to
   `third_party_licenses/pdfium-win-x64/` and is included by public installers.
 
-## DOCX viewer dependencies
+## DOCX and XLSX viewer dependencies
 
-### BetterOffice DOCX engine
+### BetterOffice OOXML engines
 
 Components:
-- `betteroffice-docx-edit`, `betteroffice-docx-layout`,
+- DOCX: `betteroffice-docx-edit`, `betteroffice-docx-layout`,
   `betteroffice-docx-parse`, `betteroffice-docx-raster`, and
-  `betteroffice-ooxml-text`, all pinned to version `0.3.0`.
+  `betteroffice-ooxml-text`, and `betteroffice-ooxml-diff`.
+- XLSX: `betteroffice-xlsx`, `betteroffice-xlsx-calc`,
+  `betteroffice-xlsx-model`, `betteroffice-xlsx-ops`,
+  `betteroffice-xlsx-parse`, `betteroffice-xlsx-raster`, and
+  `betteroffice-xlsx-render`.
+- Shared: `betteroffice-drawingml` and `betteroffice-opc`.
+- All listed crates are pinned to version `0.3.0` in the resolved dependency
+  graph.
 
 Source:
 - https://github.com/openooxml/betteroffice
-- https://crates.io/crates/betteroffice-docx
+- https://crates.io/crates/betteroffice-docx-parse
+- https://crates.io/crates/betteroffice-xlsx
 
 License:
-- Apache-2.0. The complete license text is included in the top-level
-  `LICENSE` file.
+- The pinned BetterOffice DOCX and XLSX crates declare Apache-2.0. The complete
+  license text is included in the top-level `LICENSE` file.
 
 Attribution:
 - The upstream notice is reproduced in
   `third_party_licenses/BETTEROFFICE-NOTICE.txt` and included in public
   installers.
-- The application uses the native parsing, layout, and raster crates for a
-  read-only viewer. It does not redistribute BetterOffice's editor UI or font
-  assets.
+- The application uses BetterOffice's native OOXML parsing, layout/model, and
+  rendering crates for read-only DOCX and XLSX viewers. It does not redistribute
+  BetterOffice's editor UI or font assets.
 
 ### Yrs
 
@@ -226,7 +234,7 @@ License:
 Attribution:
 - Copyright (c) 2020 Bartosz Sypytkowski and Kevin Jahns.
 
-### Raster and ZIP support
+### Shared raster and ZIP support
 
 Components:
 - `dashmap` `6.2.1`, MIT; its license text is in
@@ -236,8 +244,8 @@ Components:
 - `zip` `8.6.0`, MIT; its license text is in
   `third_party_licenses/ZIP-8-LICENSE.txt`.
 - `tiny-skia` and `tiny-skia-path` `0.12.0`, used by BetterOffice's native
-  raster backend; both are BSD-3-Clause.
-- `libz-rs-sys` and `zlib-rs` `0.5.5`, used by the BetterOffice OPC ZIP reader;
+  DOCX/XLSX raster backends; both are BSD-3-Clause.
+- `libz-rs-sys` and `zlib-rs` `0.5.5`, used by BetterOffice's OPC ZIP reader;
   both use the Zlib license.
 - `ryu-js` `1.0.3`, used by BetterOffice serialization. Its Apache-2.0 OR
   BSL-1.0 terms are used under the Apache-2.0 option.
