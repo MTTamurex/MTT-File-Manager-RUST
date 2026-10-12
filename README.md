@@ -20,8 +20,7 @@
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Windows Integration
-- **Default folder handling (experimental)** — In Settings > General, optionally route Windows folder-open requests to MTT, add **Open in MTT** to folder context menus, or route Win+E and Explorer launch requests to MTT. These options modify Windows Registry settings and may prompt for UAC confirmation. Win+E redirection is experimental and can prevent Explorer from opening if MTT cannot start; turning the option off restores Explorer.
-- **Windows 11 compact context menu** — Installer builds configured with a trusted signing certificate can register **Open in MTT** in Explorer's modern context menu through a sparse package. Builds without that package retain the classic context-menu integration.
+- **Default File Manager (experimental)** — In Settings > General, optionally route Windows folder-open requests to MTT, add **Open in MTT** to folder context menus, or route Win+E and Explorer launch requests to MTT. These options modify Windows Registry settings and may prompt for UAC confirmation. Win+E redirection is experimental and can prevent Explorer from opening if MTT cannot start; turning the option off restores Explorer.
 
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
