@@ -934,7 +934,7 @@ fn query_worker_loop(req_receiver: Receiver<QueryRequest>, res_sender: Sender<Qu
                     &model,
                     root,
                     basis,
-                    LARGEST_LIMIT,
+                    LARGEST_LIMIT_PER_KIND,
                     is_cancelled,
                 );
                 if !is_cancelled() {
@@ -995,7 +995,7 @@ fn basis_of<'a>(
     weights: Option<&'a [u64]>,
 ) -> crate::app::disk_analysis_query::WeightBasis<'a> {
     match weights {
-        Some(w) => crate::app::disk_analysis_query::WeightBasis::Filtered(w),
+        Some(weights) => crate::app::disk_analysis_query::WeightBasis::Filtered { metric, weights },
         None => crate::app::disk_analysis_query::WeightBasis::Metric(metric),
     }
 }
@@ -1020,8 +1020,8 @@ impl QueryRequest {
     }
 }
 
-/// Initial cap for the Largest items list (plan section 4).
-const LARGEST_LIMIT: usize = 100;
+/// Top-K cap for each item kind in FileCount mode and total cap otherwise.
+const LARGEST_LIMIT_PER_KIND: usize = 100;
 /// Rows kept per efficiency group (full totals are computed regardless).
 const EFFICIENCY_LIMIT: usize = 200;
 /// Initial cap for search results (plan section 5).

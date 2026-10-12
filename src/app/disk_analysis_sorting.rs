@@ -34,12 +34,18 @@ pub struct LargestSortCriterion {
 }
 
 impl DiskAnalysisState {
-    /// Replace the largest-items sort with a single metric-driven criterion.
+    /// Replace the largest-items sort with the metric's default criteria.
     pub fn reset_largest_sort(&mut self, column: LargestColumn) {
         self.largest_sort_criteria = vec![LargestSortCriterion {
             column,
             ascending: column.default_ascending(),
         }];
+        if column == LargestColumn::Files {
+            self.largest_sort_criteria.push(LargestSortCriterion {
+                column: LargestColumn::Logical,
+                ascending: false,
+            });
+        }
     }
 
     /// Update the largest-items sort from a header click. A shift-click adds
@@ -230,6 +236,21 @@ mod tests {
                 column: LargestColumn::Allocated,
                 ascending: false,
             }]
+        );
+
+        state.reset_largest_sort(LargestColumn::Files);
+        assert_eq!(
+            state.largest_sort_criteria,
+            [
+                LargestSortCriterion {
+                    column: LargestColumn::Files,
+                    ascending: false,
+                },
+                LargestSortCriterion {
+                    column: LargestColumn::Logical,
+                    ascending: false,
+                },
+            ]
         );
     }
 

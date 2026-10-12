@@ -272,7 +272,10 @@ pub enum WeightBasis<'a> {
     /// Plain metric read from the model.
     Metric(SizeMetric),
     /// Precomputed filtered weights; zero hides the node.
-    Filtered(&'a [u64]),
+    Filtered {
+        metric: SizeMetric,
+        weights: &'a [u64],
+    },
 }
 
 /// Filtered per-node weights currently attached to the treemap/list views.
@@ -291,9 +294,18 @@ impl WeightBasis<'_> {
     fn subtree_value(self, model: &DiskAnalysisModel, idx: u32) -> u64 {
         match self {
             WeightBasis::Metric(m) => m.subtree(&model.nodes[idx as usize]),
-            WeightBasis::Filtered(w) => w.get(idx as usize).copied().unwrap_or(0),
+            WeightBasis::Filtered { weights, .. } => {
+                weights.get(idx as usize).copied().unwrap_or(0)
+            }
         }
     }
+
+    fn metric(self) -> SizeMetric {
+        match self {
+            WeightBasis::Metric(metric) | WeightBasis::Filtered { metric, .. } => metric,
+        }
+    }
+
     fn includes(self, model: &DiskAnalysisModel, idx: u32) -> bool {
         self.subtree_value(model, idx) > 0
     }
@@ -303,9 +315,11 @@ impl WeightBasis<'_> {
 /// displayed numbers are read straight from the model at paint time.
 pub type LargestProjection = Vec<u32>;
 
-/// Top-K heaviest descendants of `root` (root itself excluded), computed with
-/// a bounded heap so millions of nodes never get sorted. Ties break by lower
-/// index first, making the output deterministic.
+/// Top-K descendants of `root` (root itself excluded), computed with bounded
+/// heaps so millions of nodes never get sorted. For byte metrics, this returns
+/// the K heaviest items. For file count, it returns the K folders with the
+/// most descendant files plus the K largest files by logical size. Ties break
+/// by lower index, making the output deterministic.
 pub fn largest_items(
     model: &DiskAnalysisModel,
     root: u32,
@@ -316,6 +330,10 @@ pub fn largest_items(
     if k == 0 {
         return Vec::new();
     }
+    if basis.metric() == SizeMetric::FileCount {
+        return largest_file_count_items(model, root, basis, k, is_cancelled);
+    }
+
     // The heap root is the worst retained entry: lowest weight and, on a
     // tie, highest index. This preserves the documented lower-index tie-break.
     let mut heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>> = BinaryHeap::with_capacity(k.min(1024));
@@ -334,25 +352,89 @@ pub fn largest_items(
             continue;
         }
         let weight = basis.subtree_value(model, idx);
-        // Bounded min-heap of the k heaviest entries so far: peek yields the
-        // smallest kept tuple; a new entry replaces it only when heavier.
-        let key = (weight, Reverse(idx));
-        if heap.len() < k {
-            heap.push(Reverse(key));
-        } else if let Some(&Reverse(smallest)) = heap.peek() {
-            if key > smallest {
-                heap.pop();
-                heap.push(Reverse(key));
+        retain_largest(&mut heap, idx, weight, k);
+    }
+    finish_largest_heap(heap)
+        .into_iter()
+        .map(|(_, idx)| idx)
+        .collect()
+}
+
+fn largest_file_count_items(
+    model: &DiskAnalysisModel,
+    root: u32,
+    basis: WeightBasis<'_>,
+    k: usize,
+    is_cancelled: impl Fn() -> bool,
+) -> LargestProjection {
+    let mut folders = BinaryHeap::with_capacity(k.min(1024));
+    let mut files = BinaryHeap::with_capacity(k.min(1024));
+    let mut stack = vec![root];
+    while let Some(idx) = stack.pop() {
+        if is_cancelled() {
+            return Vec::new();
+        }
+        let node = &model.nodes[idx as usize];
+        if node.is_dir && !node.is_reparse {
+            for &child in model.children(idx) {
+                stack.push(child);
             }
         }
+        if idx == root || !basis.includes(model, idx) {
+            continue;
+        }
+        if node.is_dir {
+            retain_largest(&mut folders, idx, basis.subtree_value(model, idx), k);
+        } else {
+            // A file contributes one to the file-count metric, so use logical
+            // size to choose which files to show when folders are ranked by
+            // their descendant file counts.
+            retain_largest(&mut files, idx, node.subtree_size, k);
+        }
     }
+
+    let mut rows: Vec<(u64, u64, u32)> = finish_largest_heap(folders)
+        .into_iter()
+        .map(|(count, idx)| (count, model.nodes[idx as usize].subtree_size, idx))
+        .collect();
+    rows.extend(finish_largest_heap(files).into_iter().map(|(_, idx)| {
+        (
+            basis.subtree_value(model, idx),
+            model.nodes[idx as usize].subtree_size,
+            idx,
+        )
+    }));
+    // Match the Files / Logical default table order: folder file-count first,
+    // then logical size, then node index for a stable tie-break.
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    rows.into_iter().map(|(_, _, idx)| idx).collect()
+}
+
+fn retain_largest(
+    heap: &mut BinaryHeap<Reverse<(u64, Reverse<u32>)>>,
+    idx: u32,
+    weight: u64,
+    k: usize,
+) {
+    let key = (weight, Reverse(idx));
+    if heap.len() < k {
+        heap.push(Reverse(key));
+    } else if let Some(&Reverse(smallest)) = heap.peek() {
+        if key > smallest {
+            heap.pop();
+            heap.push(Reverse(key));
+        }
+    }
+}
+
+fn finish_largest_heap(heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>>) -> Vec<(u64, u32)> {
     let mut rows: Vec<(u64, u32)> = heap
         .into_iter()
         .map(|Reverse((weight, Reverse(idx)))| (weight, idx))
         .collect();
     // Heaviest first; deterministic tie-break by ascending index.
     rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    rows.into_iter().map(|(_, idx)| idx).collect()
+    rows
 }
 
 /// One efficiency finding: a file whose logical size and physical allocation
@@ -807,6 +889,67 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(model.nodes[rows[0] as usize].name, "movie.MP4");
         assert_eq!(model.nodes[rows[1] as usize].name, "docs");
+    }
+
+    #[test]
+    fn file_count_top_k_includes_largest_files_and_most_populated_folders() {
+        let model = build(vec![
+            rec(5, 5, "", 0, 0, true),
+            rec(10, 5, "docs", 0, 0, true),
+            rec(11, 10, "small-a.bin", 100, 100, false),
+            rec(12, 10, "small-b.bin", 200, 200, false),
+            rec(13, 5, "large.bin", 1_000_000, 800_000, false),
+            rec(14, 5, "medium.bin", 900_000, 700_000, false),
+        ]);
+
+        let rows = largest_items(
+            &model,
+            model.root,
+            WeightBasis::Metric(SizeMetric::FileCount),
+            1,
+            || false,
+        );
+        let names: Vec<&str> = rows
+            .iter()
+            .map(|&idx| model.nodes[idx as usize].name.as_str())
+            .collect();
+
+        // Even though the folder outranks every individual file by count,
+        // the Files metric keeps one top-K selection for each node kind.
+        assert_eq!(names, vec!["docs", "large.bin"]);
+    }
+
+    #[test]
+    fn file_count_top_k_applies_filters_to_both_node_kinds() {
+        let model = build(vec![
+            rec(5, 5, "", 0, 0, true),
+            rec(10, 5, "folder", 0, 0, true),
+            rec(11, 10, "keep.bin", 100, 100, false),
+            rec(12, 10, "skip.txt", 1_000_000, 1_000_000, false),
+            rec(13, 5, "keep-large.bin", 900_000, 900_000, false),
+        ]);
+        let filter = DiskAnalysisFilter {
+            extensions: vec!["bin".to_string()],
+            ..DiskAnalysisFilter::default()
+        };
+        let weights = compute_filtered_weights(&model, model.root, &filter, SizeMetric::FileCount);
+
+        let rows = largest_items(
+            &model,
+            model.root,
+            WeightBasis::Filtered {
+                metric: SizeMetric::FileCount,
+                weights: &weights.weights,
+            },
+            1,
+            || false,
+        );
+        let names: Vec<&str> = rows
+            .iter()
+            .map(|&idx| model.nodes[idx as usize].name.as_str())
+            .collect();
+
+        assert_eq!(names, vec!["folder", "keep-large.bin"]);
     }
 
     #[test]

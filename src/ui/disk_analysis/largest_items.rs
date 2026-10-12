@@ -79,10 +79,15 @@ pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             if resp.clicked() {
                 state.selected = Some(idx);
             }
-            // Double click on a folder navigates into it.
-            if resp.double_clicked() && model.nodes[idx as usize].is_dir {
-                state.navigate_to(idx);
-                state.selected = None;
+            // Double-clicking a folder drills into it; a file reveals its
+            // parent and highlights the file in the treemap.
+            if resp.double_clicked() {
+                if model.nodes[idx as usize].is_dir {
+                    state.navigate_to(idx);
+                    state.selected = None;
+                } else {
+                    state.reveal_file(idx);
+                }
             }
             attach_row_menu(state, ui, &resp, idx, false);
         }
