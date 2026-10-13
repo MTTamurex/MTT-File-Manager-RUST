@@ -8,6 +8,7 @@ use windows::Win32::Foundation::HWND;
 
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerConflictPolicy;
+mod cleanup;
 mod handlers;
 
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
@@ -138,6 +139,21 @@ pub enum FileOperationResult {
     ClipboardMoveFailed {
         token: u64,
         message: String,
+    },
+    /// Cleanup run progress (per item).
+    CleanupDeleteProgress {
+        completed: usize,
+        total: usize,
+        current_name: Option<String>,
+        failed_count: usize,
+    },
+    /// Cleanup run finished. No generic Finished result follows — the cleanup
+    /// handler owns its own lifecycle.
+    CleanupDeleteCompleted {
+        deleted_paths: Vec<PathBuf>,
+        /// (path, reason) for items that were not deleted.
+        failed: Vec<(PathBuf, String)>,
+        aborted: bool,
     },
 }
 
@@ -359,6 +375,18 @@ pub(crate) enum FileOperationRequest {
         paths: Vec<PathBuf>,
         hwnd: SendHwnd,
     },
+    /// Cleanup run: silent per-item deletes with per-item stale validation.
+    /// The handler reports progress via `CleanupDeleteProgress` results and
+    /// finishes with `CleanupDeleteCompleted` (no generic Finished follows).
+    CleanupDelete {
+        paths: Vec<PathBuf>,
+        permanent: bool,
+        /// Revalidation cutoff: items modified at/after this unix second are
+        /// skipped as "changed since the scan".
+        cutoff_unix: u64,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+        hwnd: SendHwnd,
+    },
 }
 
 impl FileOperationRequest {
@@ -457,6 +485,21 @@ impl FileOperationRequest {
             hwnd: SendHwnd(hwnd),
         }
     }
+    pub fn cleanup_delete(
+        paths: Vec<PathBuf>,
+        permanent: bool,
+        cutoff_unix: u64,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+        hwnd: HWND,
+    ) -> Self {
+        Self::CleanupDelete {
+            paths,
+            permanent,
+            cutoff_unix,
+            cancel,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
 
     /// Replaces the HWND in all variants that carry one.
     /// Used by the worker thread to substitute the UI-thread HWND with a
@@ -541,6 +584,19 @@ impl FileOperationRequest {
             },
             Self::EmptyRecycleBin { .. } => Self::EmptyRecycleBin { hwnd },
             Self::ShowProperties { paths, hwnd } => Self::ShowProperties { paths, hwnd },
+            Self::CleanupDelete {
+                paths,
+                permanent,
+                cutoff_unix,
+                cancel,
+                ..
+            } => Self::CleanupDelete {
+                paths,
+                permanent,
+                cutoff_unix,
+                cancel,
+                hwnd,
+            },
         }
     }
 }
@@ -878,6 +934,24 @@ fn run_file_operation_loop(
                 FileOperationRequest::ShowProperties { paths, hwnd } => {
                     handlers::handle_show_properties(paths, hwnd);
                     // No Finished message — fire-and-forget, dialog manages itself
+                    return CompletionBehavior::NoFinished;
+                }
+                FileOperationRequest::CleanupDelete {
+                    paths,
+                    permanent,
+                    cutoff_unix,
+                    cancel,
+                    hwnd,
+                } => {
+                    cleanup::handle_cleanup_delete(cleanup::CleanupDeleteContext {
+                        paths,
+                        permanent,
+                        cutoff_unix,
+                        cancel,
+                        hwnd,
+                        result_sender: &result_sender,
+                    });
+                    // No Finished message — CleanupDeleteCompleted owns the lifecycle.
                     return CompletionBehavior::NoFinished;
                 }
             }

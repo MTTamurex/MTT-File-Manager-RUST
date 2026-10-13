@@ -27,8 +27,8 @@ pub(crate) use organizer_move::{
 };
 pub use shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, delete_item_with_shell,
-    delete_items_permanently_with_shell, delete_items_with_shell, move_item_with_shell,
-    move_items_with_shell, rename_item_with_shell,
+    delete_items_permanently_with_shell, delete_items_with_shell, delete_single_silent,
+    move_item_with_shell, move_items_with_shell, rename_item_with_shell,
 };
 
 /// Creates a hidden, unowned top-level popup window used as the owner for Shell

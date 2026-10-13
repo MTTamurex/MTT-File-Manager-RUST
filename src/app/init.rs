@@ -225,6 +225,9 @@ impl ImageViewerApp {
             initial_indexing_notice_generation,
             mut saved_tab_session,
             minimize_to_tray,
+            cleanup_age_hours,
+            cleanup_delete_mode,
+            cleanup_history,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -870,6 +873,12 @@ impl ImageViewerApp {
                 prefetch_tx,
                 idle_warmup_tx,
                 pending_deletions,
+            ),
+
+            cleanup_state: crate::app::cleanup_state::CleanupState::with_persisted(
+                cleanup_age_hours,
+                cleanup_delete_mode,
+                cleanup_history,
             ),
 
             // BULK THUMBNAIL SCAN

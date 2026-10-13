@@ -3,6 +3,8 @@ pub mod appearance_settings;
 pub mod backend_settings;
 pub mod batch_rename_modal;
 pub mod breadcrumb;
+pub mod cleanup_modal;
+pub(crate) mod cleanup_modal_review;
 pub mod default_file_manager_settings;
 pub mod drag_move_confirmation_modal;
 pub mod general_settings;

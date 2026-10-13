@@ -321,6 +321,26 @@ impl ImageViewerApp {
                             self.handle_file_operation_finished(true);
                             self.request_global_search_refresh();
                         }
+                        FileOperationResult::CleanupDeleteProgress {
+                            completed,
+                            total,
+                            current_name,
+                            failed_count,
+                        } => {
+                            self.handle_cleanup_delete_progress(
+                                completed,
+                                total,
+                                current_name,
+                                failed_count,
+                            );
+                        }
+                        FileOperationResult::CleanupDeleteCompleted {
+                            deleted_paths,
+                            failed,
+                            aborted,
+                        } => {
+                            self.handle_cleanup_delete_completed(deleted_paths, failed, aborted);
+                        }
                         FileOperationResult::Finished => self.handle_file_operation_finished(true),
                         FileOperationResult::FinishedNoRefresh => {
                             self.handle_file_operation_finished(false)

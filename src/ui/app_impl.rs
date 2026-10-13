@@ -26,6 +26,7 @@ fn is_minimized_for_updates(saved_minimized: bool, native_minimized: bool) -> bo
 
 struct RepaintDeadlineInputs {
     file_ops_in_progress: bool,
+    cleanup_active: bool,
     clipboard_cleanup_pending: bool,
     preferences_save_elapsed: Option<Duration>,
     drive_bitmask_check_elapsed: Duration,
@@ -50,6 +51,9 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
     );
 
     if inputs.file_ops_in_progress {
+        deadline = deadline.min(FILE_OP_REPAINT_INTERVAL);
+    }
+    if inputs.cleanup_active {
         deadline = deadline.min(FILE_OP_REPAINT_INTERVAL);
     }
     if inputs.clipboard_cleanup_pending {
@@ -92,6 +96,7 @@ impl ImageViewerApp {
             .flatten();
         let deadline = next_background_repaint(RepaintDeadlineInputs {
             file_ops_in_progress: self.file_operations_active_for_background(),
+            cleanup_active: self.cleanup_state.is_active(),
             clipboard_cleanup_pending: self
                 .file_operation_state
                 .pending_clipboard_cleanup_sequence
@@ -133,6 +138,9 @@ impl ImageViewerApp {
         }
 
         self.poll_system_theme(ctx);
+
+        // Cleanup scan results (worker → UI channel); runs in both branches.
+        self.poll_cleanup_updates();
 
         let t0 = std::time::Instant::now();
         if upload_textures {
@@ -666,6 +674,15 @@ impl eframe::App for ImageViewerApp {
             crate::ui::components::tag_manager_modal::render_tag_manager_modal(self, ctx);
         }
 
+        // 15b. Cleanup Modal (scan → review → delete → summary)
+        if self.cleanup_state.phase != crate::domain::cleanup::CleanupPhase::Idle {
+            crate::ui::components::cleanup_modal::render_cleanup_modal(self, ctx);
+        }
+        // A cleanup run owns the window: never keep an item drag alive under it.
+        if self.cleanup_state.is_active() && self.is_item_dragging {
+            self.cancel_item_drag();
+        }
+
         // 14. Notifications
         app::notifications::render_notifications(self, ctx);
 
@@ -846,6 +863,7 @@ mod tests {
     fn idle_inputs() -> RepaintDeadlineInputs {
         RepaintDeadlineInputs {
             file_ops_in_progress: false,
+            cleanup_active: false,
             clipboard_cleanup_pending: false,
             preferences_save_elapsed: None,
             drive_bitmask_check_elapsed: Duration::ZERO,

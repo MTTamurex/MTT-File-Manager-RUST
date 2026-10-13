@@ -1,5 +1,6 @@
 // Domain types and business logic
 
+pub mod cleanup;
 pub mod cloud_root;
 pub mod errors;
 pub mod file_entry;

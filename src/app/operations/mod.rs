@@ -24,6 +24,7 @@
 
 pub mod clipboard_ops;
 pub mod compression;
+pub mod cleanup_ops;
 pub mod context_menu;
 pub mod default_file_manager;
 pub mod disk_analysis;

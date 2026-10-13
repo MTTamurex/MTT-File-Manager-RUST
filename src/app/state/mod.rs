@@ -826,6 +826,9 @@ pub struct ImageViewerApp {
     // FILE OPERATION WORKER/TRACKING
     pub file_operation_state: FileOperationState,
 
+    // CLEANUP FEATURE (scan → review → delete junk files/folders)
+    pub cleanup_state: crate::app::cleanup_state::CleanupState,
+
     // BULK THUMBNAIL SCAN
     pub bulk_thumbnail_scanning: Arc<AtomicBool>,
     pub bulk_thumbnail_was_scanning: bool,

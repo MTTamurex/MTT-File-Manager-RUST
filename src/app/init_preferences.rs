@@ -52,6 +52,9 @@ pub(super) struct StartupPreferences {
     pub(super) initial_indexing_notice_generation: Option<String>,
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
     pub(super) minimize_to_tray: bool,
+    pub(super) cleanup_age_hours: u64,
+    pub(super) cleanup_delete_mode: crate::domain::cleanup::CleanupDeleteMode,
+    pub(super) cleanup_history: Vec<crate::domain::cleanup::CleanupRunSummary>,
 }
 
 impl StartupPreferences {
@@ -350,6 +353,19 @@ impl StartupPreferences {
             .map(|value| value == "true")
             .unwrap_or(false);
 
+        let cleanup_age_hours = prefs
+            .get("cleanup_age_hours")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(crate::app::cleanup_state::DEFAULT_CLEANUP_AGE_HOURS);
+        let cleanup_delete_mode = prefs
+            .get("cleanup_delete_mode")
+            .and_then(|value| crate::domain::cleanup::CleanupDeleteMode::from_preference_value(value))
+            .unwrap_or(crate::domain::cleanup::CleanupDeleteMode::RecycleBin);
+        let cleanup_history = prefs
+            .get("cleanup_history")
+            .map(|value| crate::domain::cleanup::CleanupRunSummary::decode_history(value))
+            .unwrap_or_default();
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -395,6 +411,9 @@ impl StartupPreferences {
             initial_indexing_notice_generation,
             saved_tab_session,
             minimize_to_tray,
+            cleanup_age_hours,
+            cleanup_delete_mode,
+            cleanup_history,
         }
     }
 }

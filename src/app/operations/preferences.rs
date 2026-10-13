@@ -344,6 +344,20 @@ impl ImageViewerApp {
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
 
+        // Cleanup feature preferences + run history (local audit trail)
+        prefs.push((
+            "cleanup_age_hours",
+            self.cleanup_state.age_hours.to_string(),
+        ));
+        prefs.push((
+            "cleanup_delete_mode",
+            self.cleanup_state.delete_mode.preference_value().to_string(),
+        ));
+        prefs.push((
+            "cleanup_history",
+            crate::domain::cleanup::CleanupRunSummary::encode_history(&self.cleanup_state.history),
+        ));
+
         prefs.push((
             "scroll_interpolation",
             if self.scroll_interpolation_enabled {

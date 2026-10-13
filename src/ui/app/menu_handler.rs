@@ -953,6 +953,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         }
                     }
                 }
+                -84 => {
+                    app.open_cleanup_modal();
+                }
                 -90 => {}
                 // "Compress" submenu parent — leaf items dispatch via "compress:" command
                 -102 => {}

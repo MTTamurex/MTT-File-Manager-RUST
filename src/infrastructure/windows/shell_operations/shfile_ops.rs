@@ -104,6 +104,39 @@ pub fn delete_items_permanently_with_shell(paths: &[PathBuf], hwnd: HWND) -> boo
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
+/// Deletes exactly one item with no native UI (silent, auto-confirm, no error
+/// dialogs). Used by the cleanup worker so a locked item becomes a per-item
+/// failure instead of a native dialog storm.
+/// `to_recycle_bin` controls `FOF_ALLOWUNDO` (recoverable vs permanent).
+/// `Err` carries the `SHFileOperationW` return code.
+pub fn delete_single_silent(path: &Path, hwnd: HWND, to_recycle_bin: bool) -> Result<(), i32> {
+    let path_str = path.to_string_lossy();
+    let from_vec = to_double_null_terminated(&path_str);
+
+    let mut flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
+    if to_recycle_bin {
+        flags |= FOF_ALLOWUNDO;
+    }
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR::default(),
+        fFlags: flags.0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string.
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    if result == 0 && op.fAnyOperationsAborted.0 == 0 {
+        Ok(())
+    } else {
+        Err(result)
+    }
+}
+
 /// Renames a file or directory using Windows Shell.
 /// Returns true if operation was successful.
 pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {

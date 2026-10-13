@@ -727,6 +727,10 @@ impl ImageViewerApp {
                         .with_svg_icon("drive"),
                 );
             }
+            // Cleanup entry for drive roots (global junk scan).
+            items.push(
+                ContextMenuItem::new(-84, t!("context_menu.cleanup")).with_svg_icon("broom"),
+            );
         }
         let can_create_folder =
             !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
@@ -760,6 +764,10 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin"))
                     .with_svg_icon("terminal"),
+            );
+            // Cleanup entry for empty areas (global junk scan).
+            items.push(
+                ContextMenuItem::new(-84, t!("context_menu.cleanup")).with_svg_icon("broom"),
             );
         } else {
             items.push(ContextMenuItem::separator());
