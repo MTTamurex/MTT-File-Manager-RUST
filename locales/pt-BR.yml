@@ -396,6 +396,7 @@ settings:
   quick_access_position_sidebar: "Barra lateral (vertical)"
   quick_access_position_horizontal: "Barra horizontal"
   show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"
+  minimize_to_tray: "Minimizar para a bandeja ao fechar"
   default_file_manager_description: "Definir MTT como gerenciador padrão"
   default_file_manager_experimental_note: "Experimental: as pastas serão abertas no MTT e “Abrir no MTT” será adicionado ao menu de contexto. O recurso altera o Registro do Windows e pode gerar falso positivo em alguns antivírus."
   win_e_open_mtt_description: "Usar o MTT ao pressionar Win+E e em solicitações para abrir o Explorer."
@@ -1173,3 +1174,6 @@ disk_analysis:
   dup_report_stats: "%{processed} / %{candidates} candidatos processados · %{bytes} lidos"
   dup_hardlink_note: "%{groups} grupo(s) são hardlinks do mesmo arquivo físico"
   dup_none: "Nenhum arquivo duplicado encontrado."
+tray:
+  open: "Abrir"
+  exit: "Sair"

@@ -144,6 +144,8 @@ pub struct GridViewContext<'a> {
     pub last_grid_cols: usize,
     pub renaming_state: Option<(PathBuf, String)>,
     pub focus_rename: bool,
+    pub rename_click_scope: egui::Id,
+    pub rename_requested_item: Option<usize>,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
@@ -255,6 +257,7 @@ pub trait GridViewOperations {
 pub enum GridViewAction {
     Click(usize),
     DoubleClick(usize),
+    StartRename(usize),
     SecondaryClick(usize),
     EmptyAreaClick,
     EmptyAreaSecondaryClick,
@@ -267,6 +270,13 @@ pub fn render_grid_view(
     ctx: &mut GridViewContext,
     ops: &mut dyn GridViewOperations,
 ) -> Option<GridViewAction> {
+    crate::ui::components::inline_rename::clear_pending_name_click_outside(
+        ui.ctx(),
+        ctx.rename_click_scope,
+        ctx.selected_item
+            .and_then(|index| ctx.items.get(index))
+            .map(|item| item.path.as_path()),
+    );
     let t_total = std::time::Instant::now();
     // ENFORCE MINIMUM ZOOM (Hard Floor)
     // Prevents any calculation or render with size smaller than 96px
@@ -550,6 +560,9 @@ pub fn render_grid_view(
 
     if let Some(key) = toggled_group {
         return Some(GridViewAction::ToggleGroup(key));
+    }
+    if let Some(index) = ctx.rename_requested_item.take() {
+        return Some(GridViewAction::StartRename(index));
     }
     interactions::resolve_grid_action(
         clicked_item,

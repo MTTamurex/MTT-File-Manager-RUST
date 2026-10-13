@@ -474,6 +474,8 @@ impl ImageViewerApp {
             sort_descending,
             renaming_state,
             focus_rename,
+            rename_click_scope: ui.id().with("main_panel_inline_rename"),
+            rename_requested_item: None,
             scroll_to_selected,
             generation: self.generation,
             scroll_interpolation_enabled,
@@ -614,9 +616,24 @@ impl ImageViewerApp {
 
         // Process actions (blocked during renaming)
         let is_renaming = self.renaming_state.is_some();
+        let active_rename_path = self.renaming_state.as_ref().map(|(path, _)| path.clone());
         if !file_panel_input_blocked {
             match action {
-                Some(list_view::ListViewAction::Click(idx)) if !is_renaming => {
+                Some(list_view::ListViewAction::StartRename(idx)) if !is_renaming => {
+                    self.begin_rename_item(idx);
+                }
+                Some(list_view::ListViewAction::Click(idx))
+                    if !is_renaming
+                        || self.items.get(idx).is_some_and(|item| {
+                            active_rename_path
+                                .as_ref()
+                                .is_some_and(|path| item.path.as_path() != path.as_path())
+                        }) =>
+                {
+                    if is_renaming {
+                        self.rename_with_shell(idx);
+                        self.pending_select_path = None;
+                    }
                     let (ctrl, shift) =
                         ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
                     let auto_open_path = self.items.get(idx).and_then(|item| {

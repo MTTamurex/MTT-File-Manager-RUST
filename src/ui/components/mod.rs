@@ -8,6 +8,7 @@ pub mod drag_move_confirmation_modal;
 pub mod general_settings;
 pub mod gif_manager;
 pub mod gif_player;
+pub(crate) mod inline_rename;
 pub mod item_slot;
 pub mod language_settings;
 pub mod media_preview;

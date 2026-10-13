@@ -8,6 +8,14 @@ fn can_add_panel_tab_count(left: usize, right: usize) -> bool {
     left.saturating_add(right) < MAX_PANEL_TABS
 }
 
+fn new_panel_tab_insert_index(active_tab: usize, tab_count: usize, append: bool) -> usize {
+    if append {
+        tab_count
+    } else {
+        active_tab + 1
+    }
+}
+
 fn active_index_after_close(
     active_tab: usize,
     index: usize,
@@ -103,6 +111,22 @@ impl DualPanelTabs {
         }
     }
 
+    pub(crate) fn from_panel_tab_sets(left: PanelTabSet, right: PanelTabSet) -> Self {
+        let next_id = left
+            .tabs
+            .iter()
+            .chain(&right.tabs)
+            .map(|tab| tab.id)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1);
+        Self {
+            left,
+            right,
+            next_id,
+        }
+    }
+
     pub fn panel(&self, panel: ActivePanel) -> &PanelTabSet {
         match panel {
             ActivePanel::Left => &self.left,
@@ -126,6 +150,19 @@ impl DualPanelTabs {
     }
 
     pub fn add_tab(&mut self, panel: ActivePanel, snapshot: PanelSnapshot) -> Option<usize> {
+        self.add_tab_at_position(panel, snapshot, false)
+    }
+
+    pub fn add_tab_to_end(&mut self, panel: ActivePanel, snapshot: PanelSnapshot) -> Option<usize> {
+        self.add_tab_at_position(panel, snapshot, true)
+    }
+
+    fn add_tab_at_position(
+        &mut self,
+        panel: ActivePanel,
+        snapshot: PanelSnapshot,
+        append: bool,
+    ) -> Option<usize> {
         if !self.can_add_tab() {
             return None;
         }
@@ -133,7 +170,7 @@ impl DualPanelTabs {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let tabs = self.panel_mut(panel);
-        let insert_at = tabs.active_tab + 1;
+        let insert_at = new_panel_tab_insert_index(tabs.active_tab, tabs.tabs.len(), append);
         tabs.tabs.insert(insert_at, PanelTab { id, snapshot });
         tabs.active_tab = insert_at;
         Some(insert_at)
@@ -162,5 +199,11 @@ mod tests {
         assert_eq!(active_index_after_close(1, 1, 3), Some((1, true)));
         assert_eq!(active_index_after_close(1, 0, 2), Some((0, false)));
         assert_eq!(active_index_after_close(0, 0, 1), None);
+    }
+
+    #[test]
+    fn new_panel_tab_can_append_after_the_rightmost_tab() {
+        assert_eq!(new_panel_tab_insert_index(1, 4, true), 4);
+        assert_eq!(new_panel_tab_insert_index(1, 4, false), 2);
     }
 }

@@ -311,7 +311,7 @@ pub(super) fn render_grid_item(
     }
 
     let inner_rect = rect.shrink(3.0);
-    render_item_slot_for_grid(
+    let rename_name_rect = render_item_slot_for_grid(
         ui,
         inner_rect,
         index,
@@ -322,6 +322,24 @@ pub(super) fn render_grid_item(
         allow_thumbnail_requests,
         hover_scale,
     );
+    if !ctx.is_recycle_bin_view
+        && !ctx.global_search_active
+        && !is_renaming
+        && (ctx.selected_item == Some(index) || response.clicked() || response.double_clicked())
+    {
+        if let Some(name_rect) = rename_name_rect {
+            if crate::ui::components::inline_rename::selected_name_click_starts_rename(
+                ui,
+                ctx.rename_click_scope,
+                &response,
+                &item.path,
+                name_rect,
+                ctx.selected_item == Some(index) && ctx.multi_selection.len() <= 1,
+            ) {
+                ctx.rename_requested_item = Some(index);
+            }
+        }
+    }
 }
 
 pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
@@ -346,7 +364,7 @@ fn render_item_slot_for_grid(
     is_scrolling: bool,
     allow_thumbnail_requests: bool,
     hover_scale: f32,
-) {
+) -> Option<Rect> {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
     let is_renaming = ctx
@@ -360,7 +378,7 @@ fn render_item_slot_for_grid(
         None
     };
 
-    {
+    let rename_name_rect = {
         let renaming_text = renaming_text_clone.as_mut();
 
         let mut item_slot_ctx = ItemSlotContext {
@@ -371,6 +389,7 @@ fn render_item_slot_for_grid(
             is_renaming,
             renaming_text,
             focus_rename: ctx.focus_rename,
+            rename_name_rect: None,
             is_recycle_bin_view: ctx.is_recycle_bin_view,
             texture_cache: ctx.texture_cache,
             attempted_thumbnail_bucket: ctx.attempted_thumbnail_bucket,
@@ -447,7 +466,8 @@ fn render_item_slot_for_grid(
         } else {
             render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
         }
-    }
+        item_slot_ctx.rename_name_rect
+    };
 
     if let Some(new_text) = renaming_text_clone {
         if is_renaming {
@@ -456,6 +476,7 @@ fn render_item_slot_for_grid(
             }
         }
     }
+    rename_name_rect
 }
 
 fn thumbnail_directory_index(

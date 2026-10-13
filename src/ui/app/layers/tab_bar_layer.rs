@@ -55,9 +55,13 @@ pub(crate) fn render_tab_bar_layer(
                     app.tab_manager.switch_to(idx);
                     app.sync_from_tab();
                     app.update_video_visibility();
+                    app.save_preferences();
                 }
                 TabBarAction::MoveTab { from, gap } => {
-                    app.tab_manager.move_tab_to_gap(from, gap);
+                    app.sync_to_tab();
+                    if app.tab_manager.move_tab_to_gap(from, gap) {
+                        app.save_preferences();
+                    }
                 }
                 TabBarAction::NewTab => {
                     // PERF-05: enforce the tab cap before touching tab state.
@@ -85,6 +89,7 @@ pub(crate) fn render_tab_bar_layer(
                         }
                         app.sync_to_tab();
                         app.update_video_visibility();
+                        app.save_preferences();
                     }
                 }
                 TabBarAction::CloseTab(idx) => {
@@ -101,11 +106,13 @@ pub(crate) fn render_tab_bar_layer(
                         }
                     }
 
+                    app.sync_to_tab();
                     let closing_active_tab = idx == app.tab_manager.active_tab;
 
                     if app.tab_manager.close_tab(idx) {
                         log::debug!("[DEBUG] Last tab closed. Closing app.");
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        app.save_preferences();
+                        app.request_window_close(&ctx);
                     } else {
                         if closing_active_tab {
                             log::debug!(
@@ -122,10 +129,11 @@ pub(crate) fn render_tab_bar_layer(
                         }
 
                         app.update_video_visibility();
+                        app.save_preferences();
                     }
                 }
                 TabBarAction::CloseApp => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    app.request_window_close(&ctx);
                 }
                 TabBarAction::ToggleMaximize => {
                     let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));

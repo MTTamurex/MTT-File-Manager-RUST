@@ -17,6 +17,9 @@ use std::sync::Arc;
 
 mod panel_tabs;
 pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};
+mod session;
+mod session_restore;
+pub use session::TabManagerSession;
 
 fn tab_title_for_path(path: &str) -> String {
     Path::new(path)

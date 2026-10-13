@@ -313,6 +313,7 @@ pub struct ImageViewerApp {
     pub show_hidden_files: bool, // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
     pub show_quick_access: bool, // Show Quick Access
+    pub minimize_to_tray: bool,
     pub default_file_manager_settings: DefaultFileManagerSettingsState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar
@@ -635,6 +636,8 @@ pub struct ImageViewerApp {
     // Prevents the Shell from disabling the app's main window during long
     // or cancelled copy/move/delete operations.
     pub shell_op_proxy_hwnd: Option<HWND>,
+    /// Explicit tray-menu exit bypasses the close-to-tray interception.
+    pub tray_exit_requested: bool,
 
     // 3-stage startup: hidden -> maximize/resize -> reveal
     pub startup_tick: usize,

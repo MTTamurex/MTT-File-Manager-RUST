@@ -204,6 +204,8 @@ pub struct ListViewContext<'a> {
     pub sort_descending: bool,
     pub renaming_state: Option<(PathBuf, String)>,
     pub focus_rename: bool,
+    pub rename_click_scope: egui::Id,
+    pub rename_requested_item: Option<usize>,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub generation: usize,
     pub scroll_interpolation_enabled: bool,
@@ -280,6 +282,7 @@ pub struct ListViewContext<'a> {
 pub enum ListViewAction {
     Click(usize),
     DoubleClick(usize),
+    StartRename(usize),
     SecondaryClick(usize),
     SortChange(SortMode),
     EmptyAreaClick,
@@ -318,6 +321,13 @@ pub fn render_list_view(
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
 ) -> Option<ListViewAction> {
+    crate::ui::components::inline_rename::clear_pending_name_click_outside(
+        ui.ctx(),
+        ctx.rename_click_scope,
+        ctx.selected_item
+            .and_then(|index| ctx.items.get(index))
+            .map(|item| item.path.as_path()),
+    );
     let row_height = 24.0;
     let available_w = ui.available_width();
 
@@ -376,6 +386,10 @@ pub fn render_list_view(
 
     if let Some(key) = interaction.toggled_group {
         return Some(ListViewAction::ToggleGroup(key));
+    }
+
+    if let Some(index) = ctx.rename_requested_item.take() {
+        return Some(ListViewAction::StartRename(index));
     }
 
     // Handle actions after rendering - ORDER MATTERS!

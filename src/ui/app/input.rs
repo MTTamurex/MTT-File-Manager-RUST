@@ -54,14 +54,18 @@ fn create_new_tab(app: &mut ImageViewerApp) {
     app.setup_computer_view();
     app.sync_to_tab();
     app.update_video_visibility();
+    app.save_preferences();
 }
 
 fn close_current_tab(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    app.sync_to_tab();
     if app.tab_manager.close_active_tab() {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        app.save_preferences();
+        app.request_window_close(ctx);
     } else {
         app.sync_from_tab();
         app.update_video_visibility();
+        app.save_preferences();
     }
 }
 
@@ -74,6 +78,7 @@ fn switch_tab(app: &mut ImageViewerApp, previous: bool) {
     }
     app.sync_from_tab();
     app.update_video_visibility();
+    app.save_preferences();
 }
 
 fn handle_paste_shortcut(
@@ -288,7 +293,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .shortcuts
             .consume_triggered(ShortcutAction::MoveTabLeft, ctx)
         {
-            app.tab_manager.move_tab_left();
+            if app.tab_manager.move_tab_left() {
+                app.save_preferences();
+            }
             user_active = true;
         }
 
@@ -296,7 +303,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .shortcuts
             .consume_triggered(ShortcutAction::MoveTabRight, ctx)
         {
-            app.tab_manager.move_tab_right();
+            if app.tab_manager.move_tab_right() {
+                app.save_preferences();
+            }
             user_active = true;
         }
 

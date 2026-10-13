@@ -722,6 +722,10 @@ impl ImageViewerApp {
         parent_folder: PathBuf,
         current_path_norm: &str,
     ) {
+        let selection_moved_away_from_renamed_item =
+            self.selected_file.as_ref().is_some_and(|selected| {
+                Self::normalize_for_match(&selected.path) != Self::normalize_for_match(&path)
+            });
         let parent_str = Self::normalize_for_match(parent_folder.as_path());
         self.invalidate_folder_and_tab_caches(&parent_folder);
         self.invalidate_panel_tab_snapshots_for_path(&path);
@@ -771,7 +775,9 @@ impl ImageViewerApp {
             // empty-items path in sync_from_tab instead.
             self.directory_dirty_registry.clear_dirty(&parent_folder);
             // Only move selection for single (non-batch) renames.
-            if self.file_operation_state.batch_rename_progress.is_none() {
+            if self.file_operation_state.batch_rename_progress.is_none()
+                && !selection_moved_away_from_renamed_item
+            {
                 self.pending_select_path = Some(new_path);
             }
             self.pending_items_rebuild = true;

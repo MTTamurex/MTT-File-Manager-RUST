@@ -825,6 +825,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 app.watch_current_folder();
                                 app.load_folder(false);
                             }
+                            app.sync_to_tab();
+                            app.save_preferences();
                         }
                     }
                 }

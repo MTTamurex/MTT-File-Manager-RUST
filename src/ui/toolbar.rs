@@ -303,7 +303,7 @@ pub fn render_toolbar(
 
             let hint = egui::RichText::new(t!("toolbar.search_placeholder"))
                 .color(egui::Color32::from_gray(120));
-            let text_resp = search_ui.add_sized(
+            let mut text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
                     .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
@@ -311,6 +311,15 @@ pub fn render_toolbar(
                     .text_color(theme::text_color(ui.visuals().dark_mode))
                     .vertical_align(egui::Align::Center),
             );
+            let search_text_menu = crate::ui::components::inline_rename::add_text_context_menu(
+                &mut search_ui,
+                &text_resp,
+                search_query,
+                false,
+            );
+            if search_text_menu.text_changed {
+                text_resp.mark_changed();
+            }
 
             if text_resp.changed() {
                 action = Some(ToolbarAction::Search(search_query.clone()));
@@ -389,6 +398,12 @@ pub fn render_toolbar(
                         .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
                         .text_color(theme::text_color(ui.visuals().dark_mode)),
                 );
+                let address_text_menu = crate::ui::components::inline_rename::add_text_context_menu(
+                    &mut addr_ui,
+                    &edit_response,
+                    path_input,
+                    false,
+                );
 
                 let mut close_history_clicked = false;
 
@@ -412,6 +427,7 @@ pub fn render_toolbar(
                 }
 
                 if !close_history_clicked
+                    && !address_text_menu.menu_active
                     && (edit_response.clicked_elsewhere()
                         || (edit_response.lost_focus()
                             && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter))))

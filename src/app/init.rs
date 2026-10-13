@@ -223,6 +223,8 @@ impl ImageViewerApp {
             sidebar_quick_access_height,
             sidebar_tag_order,
             initial_indexing_notice_generation,
+            mut saved_tab_session,
+            minimize_to_tray,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -263,26 +265,46 @@ impl ImageViewerApp {
             organizer_rules,
             ctx.clone(),
         );
+        if let Some(session) = saved_tab_session.as_mut() {
+            session.replace_invalid_paths(|path| {
+                if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(path) {
+                    tag_definitions.contains_key(&tag_id)
+                } else {
+                    crate::app::startup_folder::is_valid_saved_tab_path(path)
+                }
+            });
+            session.replace_invalid_tag_filters(|id| tag_definitions.contains_key(&id));
+        }
+
+        let (fallback_path, fallback_is_computer_view) = determine_initial_path(&app_state_db);
         let mut active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
+        let (initial_path, is_computer_view_initial) = if let Some(session) = &saved_tab_session {
+            let path = session.active_path().to_owned();
+            active_tag_filter = crate::domain::special_paths::tag_id_from_view_path(&path)
+                .or(session.active_tab_record().active_tag_filter)
+                .filter(|id| tag_definitions.contains_key(id));
+            let is_computer = path == COMPUTER_VIEW_ID;
+            (path, is_computer)
+        } else if let Some(tag_id) = active_tag_filter {
+            (tag_view_path(tag_id), false)
+        } else {
+            (fallback_path, fallback_is_computer_view)
+        };
 
-        // Determine initial path based on last saved folder
-        let (mut initial_path, mut is_computer_view_initial) =
-            determine_initial_path(&app_state_db);
-        if let Some(tag_id) = active_tag_filter {
-            initial_path = tag_view_path(tag_id);
-            is_computer_view_initial = false;
-        }
-        if let Some(startup_folder) = startup_folder {
-            if let Ok(requested_path) = validate_requested_folder(startup_folder) {
-                initial_path = requested_path;
-                is_computer_view_initial = false;
-                active_tag_filter = None;
-                log::info!("[INIT] Using folder requested by the Windows shell");
-            } else {
-                log::warn!("[INIT] Ignoring an invalid folder requested by the Windows shell");
-            }
-        }
+        // A shell folder activation is applied after restoring the previous
+        // session, so it becomes a new tab instead of replacing that session.
+        let startup_folder_path =
+            startup_folder.and_then(|folder| match validate_requested_folder(folder) {
+                Ok(path) => {
+                    log::info!("[INIT] Queued Windows shell folder for a new tab");
+                    Some(path)
+                }
+                Err(()) => {
+                    log::warn!("[INIT] Ignoring an invalid folder requested by the Windows shell");
+                    None
+                }
+            });
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
         let crate::infrastructure::shell_menu_worker::ShellMenuWorkerChannels {
@@ -315,25 +337,51 @@ impl ImageViewerApp {
         let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
             std::sync::mpsc::channel();
 
-        // Create tab manager with the initial path
-        let mut tab_manager = if is_computer_view_initial {
+        // Create all outer tabs from the saved session, falling back to the
+        // legacy one-folder startup state when no valid session was persisted.
+        let mut tab_manager = if let Some(session) = &saved_tab_session {
+            session.clone().into_tab_manager()
+        } else if is_computer_view_initial {
             crate::tabs::TabManager::new()
         } else {
             crate::tabs::TabManager::new_at_path(&initial_path)
         };
-        // Set the initial tab's view mode from saved preference
-        {
+        if saved_tab_session.is_none() {
             let active = tab_manager.active_mut();
             active.view_mode = view_mode;
             active.show_left_sidebar = show_left_sidebar;
             active.show_preview_panel = show_preview_panel;
             active.active_tag_filter = active_tag_filter;
+            active.sort_mode = sort_mode;
+            active.sort_descending = sort_descending;
+            active.folders_position = folders_position;
             active.group_mode = group_mode;
             active.group_descending = group_descending;
+            active.dual_panel_enabled = saved_dual_panel_enabled;
+            active.dual_panel_active = saved_dual_panel_active;
+            active.dual_panel_split_ratio = dual_panel_split_ratio;
+            if saved_dual_panel_enabled {
+                active.view_mode = saved_dual_panel_active_view_mode;
+            }
         }
+        let initial_tab = tab_manager.active();
+        let initial_sort_mode = initial_tab.sort_mode;
+        let initial_sort_descending = initial_tab.sort_descending;
+        let initial_folders_position = initial_tab.folders_position;
+        let initial_group_mode = initial_tab.group_mode;
+        let initial_group_descending = initial_tab.group_descending;
+        let initial_view_mode = initial_tab.view_mode;
+        let initial_show_left_sidebar = initial_tab.show_left_sidebar;
+        let initial_show_preview_panel = initial_tab.show_preview_panel;
+        let initial_dual_panel_active = initial_tab.dual_panel_active;
+        let initial_active_tag_filter = initial_tab.active_tag_filter;
+        let mut initial_navigation_state =
+            NavigationState::new(initial_path.clone(), is_computer_view_initial);
+        initial_navigation_state.is_recycle_bin_view =
+            initial_path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 
         let mut app = Self {
-            navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
+            navigation_state: initial_navigation_state,
             current_folder_modified_hint: None,
             current_folder_created_hint: None,
             folder_modified_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
@@ -382,15 +430,15 @@ impl ImageViewerApp {
                 folder_preview_trace,
             ),
             // Sorting - loaded from SQLite or defaults
-            sort_mode,
+            sort_mode: initial_sort_mode,
             sort_mode_computer,
             sort_mode_normal,
-            sort_descending,
+            sort_descending: initial_sort_descending,
             sort_descending_normal: sort_descending,
-            folders_position,
+            folders_position: initial_folders_position,
             folders_position_normal: folders_position,
-            group_mode,
-            group_descending,
+            group_mode: initial_group_mode,
+            group_descending: initial_group_descending,
             group_projection: Arc::new(Default::default()),
             collapsed_groups_by_context: Default::default(),
             show_hidden_files,
@@ -406,7 +454,7 @@ impl ImageViewerApp {
             ),
             directory_index: directory_index.clone(),
             // View mode: loaded from SQLite
-            view_mode,
+            view_mode: initial_view_mode,
             // Selection & Preview
             selected_file: None,
             selected_thumbnail: None,
@@ -420,10 +468,11 @@ impl ImageViewerApp {
             video_player_close_in_progress: false,
             pending_video_player_action: None,
             selected_metadata: None,
-            show_left_sidebar,  // Loaded from SQLite
-            show_preview_panel, // Loaded from SQLite
-            show_recycle_bin,   // Loaded from SQLite
-            show_quick_access,  // Loaded from SQLite
+            show_left_sidebar: initial_show_left_sidebar,
+            show_preview_panel: initial_show_preview_panel,
+            show_recycle_bin,  // Loaded from SQLite
+            show_quick_access, // Loaded from SQLite
+            minimize_to_tray,
             default_file_manager_settings:
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
             quick_access_placement, // Loaded from SQLite
@@ -615,6 +664,7 @@ impl ImageViewerApp {
 
             // Shell op proxy HWND (created alongside native_hwnd)
             shell_op_proxy_hwnd: None,
+            tray_exit_requested: false,
 
             // 3-stage startup counter
             startup_tick: 0,
@@ -672,7 +722,7 @@ impl ImageViewerApp {
 
             // DUAL PANEL (split view) — disabled by default
             dual_panel_enabled: false,
-            dual_panel_active: crate::app::dual_panel::ActivePanel::Left,
+            dual_panel_active: initial_dual_panel_active,
             dual_panel_inactive_state: None,
             in_inactive_panel_context: false,
             suppress_file_panel_keyboard: false,
@@ -777,7 +827,7 @@ impl ImageViewerApp {
             purge_worker_state: Some(
                 crate::app::operations::tag_ops::purge_worker::PurgeWorkerState::new(),
             ),
-            active_tag_filter,
+            active_tag_filter: initial_active_tag_filter,
             collapse_tags: false,
             show_tag_manager: false,
             tag_manager_new_name: String::new(),
@@ -859,39 +909,61 @@ impl ImageViewerApp {
         // Apply folder lock for the initial folder (if it has one saved)
         app.apply_folder_lock_if_present();
 
-        // Restore dual panel state (must run after full app construction)
-        if saved_dual_panel_enabled {
-            app.view_mode = saved_dual_panel_active_view_mode;
+        if let Some(session) = saved_tab_session.as_ref() {
+            session.restore_panel_tabs(&mut app);
+        }
+
+        // Restore the active workspace's split state after all runtime fields
+        // exist. Session panel tabs carry both panes and their active indices;
+        // legacy preferences remain a fallback for sessions written by older
+        // versions that only saved one inactive path.
+        let has_saved_panel_tabs = app.tab_manager.active().dual_panel_tabs.is_some();
+        if app.tab_manager.active().dual_panel_enabled {
+            app.view_mode = app.tab_manager.active().view_mode;
+            app.dual_panel_active = app.tab_manager.active().dual_panel_active;
+            app.layout.dual_panel_split_ratio = app
+                .tab_manager
+                .active()
+                .dual_panel_split_ratio
+                .clamp(0.2, 0.8);
+            if let Some(widths) = app
+                .tab_manager
+                .active()
+                .dual_panel_active_list_column_widths
+            {
+                widths.apply_to_layout(&mut app.layout);
+            }
             app.dual_panel_enable_for_restore();
-            // dual_panel_enable() always makes Left active. If the saved active
-            // panel was Right, swap so the app fields and inactive snapshot are
-            // consistent with the persisted active panel.
-            if saved_dual_panel_active == crate::app::dual_panel::ActivePanel::Right {
-                app.dual_panel_switch_active_for_restore();
+
+            if !has_saved_panel_tabs {
+                if saved_dual_panel_active == crate::app::dual_panel::ActivePanel::Right {
+                    app.dual_panel_switch_active_for_restore();
+                }
+                if let Some(inactive_path) = saved_dual_panel_inactive_path {
+                    let inactive_path = if is_valid_startup_folder_path(&inactive_path) {
+                        inactive_path
+                    } else {
+                        COMPUTER_VIEW_ID.to_string()
+                    };
+                    app.with_inactive_panel(|app| {
+                        let is_computer =
+                            inactive_path == crate::domain::special_paths::COMPUTER_VIEW_ID;
+                        let inactive_tag_id =
+                            crate::domain::special_paths::tag_id_from_view_path(&inactive_path);
+                        app.navigation_state.current_path = inactive_path.clone();
+                        app.navigation_state.path_input = inactive_path;
+                        app.navigation_state.is_computer_view = is_computer;
+                        app.navigation_state.is_recycle_bin_view = false;
+                        app.active_tag_filter = inactive_tag_id;
+                        app.view_mode = saved_dual_panel_inactive_view_mode;
+                        app.loaded_path.clear();
+                    });
+                }
             }
-            // Restore the inactive panel's saved path so it doesn't just clone
-            // the active panel's folder. The actual folder load is deferred to
-            // handle_startup_sequence() where workers are fully ready.
-            if let Some(inactive_path) = saved_dual_panel_inactive_path {
-                let inactive_path = if is_valid_startup_folder_path(&inactive_path) {
-                    inactive_path
-                } else {
-                    COMPUTER_VIEW_ID.to_string()
-                };
-                app.with_inactive_panel(|app| {
-                    let is_computer =
-                        inactive_path == crate::domain::special_paths::COMPUTER_VIEW_ID;
-                    let inactive_tag_id =
-                        crate::domain::special_paths::tag_id_from_view_path(&inactive_path);
-                    app.navigation_state.current_path = inactive_path.clone();
-                    app.navigation_state.path_input = inactive_path;
-                    app.navigation_state.is_computer_view = is_computer;
-                    app.navigation_state.is_recycle_bin_view = false;
-                    app.active_tag_filter = inactive_tag_id;
-                    app.view_mode = saved_dual_panel_inactive_view_mode;
-                    app.loaded_path.clear();
-                });
-            }
+        }
+
+        if let Some(path) = startup_folder_path {
+            app.open_integrated_folder_in_new_context(&path);
         }
 
         if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {

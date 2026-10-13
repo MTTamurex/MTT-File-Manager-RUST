@@ -396,6 +396,7 @@ settings:
   quick_access_position_sidebar: "Sidebar (vertical)"
   quick_access_position_horizontal: "Horizontal bar"
   show_recycle_bin: "Show Recycle Bin in Quick Access"
+  minimize_to_tray: "Minimize to system tray on close"
   default_file_manager_description: "Set MTT as your default file manager"
   default_file_manager_experimental_note: "Experimental: folder opens will use MTT and Open in MTT will be added to folder menus. This changes the Windows Registry; some antivirus products may flag it as malware (a false positive)."
   win_e_open_mtt_description: "Use MTT for Win+E and Explorer launch requests."
@@ -1173,3 +1174,6 @@ disk_analysis:
   dup_report_stats: "%{processed} / %{candidates} candidates processed · %{bytes} read"
   dup_hardlink_note: "%{groups} group(s) are hardlinks of one physical file"
   dup_none: "No duplicate files found."
+tray:
+  open: "Open"
+  exit: "Exit"

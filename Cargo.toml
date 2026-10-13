@@ -14,7 +14,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [package]
 name = "mtt-file-manager"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 
 [dependencies]

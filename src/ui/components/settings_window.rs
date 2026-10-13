@@ -18,6 +18,7 @@ pub struct SettingsWindowOutput {
     pub shortcuts_changed: bool,
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
+    pub minimize_to_tray_changed: bool,
     pub tags_changed: bool,
     pub diagnostic_mode_changed: bool,
     pub open_diagnostic_folder: bool,
@@ -66,6 +67,7 @@ pub fn render_settings_window(
     let mut shortcuts_changed = false;
     let mut quick_access_changed = false;
     let mut recycle_bin_changed = false;
+    let mut minimize_to_tray_changed = false;
     let mut tags_changed = false;
     let mut diagnostic_mode_changed = false;
     let mut open_diagnostic_folder = false;
@@ -203,6 +205,7 @@ pub fn render_settings_window(
                                             theme_changed |= general.theme_changed;
                                             quick_access_changed |= general.quick_access_changed;
                                             recycle_bin_changed |= general.recycle_bin_changed;
+                                            minimize_to_tray_changed |= general.minimize_to_tray_changed;
                                             default_file_manager_action = general.default_file_manager_action;
                                             win_e_action = general.win_e_action;
                                         }
@@ -284,6 +287,7 @@ pub fn render_settings_window(
         shortcuts_changed,
         quick_access_changed,
         recycle_bin_changed,
+        minimize_to_tray_changed,
         tags_changed,
         diagnostic_mode_changed,
         open_diagnostic_folder,

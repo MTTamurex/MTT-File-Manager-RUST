@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 
 impl ImageViewerApp {
-    fn new_panel_tab_snapshot(&mut self, path: &str) -> PanelSnapshot {
+    pub(crate) fn new_panel_tab_snapshot(&mut self, path: &str) -> PanelSnapshot {
         let mut snapshot = PanelSnapshot::from_app(self);
         let path = path.to_owned();
 
@@ -185,17 +185,22 @@ impl ImageViewerApp {
     }
 
     pub fn dual_panel_add_tab(&mut self, panel: ActivePanel) -> bool {
-        self.dual_panel_add_tab_to_path(panel, None)
+        self.dual_panel_add_tab_to_path(panel, None, false)
     }
 
     pub fn dual_panel_add_tab_at(&mut self, panel: ActivePanel, path: &str) -> bool {
-        self.dual_panel_add_tab_to_path(panel, Some(path))
+        self.dual_panel_add_tab_to_path(panel, Some(path), false)
+    }
+
+    pub(crate) fn dual_panel_add_tab_at_end(&mut self, panel: ActivePanel, path: &str) -> bool {
+        self.dual_panel_add_tab_to_path(panel, Some(path), true)
     }
 
     fn dual_panel_add_tab_to_path(
         &mut self,
         panel: ActivePanel,
         target_path: Option<&str>,
+        append: bool,
     ) -> bool {
         if !self.dual_panel_enabled {
             return false;
@@ -227,7 +232,11 @@ impl ImageViewerApp {
                 .dual_panel_tabs
                 .as_mut()
                 .expect("dual panel tabs are initialized when dual mode is active");
-            tabs.add_tab(panel, snapshot)
+            if append {
+                tabs.add_tab_to_end(panel, snapshot)
+            } else {
+                tabs.add_tab(panel, snapshot)
+            }
         };
         let Some(index) = index else {
             return false;

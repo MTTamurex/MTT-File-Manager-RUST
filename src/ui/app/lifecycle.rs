@@ -77,6 +77,8 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // FINAL INITIALIZATION: Now that the UI is ready, ensure the initial tab is populated
             if app.navigation_state.is_computer_view {
                 app.setup_computer_view();
+            } else if app.navigation_state.is_recycle_bin_view {
+                app.setup_recycle_bin_view();
             } else if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
                 &app.navigation_state.current_path,
             ) {
@@ -91,6 +93,8 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.with_inactive_panel(|app| {
                     if app.navigation_state.is_computer_view {
                         app.setup_computer_view();
+                    } else if app.navigation_state.is_recycle_bin_view {
+                        app.setup_recycle_bin_view();
                     } else if let Some(tag_id) =
                         crate::domain::special_paths::tag_id_from_view_path(
                             &app.navigation_state.current_path,
@@ -410,6 +414,9 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    if let Some(hwnd) = app.native_hwnd {
+        crate::infrastructure::windows::system_tray::remove_tray_icon(hwnd);
+    }
     // Prevent the incremental GC from starting another app-state DB write.
     crate::app::init_workers::stop_gc_worker();
 

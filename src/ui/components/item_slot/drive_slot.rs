@@ -89,6 +89,7 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         egui::pos2(rect.center().x, current_y + 9.0), // ~half text height
         egui::vec2(progress_w, 18.0),
     );
+    ctx.rename_name_rect = Some(name_rect);
 
     if ctx.is_renaming {
         if let Some(text) = &mut ctx.renaming_text {
@@ -97,6 +98,12 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
                 egui::TextEdit::singleline(&mut **text)
                     .horizontal_align(egui::Align::Center)
                     .id_source("rename_input_drive"),
+            );
+            let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
+                ui,
+                &response,
+                text,
+                ctx.focus_rename,
             );
 
             if ctx.focus_rename {
@@ -115,11 +122,15 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
                 }
             }
 
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let commit = (response.has_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                || (response.lost_focus() && !text_menu_active.menu_active);
+            if commit {
                 ops.rename_item(ctx.idx);
             }
         }
     } else {
+        // Let the enclosing card handle selection and click-to-rename.
         ui.put(
             name_rect,
             egui::Label::new(
@@ -127,6 +138,7 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
                     .size(11.0)
                     .strong(),
             )
+            .selectable(false)
             .truncate(),
         );
     }

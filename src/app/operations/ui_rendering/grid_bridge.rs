@@ -323,6 +323,8 @@ impl ImageViewerApp {
             last_grid_cols,
             renaming_state,
             focus_rename,
+            rename_click_scope: ui.id().with("main_panel_inline_rename"),
+            rename_requested_item: None,
             scroll_to_selected,
             is_computer_view: self.navigation_state.is_computer_view,
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
@@ -415,9 +417,24 @@ impl ImageViewerApp {
 
         // Process actions (blocked during renaming, except click on item itself)
         let is_renaming = self.renaming_state.is_some();
+        let active_rename_path = self.renaming_state.as_ref().map(|(path, _)| path.clone());
         if !file_panel_input_blocked {
             match action {
-                Some(grid_view::GridViewAction::Click(idx)) if !is_renaming => {
+                Some(grid_view::GridViewAction::StartRename(idx)) if !is_renaming => {
+                    self.begin_rename_item(idx);
+                }
+                Some(grid_view::GridViewAction::Click(idx))
+                    if !is_renaming
+                        || self.items.get(idx).is_some_and(|item| {
+                            active_rename_path
+                                .as_ref()
+                                .is_some_and(|path| item.path.as_path() != path.as_path())
+                        }) =>
+                {
+                    if is_renaming {
+                        self.rename_with_shell(idx);
+                        self.pending_select_path = None;
+                    }
                     if let Some(item) = self.items.get(idx) {
                         let ctrl = ui.input(|i| i.modifiers.ctrl);
                         let shift = ui.input(|i| i.modifiers.shift);

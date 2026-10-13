@@ -234,6 +234,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             egui::pos2(rect.left(), text_start_y),
             egui::vec2(rect.width(), 20.0), // Fixed height for text
         );
+        ctx.rename_name_rect = Some(text_rect);
 
         if ctx.is_renaming {
             if let Some(text) = &mut ctx.renaming_text {
@@ -242,6 +243,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     egui::TextEdit::singleline(&mut **text)
                         .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_dir"),
+                );
+                let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
+                    ui,
+                    &response,
+                    text,
+                    ctx.focus_rename,
                 );
 
                 // On first focus: select all text (directories have no extension)
@@ -261,11 +268,15 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     }
                 }
 
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let commit = (response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                    || (response.lost_focus() && !text_menu_active.menu_active);
+                if commit {
                     ops.rename_item(ctx.idx);
                 }
             }
         } else {
+            // Let the enclosing card handle selection and click-to-rename.
             ui.put(
                 text_rect,
                 egui::Label::new(
@@ -273,6 +284,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                         .size(11.0)
                         .color(crate::ui::theme::text_color(ui.visuals().dark_mode)),
                 )
+                .selectable(false)
                 .truncate(),
             );
         }

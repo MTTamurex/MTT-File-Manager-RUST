@@ -16,7 +16,8 @@ use windows::{
         UI::{
             Shell::*,
             WindowsAndMessaging::{
-                BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE,
+                BringWindowToTop, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow,
+                SW_HIDE, SW_RESTORE, SW_SHOW,
             },
         },
     },
@@ -163,8 +164,14 @@ pub fn restore_window_foreground(hwnd: HWND) {
     }
 
     unsafe {
+        let was_hidden = !IsWindowVisible(hwnd).as_bool();
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
+        } else if was_hidden {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+        if was_hidden {
+            crate::infrastructure::windows::system_tray::remove_tray_icon(hwnd);
         }
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);

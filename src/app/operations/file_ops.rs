@@ -421,6 +421,23 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn rename_path_with_shell(&mut self, path: PathBuf, new_name: String) -> bool {
+        if crate::infrastructure::windows::is_drive_root_path(&path) {
+            let drive_path = path.to_string_lossy();
+            if crate::infrastructure::windows::get_volume_label_raw(&drive_path).as_deref()
+                == Some(new_name.as_str())
+            {
+                return false;
+            }
+        } else {
+            if new_name.is_empty()
+                || path
+                    .file_name()
+                    .is_some_and(|current_name| current_name.to_string_lossy() == new_name)
+            {
+                return false;
+            }
+        }
+
         self.file_operation_state.file_ops_in_progress += 1;
         if self
             .file_operation_state

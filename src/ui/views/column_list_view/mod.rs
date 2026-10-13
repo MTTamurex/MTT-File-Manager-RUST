@@ -54,6 +54,13 @@ pub fn render_column_list_view(
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
 ) -> Option<ListViewAction> {
+    crate::ui::components::inline_rename::clear_pending_name_click_outside(
+        ui.ctx(),
+        ctx.rename_click_scope,
+        ctx.selected_item
+            .and_then(|index| ctx.items.get(index))
+            .map(|item| item.path.as_path()),
+    );
     let available_rect = ui.available_rect_before_wrap();
     ctx.visible_group_paths.clear();
     let grouped = ctx.group_projection.is_grouped() && !ctx.compact;
@@ -247,6 +254,8 @@ pub fn render_column_list_view(
 
     if let Some(key) = toggled_group {
         Some(ListViewAction::ToggleGroup(key))
+    } else if let Some(index) = ctx.rename_requested_item.take() {
+        Some(ListViewAction::StartRename(index))
     } else if let Some(index) = double_clicked_item {
         Some(ListViewAction::DoubleClick(index))
     } else if let Some(index) = secondary_clicked_item {

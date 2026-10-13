@@ -545,9 +545,8 @@ fn main() -> eframe::Result<()> {
                 std::process::exit(2);
             };
             let path = PathBuf::from(path_arg);
-            if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_request_to_main_app(
+            if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_folder_to_main_app(
                 &path.to_string_lossy(),
-                true,
             ) {
                 std::process::exit(0);
             }

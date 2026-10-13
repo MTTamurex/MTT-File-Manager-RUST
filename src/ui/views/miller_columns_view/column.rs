@@ -353,6 +353,12 @@ fn render_row(
                 egui::TextEdit::singleline(&mut text)
                     .id_source(("rename_input_miller", &item.path)),
             );
+            let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
+                ui,
+                &response,
+                &mut text,
+                ctx.focus_rename,
+            );
             if ctx.focus_rename {
                 response.request_focus();
                 if let Some(mut state) =
@@ -376,7 +382,9 @@ fn render_row(
                     state.store(ui.ctx(), response.id);
                 }
             }
-            commit = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            commit = (response.has_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                || (response.lost_focus() && !text_menu_active.menu_active);
         });
         *rename_update = Some(MillerRenameUpdate {
             path: item.path.clone(),

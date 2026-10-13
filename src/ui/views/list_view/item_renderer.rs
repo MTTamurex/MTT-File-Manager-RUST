@@ -284,6 +284,27 @@ pub(super) fn render_list_item(
             );
         }
 
+        let rename_hit_rect = Rect::from_min_size(
+            rect.min + egui::vec2(24.0 + tag_name_offset, 2.0),
+            egui::vec2((w_name - 30.0 - tag_name_offset).max(0.0), row_height - 4.0),
+        );
+        if !ctx.compact
+            && !ctx.is_recycle_bin_view
+            && !ctx.global_search_active
+            && ctx.renaming_state.is_none()
+            && (ctx.selected_item == Some(i) || response.clicked() || response.double_clicked())
+            && crate::ui::components::inline_rename::selected_name_click_starts_rename(
+                ui,
+                ctx.rename_click_scope,
+                &response,
+                &item.path,
+                rename_hit_rect,
+                ctx.selected_item == Some(i) && ctx.multi_selection.len() <= 1,
+            )
+        {
+            ctx.rename_requested_item = Some(i);
+        }
+
         // RENAMING LOGIC (LIST VIEW)
         let is_renaming_this = ctx
             .renaming_state
@@ -304,6 +325,12 @@ pub(super) fn render_list_item(
                     egui::TextEdit::singleline(&mut text)
                         .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_list"),
+                );
+                let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
+                    ui,
+                    &response,
+                    &mut text,
+                    ctx.focus_rename,
                 );
 
                 if ctx.focus_rename {
@@ -332,8 +359,10 @@ pub(super) fn render_list_item(
                     }
                 }
 
-                // Confirm rename with Enter (while focused)
-                if ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                let commit = (response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                    || (response.lost_focus() && !text_menu_active.menu_active);
+                if commit {
                     ops.rename_with_shell(i);
                 }
             });

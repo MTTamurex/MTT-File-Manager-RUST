@@ -72,6 +72,8 @@ pub struct ItemSlotContext<'a> {
     pub renaming_text: Option<&'a mut String>,
     /// Whether to focus the rename input
     pub focus_rename: bool,
+    /// Name label bounds used for click-to-rename hit testing in grid view.
+    pub rename_name_rect: Option<egui::Rect>,
     /// Whether in Recycle Bin view (avoids heavy IO and thumbnails)
     pub is_recycle_bin_view: bool,
     /// Cache de texturas (LRU)

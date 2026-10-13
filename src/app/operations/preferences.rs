@@ -41,6 +41,7 @@ impl ImageViewerApp {
         {
             return;
         }
+        self.sync_to_tab();
         // Non-blocking flush: if DB writer is busy, keep dirty=true and retry next frame.
         match self.do_save_preferences_nonblocking() {
             PreferenceWriteOutcome::Persisted => {
@@ -60,6 +61,7 @@ impl ImageViewerApp {
 
     /// Force-flushes preferences immediately (for exit).
     pub fn force_save_preferences(&mut self) -> bool {
+        self.sync_to_tab();
         match self.do_save_preferences_bounded() {
             PreferenceWriteOutcome::Persisted => {
                 self.preferences_dirty = false;
@@ -179,6 +181,15 @@ impl ImageViewerApp {
             .to_string(),
         ));
         prefs.push((
+            "minimize_to_tray",
+            if self.minimize_to_tray {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
+        ));
+        prefs.push((
             "quick_access_placement",
             match self.quick_access_placement {
                 QuickAccessPlacement::Sidebar => "sidebar",
@@ -263,6 +274,11 @@ impl ImageViewerApp {
             "dual_panel_inactive_view_mode",
             view_mode_preference_value(inactive_view_mode).to_string(),
         ));
+
+        match crate::tabs::TabManagerSession::from_tab_manager(&self.tab_manager).to_json() {
+            Ok(session) => prefs.push(("tab_session", session)),
+            Err(error) => log::warn!("[PREFERENCES] Could not serialize open tabs: {error}"),
+        }
 
         // Sidebar widths persistence - only save valid values
         let left_to_save = self.layout.sidebar_left_width.max(150.0);

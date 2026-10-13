@@ -159,6 +159,32 @@ fn render_column_item(
             ctx.rectangle_selection_state
                 .map(|state| state.preview_contains(index)),
         );
+        let has_tag = crate::domain::file_tag::tag_ids_for_path(ctx.tag_assignments, &item.path)
+            .is_some_and(|ids| ids.iter().any(|id| ctx.tag_definitions.contains_key(id)));
+        let tag_offset = if has_tag { 12.0 } else { 0.0 };
+        let rename_name_rect = Rect::from_min_size(
+            rect.min + egui::vec2(24.0 + tag_offset, 2.0),
+            egui::vec2(
+                (COLUMN_WIDTH - 32.0 - tag_offset).max(0.0),
+                ROW_HEIGHT - 4.0,
+            ),
+        );
+        if !ctx.compact
+            && !ctx.is_recycle_bin_view
+            && !ctx.global_search_active
+            && ctx.renaming_state.is_none()
+            && (ctx.selected_item == Some(index) || response.clicked() || response.double_clicked())
+            && crate::ui::components::inline_rename::selected_name_click_starts_rename(
+                ui,
+                ctx.rename_click_scope,
+                &response,
+                &item.path,
+                rename_name_rect,
+                ctx.selected_item == Some(index) && ctx.multi_selection.len() <= 1,
+            )
+        {
+            ctx.rename_requested_item = Some(index);
+        }
         if response.secondary_clicked() {
             let content_hit = ui
                 .input(|input| input.pointer.interact_pos())
@@ -339,12 +365,42 @@ fn render_column_item_name(
             egui::vec2(COLUMN_WIDTH - 32.0 - tag_offset, ROW_HEIGHT - 4.0),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
-            let response =
-                ui.add(egui::TextEdit::singleline(&mut text).id_source("rename_input_column_list"));
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id_source(("rename_input_column_list", &item.path)),
+            );
+            let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
+                ui,
+                &response,
+                &mut text,
+                ctx.focus_rename,
+            );
             if ctx.focus_rename {
                 response.request_focus();
+                let mut state =
+                    egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                        .unwrap_or_default();
+                let char_count = text.chars().count();
+                let select_end = if item.is_dir {
+                    char_count
+                } else {
+                    text.rfind('.')
+                        .map(|byte_pos| text[..byte_pos].chars().count())
+                        .filter(|&position| position > 0)
+                        .unwrap_or(char_count)
+                };
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(select_end),
+                    )));
+                state.store(ui.ctx(), response.id);
             }
-            if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            let commit = (response.has_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                || (response.lost_focus() && !text_menu_active.menu_active);
+            if commit {
                 ops.rename_with_shell(index);
             }
         });

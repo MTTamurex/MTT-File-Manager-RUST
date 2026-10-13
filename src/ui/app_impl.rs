@@ -217,6 +217,7 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::track_window_state(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
         self.ensure_window_handle(frame);
+        self.handle_tray_and_close_events(ctx);
         // "Open in main app" requests from the disk analyzer (WM_COPYDATA
         // queue or DB fallback); no-op until startup completes.
         crate::app::operations::external_open::process_external_open_requests(self, ctx);
@@ -631,6 +632,10 @@ impl eframe::App for ImageViewerApp {
                 self.force_save_preferences();
             }
             if output.recycle_bin_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
+            if output.minimize_to_tray_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }

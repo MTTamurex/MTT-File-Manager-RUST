@@ -50,6 +50,8 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_quick_access_height: Option<f32>,
     pub(super) sidebar_tag_order: Vec<i64>,
     pub(super) initial_indexing_notice_generation: Option<String>,
+    pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
+    pub(super) minimize_to_tray: bool,
 }
 
 impl StartupPreferences {
@@ -340,6 +342,13 @@ impl StartupPreferences {
             crate::infrastructure::windows::read_installer_installation_generation().filter(
                 |generation| prefs.get("initial_indexing_completed_generation") != Some(generation),
             );
+        let saved_tab_session = prefs
+            .get("tab_session")
+            .and_then(|value| crate::tabs::TabManagerSession::from_json(value));
+        let minimize_to_tray = prefs
+            .get("minimize_to_tray")
+            .map(|value| value == "true")
+            .unwrap_or(false);
 
         Self {
             sort_mode,
@@ -384,6 +393,8 @@ impl StartupPreferences {
             sidebar_quick_access_height,
             sidebar_tag_order,
             initial_indexing_notice_generation,
+            saved_tab_session,
+            minimize_to_tray,
         }
     }
 }
@@ -445,6 +456,15 @@ mod tests {
         db.set_preference("scroll_interpolation", "false").unwrap();
 
         assert!(!StartupPreferences::load(&db).scroll_interpolation_enabled);
+    }
+
+    #[test]
+    fn minimize_to_tray_defaults_off_and_loads_saved_value() {
+        let db = test_db();
+        assert!(!StartupPreferences::load(&db).minimize_to_tray);
+
+        db.set_preference("minimize_to_tray", "true").unwrap();
+        assert!(StartupPreferences::load(&db).minimize_to_tray);
     }
 
     #[test]

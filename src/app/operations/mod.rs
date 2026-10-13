@@ -49,6 +49,7 @@ pub mod rectangle_selection;
 pub mod recycle_bin_ops;
 pub mod selection;
 pub mod shutdown;
+pub(crate) mod system_tray;
 pub mod tabs;
 pub mod tag_ops;
 pub mod thumbnails;

@@ -10,6 +10,7 @@ pub struct GeneralSettingsOutput {
     pub theme_changed: bool,
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
+    pub minimize_to_tray_changed: bool,
     pub default_file_manager_action: Option<bool>,
     pub win_e_action: Option<bool>,
 }
@@ -24,6 +25,7 @@ pub fn render_general_settings_section(
         theme_changed: false,
         quick_access_changed: false,
         recycle_bin_changed: false,
+        minimize_to_tray_changed: false,
         default_file_manager_action: None,
         win_e_action: None,
     };
@@ -76,6 +78,14 @@ pub fn render_general_settings_section(
         &mut app.show_recycle_bin,
     ) {
         output.recycle_bin_changed = true;
+    }
+    ui.add_space(12.0);
+    if settings_ui::toggle_row(
+        ui,
+        &t!("settings.minimize_to_tray"),
+        &mut app.minimize_to_tray,
+    ) {
+        output.minimize_to_tray_changed = true;
     }
     ui.add_space(20.0);
     let default_file_manager_settings =

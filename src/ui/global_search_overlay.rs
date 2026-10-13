@@ -323,7 +323,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     let text_available_w = search_ui.available_width() - 8.0 - clear_btn_space;
                     let hint = egui::RichText::new(t!("search.placeholder"))
                         .color(egui::Color32::from_gray(120));
-                    let search_resp = search_ui.add_sized(
+                    let mut search_resp = search_ui.add_sized(
                         egui::vec2(text_available_w, input_height - 2.0),
                         egui::TextEdit::singleline(&mut app.global_search.query)
                             .frame(
@@ -335,6 +335,16 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             .vertical_align(egui::Align::Center)
                             .id_source("global_search_input"),
                     );
+                    let search_text_menu =
+                        crate::ui::components::inline_rename::add_text_context_menu(
+                            &mut search_ui,
+                            &search_resp,
+                            &mut app.global_search.query,
+                            false,
+                        );
+                    if search_text_menu.text_changed {
+                        search_resp.mark_changed();
+                    }
 
                     // Clear button (X)
                     if has_text
@@ -370,7 +380,11 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.focus_request = false;
                     }
 
-                    if search_resp.clicked() || search_resp.gained_focus() || search_resp.changed() {
+                    if search_resp.clicked()
+                        || search_resp.gained_focus()
+                        || search_resp.changed()
+                        || search_text_menu.menu_active
+                    {
                         app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
                         app.global_search.rename_state = None;
                     }

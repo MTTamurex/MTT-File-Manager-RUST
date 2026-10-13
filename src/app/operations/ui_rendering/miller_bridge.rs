@@ -16,10 +16,13 @@ use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
 use crate::domain::special_paths::is_virtual_path;
 use crate::ui::views::miller_columns_view::{
-    ancestor_chain, render_miller_column, MillerColumnAction, MillerColumnContext,
-    ANCESTOR_COL_WIDTH, FOCUSED_COL_WIDTH,
+    ancestor_chain, render_miller_column, MillerColumnContext, ANCESTOR_COL_WIDTH,
+    FOCUSED_COL_WIDTH,
 };
 use crate::ui::views::rectangle_selection::RectangleSelectionSource;
+
+mod interactions;
+mod rename_click;
 
 impl ImageViewerApp {
     pub fn render_miller_columns_view(&mut self, ui: &mut egui::Ui) {
@@ -296,144 +299,14 @@ impl ImageViewerApp {
             self.cancel_rectangle_selection();
         }
 
-        // ── Apply deferred ancestor interactions. ──
-        for (col_idx, output) in ancestor_outputs {
-            let Some(listing) = ancestor_data[col_idx].0.as_ref() else {
-                continue;
-            };
-            self.handle_miller_rectangle_selection_frame(
-                ui,
-                &output.rectangle_selection_frame,
-                listing,
-            );
-            if let Some(update) = output.rename_update {
-                let is_active_target = self
-                    .renaming_state
-                    .as_ref()
-                    .is_some_and(|(path, _)| *path == update.path);
-                if is_active_target && update.commit {
-                    self.renaming_state = None;
-                    self.focus_rename = false;
-                    if self.can_rename_path(&update.path) {
-                        self.rename_path_with_shell(update.path, update.text);
-                    }
-                } else if is_active_target {
-                    if let Some((_, text)) = self.renaming_state.as_mut() {
-                        *text = update.text;
-                    }
-                }
-            }
-            if self.renaming_state.is_some() {
-                continue;
-            }
-            let Some(action) = output.action else {
-                continue;
-            };
-            if matches!(
-                &action,
-                MillerColumnAction::SecondaryClicked(_, _)
-                    | MillerColumnAction::EmptySecondaryClicked(_)
-            ) {
-                let selection_belongs_to_column = self
-                    .rectangle_selection_state
-                    .as_ref()
-                    .is_some_and(|state| {
-                        matches!(
-                            &state.source,
-                            RectangleSelectionSource::MillerAncestor { directory }
-                                if directory == &chain[col_idx]
-                        )
-                    });
-                if selection_belongs_to_column {
-                    self.finish_miller_rectangle_selection(&chain[col_idx], listing);
-                } else {
-                    self.cancel_rectangle_selection();
-                }
-            }
-            match action {
-                MillerColumnAction::Clicked(i) => {
-                    if let Some(entry) = listing.get(i).cloned() {
-                        let (ctrl, shift) =
-                            ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
-                        if entry.is_dir && !ctrl && !shift {
-                            // Anti-collapse: clicking the child already in the
-                            // chain keeps the deeper columns intact and selects it.
-                            let already = chain
-                                .get(col_idx + 1)
-                                .map(|c| c.as_path() == entry.path.as_path())
-                                .unwrap_or(false);
-                            if already {
-                                self.select_miller_ancestor_entry(
-                                    &chain[col_idx],
-                                    listing,
-                                    i,
-                                    false,
-                                    false,
-                                );
-                            } else {
-                                pending_nav = Some(entry.path.to_string_lossy().to_string());
-                            }
-                        } else {
-                            self.select_miller_ancestor_entry(
-                                &chain[col_idx],
-                                listing,
-                                i,
-                                ctrl,
-                                shift,
-                            );
-                        }
-                    }
-                }
-                MillerColumnAction::DoubleClicked(i) => {
-                    if let Some(entry) = listing.get(i).cloned() {
-                        if entry.is_dir {
-                            pending_nav = Some(entry.path.to_string_lossy().to_string());
-                        } else {
-                            self.open_with_shell_guarded(&entry.path);
-                        }
-                    }
-                }
-                MillerColumnAction::SecondaryClicked(i, pos) => {
-                    if let Some(entry) = listing.get(i).cloned() {
-                        if !self.multi_selection.contains(&entry.path) {
-                            self.select_ancestor_entry_for_preview(entry.clone());
-                        } else {
-                            self.selected_item = None;
-                            self.selection_anchor = None;
-                            self.update_miller_ancestor_selected_file(entry.clone());
-                        }
-                        let mut paths = vec![entry.path.clone()];
-                        paths.extend(
-                            listing
-                                .iter()
-                                .filter(|item| {
-                                    item.path != entry.path
-                                        && self.multi_selection.contains(&item.path)
-                                })
-                                .map(|item| item.path.clone()),
-                        );
-                        self.context_menu.open(pos, None, paths.clone(), false);
-                        self.context_menu.primary_is_directory = Some(entry.is_dir);
-                        self.context_menu.operation_directory = Some(chain[col_idx].clone());
-                        self.capture_context_menu_panel_origin();
-                        self.populate_context_menu(ui.ctx(), &paths, false, None);
-                    }
-                }
-                MillerColumnAction::DragStarted(i) => {
-                    if let Some(entry) = listing.get(i).cloned() {
-                        self.begin_miller_ancestor_drag(entry, listing);
-                    }
-                }
-                MillerColumnAction::EmptyClicked => self.clear_file_view_selection(),
-                MillerColumnAction::EmptySecondaryClicked(pos) => {
-                    let paths = vec![chain[col_idx].clone()];
-                    self.context_menu.open(pos, None, paths.clone(), true);
-                    self.context_menu.primary_is_directory = Some(true);
-                    self.capture_context_menu_panel_origin();
-                    self.populate_context_menu(ui.ctx(), &paths, true, None);
-                }
-            }
-        }
+        interactions::apply_ancestor_interactions(
+            self,
+            ui,
+            &mut ancestor_outputs,
+            &ancestor_data,
+            &chain,
+            &mut pending_nav,
+        );
 
         if let Some(target) = pending_nav {
             self.navigate_to(&target);

@@ -1,9 +1,8 @@
-//! Consumption of "open in main app" requests sent by child processes
-//! (the standalone disk analyzer). Requests arrive either instantly via
-//! WM_COPYDATA (queued by the window subclass) or through a `pending_open_request`
-//! row in `app_state.db` written by a `--open-path` helper invocation when
-//! the main window could not be reached directly.
+//! Consumption of item-reveal requests from child processes and new-tab folder
+//! activations from Windows Explorer. Requests arrive via WM_COPYDATA or, for
+//! the disk analyzer fallback, a `pending_open_request` row in `app_state.db`.
 
+use crate::app::dual_panel::ActivePanel;
 use crate::app::ImageViewerApp;
 use crate::infrastructure::app_state_db::AppStateDb;
 use eframe::egui;
@@ -18,6 +17,7 @@ const DB_REQUEST_MAX_AGE_SECS: u64 = 600;
 const DB_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const DIRECTORY_TARGET_PREFIX: &str = "D|";
 const FILE_TARGET_PREFIX: &str = "F|";
+const OPEN_FOLDER_NEW_TAB_PREFIX: &str = "N|";
 
 /// Encode the target kind without relying on filesystem metadata in the
 /// receiving process. Unprefixed legacy requests remain directory requests.
@@ -30,6 +30,17 @@ pub fn encode_target_request(path: &str, is_dir: bool) -> String {
             FILE_TARGET_PREFIX
         }
     )
+}
+
+/// Encode a Windows Explorer folder activation as an explicit new-tab request.
+pub fn encode_open_folder_request(path: &str) -> String {
+    format!("{OPEN_FOLDER_NEW_TAB_PREFIX}{path}")
+}
+
+fn decode_open_folder_request(request: &str) -> Option<&str> {
+    request
+        .strip_prefix(OPEN_FOLDER_NEW_TAB_PREFIX)
+        .filter(|path| !path.is_empty())
 }
 
 fn decode_target_request(request: &str) -> (&str, bool) {
@@ -51,7 +62,7 @@ pub fn encode_db_request(path: &str) -> String {
     format!("{secs}|{path}")
 }
 
-/// Drain queued external open requests and navigate to the first one.
+/// Drain one queued external open request.
 /// Runs every frame from the app logic loop; gated until startup completes.
 pub fn process_external_open_requests(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if app.startup_tick < 2 {
@@ -66,6 +77,22 @@ pub fn process_external_open_requests(app: &mut ImageViewerApp, ctx: &egui::Cont
     let Some(request) = path else {
         return;
     };
+    if let Some(path) = decode_open_folder_request(&request) {
+        match crate::app::startup_folder::validate_requested_folder(std::path::PathBuf::from(path))
+        {
+            Ok(path) => {
+                app.open_integrated_folder_in_new_context(&path);
+                if let Some(hwnd) = app.native_hwnd {
+                    crate::infrastructure::windows::restore_window_foreground(hwnd);
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.request_repaint();
+            }
+            Err(()) => log::warn!("[EXTERNAL-OPEN] Ignored an invalid Explorer folder request"),
+        }
+        return;
+    }
     let (path, is_dir) = decode_target_request(&request);
     if path.is_empty() {
         return;
@@ -76,7 +103,64 @@ pub fn process_external_open_requests(app: &mut ImageViewerApp, ctx: &egui::Cont
     if let Some(hwnd) = app.native_hwnd {
         crate::infrastructure::windows::restore_window_foreground(hwnd);
     }
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
     ctx.request_repaint();
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntegratedFolderDestination {
+    MainTab,
+    Panel(ActivePanel),
+}
+
+fn integrated_folder_destination(
+    dual_panel_enabled: bool,
+    focused_panel: ActivePanel,
+) -> IntegratedFolderDestination {
+    if dual_panel_enabled {
+        IntegratedFolderDestination::Panel(focused_panel)
+    } else {
+        IntegratedFolderDestination::MainTab
+    }
+}
+
+impl ImageViewerApp {
+    pub(crate) fn open_integrated_folder_in_new_context(&mut self, path: &str) -> bool {
+        if let IntegratedFolderDestination::Panel(panel) =
+            integrated_folder_destination(self.dual_panel_enabled, self.dual_panel_active)
+        {
+            return self.dual_panel_add_tab_at_end(panel, path);
+        }
+
+        if !self.tab_manager.can_add_tab() {
+            self.notifications.warning(
+                rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string(),
+            );
+            return false;
+        }
+
+        let view_mode = self.view_mode;
+        let sort_mode = self.sort_mode;
+        let sort_descending = self.sort_descending;
+        let folders_position = self.folders_position;
+        self.sync_to_tab();
+        if !self.tab_manager.new_tab_at(path) {
+            return false;
+        }
+        {
+            let active = self.tab_manager.active_mut();
+            active.view_mode = view_mode;
+            active.sort_mode = sort_mode;
+            active.sort_descending = sort_descending;
+            active.folders_position = folders_position;
+        }
+        self.sync_from_tab();
+        self.sync_to_tab();
+        self.update_video_visibility();
+        self.save_preferences();
+        true
+    }
 }
 
 /// Consume a pending request from the shared preferences DB (throttled).
@@ -147,6 +231,28 @@ mod tests {
         assert_eq!(
             decode_target_request(r"C:\Legacy Folder"),
             (r"C:\Legacy Folder", true)
+        );
+    }
+
+    #[test]
+    fn windows_folder_activation_uses_a_distinct_new_tab_request() {
+        let request = encode_open_folder_request(r"C:\Users\user\Documents\Project");
+        assert_eq!(
+            decode_open_folder_request(&request),
+            Some(r"C:\Users\user\Documents\Project")
+        );
+        assert_eq!(decode_open_folder_request("N|"), None);
+    }
+
+    #[test]
+    fn integrated_folder_targets_outer_tabs_in_mono_and_last_focused_panel_in_dual() {
+        assert_eq!(
+            integrated_folder_destination(false, ActivePanel::Right),
+            IntegratedFolderDestination::MainTab
+        );
+        assert_eq!(
+            integrated_folder_destination(true, ActivePanel::Right),
+            IntegratedFolderDestination::Panel(ActivePanel::Right)
         );
     }
 }

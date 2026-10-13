@@ -310,8 +310,18 @@ extern "system" fn borderless_subclass_proc(
         }
     }
 
+    if msg == super::system_tray::taskbar_created_message() {
+        super::system_tray::restore_icon_after_taskbar_restart(hwnd);
+        return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    }
+
     if msg == redraw_suppression::REPLAY_MESSAGE {
         redraw_suppression::handle_replay(hwnd);
+        return LRESULT(0);
+    }
+
+    if msg == super::system_tray::TRAY_CALLBACK_MESSAGE {
+        super::system_tray::handle_callback(hwnd, lparam);
         return LRESULT(0);
     }
 
@@ -326,7 +336,7 @@ extern "system" fn borderless_subclass_proc(
         redraw_suppression::note_non_client_press(hit_test::is_caption_code(wparam.0));
     }
 
-    // "Open in main app" requests from child processes (disk analyzer, etc.).
+    // "Open in main app" requests from child tools and the Explorer integration.
     // Only copy the payload and queue it; navigation happens in the UI loop.
     if msg == WM_COPYDATA {
         let copy_data = lparam.0 as *const COPYDATASTRUCT;

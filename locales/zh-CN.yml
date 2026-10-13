@@ -396,6 +396,7 @@ settings:
   quick_access_position_sidebar: "侧边栏（垂直）"
   quick_access_position_horizontal: "水平栏"
   show_recycle_bin: "在快速访问中显示回收站"
+  minimize_to_tray: "关闭时最小化到系统托盘"
   default_file_manager_description: "将 MTT 设为默认文件管理器"
   default_file_manager_experimental_note: "实验性功能：文件夹将在 MTT 中打开，且文件夹菜单会添加“在 MTT 中打开”。此功能会修改 Windows 注册表，某些杀毒软件可能会误报。"
   win_e_open_mtt_description: "按 Win+E 或通过资源管理器启动请求打开 MTT。"
@@ -1163,3 +1164,6 @@ disk_analysis:
   dup_report_stats: "已处理%{processed}/%{candidates}个候选 · 读取%{bytes}"
   dup_hardlink_note: "其中%{groups}组是指向同一个物理文件的硬链接"
   dup_none: "没有找到重复文件。"
+tray:
+  open: "打开"
+  exit: "退出"
