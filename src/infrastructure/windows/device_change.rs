@@ -14,8 +14,8 @@ use windows::{
         RegisterClassW, RegisterDeviceNotificationW, TranslateMessage,
         UnregisterDeviceNotification, DBT_DEVICEARRIVAL, DBT_DEVICEQUERYREMOVE,
         DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
-        DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE,
-        WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
+        DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, MSG, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
     },
 };
 
@@ -91,7 +91,7 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
             0,
             0,
             0,
-            Some(HWND_MESSAGE),
+            None, // A hidden top-level window also receives volume unit-mask broadcasts.
             None,
             Some(hinstance),
             None,
@@ -150,6 +150,13 @@ fn clear_notification_handle() {
     slot.take();
 }
 
+#[cfg(feature = "notify-watcher")]
+pub(crate) fn repaint_after_watcher_lifecycle_change() {
+    if let Some(ctx) = EGUI_CONTEXT.get() {
+        ctx.request_repaint();
+    }
+}
+
 unsafe extern "system" fn device_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -169,6 +176,10 @@ unsafe extern "system" fn device_wnd_proc(
             }
 
             if event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE {
+                #[cfg(feature = "notify-watcher")]
+                if event == DBT_DEVICEARRIVAL {
+                    resume_arriving_volumes(lparam);
+                }
                 if let Some(sender) = DEVICE_EVENT_SENDER.get() {
                     let _ = sender.send(());
                     // Force immediate UI repaint from worker thread
@@ -181,6 +192,36 @@ unsafe extern "system" fn device_wnd_proc(
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+#[cfg(feature = "notify-watcher")]
+unsafe fn resume_arriving_volumes(lparam: LPARAM) {
+    let Some(unitmask) = volume_arrival_unitmask(lparam) else {
+        return;
+    };
+    for bit in 0..26 {
+        if unitmask & (1 << bit) != 0 {
+            crate::infrastructure::removal_aware_watcher::volume_arrived((b'A' + bit) as char);
+        }
+    }
+}
+
+#[cfg(feature = "notify-watcher")]
+unsafe fn volume_arrival_unitmask(lparam: LPARAM) -> Option<u32> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DBT_DEVTYP_VOLUME, DEV_BROADCAST_HDR, DEV_BROADCAST_VOLUME,
+    };
+    if lparam.0 == 0 {
+        return None;
+    }
+    let header = &*(lparam.0 as *const DEV_BROADCAST_HDR);
+    if header.dbch_devicetype != DBT_DEVTYP_VOLUME
+        || (header.dbch_size as usize) < std::mem::size_of::<DEV_BROADCAST_VOLUME>()
+    {
+        return None;
+    }
+    let volume = &*(lparam.0 as *const DEV_BROADCAST_VOLUME);
+    Some(volume.dbcv_unitmask)
 }
 
 #[cfg(test)]
@@ -201,5 +242,21 @@ mod tests {
         };
 
         assert_eq!(result.0, 1);
+    }
+
+    #[cfg(feature = "notify-watcher")]
+    #[test]
+    fn arrival_parser_uses_only_volume_unitmask_payloads() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DBT_DEVTYP_DEVICEINTERFACE, DBT_DEVTYP_VOLUME,
+        };
+        let mask = (1u32 << 22) | (1u32 << 23);
+        let parse = |payload: &[u32; 5]| unsafe {
+            super::volume_arrival_unitmask(LPARAM(payload.as_ptr() as isize))
+        };
+        assert_eq!(parse(&[20, DBT_DEVTYP_VOLUME.0, 0, mask, 0]), Some(mask));
+        assert_eq!(parse(&[12, DBT_DEVTYP_VOLUME.0, 0, mask, 0]), None);
+        assert_eq!(parse(&[20, DBT_DEVTYP_DEVICEINTERFACE.0, 0, mask, 0]), None);
+        assert_eq!(unsafe { super::volume_arrival_unitmask(LPARAM(0)) }, None);
     }
 }

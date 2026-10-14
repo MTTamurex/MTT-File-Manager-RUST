@@ -22,6 +22,8 @@ pub mod onedrive;
 pub mod open_with_worker;
 pub mod organizer;
 mod prioritized_receiver;
+#[cfg(feature = "notify-watcher")]
+pub(crate) mod removal_aware_watcher;
 pub mod security;
 pub mod shell_menu_worker;
 pub mod threading;

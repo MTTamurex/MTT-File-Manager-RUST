@@ -5,7 +5,7 @@
 
 use crate::app::state::ImageViewerApp;
 #[cfg(feature = "notify-watcher")]
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 #[cfg(feature = "notify-watcher")]
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 
 mod fallback;
 
+#[cfg(feature = "notify-watcher")]
+mod event_handler;
 #[cfg(feature = "notify-watcher")]
 mod polling_policy;
 
@@ -98,9 +100,16 @@ impl ImageViewerApp {
         let current_path = self.navigation_state.current_path.clone();
         let mut paths_to_watch = Vec::new();
         let mut seen_paths = HashSet::new();
+        let mut suspended_watch_paths = false;
 
         let mut push_watch_path = |path: String, label: &str| {
             let path_to_watch = PathBuf::from(&path);
+            if crate::infrastructure::windows::extract_drive_letter(&path_to_watch)
+                .is_some_and(crate::infrastructure::removal_aware_watcher::is_suspended)
+            {
+                suspended_watch_paths = true;
+                return;
+            }
 
             let normalized = normalize_watch_path(&path_to_watch);
             if seen_paths.insert(normalized) {
@@ -145,8 +154,9 @@ impl ImageViewerApp {
 
         if paths_to_watch.is_empty() {
             self.watcher = None;
-            self.notify_watcher_setup_pending = false;
-            self.notify_watcher_setup_retry_after = None;
+            self.notify_watcher_setup_pending = suspended_watch_paths;
+            self.notify_watcher_setup_retry_after =
+                suspended_watch_paths.then(|| Instant::now() + Duration::from_secs(5));
             return;
         }
 
@@ -183,7 +193,7 @@ impl ImageViewerApp {
         let rx_for_overflow = self.fs_event_receiver.clone();
         let ctx_for_events = self.ui_ctx.clone();
         let ctx_for_setup = self.ui_ctx.clone();
-        let active_path = paths_to_watch[0].clone();
+        let active_path = PathBuf::from(current_path);
 
         let spawn_result = std::thread::Builder::new()
             .name("notify-watcher-setup".to_string())
@@ -199,78 +209,26 @@ impl ImageViewerApp {
                 }
                 let _setup_guard = SetupThreadGuard;
 
+                let suspended_watch_paths = suspended_watch_paths
+                    || paths_to_watch.iter().any(|path| {
+                        crate::infrastructure::removal_aware_watcher::path_is_suspended(path)
+                    });
                 let paths_to_watch = polling_policy::native_watch_paths(paths_to_watch);
                 if paths_to_watch.is_empty() {
                     let _ = setup_tx.send(crate::app::state::NotifyWatcherSetupResult {
                         request_id,
                         watcher: None,
                         active_watched: false,
-                        complete: true,
+                        complete: !suspended_watch_paths,
                     });
                     ctx_for_setup.request_repaint();
                     return;
                 }
 
                 let watcher_result =
-                    notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                        match &res {
-                            Ok(event) => {
-                                log::trace!(
-                                    "[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
-                                    event.kind,
-                                    event.paths
-                                );
-                            }
-                            Err(e) => {
-                                log::error!("[NOTIFY-WATCHER] Event error: {}", e);
-                            }
-                        }
-                        let event = crate::app::state::TimestampedNotifyEvent {
-                            received_at: std::time::Instant::now(),
-                            result: res,
-                            overflow: false,
-                        };
-                        match tx.try_send(event) {
-                            Ok(()) => {}
-                            Err(crossbeam_channel::TrySendError::Full(dropped)) => {
-                                // EST-01: bounded channel saturated under a sustained
-                                // event storm. Drop the oldest queued event and
-                                // coalesce the burst into a single overflow marker;
-                                // the UI applies one debounced reload instead of
-                                // processing every dropped event.
-                                let _ = rx_for_overflow.try_recv();
-                                let marker_paths = match &dropped.result {
-                                    Ok(evt) => evt.paths.clone(),
-                                    Err(err) => err.paths.clone(),
-                                };
-                                let marker = notify::Event {
-                                    kind: notify::EventKind::Modify(notify::event::ModifyKind::Any),
-                                    paths: marker_paths,
-                                    attrs: Default::default(),
-                                };
-                                let mut overflow_event =
-                                    crate::app::state::TimestampedNotifyEvent {
-                                        received_at: std::time::Instant::now(),
-                                        result: Ok(marker),
-                                        overflow: true,
-                                    };
-                                loop {
-                                    match tx.try_send(overflow_event) {
-                                        Ok(()) => break,
-                                        Err(crossbeam_channel::TrySendError::Full(returned)) => {
-                                            let _ = rx_for_overflow.try_recv();
-                                            overflow_event = returned;
-                                        }
-                                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
-                        }
-                        ctx_for_events.request_repaint();
-                    });
+                    crate::infrastructure::removal_aware_watcher::RemovalAwareWatcher::new(
+                        event_handler::handler(tx, rx_for_overflow, ctx_for_events),
+                    );
 
                 let watcher_to_install = match watcher_result {
                     Ok(mut watcher) => {
@@ -301,7 +259,7 @@ impl ImageViewerApp {
                         (
                             watched_any.then_some(watcher),
                             active_watched,
-                            watched_count == paths_to_watch.len(),
+                            watched_count == paths_to_watch.len() && !suspended_watch_paths,
                         )
                     }
                     Err(e) => {
@@ -330,6 +288,14 @@ impl ImageViewerApp {
 
     #[cfg(feature = "notify-watcher")]
     pub(crate) fn poll_notify_watcher_setup(&mut self) {
+        if self
+            .watcher
+            .as_ref()
+            .is_some_and(|watcher| watcher.needs_refresh())
+        {
+            self.watcher = None;
+            self.queue_notify_watcher_setup();
+        }
         while let Ok(result) = self.notify_watcher_setup_receiver.try_recv() {
             if result.request_id != self.notify_watcher_setup_request_id {
                 log::debug!(

@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use windows::Win32::Foundation::HANDLE;
-
 use crate::file_index::VolumeIndex;
 use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
@@ -12,32 +10,37 @@ pub(super) fn build_and_persist(
     drive_letter: char,
     volume_id: &str,
     volume_serial: u32,
-    volume_handle: HANDLE,
     journal_info: &UsnJournalInfo,
     indexing_progress: &Arc<IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     stop: &VolumeStopSignal,
 ) -> Result<VolumeIndex, String> {
+    // The permit belongs to the MFT attempt, not to the caller that may start
+    // a filesystem fallback after this function returns an error.
+    let _build_permit = super::super::wait_for_index_build(stop)
+        .ok_or_else(|| "MFT scan cancelled by volume removal".to_string())?;
     crate::memory_trim::log_process_memory(&format!("{}:\\ before full MFT scan", drive_letter));
     indexing_progress.set_scanning(drive_letter, 0, "scanning_mft");
     eprintln!("[USN] {}:\\ Starting bulk MFT read...", drive_letter);
     let start = std::time::Instant::now();
 
-    let mut index = match crate::mft_reader::read_mft_bulk(
-        volume_handle,
-        drive_letter,
-        |done, total, indexed| {
-            indexing_progress.update(
-                drive_letter,
-                "scanning",
-                indexed,
-                "scanning_mft",
-                Some(done),
-                Some(total),
-            )
-        },
-        || stop.is_stopped(),
-    ) {
+    let index = match super::volume_io::with_volume(drive_letter, stop, |volume_handle| {
+        crate::mft_reader::read_mft_bulk(
+            volume_handle,
+            drive_letter,
+            |done, total, indexed| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    indexed,
+                    "scanning_mft",
+                    Some(done),
+                    Some(total),
+                )
+            },
+            || stop.is_stopped(),
+        )
+    }) {
         Ok(index) => index,
         Err(error) => {
             if !stop.is_stopped() {
@@ -48,6 +51,15 @@ pub(super) fn build_and_persist(
                     crate::redact_paths(&error)
                 );
             }
+            return Err(error);
+        }
+    };
+
+    let mut index = match validate_mft_index(index) {
+        Ok(index) => index,
+        Err(error) => {
+            indexing_progress.set_error(drive_letter, 0, "scanning_mft");
+            eprintln!("[USN] {}:\\ {}", drive_letter, error);
             return Err(error);
         }
     };
@@ -180,4 +192,80 @@ pub(super) fn build_and_persist(
     index.clear_pending();
     crate::memory_trim::log_process_memory(&format!("{}:\\ after full MFT scan", drive_letter));
     Ok(index)
+}
+
+fn validate_mft_index(index: VolumeIndex) -> Result<VolumeIndex, String> {
+    if index.records.is_empty() {
+        Err("MFT scan returned no indexable records".to_string())
+    } else {
+        Ok(index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_mft_index, VolumeIndex};
+    use crate::index_db::IndexDb;
+    use crate::indexing_progress::IndexingProgress;
+    use crate::usn_journal::{DiscoveredVolume, UsnJournalInfo};
+    use crate::volume_lifecycle::VolumeLifecycle;
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{mpsc, Arc};
+
+    #[test]
+    fn empty_mft_result_is_rejected_instead_of_persisted_as_a_ready_index() {
+        match validate_mft_index(VolumeIndex::empty('R')) {
+            Err(error) => assert_eq!(error, "MFT scan returned no indexable records"),
+            Ok(_) => panic!("empty MFT results must trigger the filesystem fallback"),
+        }
+    }
+
+    #[test]
+    fn failed_mft_attempt_releases_build_permit_before_fallback() {
+        let progress = Arc::new(IndexingProgress::new());
+        let (wake, _events) = mpsc::channel();
+        let lifecycle = VolumeLifecycle::new(
+            Arc::new(AtomicBool::new(false)),
+            crate::volume_indices::new_shared(),
+            progress.clone(),
+            wake,
+        );
+        // An invalid drive letter guarantees the attempt fails without touching
+        // any mounted volume or requiring physical test media.
+        let volume = DiscoveredVolume {
+            drive_letter: '?',
+            volume_id: "test-volume".to_string(),
+            volume_serial: 1,
+            label: String::new(),
+            file_system: "NTFS".to_string(),
+            usn_supported: true,
+        };
+        let ticket = lifecycle.claim_worker(&volume).unwrap();
+        let db = Arc::new(IndexDb::open(Path::new(":memory:")).unwrap());
+        let journal = UsnJournalInfo {
+            journal_id: 1,
+            first_usn: 0,
+            next_usn: 0,
+        };
+
+        assert!(super::build_and_persist(
+            volume.drive_letter,
+            &volume.volume_id,
+            volume.volume_serial,
+            &journal,
+            &progress,
+            &db,
+            &ticket.stop_signal(),
+        )
+        .is_err());
+        let fallback_permit = crate::volume_indexers::try_begin_index_build();
+        assert!(
+            fallback_permit.is_some(),
+            "MFT failure must not retain the build lock"
+        );
+        drop(fallback_permit);
+        drop(ticket);
+        assert!(lifecycle.prepare_remove_identity(&volume.volume_id, volume.volume_serial));
+    }
 }

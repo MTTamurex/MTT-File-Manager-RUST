@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use windows::Win32::Foundation::HANDLE;
-
 use crate::index_db;
 use crate::usn_journal::UsnJournalInfo;
 use crate::volume_indices::VolumeIndexHandle;
@@ -22,7 +20,6 @@ pub(super) fn run_incremental(
     drive_letter: char,
     mut current_usn: i64,
     journal_info: UsnJournalInfo,
-    volume_handle: HANDLE,
     handle: VolumeIndexHandle,
     db: Arc<index_db::IndexDb>,
     shutdown: VolumeStopSignal,
@@ -38,7 +35,9 @@ pub(super) fn run_incremental(
             break;
         }
 
-        match crate::usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn) {
+        match super::volume_io::with_volume(drive_letter, &shutdown, |volume_handle| {
+            crate::usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn)
+        }) {
             Ok(Some((buffer, bytes_returned, new_usn))) => {
                 let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
                 let mut applied = false;
@@ -146,29 +145,28 @@ pub(super) fn run_incremental(
 
             if !pending_frns.is_empty() {
                 let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
-                let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
-                if let Ok(record_size) = geometry {
-                    let mut size_updates: Vec<(u64, crate::file_index::FileMetrics)> =
-                        Vec::with_capacity(pending_frns.len());
-                    let mut unresolved_frns: Vec<u64> = Vec::new();
-                    for &frn in &pending_frns {
-                        if shutdown.is_stopped() {
-                            let mut vol = handle.write();
-                            vol.pending_size_refresh
-                                .extend(pending_frns.iter().copied());
-                            vol.size_refresh_in_progress = false;
-                            break 'incremental;
+                let metrics =
+                    super::volume_io::with_volume(drive_letter, &shutdown, |volume_handle| {
+                        let record_size = crate::mft_reader::query_mft_geometry_pub(volume_handle)?;
+                        let mut size_updates = Vec::with_capacity(pending_frns.len());
+                        let mut unresolved_frns = Vec::new();
+                        for &frn in &pending_frns {
+                            if shutdown.is_stopped() {
+                                return Err("Size refresh cancelled".to_string());
+                            }
+                            if let Some(metrics) = crate::mft_reader::read_single_file_metrics(
+                                volume_handle,
+                                frn,
+                                record_size,
+                            ) {
+                                size_updates.push((frn, metrics));
+                            } else {
+                                unresolved_frns.push(frn);
+                            }
                         }
-                        if let Some(metrics) = crate::mft_reader::read_single_file_metrics(
-                            volume_handle,
-                            frn,
-                            record_size,
-                        ) {
-                            size_updates.push((frn, metrics));
-                        } else {
-                            unresolved_frns.push(frn);
-                        }
-                    }
+                        Ok((size_updates, unresolved_frns))
+                    });
+                if let Ok((size_updates, mut unresolved_frns)) = metrics {
                     if shutdown.is_stopped() {
                         let mut vol = handle.write();
                         vol.pending_size_refresh
@@ -276,7 +274,6 @@ pub(super) fn run_incremental(
             "[USN] {}:\\ Releasing volume at the last durable checkpoint; pending journal changes will be replayed on return",
             drive_letter
         );
-        crate::usn_journal::close_volume(volume_handle);
         return;
     }
 
@@ -292,6 +289,5 @@ pub(super) fn run_incremental(
     }
     flush_binary_snapshot_if_dirty(&handle, drive_letter);
 
-    crate::usn_journal::close_volume(volume_handle);
     eprintln!("[USN] {}:\\ Indexer stopped", drive_letter);
 }

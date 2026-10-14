@@ -113,6 +113,12 @@ impl ImageViewerApp {
     /// Sends a consistency probe request to the background worker if the interval has elapsed.
     /// The actual disk read happens off the UI thread.
     fn maybe_send_consistency_probe(&mut self) {
+        #[cfg(feature = "notify-watcher")]
+        if crate::infrastructure::removal_aware_watcher::path_is_suspended(Path::new(
+            &self.navigation_state.current_path,
+        )) {
+            return;
+        }
         if !self.watcher_fallback_polling {
             return;
         }
@@ -214,6 +220,10 @@ impl ImageViewerApp {
         }
 
         let inactive_path = PathBuf::from(&snapshot.path);
+        #[cfg(feature = "notify-watcher")]
+        if crate::infrastructure::removal_aware_watcher::path_is_suspended(&inactive_path) {
+            return;
+        }
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view

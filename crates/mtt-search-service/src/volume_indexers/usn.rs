@@ -4,19 +4,23 @@ use crate::file_index;
 use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
 use crate::usn_journal;
-use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
+use crate::volume_indices::SharedVolumeIndices;
 use crate::volume_lifecycle::VolumeStopSignal;
 
 mod cache;
+mod filesystem_fallback;
 mod full_scan;
 mod incremental;
 mod persistence;
+mod ready;
 mod size_refresh;
+mod volume_io;
 
 pub(crate) fn index_volume(
     drive_letter: char,
     volume_id: String,
     volume_serial: u32,
+    file_system: String,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
@@ -28,6 +32,16 @@ pub(crate) fn index_volume(
     }
     let startup_operation = crate::memory_trim::begin_active_operation("USN index startup");
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
+    let filesystem_fallback = filesystem_fallback::FilesystemFallback::new(
+        drive_letter,
+        volume_id.clone(),
+        volume_serial,
+        file_system,
+        indices.clone(),
+        indexing_progress.clone(),
+        db.clone(),
+        shutdown.clone(),
+    );
 
     let Some(cache::LoadedVolumeCache {
         mut index,
@@ -44,29 +58,20 @@ pub(crate) fn index_volume(
         return;
     }
 
-    // Open volume handle.
-    let volume_handle = match usn_journal::open_volume(drive_letter) {
-        Ok(h) => h,
-        Err(e) => {
-            indexing_progress.set_error(drive_letter, 0, "open_volume");
-            eprintln!("[USN] Failed to open volume {}:\\: {}", drive_letter, e);
-            return;
-        }
-    };
-
-    // Query USN Journal.
-    let journal_info = match usn_journal::query_usn_journal(volume_handle) {
-        Ok(info) => info,
-        Err(e) => {
-            indexing_progress.set_error(drive_letter, 0, "query_journal");
-            eprintln!(
-                "[USN] Failed to query USN journal for {}:\\: {}",
-                drive_letter, e
-            );
-            usn_journal::close_volume(volume_handle);
-            return;
-        }
-    };
+    let journal_info =
+        match volume_io::with_volume(drive_letter, &shutdown, usn_journal::query_usn_journal) {
+            Ok(info) => info,
+            Err(e) => {
+                indexing_progress.set_error(drive_letter, 0, "query_journal");
+                eprintln!(
+                    "[USN] Failed to query USN journal for {}:\\: {}",
+                    drive_letter, e
+                );
+                drop(startup_operation);
+                filesystem_fallback.run("USN journal unavailable");
+                return;
+            }
+        };
 
     eprintln!(
         "[USN] {}:\\ Journal ID: {}, First USN: {}, Next USN: {}",
@@ -150,7 +155,6 @@ pub(crate) fn index_volume(
                     Some(state.files_indexed),
                 );
                 let Some(_build_permit) = super::wait_for_index_build(&shutdown) else {
-                    usn_journal::close_volume(volume_handle);
                     indexing_progress.clear(drive_letter);
                     return;
                 };
@@ -177,7 +181,14 @@ pub(crate) fn index_volume(
             };
 
             if let Some(count) = loaded_count {
-                if !loaded_from_binary && count as u64 != state.files_indexed {
+                if !cache::has_usable_cached_records(&index, state.files_indexed) {
+                    eprintln!(
+                        "[USN] {}:\\ Cached snapshot is empty; forcing a fresh scan",
+                        drive_letter
+                    );
+                    index.clear();
+                    need_full_scan = true;
+                } else if !loaded_from_binary && count as u64 != state.files_indexed {
                     eprintln!(
                         "[USN] {}:\\ SQLite fallback snapshot is incomplete (loaded {} rows, volume_state says {}); forcing full scan",
                         drive_letter,
@@ -219,12 +230,14 @@ pub(crate) fn index_volume(
                     );
 
                     // Catch up from last USN.
-                    match usn_journal::read_usn_changes(
-                        volume_handle,
-                        &journal_info,
-                        index.last_usn,
-                        &mut index,
-                    ) {
+                    match volume_io::with_volume(drive_letter, &shutdown, |volume_handle| {
+                        usn_journal::read_usn_changes(
+                            volume_handle,
+                            &journal_info,
+                            index.last_usn,
+                            &mut index,
+                        )
+                    }) {
                         Ok(new_usn) => {
                             index.last_usn = new_usn;
                             eprintln!(
@@ -300,16 +313,10 @@ pub(crate) fn index_volume(
 
     // Full MFT enumeration if needed.
     if need_full_scan {
-        let Some(_build_permit) = super::wait_for_index_build(&shutdown) else {
-            usn_journal::close_volume(volume_handle);
-            indexing_progress.clear(drive_letter);
-            return;
-        };
         index = match full_scan::build_and_persist(
             drive_letter,
             &volume_id,
             volume_serial,
-            volume_handle,
             &journal_info,
             &indexing_progress,
             &db,
@@ -319,10 +326,10 @@ pub(crate) fn index_volume(
             Err(_error) => {
                 if shutdown.is_stopped() {
                     indexing_progress.clear(drive_letter);
-                    usn_journal::close_volume(volume_handle);
                     return;
                 }
-                usn_journal::close_volume(volume_handle);
+                drop(startup_operation);
+                filesystem_fallback.run("initial MFT scan failed");
                 return;
             }
         };
@@ -330,54 +337,17 @@ pub(crate) fn index_volume(
 
     if shutdown.is_stopped() {
         indexing_progress.clear(drive_letter);
-        usn_journal::close_volume(volume_handle);
         return;
     }
 
-    index.shrink_to_fit();
-    index.state = file_index::IndexState::Ready;
-    let current_usn = index.last_usn;
-    let sizes_already_loaded = index.sizes_loaded;
-
-    // Register / update this volume's handle. From here on, all per-volume
-    // mutations happen through `handle` directly — the outer registry lock is
-    // not taken again, so concurrent writers/readers on *other* volumes are
-    // never blocked by this thread.
-    let handle: VolumeIndexHandle = volume_indices::upsert(&indices, index);
-    indexing_progress.clear(drive_letter);
-    if sizes_already_loaded {
-        crate::memory_trim::request_trim(format!("{}:\\ index ready", drive_letter));
-    }
-
-    let size_worker = (!sizes_already_loaded).then(|| {
-        size_refresh::spawn_background_size_refresh(
-            drive_letter,
-            handle.clone(),
-            indexing_progress.clone(),
-            shutdown.clone(),
-        )
-    });
-
-    eprintln!(
-        "[USN] {}:\\ Index ready, starting incremental updates",
-        drive_letter
-    );
     drop(startup_operation);
-    incremental::run_incremental(
+    ready::publish_and_run(
         drive_letter,
-        current_usn,
+        index,
         journal_info,
-        volume_handle,
-        handle,
+        indices,
+        indexing_progress,
         db,
         shutdown,
     );
-    if let Some(worker) = size_worker {
-        if worker.join().is_err() {
-            eprintln!(
-                "[MFT-SIZE] {}:\\ Background size worker panicked",
-                drive_letter
-            );
-        }
-    }
 }

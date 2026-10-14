@@ -30,6 +30,9 @@ fn native_watch_paths_with(
             let Some(letter) = crate::infrastructure::windows::extract_drive_letter(path) else {
                 return true;
             };
+            if crate::infrastructure::removal_aware_watcher::is_suspended(letter) {
+                return false;
+            }
             let filesystem = filesystems
                 .entry(letter)
                 .or_insert_with(|| filesystem_for_path(path));

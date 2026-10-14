@@ -1,9 +1,11 @@
+mod dispatcher;
 mod non_usn;
 mod usn;
 
 use std::sync::OnceLock;
 
-pub(crate) use non_usn::index_non_ntfs_volume;
+pub(crate) use dispatcher::spawn_volume_indexer;
+pub(crate) use non_usn::index_filesystem_fallback;
 pub(crate) use usn::index_volume;
 
 use crate::volume_lifecycle::VolumeStopSignal;

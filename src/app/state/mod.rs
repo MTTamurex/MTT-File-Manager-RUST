@@ -3,10 +3,10 @@
 //! This module defines the `ImageViewerApp` struct, which holds the entire state
 //! of the application, including UI state, file lists, worker channels, and configuration.
 
+#[cfg(feature = "notify-watcher")]
+use crate::infrastructure::removal_aware_watcher::RemovalAwareWatcher;
 use eframe::egui;
 use lru::LruCache;
-#[cfg(feature = "notify-watcher")]
-use notify::RecommendedWatcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LastInput {
@@ -210,7 +210,7 @@ pub struct TimestampedNotifyEvent {
 #[cfg(feature = "notify-watcher")]
 pub struct NotifyWatcherSetupResult {
     pub request_id: u64,
-    pub watcher: Option<RecommendedWatcher>,
+    pub watcher: Option<RemovalAwareWatcher>,
     pub active_watched: bool,
     pub complete: bool,
 }
@@ -450,7 +450,7 @@ pub struct ImageViewerApp {
     // WATCHER SYSTEM (AUTO-REFRESH)
     // Per-folder notify-based watcher
     #[cfg(feature = "notify-watcher")]
-    pub watcher: Option<RecommendedWatcher>,
+    pub watcher: Option<RemovalAwareWatcher>,
     #[cfg(feature = "notify-watcher")]
     pub notify_watcher_setup_sender: Sender<NotifyWatcherSetupResult>,
     #[cfg(feature = "notify-watcher")]

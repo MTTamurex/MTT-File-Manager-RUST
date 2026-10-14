@@ -82,6 +82,10 @@ pub(super) fn load_volume_cache(
     })
 }
 
+pub(super) fn has_usable_cached_records(index: &VolumeIndex, persisted_records: u64) -> bool {
+    persisted_records > 0 && !index.records.is_empty()
+}
+
 fn cache_identity_matches(
     stored_id: &str,
     stored_serial: u32,
@@ -95,7 +99,8 @@ fn cache_identity_matches(
 
 #[cfg(test)]
 mod tests {
-    use super::cache_identity_matches;
+    use super::{cache_identity_matches, has_usable_cached_records};
+    use crate::file_index::VolumeIndex;
 
     #[test]
     fn cache_requires_a_known_matching_volume_serial() {
@@ -113,5 +118,17 @@ mod tests {
             "volume-id",
             0x5678
         ));
+    }
+
+    #[test]
+    fn empty_persisted_or_loaded_snapshot_requires_a_rescan() {
+        let empty = VolumeIndex::empty('R');
+        assert!(!has_usable_cached_records(&empty, 0));
+        assert!(!has_usable_cached_records(&empty, 25));
+
+        let mut index = VolumeIndex::empty('R');
+        assert!(index.insert_record_untracked(6, "file.txt", 5, false, false));
+        assert!(!has_usable_cached_records(&index, 0));
+        assert!(has_usable_cached_records(&index, 1));
     }
 }

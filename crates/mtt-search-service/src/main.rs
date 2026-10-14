@@ -329,83 +329,12 @@ fn spawn_indexers_for_discovered_volumes(
             );
             continue;
         }
-        spawn_volume_indexer(
+        volume_indexers::spawn_volume_indexer(
             volume,
             lifecycle,
             indices.clone(),
             indexing_progress.clone(),
             db.clone(),
-        );
-    }
-}
-
-fn spawn_volume_indexer(
-    volume: usn_journal::DiscoveredVolume,
-    lifecycle: &Arc<volume_lifecycle::VolumeLifecycle>,
-    indices: SharedVolumeIndices,
-    indexing_progress: Arc<indexing_progress::IndexingProgress>,
-    db: Arc<index_db::IndexDb>,
-) {
-    let Some(ticket) = lifecycle.claim_worker(&volume) else {
-        return;
-    };
-
-    let drive_letter = volume.drive_letter;
-    let volume_id = volume.volume_id.clone();
-    let volume_serial = volume.volume_serial;
-    let stop = ticket.stop_signal();
-    let label = if volume.label.is_empty() {
-        "(no label)"
-    } else {
-        volume.label.as_str()
-    };
-
-    if volume.usn_supported {
-        eprintln!(
-            "[SERVICE] Starting USN indexer for {}:\\ ({}, {})",
-            drive_letter, label, volume.file_system
-        );
-    } else {
-        eprintln!(
-            "[SERVICE] Starting fallback scanner for {}:\\ ({}, {})",
-            drive_letter, label, volume.file_system
-        );
-    }
-
-    indexing_progress.set_pending(drive_letter);
-    let progress_on_spawn_failure = indexing_progress.clone();
-    let spawn_result = std::thread::Builder::new()
-        .name(format!("volume-index-{drive_letter}"))
-        .spawn(move || {
-            let _ticket = ticket;
-            if volume.usn_supported {
-                volume_indexers::index_volume(
-                    drive_letter,
-                    volume_id,
-                    volume_serial,
-                    indices,
-                    indexing_progress,
-                    db,
-                    stop,
-                );
-            } else {
-                volume_indexers::index_non_ntfs_volume(
-                    drive_letter,
-                    volume_id,
-                    volume_serial,
-                    volume.file_system,
-                    indices,
-                    indexing_progress,
-                    db,
-                    stop,
-                );
-            }
-        });
-    if let Err(error) = spawn_result {
-        progress_on_spawn_failure.clear(drive_letter);
-        eprintln!(
-            "[SERVICE] Failed to spawn indexer for {}:\\: {}",
-            drive_letter, error
         );
     }
 }

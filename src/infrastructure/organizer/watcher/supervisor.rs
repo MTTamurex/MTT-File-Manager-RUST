@@ -1,6 +1,7 @@
 use crate::domain::organizer_rule::OrganizerRule;
 use crate::infrastructure::organizer::{OrganizerEvent, OrganizerRuleStatus};
-use notify::{RecursiveMode, Watcher};
+use crate::infrastructure::removal_aware_watcher::{path_is_suspended, RemovalAwareWatcher};
+use notify::RecursiveMode;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{
@@ -16,7 +17,7 @@ use super::{
 };
 
 pub(super) struct WatcherRuntime {
-    pub(super) watcher: Option<notify::RecommendedWatcher>,
+    pub(super) watcher: Option<RemovalAwareWatcher>,
     pub(super) signature: Option<Vec<(String, bool)>>,
     pub(super) ready: bool,
     pub(super) registered_folders: HashSet<String>,
@@ -64,7 +65,11 @@ pub(super) fn reconcile_watcher(
     let signature = watch_signature(rules);
     let now = Instant::now();
     let signature_changed = runtime.signature.as_ref() != Some(&signature);
-    if signature_changed || (!runtime.ready && now >= runtime.next_retry) {
+    let watcher_released = runtime
+        .watcher
+        .as_ref()
+        .is_some_and(|watcher| watcher.needs_refresh());
+    if signature_changed || watcher_released || (!runtime.ready && now >= runtime.next_retry) {
         let (new_watcher, ready, new_registered_folders) = configure_watcher(
             rules,
             runtime.event_sender.clone(),
@@ -123,15 +128,18 @@ pub(super) fn status_for_rule(
     if paused_rules.contains(&rule.id) {
         return OrganizerRuleStatus::Paused;
     }
-    let source_available = rule.source_folder.is_dir();
-    let destination_available = rule.destination_folder.is_dir();
+    let source_available = !path_is_suspended(&rule.source_folder) && rule.source_folder.is_dir();
+    let destination_available =
+        !path_is_suspended(&rule.destination_folder) && rule.destination_folder.is_dir();
     match (source_available, destination_available) {
         (false, false) => OrganizerRuleStatus::BothUnavailable,
         (false, true) => OrganizerRuleStatus::SourceUnavailable,
         (true, false) => OrganizerRuleStatus::DestinationUnavailable,
         (true, true)
             if rule_watch_folders(rule).all(|folder| {
-                folder.is_dir() && registered_folders.contains(&normalize_watched_path(folder))
+                !path_is_suspended(folder)
+                    && folder.is_dir()
+                    && registered_folders.contains(&normalize_watched_path(folder))
             }) =>
         {
             OrganizerRuleStatus::Active
@@ -144,7 +152,7 @@ fn watch_signature(rules: &[OrganizerRule]) -> Vec<(String, bool)> {
     watched_folders(rules)
         .into_iter()
         .map(|folder| {
-            let available = folder.is_dir();
+            let available = !path_is_suspended(&folder) && folder.is_dir();
             (normalize_watched_path(&folder), available)
         })
         .collect()
@@ -155,9 +163,9 @@ fn configure_watcher(
     event_sender: SyncSender<notify::Result<notify::Event>>,
     watch_overflowed: Arc<AtomicBool>,
     ui_ctx: &eframe::egui::Context,
-) -> (Option<notify::RecommendedWatcher>, bool, HashSet<String>) {
+) -> (Option<RemovalAwareWatcher>, bool, HashSet<String>) {
     let ui_ctx = ui_ctx.clone();
-    let Ok(mut watcher) = notify::recommended_watcher(move |event| {
+    let Ok(mut watcher) = RemovalAwareWatcher::new(move |event| {
         if matches!(
             event_sender.try_send(event),
             Err(std::sync::mpsc::TrySendError::Full(_))
@@ -173,7 +181,7 @@ fn configure_watcher(
     let mut ready = true;
     let mut registered_folders = HashSet::new();
     for folder in watched_folders(rules) {
-        if !folder.is_dir() {
+        if path_is_suspended(&folder) || !folder.is_dir() {
             ready = false;
             continue;
         }
