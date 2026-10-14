@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
@@ -15,6 +14,7 @@ use crate::fs_walker;
 use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
+use crate::volume_lifecycle::VolumeStopSignal;
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -33,23 +33,29 @@ enum NonUsnWaitResult {
 
 pub(crate) fn index_non_ntfs_volume(
     drive_letter: char,
+    volume_id: String,
     file_system: String,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
-    shutdown: Arc<AtomicBool>,
+    shutdown: VolumeStopSignal,
 ) {
+    if shutdown.is_stopped() {
+        indexing_progress.clear(drive_letter);
+        return;
+    }
     let persisted_record_estimate = db
         .load_volume_state(drive_letter)
+        .filter(|state| state.volume_id.eq_ignore_ascii_case(&volume_id))
         .map(|state| state.files_indexed.min(usize::MAX as u64) as usize);
 
     let cadence = non_usn_scan_cadence(&file_system);
     let fs_lower = file_system.to_ascii_lowercase();
-    let change_monitor = if is_fat_family_fs(&fs_lower) {
-        None
-    } else {
-        NonUsnChangeMonitor::new(drive_letter)
-    };
+    // Treat change notifications as an early-rescan hint on every non-USN
+    // filesystem, including FAT/exFAT. Some FAT drivers miss cross-process
+    // notifications, so the bounded periodic scan remains the correctness
+    // fallback for those filesystems.
+    let change_monitor = NonUsnChangeMonitor::new(drive_letter);
 
     eprintln!(
         "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {}, periodic={}s, trigger-gap={}s, change-monitor={})",
@@ -69,7 +75,13 @@ pub(crate) fn index_non_ntfs_volume(
     let mut cached_index = persisted_record_estimate
         .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
         .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
-    if let Ok(Some(cached_count)) = db.load_into_index(&mut cached_index, |_| {}) {
+    cached_index.volume_id = volume_id.clone();
+    let cached_count = if persisted_record_estimate.is_some() {
+        db.load_into_index(&mut cached_index, |_| {}).ok().flatten()
+    } else {
+        None
+    };
+    if let Some(cached_count) = cached_count {
         cached_index.shrink_to_fit();
         cached_index.journal_id = 0;
         cached_index.last_usn = 0;
@@ -86,21 +98,23 @@ pub(crate) fn index_non_ntfs_volume(
     // Adaptive backoff: if consecutive scans show no change in record count,
     // increase the wait interval (up to 3× the base) to reduce I/O on idle volumes.
     // Reset to base interval as soon as a change is detected.
-    // Note: record count alone can miss renames (delete+create = same count),
-    // so we keep the multiplier conservative. Volumes with a change_monitor
-    // (ReadDirectoryChangesW) are safe because the monitor wakes the loop
-    // immediately on real changes regardless of backoff.
-    let max_interval = cadence.periodic_interval * 3;
+    // Note: record count alone can miss renames (delete+create = same count).
+    // Change notifications accelerate a refresh when available, while physical
+    // FAT-family volumes retain the base interval to bound stale search results
+    // if their driver does not deliver cross-process events.
+    let max_interval = max_non_usn_scan_interval(&fs_lower, cadence.periodic_interval);
     let mut current_interval = cadence.periodic_interval;
     let mut prev_record_count: Option<usize> = persisted_record_estimate;
 
     loop {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.is_stopped() {
             break;
         }
 
         let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
-        let _build_permit = super::begin_index_build();
+        let Some(_build_permit) = super::wait_for_index_build(&shutdown) else {
+            break;
+        };
         crate::memory_trim::log_process_memory(&format!(
             "{}:\\ before fallback filesystem scan",
             drive_letter
@@ -109,6 +123,7 @@ pub(crate) fn index_non_ntfs_volume(
         let mut scanned_index = prev_record_count
             .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
             .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
+        scanned_index.volume_id = volume_id.clone();
         scanned_index.state = file_index::IndexState::Scanning;
         indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
 
@@ -184,6 +199,9 @@ pub(crate) fn index_non_ntfs_volume(
                 );
             }
             Err(e) => {
+                if shutdown.is_stopped() {
+                    break;
+                }
                 indexing_progress.set_error(
                     drive_letter,
                     scanned_index.records.len() as u64,
@@ -264,6 +282,14 @@ fn is_fat_family_fs(fs: &str) -> bool {
     matches!(fs, "exfat" | "fat32" | "fat" | "fat16" | "fat12")
 }
 
+fn max_non_usn_scan_interval(file_system: &str, base: std::time::Duration) -> std::time::Duration {
+    if is_fat_family_fs(file_system) {
+        base
+    } else {
+        base * 3
+    }
+}
+
 struct NonUsnChangeMonitor {
     handle: HANDLE,
 }
@@ -306,13 +332,13 @@ impl NonUsnChangeMonitor {
 
     fn wait_for_change_or_timeout(
         &self,
-        shutdown: &Arc<AtomicBool>,
+        shutdown: &VolumeStopSignal,
         timeout: std::time::Duration,
     ) -> NonUsnWaitResult {
         let start = std::time::Instant::now();
 
         while start.elapsed() < timeout {
-            if shutdown.load(Ordering::Relaxed) {
+            if shutdown.is_stopped() {
                 return NonUsnWaitResult::Shutdown;
             }
 
@@ -343,7 +369,7 @@ impl NonUsnChangeMonitor {
             return NonUsnWaitResult::Timeout;
         }
 
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.is_stopped() {
             NonUsnWaitResult::Shutdown
         } else {
             NonUsnWaitResult::Timeout
@@ -356,5 +382,36 @@ impl Drop for NonUsnChangeMonitor {
         unsafe {
             let _ = FindCloseChangeNotification(self.handle);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_fat_family_fs, max_non_usn_scan_interval, non_usn_scan_cadence};
+    use std::time::Duration;
+
+    #[test]
+    fn fat_family_keeps_a_bounded_polling_interval() {
+        for file_system in ["FAT32", "exFAT", "FAT16"] {
+            assert!(is_fat_family_fs(&file_system.to_ascii_lowercase()));
+            let cadence = non_usn_scan_cadence(file_system);
+            assert_eq!(cadence.periodic_interval, Duration::from_secs(120));
+            assert_eq!(
+                max_non_usn_scan_interval(
+                    &file_system.to_ascii_lowercase(),
+                    cadence.periodic_interval
+                ),
+                cadence.periodic_interval
+            );
+        }
+    }
+
+    #[test]
+    fn non_fat_filesystems_keep_adaptive_idle_backoff() {
+        let cadence = non_usn_scan_cadence("NTFS-like");
+        assert_eq!(
+            max_non_usn_scan_interval("ntfs-like", cadence.periodic_interval),
+            cadence.periodic_interval * 3
+        );
     }
 }

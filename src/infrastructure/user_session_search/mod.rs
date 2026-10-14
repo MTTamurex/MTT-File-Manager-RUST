@@ -307,7 +307,7 @@ impl UserSessionSearchIndex {
     /// Refresh candidate volume set and rescan stale/new volumes.
     ///
     /// `service_online` indicates whether service status can be trusted now.
-    /// - If online: index drives missing from service coverage.
+    /// - If online: index only user-session virtual drives missing from service coverage.
     /// - If offline: index only strongly virtual drives (to avoid scanning C:\).
     pub fn refresh(
         &mut self,

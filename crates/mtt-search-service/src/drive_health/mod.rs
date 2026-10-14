@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::volume_lifecycle::VolumeUseGuard;
 use mtt_search_protocol::{DriveHealthSnapshot, DriveHealthState};
 
 use protocol_io::{query_protocol_data, ProtocolQuery};
@@ -39,7 +40,11 @@ fn set_background_thread_priority() {
     }
 }
 
-pub(crate) fn query(drive_letter: char, background: bool) -> Result<DriveHealthSnapshot, String> {
+pub(crate) fn query(
+    drive_letter: char,
+    background: bool,
+    volume_use: Option<VolumeUseGuard>,
+) -> Result<DriveHealthSnapshot, String> {
     if QUERY_ACTIVE
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -52,6 +57,7 @@ pub(crate) fn query(drive_letter: char, background: bool) -> Result<DriveHealthS
     let worker = std::thread::Builder::new()
         .name("drive-health-query".to_string())
         .spawn(move || {
+            let _volume_use = volume_use;
             if background {
                 set_background_thread_priority();
             }
@@ -65,7 +71,11 @@ pub(crate) fn query(drive_letter: char, background: bool) -> Result<DriveHealthS
             }
 
             let _permit = QueryPermit;
-            let _ = result_tx.send(query_inner(drive_letter));
+            let result = query_inner(drive_letter);
+            while protocol_io::pass_through_is_active() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let _ = result_tx.send(result);
         })
         .map_err(|error| {
             QUERY_BACKGROUND.store(false, Ordering::Release);

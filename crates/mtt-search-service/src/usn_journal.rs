@@ -1,8 +1,8 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, GetDriveTypeW, GetVolumeInformationW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, GetDriveTypeW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -76,6 +76,7 @@ pub struct UsnJournalInfo {
 #[derive(Clone, Debug)]
 pub struct DiscoveredVolume {
     pub drive_letter: char,
+    pub volume_id: String,
     pub label: String,
     pub file_system: String,
     pub usn_supported: bool,
@@ -138,10 +139,22 @@ pub fn discover_volumes() -> Vec<DiscoveredVolume> {
             let label = String::from_utf16_lossy(&vol_name)
                 .trim_end_matches('\0')
                 .to_string();
+            let mut volume_name = [0u16; 128];
+            let volume_id = unsafe {
+                GetVolumeNameForVolumeMountPointW(PCWSTR(root_wide.as_ptr()), &mut volume_name)
+            }
+            .ok()
+            .map(|()| {
+                String::from_utf16_lossy(&volume_name)
+                    .trim_end_matches('\0')
+                    .to_string()
+            })
+            .unwrap_or_default();
             let usn_supported = fs.eq_ignore_ascii_case("NTFS") || fs.eq_ignore_ascii_case("ReFS");
 
             volumes.push(DiscoveredVolume {
                 drive_letter: letter,
+                volume_id,
                 label,
                 file_system: fs,
                 usn_supported,

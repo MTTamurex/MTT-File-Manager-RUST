@@ -3,7 +3,7 @@
 //! This module handles the setup and management of the filesystem watcher
 //! to detect external changes in the current directory.
 
-use crate::app::state::{ImageViewerApp, WatcherFsProbeCacheEntry};
+use crate::app::state::ImageViewerApp;
 #[cfg(feature = "notify-watcher")]
 use notify::{RecursiveMode, Watcher};
 #[cfg(feature = "notify-watcher")]
@@ -11,7 +11,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
+mod fallback;
+
+#[cfg(feature = "notify-watcher")]
+mod polling_policy;
 
 /// EST-02: cap on concurrently alive "notify-watcher-setup" threads. Setup
 /// performs blocking kernel calls (`CreateFileW`/RDCW handle acquisition) that
@@ -40,106 +43,6 @@ fn miller_ancestor_watch_paths(path: &Path) -> Vec<PathBuf> {
 }
 
 impl ImageViewerApp {
-    fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {
-        self.watcher_fallback_last_probe = Instant::now();
-        self.watcher_fallback_signature = None;
-
-        let fs_probe_start = Instant::now();
-        let drive_letter = crate::infrastructure::windows::extract_drive_letter(path);
-
-        let (fs_name, is_usn, fs_probe_cache_hit) = if let Some(dl) = drive_letter {
-            let cached_entry = self.watcher_fs_probe_cache.get(&dl).cloned();
-            if let Some(entry) = cached_entry {
-                if entry.probed_at.elapsed() <= WATCHER_FS_PROBE_CACHE_TTL {
-                    (entry.file_system, entry.is_usn, true)
-                } else {
-                    self.cached_file_system_for_drive(path, dl)
-                }
-            } else {
-                self.cached_file_system_for_drive(path, dl)
-            }
-        } else {
-            (None, false, false)
-        };
-
-        let fs_probe_ms = fs_probe_start.elapsed().as_millis();
-
-        self.watcher_fallback_fs = fs_name.clone();
-
-        if is_usn {
-            // NTFS / ReFS — USN journal + reliable RDCW. Zero polling overhead.
-            self.watcher_fallback_polling = false;
-            return (fs_probe_ms, fs_probe_cache_hit, drive_letter);
-        }
-
-        // Non-USN filesystem: check if we already learned this drive is unreliable.
-        let already_known_bad = drive_letter
-            .map(|dl| {
-                self.rdcw_unreliable_drives
-                    .get(&dl)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-
-        if already_known_bad {
-            // We previously detected RDCW drift on this drive → active polling.
-            self.watcher_fallback_polling = true;
-            log::info!(
-                "[WATCHER] Drive {:?} (fs={:?}): RDCW previously verified as unreliable → active polling",
-                drive_letter, fs_name
-            );
-        } else {
-            // RDCW not yet proven bad. Enable verification mode: slow probing
-            // that checks for drift without invalidating caches.
-            // If drift is found, maybe_poll_non_usn_consistency will escalate.
-            self.watcher_fallback_polling = true;
-            log::info!(
-                "[WATCHER] Drive {:?} (fs={:?}): RDCW unverified → verification probing active",
-                drive_letter,
-                fs_name
-            );
-        }
-
-        (fs_probe_ms, fs_probe_cache_hit, drive_letter)
-    }
-
-    fn cached_file_system_for_drive(
-        &mut self,
-        path: &Path,
-        drive_letter: char,
-    ) -> (Option<String>, bool, bool) {
-        let drive_root = format!("{}:\\", drive_letter);
-        let fs_name = self
-            .drive_state
-            .drive_info_cache
-            .get(&drive_root)
-            .and_then(|info| (!info.file_system.is_empty()).then(|| info.file_system.clone()));
-        let is_usn = fs_name
-            .as_deref()
-            .map(crate::infrastructure::windows::is_usn_filesystem)
-            .unwrap_or(false);
-
-        if fs_name.is_some() {
-            self.watcher_fs_probe_cache.insert(
-                drive_letter,
-                WatcherFsProbeCacheEntry {
-                    file_system: fs_name.clone(),
-                    is_usn,
-                    probed_at: Instant::now(),
-                },
-            );
-        } else {
-            self.watcher_fs_probe_cache.remove(&drive_letter);
-            log::debug!(
-                "[WATCHER] Filesystem metadata unavailable in cache for {:?}; using non-blocking fallback probing",
-                path
-            );
-        }
-
-        (fs_name, is_usn, false)
-    }
-
     /// Sets up monitoring for the current folder using per-folder notify-watcher.
     ///
     /// The consistency probe (background worker) provides additional drift detection
@@ -235,17 +138,17 @@ impl ImageViewerApp {
             }
         }
 
+        // Invalidate stale setup results even when no native watches remain
+        // or the thread cap forces this request to use polling temporarily.
+        self.notify_watcher_setup_request_id = self.notify_watcher_setup_request_id.wrapping_add(1);
+        let request_id = self.notify_watcher_setup_request_id;
+
         if paths_to_watch.is_empty() {
             self.watcher = None;
             self.notify_watcher_setup_pending = false;
             self.notify_watcher_setup_retry_after = None;
             return;
         }
-
-        // Every request invalidates older setup results, even if the thread cap
-        // forces this request to use consistency polling temporarily.
-        self.notify_watcher_setup_request_id = self.notify_watcher_setup_request_id.wrapping_add(1);
-        let request_id = self.notify_watcher_setup_request_id;
 
         // Reserve a setup slot atomically before spawning. Incrementing inside
         // the new thread allowed concurrent callers to all pass the cap check.
@@ -295,6 +198,18 @@ impl ImageViewerApp {
                     }
                 }
                 let _setup_guard = SetupThreadGuard;
+
+                let paths_to_watch = polling_policy::native_watch_paths(paths_to_watch);
+                if paths_to_watch.is_empty() {
+                    let _ = setup_tx.send(crate::app::state::NotifyWatcherSetupResult {
+                        request_id,
+                        watcher: None,
+                        active_watched: false,
+                        complete: true,
+                    });
+                    ctx_for_setup.request_repaint();
+                    return;
+                }
 
                 let watcher_result =
                     notify::recommended_watcher(move |res: notify::Result<notify::Event>| {

@@ -1,5 +1,6 @@
 mod handler;
 mod pipe_io;
+mod volume_access;
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -18,6 +19,7 @@ use windows::Win32::System::IO::OVERLAPPED;
 use crate::indexing_progress::IndexingProgress;
 use crate::security_policy::IpcSecurityPolicy;
 use crate::volume_indices::SharedVolumeIndices;
+use crate::volume_lifecycle::VolumeLifecycle;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 const PIPE_MAX_INSTANCES: u32 = 32;
@@ -47,6 +49,7 @@ pub fn run_ipc_server(
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
+    volume_lifecycle: Arc<VolumeLifecycle>,
 ) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));
@@ -176,6 +179,7 @@ pub fn run_ipc_server(
         let active_for_client = active_clients.clone();
         let active_pids_for_client = active_clients_by_pid.clone();
         let policy_for_client = security_policy.clone();
+        let lifecycle_for_client = volume_lifecycle.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -208,6 +212,7 @@ pub fn run_ipc_server(
                     &warming_for_client,
                     &warm_epoch_for_client,
                     &policy_for_client,
+                    &lifecycle_for_client,
                     &watchdog_tx,
                 )
             })) {

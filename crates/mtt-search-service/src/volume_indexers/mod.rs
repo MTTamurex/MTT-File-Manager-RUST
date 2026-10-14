@@ -1,11 +1,12 @@
 mod non_usn;
 mod usn;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 pub(crate) use non_usn::index_non_ntfs_volume;
 pub(crate) use usn::index_volume;
+
+use crate::volume_lifecycle::VolumeStopSignal;
 
 fn index_build_lock() -> &'static parking_lot::Mutex<()> {
     static LOCK: OnceLock<parking_lot::Mutex<()>> = OnceLock::new();
@@ -17,13 +18,22 @@ fn binary_snapshot_lock() -> &'static parking_lot::Mutex<()> {
     LOCK.get_or_init(|| parking_lot::Mutex::new(()))
 }
 
-/// Keep full-volume builders from multiplying their O(N) working sets across drives.
-pub(crate) fn begin_index_build() -> parking_lot::MutexGuard<'static, ()> {
-    index_build_lock().lock()
-}
-
 pub(crate) fn try_begin_index_build() -> Option<parking_lot::MutexGuard<'static, ()>> {
     index_build_lock().try_lock()
+}
+
+pub(crate) fn wait_for_index_build(
+    stop: &VolumeStopSignal,
+) -> Option<parking_lot::MutexGuard<'static, ()>> {
+    loop {
+        if stop.is_stopped() {
+            return None;
+        }
+        if let Some(guard) = try_begin_index_build() {
+            return Some(guard);
+        }
+        stop.wait_or_stop(std::time::Duration::from_millis(50));
+    }
 }
 
 /// A checkpoint is streamed, but it still walks the complete mapped index.
@@ -32,20 +42,22 @@ pub(crate) fn begin_binary_snapshot() -> parking_lot::MutexGuard<'static, ()> {
 }
 
 pub(crate) fn wait_for_shutdown_or_timeout(
-    shutdown: &Arc<AtomicBool>,
+    shutdown: &VolumeStopSignal,
     timeout: std::time::Duration,
 ) -> bool {
-    const STEP: std::time::Duration = std::time::Duration::from_millis(500);
+    const SHUTDOWN_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.is_stopped() {
             return true;
         }
 
         let remaining = timeout.saturating_sub(start.elapsed());
-        std::thread::sleep(STEP.min(remaining));
+        if shutdown.wait_or_stop(remaining.min(SHUTDOWN_POLL_INTERVAL)) {
+            return true;
+        }
     }
 
-    shutdown.load(Ordering::Relaxed)
+    shutdown.is_stopped()
 }

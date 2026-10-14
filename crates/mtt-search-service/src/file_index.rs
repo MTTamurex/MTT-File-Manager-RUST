@@ -85,6 +85,8 @@ pub enum IndexState {
 pub struct VolumeIndex {
     /// Drive letter, e.g., 'C'.
     pub drive_letter: char,
+    /// Stable volume GUID path used to distinguish media that reuse a drive letter.
+    pub volume_id: String,
     /// File Reference Number -> FileRecord.
     pub records: RecordStore,
     /// Reverse index: parent FRN -> child FRNs.
@@ -143,6 +145,7 @@ impl VolumeIndex {
     pub fn empty(drive_letter: char) -> Self {
         Self {
             drive_letter,
+            volume_id: String::new(),
             records: RecordStore::new(),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(0),
@@ -170,6 +173,7 @@ impl VolumeIndex {
     ) -> Self {
         Self {
             drive_letter,
+            volume_id: String::new(),
             records: RecordStore::with_capacity(estimated_records),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),
@@ -197,6 +201,7 @@ impl VolumeIndex {
     ) -> Self {
         Self {
             drive_letter,
+            volume_id: String::new(),
             records: RecordStore::with_sorted_capacity(estimated_records),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),

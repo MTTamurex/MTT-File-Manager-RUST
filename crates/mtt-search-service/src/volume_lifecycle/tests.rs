@@ -1,0 +1,98 @@
+use super::{normalize_volume_id, volume_ids_match, VolumeLifecycle, VolumeStopSignal};
+use crate::indexing_progress::IndexingProgress;
+use crate::usn_journal::DiscoveredVolume;
+use crate::volume_indices;
+use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
+
+fn volume() -> DiscoveredVolume {
+    DiscoveredVolume {
+        drive_letter: 'R',
+        volume_id: r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".to_string(),
+        label: String::new(),
+        file_system: "NTFS".to_string(),
+        usn_supported: true,
+    }
+}
+
+#[test]
+fn volume_identity_normalization_ignores_trailing_separator_and_case() {
+    assert_eq!(
+        normalize_volume_id(r"\\?\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}\"),
+        normalize_volume_id(r"\\?\volume{abcdef01-2345-6789-abcd-ef0123456789}")
+    );
+}
+
+#[test]
+fn pnp_symbolic_link_matches_the_mounted_volume_guid() {
+    assert!(volume_ids_match(
+        r"\\?\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}\",
+        r"\??\Volume{abcdef01-2345-6789-abcd-ef0123456789}"
+    ));
+    assert!(!volume_ids_match(
+        r"\\?\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}\",
+        r"\\?\Volume{FEDCBA98-7654-3210-FEDC-BA9876543210}\"
+    ));
+}
+
+#[test]
+fn local_stop_wakes_a_waiting_indexer_immediately() {
+    let stop = VolumeStopSignal::new(Arc::new(AtomicBool::new(false)));
+    let waiter = stop.clone();
+    let thread = std::thread::spawn(move || waiter.wait_or_stop(Duration::from_secs(30)));
+
+    std::thread::sleep(Duration::from_millis(10));
+    stop.request_stop();
+
+    assert!(thread.join().unwrap());
+}
+
+#[test]
+fn removal_waits_for_io_leases_and_the_volume_worker() {
+    let (wake_tx, _wake_rx) = mpsc::channel();
+    let lifecycle = VolumeLifecycle::new(
+        Arc::new(AtomicBool::new(false)),
+        volume_indices::new_shared(),
+        Arc::new(IndexingProgress::new()),
+        wake_tx,
+    );
+    let volume = volume();
+    let ticket = lifecycle
+        .claim_worker(&volume)
+        .expect("mounted volume should claim an index worker");
+    let stop = ticket.stop_signal();
+    let io_lease = lifecycle
+        .acquire_volume(volume.drive_letter)
+        .unwrap()
+        .expect("mounted volume should provide an I/O lease");
+
+    let lifecycle_for_removal = lifecycle.clone();
+    let volume_id = volume.volume_id.clone();
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    let remover = std::thread::spawn(move || {
+        let _ = result_tx.send(lifecycle_for_removal.prepare_remove(&volume_id));
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !stop.is_stopped() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        stop.is_stopped(),
+        "the removal request must cancel indexing"
+    );
+    assert!(result_rx.recv_timeout(Duration::from_millis(30)).is_err());
+
+    drop(io_lease);
+    drop(ticket);
+    assert!(result_rx.recv_timeout(Duration::from_secs(1)).unwrap());
+    remover.join().unwrap();
+    assert!(lifecycle.acquire_volume(volume.drive_letter).is_err());
+
+    lifecycle.removal_failed(&volume.volume_id);
+    assert!(lifecycle
+        .acquire_volume(volume.drive_letter)
+        .unwrap()
+        .is_some());
+}

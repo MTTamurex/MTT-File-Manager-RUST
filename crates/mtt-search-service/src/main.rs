@@ -1,4 +1,5 @@
 mod child_index;
+mod device_notifications;
 mod disk_analysis;
 mod drive_health;
 mod file_index;
@@ -17,13 +18,13 @@ mod service_control;
 mod usn_journal;
 mod volume_indexers;
 mod volume_indices;
+mod volume_lifecycle;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use parking_lot::Mutex;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 
 use crate::volume_indices::SharedVolumeIndices;
@@ -174,6 +175,13 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     // accepting connections immediately — even before volumes are discovered.
     let indices: SharedVolumeIndices = volume_indices::new_shared();
     let indexing_progress = Arc::new(indexing_progress::IndexingProgress::new());
+    let (discovery_wake, discovery_events) = mpsc::channel();
+    let volume_lifecycle = volume_lifecycle::VolumeLifecycle::new(
+        shutdown.clone(),
+        indices.clone(),
+        indexing_progress.clone(),
+        discovery_wake,
+    );
 
     // Open persistence (needed by both IPC and indexers)
     let db_path = match index_db::get_db_path() {
@@ -201,61 +209,60 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     // Log baseline cache sizes without delaying IPC startup.
     std::thread::spawn(index_db::diagnose_cache_size);
 
-    // Spawn volume discovery + indexing in a background thread.
-    // This allows the IPC server to start listening immediately instead of
-    // blocking on discover_volumes() which can take seconds if network or
-    // optical drives are mounted.
-    {
+    let device_notifications = match device_notifications::register_volume_notifications(
+        volume_lifecycle.clone(),
+    ) {
+        Ok(registration) => Some(registration),
+        Err(error) => {
+            eprintln!(
+                "[SERVICE] Volume indexing disabled because PnP removal notifications could not be registered: {}",
+                redact_paths(&error)
+            );
+            None
+        }
+    };
+
+    if device_notifications.is_some() {
         let indices = indices.clone();
         let indexing_progress = indexing_progress.clone();
+        let lifecycle = volume_lifecycle.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
         std::thread::spawn(move || {
-            let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
-
+            let mut handle_notifications =
+                device_notifications::VolumeHandleNotifications::default();
             let discovered = usn_journal::discover_volumes();
-            if discovered.is_empty() {
-                eprintln!("[SERVICE] No accessible volumes found at startup.");
-            } else {
-                for volume in &discovered {
-                    if volume.usn_supported {
-                        eprintln!(
-                            "[SERVICE] Found USN-capable volume: {}:\\ ({}, {})",
-                            volume.drive_letter, volume.label, volume.file_system
-                        );
-                    } else {
-                        eprintln!(
-                            "[SERVICE] Found fallback volume: {}:\\ ({}, {})",
-                            volume.drive_letter, volume.label, volume.file_system
-                        );
-                    }
-                }
-            }
-
+            log_discovered_volumes(&discovered);
             spawn_indexers_for_discovered_volumes(
                 discovered,
-                &tracked_volumes,
+                &lifecycle,
                 &indices,
                 &indexing_progress,
                 &db,
-                &shutdown,
+                &mut handle_notifications,
             );
 
-            // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
             const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
             loop {
-                if volume_indexers::wait_for_shutdown_or_timeout(&shutdown, DISCOVERY_INTERVAL) {
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                match discovery_events.recv_timeout(DISCOVERY_INTERVAL) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                if shutdown.load(Ordering::Acquire) {
                     break;
                 }
 
                 let discovered = usn_journal::discover_volumes();
                 spawn_indexers_for_discovered_volumes(
                     discovered,
-                    &tracked_volumes,
+                    &lifecycle,
                     &indices,
                     &indexing_progress,
                     &db,
-                    &shutdown,
+                    &mut handle_notifications,
                 );
             }
         });
@@ -266,71 +273,84 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         "[SERVICE] Starting IPC server on {}...",
         mtt_search_protocol::PIPE_NAME
     );
-    ipc_server::run_ipc_server(indices.clone(), indexing_progress.clone(), shutdown.clone());
+    ipc_server::run_ipc_server(
+        indices.clone(),
+        indexing_progress.clone(),
+        shutdown.clone(),
+        volume_lifecycle,
+    );
+    drop(device_notifications);
     eprintln!("[SERVICE] Shutting down...");
+}
+
+fn log_discovered_volumes(discovered: &[usn_journal::DiscoveredVolume]) {
+    if discovered.is_empty() {
+        eprintln!("[SERVICE] No accessible volumes found at startup.");
+        return;
+    }
+
+    for volume in discovered {
+        if volume.usn_supported {
+            eprintln!(
+                "[SERVICE] Found USN-capable volume: {}:\\ ({}, {})",
+                volume.drive_letter, volume.label, volume.file_system
+            );
+        } else {
+            eprintln!(
+                "[SERVICE] Found fallback volume: {}:\\ ({}, {})",
+                volume.drive_letter, volume.label, volume.file_system
+            );
+        }
+    }
 }
 
 fn spawn_indexers_for_discovered_volumes(
     discovered: Vec<usn_journal::DiscoveredVolume>,
-    tracked_volumes: &Arc<Mutex<HashSet<char>>>,
+    lifecycle: &Arc<volume_lifecycle::VolumeLifecycle>,
     indices: &SharedVolumeIndices,
     indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
-    shutdown: &Arc<AtomicBool>,
+    handle_notifications: &mut device_notifications::VolumeHandleNotifications,
 ) {
-    let volumes_to_spawn = claim_discovered_volumes(discovered, tracked_volumes, indexing_progress);
+    lifecycle.reconcile_discovered_volumes(&discovered);
+    handle_notifications.reconcile(&discovered);
 
-    for volume in volumes_to_spawn {
+    for volume in discovered {
+        if volume.volume_id.is_empty() {
+            continue;
+        }
+        if let Err(error) = handle_notifications.ensure(&volume, lifecycle) {
+            eprintln!(
+                "[PNP] Skipping indexer for {}: {}",
+                volume.drive_letter,
+                redact_paths(&error)
+            );
+            continue;
+        }
         spawn_volume_indexer(
             volume,
-            tracked_volumes.clone(),
+            lifecycle,
             indices.clone(),
             indexing_progress.clone(),
             db.clone(),
-            shutdown.clone(),
         );
     }
 }
 
-fn claim_discovered_volumes(
-    discovered: Vec<usn_journal::DiscoveredVolume>,
-    tracked_volumes: &Arc<Mutex<HashSet<char>>>,
-    indexing_progress: &indexing_progress::IndexingProgress,
-) -> Vec<usn_journal::DiscoveredVolume> {
-    let mut volumes_to_spawn = Vec::new();
-
-    for volume in discovered {
-        let drive_letter = volume.drive_letter;
-        let should_spawn = {
-            let mut tracked = tracked_volumes.lock();
-            tracked.insert(drive_letter)
-        };
-
-        if !should_spawn {
-            continue;
-        }
-
-        volumes_to_spawn.push(volume);
-    }
-
-    // Publish every discovered volume before any indexer can finish and make
-    // the initial-indexing notice believe that startup is complete.
-    for volume in &volumes_to_spawn {
-        indexing_progress.set_pending(volume.drive_letter);
-    }
-
-    volumes_to_spawn
-}
-
 fn spawn_volume_indexer(
     volume: usn_journal::DiscoveredVolume,
-    tracked_volumes: Arc<Mutex<HashSet<char>>>,
+    lifecycle: &Arc<volume_lifecycle::VolumeLifecycle>,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<indexing_progress::IndexingProgress>,
     db: Arc<index_db::IndexDb>,
-    shutdown: Arc<AtomicBool>,
 ) {
+    let Some(ticket) = lifecycle.claim_worker(&volume) else {
+        return;
+    };
+
     let drive_letter = volume.drive_letter;
+    let volume_id = volume.volume_id.clone();
+    let stop = ticket.stop_signal();
     let label = if volume.label.is_empty() {
         "(no label)"
     } else {
@@ -349,60 +369,38 @@ fn spawn_volume_indexer(
         );
     }
 
-    std::thread::spawn(move || {
-        if volume.usn_supported {
-            volume_indexers::index_volume(drive_letter, indices, indexing_progress, db, shutdown);
-        } else {
-            volume_indexers::index_non_ntfs_volume(
-                drive_letter,
-                volume.file_system,
-                indices,
-                indexing_progress,
-                db,
-                shutdown,
-            );
-        }
-
-        let mut tracked = tracked_volumes.lock();
-        tracked.remove(&drive_letter);
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{claim_discovered_volumes, indexing_progress, usn_journal, Mutex};
-    use std::collections::HashSet;
-    use std::sync::Arc;
-
-    #[test]
-    fn discovered_volumes_are_published_before_indexers_start() {
-        let tracked_volumes = Arc::new(Mutex::new(HashSet::new()));
-        let progress = indexing_progress::IndexingProgress::new();
-        let discovered = vec![
-            usn_journal::DiscoveredVolume {
-                drive_letter: 'C',
-                label: String::new(),
-                file_system: "NTFS".to_string(),
-                usn_supported: true,
-            },
-            usn_journal::DiscoveredVolume {
-                drive_letter: 'D',
-                label: String::new(),
-                file_system: "NTFS".to_string(),
-                usn_supported: true,
-            },
-        ];
-
-        let to_spawn = claim_discovered_volumes(discovered, &tracked_volumes, &progress);
-
-        assert_eq!(to_spawn.len(), 2);
-        let status = progress.snapshot();
-        assert_eq!(status.len(), 2);
-        assert!(status.iter().all(|volume| {
-            volume.state == "scanning"
-                && volume.phase == "starting"
-                && volume.files_indexed == 0
-                && volume.phase_progress == Some(0)
-        }));
+    indexing_progress.set_pending(drive_letter);
+    let progress_on_spawn_failure = indexing_progress.clone();
+    let spawn_result = std::thread::Builder::new()
+        .name(format!("volume-index-{drive_letter}"))
+        .spawn(move || {
+            let _ticket = ticket;
+            if volume.usn_supported {
+                volume_indexers::index_volume(
+                    drive_letter,
+                    volume_id,
+                    indices,
+                    indexing_progress,
+                    db,
+                    stop,
+                );
+            } else {
+                volume_indexers::index_non_ntfs_volume(
+                    drive_letter,
+                    volume_id,
+                    volume.file_system,
+                    indices,
+                    indexing_progress,
+                    db,
+                    stop,
+                );
+            }
+        });
+    if let Err(error) = spawn_result {
+        progress_on_spawn_failure.clear(drive_letter);
+        eprintln!(
+            "[SERVICE] Failed to spawn indexer for {}:\\: {}",
+            drive_letter, error
+        );
     }
 }

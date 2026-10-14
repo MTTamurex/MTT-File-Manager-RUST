@@ -1286,14 +1286,19 @@ fn parse_mft_record_bulk(record: &[u8], record_size: usize, frn: u64, state: Bul
 /// This replaces both `FSCTL_ENUM_USN_DATA` enumeration and per-file
 /// `FSCTL_GET_NTFS_FILE_RECORD` size extraction, matching the approach
 /// used by tools like *Everything*.
-pub fn read_mft_bulk<F>(
+pub fn read_mft_bulk<F, C>(
     volume: HANDLE,
     drive_letter: char,
     mut on_progress: F,
+    mut should_stop: C,
 ) -> Result<VolumeIndex, String>
 where
     F: FnMut(u64, u64, u64),
+    C: FnMut() -> bool,
 {
+    if should_stop() {
+        return Err("MFT scan cancelled by volume removal".to_string());
+    }
     let geo = query_mft_geometry(volume)?;
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
@@ -1335,6 +1340,7 @@ where
         &data_runs,
         total_records,
         &mut on_progress,
+        &mut should_stop,
     );
 
     crate::usn_journal::close_volume(read_handle);
@@ -1347,14 +1353,19 @@ where
 /// This is used when an existing cached index is structurally complete but was
 /// loaded from an older cache without sizes. It avoids building a second full
 /// `VolumeIndex` solely to copy the `size` field into the live index.
-pub fn read_mft_sizes_bulk<F>(
+pub fn read_mft_sizes_bulk<F, C>(
     volume: HANDLE,
     drive_letter: char,
     mut on_progress: F,
+    mut should_stop: C,
 ) -> Result<Vec<(u64, FileMetrics)>, String>
 where
     F: FnMut(u64, u64),
+    C: FnMut() -> bool,
 {
+    if should_stop() {
+        return Err("MFT size scan cancelled by volume removal".to_string());
+    }
     let geo = query_mft_geometry(volume)?;
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
@@ -1391,6 +1402,7 @@ where
         &data_runs,
         total_records,
         &mut on_progress,
+        &mut should_stop,
     );
     crate::usn_journal::close_volume(read_handle);
 
@@ -1508,16 +1520,18 @@ fn parse_mft_record_size_bulk(
     }
 }
 
-fn read_mft_size_data<F>(
+fn read_mft_size_data<F, C>(
     handle: HANDLE,
     drive_letter: char,
     geo: &MftGeometry,
     data_runs: &[(i64, u64)],
     total_records: u64,
     on_progress: &mut F,
+    should_stop: &mut C,
 ) -> Result<Vec<(u64, FileMetrics)>, String>
 where
     F: FnMut(u64, u64),
+    C: FnMut() -> bool,
 {
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
@@ -1538,6 +1552,9 @@ where
     on_progress(0, total_records);
 
     for &(lcn, cluster_count) in data_runs {
+        if should_stop() {
+            return Err("MFT size scan cancelled by volume removal".to_string());
+        }
         let run_byte_offset = lcn as u64 * cluster_size as u64;
         let run_bytes = cluster_count * cluster_size as u64;
 
@@ -1554,6 +1571,9 @@ where
 
         let mut bytes_remaining = run_bytes;
         while bytes_remaining > 0 && frn < total_records {
+            if should_stop() {
+                return Err("MFT size scan cancelled by volume removal".to_string());
+            }
             let to_read = (bytes_remaining as usize).min(chunk_bytes);
             let to_read = (to_read / cluster_size) * cluster_size;
             if to_read == 0 {
@@ -1585,6 +1605,9 @@ where
 
             let mut buf_offset = 0;
             while buf_offset + record_size <= usable_bytes && frn < total_records {
+                if frn.is_multiple_of(1024) && should_stop() {
+                    return Err("MFT size scan cancelled by volume removal".to_string());
+                }
                 let record_data = &mut read_buf[buf_offset..buf_offset + record_size];
                 if apply_fixup(record_data) {
                     parse_mft_record_size_bulk(
@@ -1613,6 +1636,9 @@ where
 
     let mut ext_applied = 0u64;
     for (base_frn, metrics) in extension_sizes {
+        if should_stop() {
+            return Err("MFT size scan cancelled by volume removal".to_string());
+        }
         if metrics.logical_size > 0 || metrics.allocated_size > 0 {
             match size_updates.binary_search_by_key(&base_frn, |(frn, _)| *frn) {
                 Ok(pos) => size_updates[pos].1.merge(metrics),
@@ -1630,6 +1656,9 @@ where
     if !size_recheck_candidates.is_empty() {
         let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
         for frn in size_recheck_candidates {
+            if should_stop() {
+                return Err("MFT size scan cancelled by volume removal".to_string());
+            }
             if let Some(metrics) = metrics_by_file_id(handle, frn) {
                 precise_file_id += 1;
                 match size_updates.binary_search_by_key(&frn, |(record_frn, _)| *record_frn) {
@@ -1691,16 +1720,18 @@ where
 }
 
 /// Inner function that performs the sequential MFT read and record parsing.
-fn read_mft_data<F>(
+fn read_mft_data<F, C>(
     handle: HANDLE,
     drive_letter: char,
     geo: &MftGeometry,
     data_runs: &[(i64, u64)],
     total_records: u64,
     on_progress: &mut F,
+    should_stop: &mut C,
 ) -> Result<VolumeIndex, String>
 where
     F: FnMut(u64, u64, u64),
+    C: FnMut() -> bool,
 {
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
@@ -1730,6 +1761,9 @@ where
     on_progress(0, total_records, 0);
 
     for &(lcn, cluster_count) in data_runs {
+        if should_stop() {
+            return Err("MFT scan cancelled by volume removal".to_string());
+        }
         let run_byte_offset = lcn as u64 * cluster_size as u64;
         let run_bytes = cluster_count * cluster_size as u64;
 
@@ -1749,6 +1783,9 @@ where
 
         let mut bytes_remaining = run_bytes;
         while bytes_remaining > 0 && frn < total_records {
+            if should_stop() {
+                return Err("MFT scan cancelled by volume removal".to_string());
+            }
             let to_read = (bytes_remaining as usize).min(chunk_bytes);
             // Align down to cluster boundary.
             let to_read = (to_read / cluster_size) * cluster_size;
@@ -1781,6 +1818,9 @@ where
 
             let mut buf_offset = 0;
             while buf_offset + record_size <= usable_bytes && frn < total_records {
+                if frn.is_multiple_of(1024) && should_stop() {
+                    return Err("MFT scan cancelled by volume removal".to_string());
+                }
                 let record_data = &mut read_buf[buf_offset..buf_offset + record_size];
 
                 // Apply NTFS fixup array before parsing.
@@ -1815,6 +1855,9 @@ where
     // Apply sizes from extension records to their base records.
     let mut ext_applied = 0u64;
     for (base_frn, metrics) in &extension_sizes {
+        if should_stop() {
+            return Err("MFT scan cancelled by volume removal".to_string());
+        }
         if let Some(rec) = index.records.get_mut(base_frn) {
             let old = (rec.size, rec.allocated_size);
             rec.size = rec.size.max(metrics.logical_size);
@@ -1827,6 +1870,9 @@ where
 
     let mut ext_parent_edges_applied = 0u64;
     for (base_frn, parents) in extension_parents {
+        if should_stop() {
+            return Err("MFT scan cancelled by volume removal".to_string());
+        }
         let Some(primary_parent) = index.records.get(&base_frn).map(|rec| rec.parent_ref) else {
             continue;
         };
@@ -1858,6 +1904,9 @@ where
         let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
 
         for frn in size_recheck_candidates {
+            if should_stop() {
+                return Err("MFT scan cancelled by volume removal".to_string());
+            }
             let needs_recheck = index
                 .records
                 .get(&frn)

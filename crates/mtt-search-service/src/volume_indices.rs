@@ -73,3 +73,72 @@ pub fn find_handle(indices: &SharedVolumeIndices, drive_letter: char) -> Option<
 pub fn snapshot_handles(indices: &SharedVolumeIndices) -> Vec<VolumeIndexHandle> {
     indices.read().iter().cloned().collect()
 }
+
+/// Remove a cached index only if the drive letter still refers to the same
+/// volume. This prevents a delayed removal notification from deleting a new
+/// volume that has already reused the letter.
+pub fn remove_volume_if_identity_matches(
+    indices: &SharedVolumeIndices,
+    drive_letter: char,
+    volume_id: &str,
+) -> bool {
+    let mut registry = indices.write();
+    let Some(position) = registry.iter().position(|handle| {
+        let volume = handle.read();
+        volume.drive_letter == drive_letter && volume_ids_match(&volume.volume_id, volume_id)
+    }) else {
+        return false;
+    };
+
+    registry.remove(position);
+    true
+}
+
+fn normalize_volume_id(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches(['\\', '/'])
+        .to_ascii_lowercase()
+}
+
+fn volume_ids_match(left: &str, right: &str) -> bool {
+    let left = normalize_volume_id(left);
+    let right = normalize_volume_id(right);
+    if left == right {
+        return true;
+    }
+
+    let guid_token = |value: &str| {
+        let lower = value.to_ascii_lowercase();
+        let start = lower.find("volume{")?;
+        let rest = &value[start..];
+        let end = rest.find('}')? + 1;
+        Some(rest[..end].to_ascii_lowercase())
+    };
+    guid_token(&left).is_some() && guid_token(&left) == guid_token(&right)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{new_shared, remove_volume_if_identity_matches, upsert};
+    use crate::file_index::VolumeIndex;
+
+    #[test]
+    fn stale_removal_notification_cannot_remove_a_reused_drive_letter() {
+        let indices = new_shared();
+        let mut index = VolumeIndex::empty('R');
+        index.volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".to_string();
+        upsert(&indices, index);
+
+        assert!(!remove_volume_if_identity_matches(
+            &indices,
+            'R',
+            r"\\?\Volume{fedcba98-7654-3210-fedc-ba9876543210}\"
+        ));
+        assert!(remove_volume_if_identity_matches(
+            &indices,
+            'R',
+            r"\??\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}"
+        ));
+    }
+}

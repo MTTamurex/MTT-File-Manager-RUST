@@ -18,6 +18,10 @@ const PASS_THROUGH_TIMEOUT: Duration = Duration::from_secs(5);
 const CANCELLATION_GRACE: Duration = Duration::from_secs(2);
 static PASS_THROUGH_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+pub(super) fn pass_through_is_active() -> bool {
+    PASS_THROUGH_ACTIVE.load(Ordering::Acquire)
+}
+
 pub(super) struct ProtocolQuery {
     pub(super) property_id: u32,
     pub(super) protocol_type: u32,

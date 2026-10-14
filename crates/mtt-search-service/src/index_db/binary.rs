@@ -1,20 +1,20 @@
 //! Binary index format for fast save/load of the in-memory VolumeIndex.
 //!
-//! Layout (`MTTIDX06`):
-//!   [Header]                     — 80 bytes
+//! Layout (`MTTIDX07`):
+//!   [Header]                     — 96 bytes, including the volume GUID
 //!   [Records]                    — record_count × 40 bytes (8-byte FRN + 32-byte FileRecord)
 //!   [Hardlinks]                  — hardlink_entry_count × 16 bytes (8-byte child FRN + 8-byte parent FRN)
 //!   [Reparse Points]             — reparse_count × 8 bytes (8-byte FRN)
 //!   [NameArena]                  — arena_size raw bytes, compacted from live records
 //!   [HMAC-SHA256]                — 32 bytes (covers everything above; key is per-machine, DPAPI-sealed)
 //!
-//! The records section is placed immediately after the fixed 80-byte header so
+//! The records section is placed immediately after the fixed 96-byte header so
 //! it starts at an 8-byte-aligned file offset and can be reinterpreted as
 //! `&[RecordEntry]` via a read-only memory map (see [`crate::record_store`]).
 //! New snapshots always store a raw NameArena containing only names referenced
 //! by live records. The variable-size arena is written last so it does not shift
-//! the records offset. Existing v6 zstd snapshots remain readable. Older layouts
-//! do not contain allocated sizes and are rebuilt.
+//! the records offset. v6 snapshots are rebuilt once because they do not contain
+//! a stable volume identity.
 //!
 //! SEC: The trailer is HMAC-SHA256 with a per-machine key sealed by DPAPI. HMAC
 //! requires the per-machine key (see [`super::integrity`]).
@@ -30,12 +30,13 @@ use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 use crate::record_store::RecordStore;
 
-const MAGIC: &[u8; 8] = b"MTTIDX06";
+const MAGIC: &[u8; 8] = b"MTTIDX07";
+const LEGACY_V6_MAGIC: &[u8; 8] = b"MTTIDX06";
 const LEGACY_V5_MAGIC: &[u8; 8] = b"MTTIDX05";
 const LEGACY_V4_MAGIC: &[u8; 8] = b"MTTIDX04";
 const LEGACY_V3_MAGIC: &[u8; 8] = b"MTTIDX03";
 const LEGACY_V2_MAGIC: &[u8; 8] = b"MTTIDX02";
-const VERSION: u32 = 6;
+const VERSION: u32 = 7;
 const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
 const MMAP_ARENA_MIN_BYTES: usize = 64 * 1024 * 1024;
 /// Minimum records-section size to memory-map instead of reading into private
@@ -59,6 +60,7 @@ struct Header {
     /// 0 = raw arena, 1 = zstd-compressed arena, 2+ reserved.
     arena_compression: u8,
     _pad: [u8; 2],
+    volume_guid: u128,
     journal_id: u64,
     last_usn: i64,
     record_count: u64,
@@ -79,20 +81,21 @@ const RECORD_SIZE: usize = FRN_SIZE + FILE_RECORD_SIZE;
 const HARDLINK_ENTRY_SIZE: usize = FRN_SIZE * 2;
 const REPARSE_ENTRY_SIZE: usize = FRN_SIZE;
 const _: () = {
-    assert!(HEADER_SIZE == 80);
+    assert!(HEADER_SIZE == 96);
     assert!(std::mem::offset_of!(Header, magic) == 0);
     assert!(std::mem::offset_of!(Header, version) == 8);
     assert!(std::mem::offset_of!(Header, drive_letter) == 12);
     assert!(std::mem::offset_of!(Header, arena_compression) == 13);
     assert!(std::mem::offset_of!(Header, _pad) == 14);
-    assert!(std::mem::offset_of!(Header, journal_id) == 16);
-    assert!(std::mem::offset_of!(Header, last_usn) == 24);
-    assert!(std::mem::offset_of!(Header, record_count) == 32);
-    assert!(std::mem::offset_of!(Header, arena_size) == 40);
-    assert!(std::mem::offset_of!(Header, hardlink_entry_count) == 48);
-    assert!(std::mem::offset_of!(Header, reparse_count) == 56);
-    assert!(std::mem::offset_of!(Header, flags) == 64);
-    assert!(std::mem::offset_of!(Header, compressed_arena_size) == 72);
+    assert!(std::mem::offset_of!(Header, volume_guid) == 16);
+    assert!(std::mem::offset_of!(Header, journal_id) == 32);
+    assert!(std::mem::offset_of!(Header, last_usn) == 40);
+    assert!(std::mem::offset_of!(Header, record_count) == 48);
+    assert!(std::mem::offset_of!(Header, arena_size) == 56);
+    assert!(std::mem::offset_of!(Header, hardlink_entry_count) == 64);
+    assert!(std::mem::offset_of!(Header, reparse_count) == 72);
+    assert!(std::mem::offset_of!(Header, flags) == 80);
+    assert!(std::mem::offset_of!(Header, compressed_arena_size) == 88);
 
     assert!(FILE_RECORD_SIZE == 32);
     assert!(std::mem::offset_of!(FileRecord, parent_ref) == 0);
@@ -103,6 +106,39 @@ const _: () = {
     assert!(std::mem::offset_of!(FileRecord, is_dir) == 30);
     assert!(std::mem::offset_of!(FileRecord, _pad) == 31);
 };
+
+fn volume_guid_from_id(volume_id: &str) -> u128 {
+    let lower = volume_id.to_ascii_lowercase();
+    let Some(start) = lower.find("volume{").map(|offset| offset + "volume{".len()) else {
+        return 0;
+    };
+    let Some(relative_end) = lower[start..].find('}') else {
+        return 0;
+    };
+    let guid = lower[start..start + relative_end]
+        .chars()
+        .filter(|character| character.is_ascii_hexdigit())
+        .collect::<String>();
+    if guid.len() != 32 {
+        return 0;
+    }
+    u128::from_str_radix(&guid, 16).unwrap_or(0)
+}
+
+fn volume_id_from_guid(volume_guid: u128) -> String {
+    if volume_guid == 0 {
+        return String::new();
+    }
+    let guid = format!("{volume_guid:032x}");
+    format!(
+        "\\\\?\\Volume{{{}-{}-{}-{}-{}}}\\",
+        &guid[0..8],
+        &guid[8..12],
+        &guid[12..16],
+        &guid[16..20],
+        &guid[20..32]
+    )
+}
 
 fn read_u16_le(bytes: &[u8], offset: usize, label: &str) -> Result<u16, String> {
     let raw: [u8; 2] = bytes
@@ -353,6 +389,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         drive_letter: index.drive_letter as u8,
         arena_compression: ARENA_COMPRESSION_NONE,
         _pad: [0; 2],
+        volume_guid: volume_guid_from_id(&index.volume_id),
         journal_id: index.journal_id,
         last_usn: index.last_usn,
         record_count: index.records.len() as u64,
@@ -554,12 +591,19 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         let _ = std::fs::remove_file(&path);
         return Ok(None);
     }
+    if &magic == LEGACY_V6_MAGIC {
+        eprintln!(
+            "[BINARY-IDX] {}:\\ Legacy index lacks a stable volume identity; requiring a full scan.",
+            drive_letter
+        );
+        return Ok(None);
+    }
     if &magic != MAGIC {
         let _ = std::fs::remove_file(&path);
         return Err("Bad magic".into());
     }
 
-    load_v6(drive_letter, &path)
+    load_v7(drive_letter, &path)
 }
 
 /// How the records section was materialized during a load.
@@ -570,7 +614,7 @@ enum RecordsStorage {
     Owned(RecordStore),
 }
 
-fn load_v6(
+fn load_v7(
     drive_letter: char,
     path: &Path,
 ) -> Result<Option<(VolumeIndex, PersistedBinaryState)>, String> {
@@ -607,6 +651,7 @@ fn load_v6(
     let h_version = header.version;
     let h_drive_letter = header.drive_letter;
     let h_arena_compression = header.arena_compression;
+    let h_volume_guid = header.volume_guid;
     let h_journal_id = header.journal_id;
     let h_last_usn = header.last_usn;
     let h_record_count = header.record_count;
@@ -685,7 +730,7 @@ fn load_v6(
     hmac.update(&header_bytes)
         .map_err(|e| format!("HMAC update: {}", e))?;
 
-    // Records come first in MTTIDX06. Large record sections are streamed through
+    // Records come first in MTTIDX07. Large record sections are streamed through
     // HMAC and then memory-mapped (file-backed, evictable); small ones are read
     // into an owned, sorted RecordStore. The writer stores records sorted by
     // FRN, so a mapped base can binary-search without a validating scan.
@@ -728,7 +773,7 @@ fn load_v6(
         reparse_points.insert(frn);
     }
 
-    // NameArena is written last in MTTIDX06. Uncompressed large arenas are
+    // NameArena is written last in MTTIDX07. Uncompressed large arenas are
     // streamed through HMAC and then mapped read-only; compressed arenas are
     // read into memory and decompressed after the whole-file HMAC is verified.
     enum ArenaStorage {
@@ -785,7 +830,7 @@ fn load_v6(
             match RecordStore::from_mmap(mmap, record_count) {
                 Ok(store) => store,
                 Err(e) => {
-                    // Should be unreachable (offset 80 is 8-aligned), but fall
+                    // Should be unreachable (offset 96 is 8-aligned), but fall
                     // back to an owned read so a load never fails on this alone.
                     eprintln!(
                         "[BINARY-IDX] {}:\\ records mmap unusable ({}); reading owned",
@@ -822,6 +867,7 @@ fn load_v6(
     };
     index.hardlink_parents = hardlink_parents;
     index.reparse_points = reparse_points;
+    index.volume_id = volume_id_from_guid(h_volume_guid);
     index.journal_id = h_journal_id;
     index.last_usn = h_last_usn;
     index.hardlink_data_complete = h_flags & 1 != 0;
@@ -833,6 +879,7 @@ fn load_v6(
     index.shrink_to_fit();
 
     let state = PersistedBinaryState {
+        volume_id: index.volume_id.clone(),
         journal_id: h_journal_id,
         last_usn: h_last_usn,
         files_indexed: h_record_count,
@@ -951,7 +998,7 @@ fn build_saved_storage_pair(
         || arena_compression != ARENA_COMPRESSION_NONE
         || compressed_arena_size != arena_size
     {
-        return Err("new binary index header does not describe a raw v6 snapshot".to_string());
+        return Err("new binary index header does not describe a raw v7 snapshot".to_string());
     }
     let records_bytes = record_count
         .checked_mul(RECORD_SIZE)
@@ -1048,7 +1095,7 @@ fn read_arena_region_owned(
     Ok(bytes)
 }
 
-/// Save the index as a compact raw MTTIDX06 snapshot, then replace both the
+/// Save the index as a compact raw MTTIDX07 snapshot, then replace both the
 /// record store and NameArena with corresponding storage from that same file.
 ///
 /// Both replacement values are fully constructed before either current value is
@@ -1075,6 +1122,7 @@ pub fn save_and_remap(index: &mut VolumeIndex) -> Result<(), String> {
 
 /// Metadata from a loaded binary index (mirrors PersistedVolumeState).
 pub struct PersistedBinaryState {
+    pub volume_id: String,
     pub journal_id: u64,
     pub last_usn: i64,
     pub files_indexed: u64,
@@ -1100,7 +1148,7 @@ mod tests {
     }
 
     fn rewrite_arena_as_legacy_zstd(path: &Path) {
-        let bytes = std::fs::read(path).expect("read raw v6 snapshot");
+        let bytes = std::fs::read(path).expect("read raw v7 snapshot");
         let mut header: Header =
             unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const Header) };
         let record_count = header.record_count as usize;
@@ -1128,11 +1176,12 @@ mod tests {
         let mut hmac = integrity::HmacSha256::new(&key).expect("HMAC init");
         hmac.update(&payload).expect("HMAC update");
         payload.extend_from_slice(&hmac.finalize().expect("HMAC finalize"));
-        std::fs::write(path, payload).expect("write legacy zstd v6 snapshot");
+        std::fs::write(path, payload).expect("write zstd-compressed v7 snapshot");
     }
 
     fn sample_index(drive: char) -> VolumeIndex {
         let mut index = VolumeIndex::empty(drive);
+        index.volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".to_string();
         assert!(index.insert_record(10, "docs", 5, true, false));
         assert!(index.insert_record(20, "a.txt", 10, false, false));
         index.records.get_mut(&20).unwrap().size = 55;
@@ -1164,24 +1213,47 @@ mod tests {
     }
 
     #[test]
-    fn v6_round_trips_through_save_and_load() {
+    fn v7_round_trips_through_save_and_load() {
         crate::index_db::init_data_dir_for_tests();
         let drive = 'W';
         let path = index_path(drive);
         clean_index_files(drive);
 
         let index = sample_index(drive);
-        save(&index).expect("save v6");
+        save(&index).expect("save v7");
 
-        let (loaded, state) = load(drive).expect("load v6").expect("index present");
+        let (loaded, state) = load(drive).expect("load v7").expect("index present");
         assert_eq!(state.journal_id, 7);
         assert_eq!(state.last_usn, 8);
+        assert_eq!(state.volume_id, index.volume_id);
+        assert_eq!(loaded.volume_id, index.volume_id);
         assert!(state.has_hardlink_parent_data);
         assert!(state.has_reparse_point_data);
         assert_matches_sample(&loaded, drive);
 
         assert_eq!(&read_file_magic(&path).unwrap(), MAGIC);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn v6_snapshot_is_rebuilt_without_deleting_it_before_replacement_is_ready() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'V';
+        let path = index_path(drive);
+        clean_index_files(drive);
+
+        save(&sample_index(drive)).expect("save v7 snapshot");
+        let mut bytes = std::fs::read(&path).expect("read v7 snapshot");
+        bytes[..8].copy_from_slice(LEGACY_V6_MAGIC);
+        std::fs::write(&path, bytes).expect("mark snapshot as legacy v6");
+
+        assert!(load(drive).unwrap().is_none());
+        assert!(
+            path.exists(),
+            "legacy cache remains until a new snapshot is saved"
+        );
+
+        clean_index_files(drive);
     }
 
     #[test]
@@ -1197,7 +1269,7 @@ mod tests {
         index.remove_record(10);
         assert!(index.names.len() > "live".len());
 
-        save(&index).expect("save compact v6");
+        save(&index).expect("save compact v7");
         let header = read_header(&path);
         let arena_compression = header.arena_compression;
         let arena_size = header.arena_size;
@@ -1371,20 +1443,20 @@ mod tests {
     }
 
     #[test]
-    fn legacy_zstd_v6_snapshot_still_loads() {
+    fn zstd_compressed_v7_snapshot_still_loads() {
         crate::index_db::init_data_dir_for_tests();
         let drive = 'Z';
         let path = index_path(drive);
         clean_index_files(drive);
 
         let index = sample_index(drive);
-        save(&index).expect("save raw v6");
+        save(&index).expect("save raw v7");
         rewrite_arena_as_legacy_zstd(&path);
 
         let header = read_header(&path);
         let arena_compression = header.arena_compression;
         assert_eq!(arena_compression, ARENA_COMPRESSION_ZSTD);
-        let (loaded, _) = load(drive).expect("load legacy zstd v6").unwrap();
+        let (loaded, _) = load(drive).expect("load zstd-compressed v7").unwrap();
         assert_matches_sample(&loaded, drive);
         clean_index_files(drive);
     }

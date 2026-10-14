@@ -23,6 +23,7 @@ use crate::ipc_authorization::{
 };
 use crate::security_policy::IpcSecurityPolicy;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
+use crate::volume_lifecycle::VolumeLifecycle;
 use mtt_search_protocol::*;
 
 use super::pipe_io::{read_message, send_response};
@@ -341,6 +342,7 @@ pub(super) fn handle_client(
     is_warming: &Arc<AtomicBool>,
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
+    volume_lifecycle: &VolumeLifecycle,
     watchdog: &std::sync::mpsc::Sender<super::WatchdogEvent>,
 ) {
     let request_data = match read_message(pipe) {
@@ -486,6 +488,11 @@ pub(super) fn handle_client(
                 return;
             }
 
+            let Some(_volume_uses) = super::volume_access::acquire_all(pipe, volume_lifecycle)
+            else {
+                return;
+            };
+
             // Always use in-memory search with a tiny reusable lowercase buffer
             // for ASCII SIMD matching.
             let result = collect_authorized_search_page(pipe, indices, &text, offset, limit);
@@ -517,6 +524,11 @@ pub(super) fn handle_client(
             paths,
             threshold_secs,
         } => {
+            let Some(_volume_uses) = super::volume_access::acquire_all(pipe, volume_lifecycle)
+            else {
+                return;
+            };
+
             // SEC: Impersonate the connecting client before checking any paths.
             // Without this, any local user could probe modification times of
             // directories they have no read access to (information disclosure).
@@ -580,12 +592,6 @@ pub(super) fn handle_client(
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }
         SearchRequest::FolderSize { path } => {
-            if !require_authorized_folder_size_client(pipe, &path) {
-                return;
-            }
-            let _active_operation =
-                crate::memory_trim::begin_active_operation("folder size request");
-
             let drive_letter = match path.chars().next() {
                 Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
                 _ => {
@@ -593,6 +599,17 @@ pub(super) fn handle_client(
                     return;
                 }
             };
+
+            let Some(_volume_use) =
+                super::volume_access::acquire_one(pipe, volume_lifecycle, drive_letter)
+            else {
+                return;
+            };
+            if !require_authorized_folder_size_client(pipe, &path) {
+                return;
+            }
+            let _active_operation =
+                crate::memory_trim::begin_active_operation("folder size request");
 
             // The installed app normally passes the client-image trust check.
             // If LocalSystem cannot inspect the client process, authorization
@@ -769,7 +786,14 @@ pub(super) fn handle_client(
                 return;
             }
 
-            match crate::drive_health::query(drive_letter, background) {
+            let drive_letter = drive_letter.to_ascii_uppercase();
+            let Some(volume_use) =
+                super::volume_access::acquire_one(pipe, volume_lifecycle, drive_letter)
+            else {
+                return;
+            };
+
+            match crate::drive_health::query(drive_letter, background, volume_use) {
                 Ok(snapshot) => {
                     let _ = send_response(pipe, &SearchResponse::DriveHealth(Box::new(snapshot)));
                 }
@@ -795,6 +819,11 @@ pub(super) fn handle_client(
             if !require_trusted_metadata_client(pipe, "DiskAnalysis") {
                 return;
             }
+            let Some(_volume_use) =
+                super::volume_access::acquire_one(pipe, volume_lifecycle, drive_letter)
+            else {
+                return;
+            };
             let _ = watchdog.send(super::WatchdogEvent::Extend(
                 std::time::Duration::from_secs(140),
             ));

@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::file_index::VolumeIndex;
+use crate::volume_lifecycle::VolumeStopSignal;
 
 /// Synthetic root reference used by `path_resolver` for non-USN volumes.
 const ROOT_REF: u64 = 5;
@@ -27,7 +27,7 @@ pub struct ScanStats {
 pub fn scan_volume<F>(
     drive_letter: char,
     index: &mut VolumeIndex,
-    shutdown: &AtomicBool,
+    stop: &VolumeStopSignal,
     mut on_progress: F,
 ) -> Result<ScanStats, String>
 where
@@ -50,9 +50,8 @@ where
     on_progress(0);
 
     while let Some((dir_path, parent_ref)) = queue.pop_front() {
-        // Check shutdown every 100 directories to allow graceful stop.
-        if directories_scanned.is_multiple_of(100) && shutdown.load(Ordering::Relaxed) {
-            return Err("scan interrupted by shutdown".to_string());
+        if stop.is_stopped() {
+            return Err("scan interrupted by volume removal or shutdown".to_string());
         }
         directories_scanned += 1;
 
@@ -65,6 +64,9 @@ where
         };
 
         for entry_result in entries {
+            if stop.is_stopped() {
+                return Err("scan interrupted by volume removal or shutdown".to_string());
+            }
             let entry = match entry_result {
                 Ok(entry) => entry,
                 Err(_) => {

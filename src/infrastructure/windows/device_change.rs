@@ -12,10 +12,10 @@ use windows::{
     Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostThreadMessageW,
         RegisterClassW, RegisterDeviceNotificationW, TranslateMessage,
-        UnregisterDeviceNotification, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
-        DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W,
-        HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT,
-        WNDCLASSW,
+        UnregisterDeviceNotification, DBT_DEVICEARRIVAL, DBT_DEVICEQUERYREMOVE,
+        DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
+        DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
     },
 };
 
@@ -159,6 +159,14 @@ unsafe extern "system" fn device_wnd_proc(
     match msg {
         WM_DEVICECHANGE => {
             let event = wparam.0 as u32;
+
+            if event == DBT_DEVICEQUERYREMOVE {
+                // Do not leave the app's window recipient at LRESULT(0), which
+                // is not the documented grant response for a removal query.
+                // The search service independently releases its per-volume
+                // index handles before acknowledging its PnP notification.
+                return LRESULT(1);
+            }
 
             if event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE {
                 if let Some(sender) = DEVICE_EVENT_SENDER.get() {

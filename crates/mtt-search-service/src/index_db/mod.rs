@@ -135,6 +135,7 @@ pub(crate) fn init_data_dir_for_tests() {
 /// Persisted volume state for fast restart.
 pub struct PersistedVolumeState {
     pub drive_letter: char,
+    pub volume_id: String,
     pub journal_id: u64,
     pub last_usn: i64,
     pub files_indexed: u64,
@@ -420,6 +421,7 @@ impl IndexDb {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS volume_state (
                 drive_letter TEXT PRIMARY KEY,
+                volume_id TEXT NOT NULL DEFAULT '',
                 journal_id INTEGER NOT NULL,
                 last_usn INTEGER NOT NULL,
                 files_indexed INTEGER NOT NULL,
@@ -629,6 +631,24 @@ impl IndexDb {
             .map_err(|e| format!("Volume_state reparse migration error: {}", e))?;
         }
 
+        let has_volume_id: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('volume_state')
+                 WHERE name = 'volume_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_volume_id == 0 {
+            eprintln!("[DB] Migrating volume_state to record stable volume identities...");
+            conn.execute(
+                "ALTER TABLE volume_state
+                 ADD COLUMN volume_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .map_err(|e| format!("Volume_state identity migration error: {}", e))?;
+        }
+
         let has_is_reparse_col: u32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('file_records')
@@ -665,7 +685,7 @@ impl IndexDb {
         let conn = self.open_read_connection().ok()?;
         let mut stmt = conn
             .prepare(
-                "SELECT journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
+                "SELECT volume_id, journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
                  FROM volume_state WHERE drive_letter = ?1",
             )
             .ok()?;
@@ -673,11 +693,12 @@ impl IndexDb {
         stmt.query_row(params![drive_letter.to_string()], |row| {
             Ok(PersistedVolumeState {
                 drive_letter,
-                journal_id: row.get::<_, i64>(0)? as u64,
-                last_usn: row.get(1)?,
-                files_indexed: row.get::<_, i64>(2)? as u64,
-                has_hardlink_parent_data: row.get::<_, i64>(3)? != 0,
-                has_reparse_point_data: row.get::<_, i64>(4)? != 0,
+                volume_id: row.get(0)?,
+                journal_id: row.get::<_, i64>(1)? as u64,
+                last_usn: row.get(2)?,
+                files_indexed: row.get::<_, i64>(3)? as u64,
+                has_hardlink_parent_data: row.get::<_, i64>(4)? != 0,
+                has_reparse_point_data: row.get::<_, i64>(5)? != 0,
             })
         })
         .ok()
@@ -764,6 +785,14 @@ impl IndexDb {
 mod tests {
     use super::*;
 
+    fn unique_test_directory() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("mtt-search-db-test-{}-{nonce}", std::process::id()))
+    }
+
     #[test]
     fn skip_sqlite_data_persistence_reads_env_var() {
         // Default is false.
@@ -781,5 +810,43 @@ mod tests {
         }
 
         std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
+    }
+
+    #[test]
+    fn volume_state_migrates_and_persists_stable_volume_identity() {
+        let directory = unique_test_directory();
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("search-index.db");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE volume_state (
+                        drive_letter TEXT PRIMARY KEY,
+                        journal_id INTEGER NOT NULL,
+                        last_usn INTEGER NOT NULL,
+                        files_indexed INTEGER NOT NULL,
+                        last_full_scan_epoch INTEGER NOT NULL,
+                        has_hardlink_parent_data INTEGER NOT NULL DEFAULT 0,
+                        has_reparse_point_data INTEGER NOT NULL DEFAULT 0
+                    );
+                    INSERT INTO volume_state VALUES ('R', 10, 20, 30, 40, 1, 1);",
+                )
+                .unwrap();
+        }
+
+        let db = IndexDb::open(&path).unwrap();
+        let migrated = db.load_volume_state('R').unwrap();
+        assert!(migrated.volume_id.is_empty());
+
+        let volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\";
+        db.save_volume_state_snapshot('R', volume_id, 11, 21, 31, true, true)
+            .unwrap();
+        let saved = db.load_volume_state('R').unwrap();
+        assert_eq!(saved.volume_id, volume_id);
+        assert_eq!(saved.journal_id, 11);
+
+        drop(db);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
