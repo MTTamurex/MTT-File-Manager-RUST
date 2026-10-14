@@ -10,9 +10,13 @@ use crate::indexing_progress::IndexingProgress;
 use crate::usn_journal::DiscoveredVolume;
 use crate::volume_indices::{self, SharedVolumeIndices};
 
+mod identity;
 mod usage;
 mod worker;
 
+#[cfg(test)]
+use identity::normalize_volume_id;
+use identity::volume_ids_match;
 use usage::VolumeUsage;
 pub(crate) use usage::VolumeUseGuard;
 pub(crate) use worker::VolumeStopSignal;
@@ -32,6 +36,7 @@ pub(crate) struct VolumeLifecycle {
 struct VolumeRuntime {
     drive_letter: char,
     volume_id: String,
+    volume_serial: u32,
     usage: Arc<VolumeUsage>,
     worker: Mutex<Option<WorkerState>>,
 }
@@ -83,16 +88,16 @@ impl VolumeLifecycle {
             let _ = self.ensure_runtime(volume);
         }
 
-        let stale: Vec<(char, String)> = self
+        let stale: Vec<(char, String, u32)> = self
             .runtimes
             .lock()
             .iter()
-            .filter(|(letter, _)| !present.contains(letter))
-            .map(|(&letter, runtime)| (letter, runtime.volume_id.clone()))
+            .filter(|(letter, runtime)| !present.contains(letter) && !runtime.usage.is_removing())
+            .map(|(&letter, runtime)| (letter, runtime.volume_id.clone(), runtime.volume_serial))
             .collect();
 
-        for (letter, volume_id) in stale {
-            self.disconnect_volume(letter, &volume_id);
+        for (letter, volume_id, volume_serial) in stale {
+            self.disconnect_volume(letter, &volume_id, volume_serial);
         }
     }
 
@@ -126,8 +131,23 @@ impl VolumeLifecycle {
         })
     }
 
-    pub(crate) fn prepare_remove(&self, volume_id: &str) -> bool {
-        let Some(runtime) = self.runtime_for_id(volume_id) else {
+    pub(crate) fn prepare_remove_identity(&self, volume_id: &str, volume_serial: u32) -> bool {
+        self.prepare_operation(volume_id, volume_serial, true)
+    }
+
+    /// Maintenance notifications cannot veto the operation. Keep the volume
+    /// suspended even if draining existing work exceeds the callback budget.
+    pub(crate) fn prepare_maintenance_identity(&self, volume_id: &str, volume_serial: u32) -> bool {
+        self.prepare_operation(volume_id, volume_serial, false)
+    }
+
+    fn prepare_operation(
+        &self,
+        volume_id: &str,
+        volume_serial: u32,
+        restore_on_timeout: bool,
+    ) -> bool {
+        let Some(runtime) = self.runtime_for_identity(volume_id, volume_serial) else {
             return true;
         };
 
@@ -148,18 +168,20 @@ impl VolumeLifecycle {
         }
 
         eprintln!(
-            "[PNP] Vetoing removal of {}:\\ while service handles are active (io_idle={}, indexer_stopped={})",
+            "[PNP] Service handles remain active for {}:\\ (io_idle={}, indexer_stopped={})",
             runtime.drive_letter, usage_idle, worker_finished
         );
         self.remove_index_if_owned(&runtime);
         self.indexing_progress.clear(runtime.drive_letter);
-        runtime.usage.cancel_removal();
-        let _ = self.discovery_wake.send(());
+        if restore_on_timeout {
+            runtime.usage.cancel_removal();
+            let _ = self.discovery_wake.send(());
+        }
         false
     }
 
-    pub(crate) fn removal_failed(&self, volume_id: &str) {
-        if let Some(runtime) = self.runtime_for_id(volume_id) {
+    pub(crate) fn removal_failed_identity(&self, volume_id: &str, volume_serial: u32) {
+        if let Some(runtime) = self.runtime_for_identity(volume_id, volume_serial) {
             if runtime.usage.is_removing() {
                 self.remove_index_if_owned(&runtime);
                 self.indexing_progress.clear(runtime.drive_letter);
@@ -169,19 +191,25 @@ impl VolumeLifecycle {
         let _ = self.discovery_wake.send(());
     }
 
-    pub(crate) fn device_arrived(&self) {
+    pub(crate) fn is_removing(&self, volume_id: &str, volume_serial: u32) -> bool {
+        self.runtime_for_identity(volume_id, volume_serial)
+            .is_some_and(|runtime| runtime.usage.is_removing())
+    }
+
+    pub(crate) fn is_drive_suspended(&self, letter: char) -> bool {
+        self.runtimes
+            .lock()
+            .get(&letter)
+            .is_some_and(|runtime| runtime.usage.is_removing())
+    }
+
+    pub(crate) fn wake_discovery(&self) {
         let _ = self.discovery_wake.send(());
     }
 
-    pub(crate) fn disconnect_by_id(&self, volume_id: &str) {
-        let letter = self
-            .runtimes
-            .lock()
-            .iter()
-            .find(|(_, runtime)| volume_ids_match(&runtime.volume_id, volume_id))
-            .map(|(&letter, _)| letter);
-        if let Some(letter) = letter {
-            self.disconnect_volume(letter, volume_id);
+    pub(crate) fn disconnect_by_identity(&self, volume_id: &str, volume_serial: u32) {
+        if let Some(runtime) = self.runtime_for_identity(volume_id, volume_serial) {
+            self.disconnect_volume(runtime.drive_letter, volume_id, volume_serial);
         }
     }
 
@@ -213,7 +241,10 @@ impl VolumeLifecycle {
         loop {
             let existing = self.runtimes.lock().get(&volume.drive_letter).cloned();
             match existing {
-                Some(runtime) if volume_ids_match(&runtime.volume_id, &volume.volume_id) => {
+                Some(runtime)
+                    if volume_ids_match(&runtime.volume_id, &volume.volume_id)
+                        && runtime.volume_serial == volume.volume_serial =>
+                {
                     return Some(runtime);
                 }
                 Some(runtime) => {
@@ -244,13 +275,15 @@ impl VolumeLifecycle {
                     let runtime = Arc::new(VolumeRuntime {
                         drive_letter: volume.drive_letter,
                         volume_id: volume.volume_id.clone(),
+                        volume_serial: volume.volume_serial,
                         usage: Arc::new(VolumeUsage::default()),
                         worker: Mutex::new(None),
                     });
                     let mut runtimes = self.runtimes.lock();
                     match runtimes.get(&volume.drive_letter) {
                         Some(current)
-                            if volume_ids_match(&current.volume_id, &volume.volume_id) =>
+                            if volume_ids_match(&current.volume_id, &volume.volume_id)
+                                && current.volume_serial == volume.volume_serial =>
                         {
                             return Some(current.clone());
                         }
@@ -265,20 +298,28 @@ impl VolumeLifecycle {
         }
     }
 
-    fn runtime_for_id(&self, volume_id: &str) -> Option<Arc<VolumeRuntime>> {
+    fn runtime_for_identity(
+        &self,
+        volume_id: &str,
+        volume_serial: u32,
+    ) -> Option<Arc<VolumeRuntime>> {
         self.runtimes
             .lock()
             .values()
-            .find(|runtime| volume_ids_match(&runtime.volume_id, volume_id))
+            .find(|runtime| {
+                volume_ids_match(&runtime.volume_id, volume_id)
+                    && runtime.volume_serial == volume_serial
+            })
             .cloned()
     }
 
-    fn disconnect_volume(&self, drive_letter: char, volume_id: &str) {
+    fn disconnect_volume(&self, drive_letter: char, volume_id: &str, volume_serial: u32) {
         let runtime = {
             let mut runtimes = self.runtimes.lock();
-            let matches = runtimes
-                .get(&drive_letter)
-                .is_some_and(|runtime| volume_ids_match(&runtime.volume_id, volume_id));
+            let matches = runtimes.get(&drive_letter).is_some_and(|runtime| {
+                volume_ids_match(&runtime.volume_id, volume_id)
+                    && runtime.volume_serial == volume_serial
+            });
             if matches {
                 runtimes.remove(&drive_letter)
             } else {
@@ -302,6 +343,7 @@ impl VolumeLifecycle {
             &self.indices,
             runtime.drive_letter,
             &runtime.volume_id,
+            runtime.volume_serial,
         );
     }
 }
@@ -329,30 +371,6 @@ impl Drop for VolumeWorkerTicket {
         }
         self.completion.finish();
     }
-}
-
-fn normalize_volume_id(value: &str) -> String {
-    value
-        .trim()
-        .trim_end_matches(['\\', '/'])
-        .to_ascii_lowercase()
-}
-
-fn volume_ids_match(left: &str, right: &str) -> bool {
-    let left = normalize_volume_id(left);
-    let right = normalize_volume_id(right);
-    if left == right {
-        return true;
-    }
-
-    let token = |value: &str| {
-        let lower = value.to_ascii_lowercase();
-        let start = lower.find("volume{")?;
-        let rest = &value[start..];
-        let end = rest.find('}')? + 1;
-        Some(rest[..end].to_ascii_lowercase())
-    };
-    token(&left).is_some() && token(&left) == token(&right)
 }
 
 #[cfg(test)]

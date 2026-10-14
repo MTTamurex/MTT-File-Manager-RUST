@@ -81,11 +81,14 @@ pub fn remove_volume_if_identity_matches(
     indices: &SharedVolumeIndices,
     drive_letter: char,
     volume_id: &str,
+    volume_serial: u32,
 ) -> bool {
     let mut registry = indices.write();
     let Some(position) = registry.iter().position(|handle| {
         let volume = handle.read();
-        volume.drive_letter == drive_letter && volume_ids_match(&volume.volume_id, volume_id)
+        volume.drive_letter == drive_letter
+            && volume_ids_match(&volume.volume_id, volume_id)
+            && volume.volume_serial == volume_serial
     }) else {
         return false;
     };
@@ -133,12 +136,20 @@ mod tests {
         assert!(!remove_volume_if_identity_matches(
             &indices,
             'R',
-            r"\\?\Volume{fedcba98-7654-3210-fedc-ba9876543210}\"
+            r"\\?\Volume{fedcba98-7654-3210-fedc-ba9876543210}\",
+            1,
+        ));
+        assert!(!remove_volume_if_identity_matches(
+            &indices,
+            'R',
+            r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\",
+            1,
         ));
         assert!(remove_volume_if_identity_matches(
             &indices,
             'R',
-            r"\??\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}"
+            r"\??\Volume{ABCDEF01-2345-6789-ABCD-EF0123456789}",
+            0,
         ));
     }
 }

@@ -87,6 +87,8 @@ pub struct VolumeIndex {
     pub drive_letter: char,
     /// Stable volume GUID path used to distinguish media that reuse a drive letter.
     pub volume_id: String,
+    /// Filesystem serial assigned when the volume was formatted.
+    pub volume_serial: u32,
     /// File Reference Number -> FileRecord.
     pub records: RecordStore,
     /// Reverse index: parent FRN -> child FRNs.
@@ -146,6 +148,7 @@ impl VolumeIndex {
         Self {
             drive_letter,
             volume_id: String::new(),
+            volume_serial: 0,
             records: RecordStore::new(),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(0),
@@ -174,6 +177,7 @@ impl VolumeIndex {
         Self {
             drive_letter,
             volume_id: String::new(),
+            volume_serial: 0,
             records: RecordStore::with_capacity(estimated_records),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),
@@ -202,6 +206,7 @@ impl VolumeIndex {
         Self {
             drive_letter,
             volume_id: String::new(),
+            volume_serial: 0,
             records: RecordStore::with_sorted_capacity(estimated_records),
             children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),

@@ -11,14 +11,21 @@ pub(super) struct LoadedVolumeCache {
 pub(super) fn load_volume_cache(
     drive_letter: char,
     volume_id: &str,
+    volume_serial: u32,
     db: &index_db::IndexDb,
     stop: &VolumeStopSignal,
 ) -> Option<LoadedVolumeCache> {
     let mut index = VolumeIndex::empty(drive_letter);
     index.volume_id = volume_id.to_string();
-    let sqlite_state = db
-        .load_volume_state(drive_letter)
-        .filter(|state| state.volume_id.eq_ignore_ascii_case(volume_id));
+    index.volume_serial = volume_serial;
+    let sqlite_state = db.load_volume_state(drive_letter).filter(|state| {
+        cache_identity_matches(
+            &state.volume_id,
+            state.volume_serial,
+            volume_id,
+            volume_serial,
+        )
+    });
 
     let binary_candidate = if sqlite_state.is_some() {
         let _build_permit = super::super::wait_for_index_build(stop)?;
@@ -27,13 +34,19 @@ pub(super) fn load_volume_cache(
         }
         match crate::index_db::binary::load(drive_letter) {
             Ok(Some((binary_index, binary_state)))
-                if binary_state.volume_id.eq_ignore_ascii_case(volume_id) =>
+                if cache_identity_matches(
+                    &binary_state.volume_id,
+                    binary_state.volume_serial,
+                    volume_id,
+                    volume_serial,
+                ) =>
             {
                 Some((
                     binary_index,
                     PersistedVolumeState {
                         drive_letter,
                         volume_id: binary_state.volume_id,
+                        volume_serial: binary_state.volume_serial,
                         journal_id: binary_state.journal_id,
                         last_usn: binary_state.last_usn,
                         files_indexed: binary_state.files_indexed,
@@ -67,4 +80,38 @@ pub(super) fn load_volume_cache(
         sqlite_state,
         binary_candidate,
     })
+}
+
+fn cache_identity_matches(
+    stored_id: &str,
+    stored_serial: u32,
+    current_id: &str,
+    current_serial: u32,
+) -> bool {
+    current_serial != 0
+        && stored_serial == current_serial
+        && stored_id.eq_ignore_ascii_case(current_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache_identity_matches;
+
+    #[test]
+    fn cache_requires_a_known_matching_volume_serial() {
+        assert!(cache_identity_matches(
+            "volume-id",
+            0x1234,
+            "VOLUME-ID",
+            0x1234
+        ));
+        assert!(!cache_identity_matches("volume-id", 0, "volume-id", 0x1234));
+        assert!(!cache_identity_matches("volume-id", 0x1234, "volume-id", 0));
+        assert!(!cache_identity_matches(
+            "volume-id",
+            0x1234,
+            "volume-id",
+            0x5678
+        ));
+    }
 }

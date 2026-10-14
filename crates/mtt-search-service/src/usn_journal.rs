@@ -77,6 +77,7 @@ pub struct UsnJournalInfo {
 pub struct DiscoveredVolume {
     pub drive_letter: char,
     pub volume_id: String,
+    pub volume_serial: u32,
     pub label: String,
     pub file_system: String,
     pub usn_supported: bool,
@@ -94,7 +95,7 @@ struct ReadUsnJournalDataV0 {
 }
 
 /// Discover all mounted logical volumes that expose filesystem information.
-pub fn discover_volumes() -> Vec<DiscoveredVolume> {
+pub fn discover_volumes(mut is_suspended: impl FnMut(char) -> bool) -> Vec<DiscoveredVolume> {
     // Drive type constants (from winbase.h)
     const DRIVE_REMOTE: u32 = 4;
     const DRIVE_CDROM: u32 = 5;
@@ -102,6 +103,11 @@ pub fn discover_volumes() -> Vec<DiscoveredVolume> {
     let mut volumes = Vec::new();
 
     for letter in 'A'..='Z' {
+        // Even a filesystem metadata query may mount a dismounted volume.
+        // Do not touch it until the maintenance operation has released it.
+        if is_suspended(letter) {
+            continue;
+        }
         let root = format!("{}:\\", letter);
         let root_wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -115,12 +121,13 @@ pub fn discover_volumes() -> Vec<DiscoveredVolume> {
 
         let mut fs_name = [0u16; 64];
         let mut vol_name = [0u16; 256];
+        let mut volume_serial = 0u32;
 
         let ok = unsafe {
             GetVolumeInformationW(
                 PCWSTR(root_wide.as_ptr()),
                 Some(&mut vol_name),
-                None,
+                Some(&mut volume_serial),
                 None,
                 None,
                 Some(&mut fs_name),
@@ -155,6 +162,7 @@ pub fn discover_volumes() -> Vec<DiscoveredVolume> {
             volumes.push(DiscoveredVolume {
                 drive_letter: letter,
                 volume_id,
+                volume_serial,
                 label,
                 file_system: fs,
                 usn_supported,

@@ -149,11 +149,12 @@ impl IndexDb {
             .as_secs() as i64;
         conn.execute(
             "INSERT OR REPLACE INTO volume_state
-             (drive_letter, volume_id, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (drive_letter, volume_id, volume_serial, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 drive,
                 index.volume_id,
+                index.volume_serial as i64,
                 index.journal_id as i64,
                 index.last_usn,
                 index.records.len() as i64,
@@ -182,6 +183,7 @@ impl IndexDb {
         &self,
         drive_letter: char,
         volume_id: &str,
+        volume_serial: u32,
         journal_id: u64,
         last_usn: i64,
         files_indexed: usize,
@@ -198,11 +200,12 @@ impl IndexDb {
 
         conn.execute(
             "INSERT OR REPLACE INTO volume_state
-             (drive_letter, volume_id, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (drive_letter, volume_id, volume_serial, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 drive,
                 volume_id,
+                volume_serial as i64,
                 journal_id as i64,
                 last_usn,
                 files_indexed as i64,
@@ -308,11 +311,12 @@ impl IndexDb {
         // Otherwise a crash can skip USN entries whose SQLite rows were not committed.
         tx.execute(
             "INSERT OR REPLACE INTO volume_state
-             (drive_letter, volume_id, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (drive_letter, volume_id, volume_serial, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 drive,
                 state.volume_id,
+                state.volume_serial as i64,
                 state.journal_id as i64,
                 state.last_usn,
                 state.files_indexed as i64,

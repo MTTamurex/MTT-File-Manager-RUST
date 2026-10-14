@@ -11,6 +11,7 @@ use crate::volume_lifecycle::VolumeStopSignal;
 pub(super) fn build_and_persist(
     drive_letter: char,
     volume_id: &str,
+    volume_serial: u32,
     volume_handle: HANDLE,
     journal_info: &UsnJournalInfo,
     indexing_progress: &Arc<IndexingProgress>,
@@ -56,6 +57,7 @@ pub(super) fn build_and_persist(
     }
 
     index.volume_id = volume_id.to_string();
+    index.volume_serial = volume_serial;
     let elapsed = start.elapsed();
     index.journal_id = journal_info.journal_id;
     index.last_usn = journal_info.next_usn;
@@ -124,6 +126,7 @@ pub(super) fn build_and_persist(
         if let Err(error) = db.save_volume_state_snapshot(
             drive_letter,
             volume_id,
+            volume_serial,
             index.journal_id,
             index.last_usn,
             index.records.len(),

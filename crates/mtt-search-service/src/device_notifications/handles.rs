@@ -11,17 +11,19 @@ use windows::core::PCWSTR;
 use windows::Win32::Devices::DeviceAndDriverInstallation::*;
 use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, ERROR_SUCCESS, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING,
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 
 use crate::usn_journal::DiscoveredVolume;
 use crate::volume_lifecycle::VolumeLifecycle;
 
+mod custom_events;
+
 struct Context {
     lifecycle: Arc<VolumeLifecycle>,
     drive_letter: char,
     volume_id: String,
+    volume_serial: u32,
     handle: Mutex<Option<usize>>,
     rearm: AtomicBool,
 }
@@ -33,6 +35,10 @@ impl Context {
                 let _ = CloseHandle(HANDLE(handle as *mut c_void));
             }
         }
+    }
+
+    fn is_open(&self) -> bool {
+        self.handle.lock().is_some()
     }
 }
 
@@ -71,10 +77,14 @@ pub(crate) struct VolumeHandleNotifications {
 
 impl VolumeHandleNotifications {
     pub(crate) fn reconcile(&mut self, volumes: &[DiscoveredVolume]) {
-        self.registrations.retain(|id, _| {
-            volumes
+        self.registrations.retain(|id, registration| {
+            registration.context.as_ref().is_some_and(|context| {
+                context
+                    .lifecycle
+                    .is_removing(&context.volume_id, context.volume_serial)
+            }) || volumes
                 .iter()
-                .any(|volume| volume.volume_id.eq_ignore_ascii_case(id))
+                .any(|volume| registration_key(&volume.volume_id, volume.volume_serial) == *id)
         });
     }
 
@@ -83,28 +93,27 @@ impl VolumeHandleNotifications {
         volume: &DiscoveredVolume,
         lifecycle: &Arc<VolumeLifecycle>,
     ) -> Result<(), String> {
-        let key = volume.volume_id.to_ascii_lowercase();
+        let key = registration_key(&volume.volume_id, volume.volume_serial);
         if let Some(registration) = self.registrations.get(&key) {
             if registration
                 .context
                 .as_ref()
-                .is_some_and(|context| !context.rearm.load(Ordering::Acquire))
+                .is_some_and(|context| !context.rearm.load(Ordering::Acquire) && context.is_open())
             {
                 return Ok(());
             }
         }
+        if lifecycle.is_removing(&volume.volume_id, volume.volume_serial) {
+            return Ok(());
+        }
         self.registrations.remove(&key);
-        let path: Vec<u16> = volume
-            .volume_id
-            .trim_end_matches('\\')
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+        let device_path = format!("\\\\.\\{}:", volume.drive_letter);
+        let path: Vec<u16> = device_path.encode_utf16().chain(Some(0)).collect();
         let handle = unsafe {
             CreateFileW(
                 PCWSTR(path.as_ptr()),
-                0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                0x80000000, // GENERIC_READ on the raw volume device
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
                 None,
                 OPEN_EXISTING,
                 FILE_FLAG_BACKUP_SEMANTICS,
@@ -116,6 +125,7 @@ impl VolumeHandleNotifications {
             lifecycle: lifecycle.clone(),
             drive_letter: volume.drive_letter,
             volume_id: volume.volume_id.clone(),
+            volume_serial: volume.volume_serial,
             handle: Mutex::new(Some(handle.0 as usize)),
             rearm: AtomicBool::new(false),
         });
@@ -149,6 +159,10 @@ impl VolumeHandleNotifications {
                 context: Some(context),
             },
         );
+        eprintln!(
+            "[PNP] Handle notification registered for {}:",
+            volume.drive_letter
+        );
         Ok(())
     }
 }
@@ -157,8 +171,8 @@ unsafe extern "system" fn callback(
     _notification: HCMNOTIFICATION,
     context: *const c_void,
     action: CM_NOTIFY_ACTION,
-    _event: *const CM_NOTIFY_EVENT_DATA,
-    _size: u32,
+    event: *const CM_NOTIFY_EVENT_DATA,
+    event_size: u32,
 ) -> u32 {
     let context = unsafe { &*context.cast::<Context>() };
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -166,9 +180,12 @@ unsafe extern "system" fn callback(
             CM_NOTIFY_ACTION_DEVICEQUERYREMOVE => {
                 eprintln!("[PNP] Query-remove received for {}:", context.drive_letter);
                 context.close();
-                if !context.lifecycle.prepare_remove(&context.volume_id) {
+                let released = context
+                    .lifecycle
+                    .prepare_remove_identity(&context.volume_id, context.volume_serial);
+                if !released {
                     context.rearm.store(true, Ordering::Release);
-                    context.lifecycle.device_arrived();
+                    context.lifecycle.wake_discovery();
                     return ERROR_CANCELLED.0;
                 }
                 eprintln!(
@@ -178,11 +195,18 @@ unsafe extern "system" fn callback(
             }
             CM_NOTIFY_ACTION_DEVICEQUERYREMOVEFAILED => {
                 context.rearm.store(true, Ordering::Release);
-                context.lifecycle.removal_failed(&context.volume_id);
+                context
+                    .lifecycle
+                    .removal_failed_identity(&context.volume_id, context.volume_serial);
+            }
+            CM_NOTIFY_ACTION_DEVICECUSTOMEVENT => {
+                custom_events::handle(context, event, event_size);
             }
             CM_NOTIFY_ACTION_DEVICEREMOVEPENDING | CM_NOTIFY_ACTION_DEVICEREMOVECOMPLETE => {
                 context.close();
-                context.lifecycle.disconnect_by_id(&context.volume_id);
+                context
+                    .lifecycle
+                    .disconnect_by_identity(&context.volume_id, context.volume_serial);
             }
             _ => {}
         }
@@ -195,73 +219,9 @@ unsafe extern "system" fn callback(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::indexing_progress::IndexingProgress;
-    use crate::volume_indices;
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    #[test]
-    fn handle_query_remove_closes_registration_handle_and_stops_indexer() {
-        let (wake, _events) = mpsc::channel();
-        let lifecycle = VolumeLifecycle::new(
-            Arc::new(AtomicBool::new(false)),
-            volume_indices::new_shared(),
-            Arc::new(IndexingProgress::new()),
-            wake,
-        );
-        let volume = DiscoveredVolume {
-            drive_letter: 'R',
-            volume_id: r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".to_string(),
-            label: String::new(),
-            file_system: "exFAT".to_string(),
-            usn_supported: false,
-        };
-        let ticket = lifecycle.claim_worker(&volume).unwrap();
-        let stop = ticket.stop_signal();
-        let worker = std::thread::spawn(move || {
-            while !stop.is_stopped() {
-                stop.wait_or_stop(Duration::from_millis(10));
-            }
-            drop(ticket);
-        });
-        let handle = unsafe {
-            windows::Win32::System::Threading::CreateEventW(None, true, false, None).unwrap()
-        };
-        let context = Context {
-            lifecycle: lifecycle.clone(),
-            drive_letter: volume.drive_letter,
-            volume_id: volume.volume_id.clone(),
-            handle: Mutex::new(Some(handle.0 as usize)),
-            rearm: AtomicBool::new(false),
-        };
-        let result = unsafe {
-            callback(
-                HCMNOTIFICATION::default(),
-                (&context as *const Context).cast(),
-                CM_NOTIFY_ACTION_DEVICEQUERYREMOVE,
-                std::ptr::null(),
-                0,
-            )
-        };
-        assert_eq!(result, ERROR_SUCCESS.0);
-        assert!(context.handle.lock().is_none());
-        assert!(lifecycle.acquire_volume('R').is_err());
-        worker.join().unwrap();
-
-        let result = unsafe {
-            callback(
-                HCMNOTIFICATION::default(),
-                (&context as *const Context).cast(),
-                CM_NOTIFY_ACTION_DEVICEQUERYREMOVEFAILED,
-                std::ptr::null(),
-                0,
-            )
-        };
-        assert_eq!(result, ERROR_SUCCESS.0);
-        assert!(context.rearm.load(Ordering::Acquire));
-        assert!(lifecycle.acquire_volume('R').is_ok());
-    }
+fn registration_key(volume_id: &str, volume_serial: u32) -> String {
+    format!("{}#{volume_serial:08x}", volume_id.to_ascii_lowercase())
 }
+
+#[cfg(test)]
+mod tests;

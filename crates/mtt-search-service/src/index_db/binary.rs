@@ -68,7 +68,7 @@ struct Header {
     arena_size: u64,
     hardlink_entry_count: u64,
     reparse_count: u64,
-    /// Bit 0: hardlink_data_complete, Bit 1: reparse_data_complete, Bit 2: sizes_complete
+    /// Bits 0-2: completeness flags; bits 32-63: filesystem serial number.
     flags: u64,
     /// On-disk compressed arena size in bytes. Equal to arena_size when uncompressed.
     compressed_arena_size: u64,
@@ -382,6 +382,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     if index.sizes_loaded {
         flags |= 4;
     }
+    flags |= (index.volume_serial as u64) << 32;
 
     let header = Header {
         magic: *MAGIC,
@@ -868,6 +869,7 @@ fn load_v7(
     index.hardlink_parents = hardlink_parents;
     index.reparse_points = reparse_points;
     index.volume_id = volume_id_from_guid(h_volume_guid);
+    index.volume_serial = (h_flags >> 32) as u32;
     index.journal_id = h_journal_id;
     index.last_usn = h_last_usn;
     index.hardlink_data_complete = h_flags & 1 != 0;
@@ -880,6 +882,7 @@ fn load_v7(
 
     let state = PersistedBinaryState {
         volume_id: index.volume_id.clone(),
+        volume_serial: index.volume_serial,
         journal_id: h_journal_id,
         last_usn: h_last_usn,
         files_indexed: h_record_count,
@@ -1123,6 +1126,7 @@ pub fn save_and_remap(index: &mut VolumeIndex) -> Result<(), String> {
 /// Metadata from a loaded binary index (mirrors PersistedVolumeState).
 pub struct PersistedBinaryState {
     pub volume_id: String,
+    pub volume_serial: u32,
     pub journal_id: u64,
     pub last_usn: i64,
     pub files_indexed: u64,
@@ -1182,6 +1186,7 @@ mod tests {
     fn sample_index(drive: char) -> VolumeIndex {
         let mut index = VolumeIndex::empty(drive);
         index.volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".to_string();
+        index.volume_serial = 0x1234_abcd;
         assert!(index.insert_record(10, "docs", 5, true, false));
         assert!(index.insert_record(20, "a.txt", 10, false, false));
         index.records.get_mut(&20).unwrap().size = 55;
@@ -1226,7 +1231,9 @@ mod tests {
         assert_eq!(state.journal_id, 7);
         assert_eq!(state.last_usn, 8);
         assert_eq!(state.volume_id, index.volume_id);
+        assert_eq!(state.volume_serial, index.volume_serial);
         assert_eq!(loaded.volume_id, index.volume_id);
+        assert_eq!(loaded.volume_serial, index.volume_serial);
         assert!(state.has_hardlink_parent_data);
         assert!(state.has_reparse_point_data);
         assert_matches_sample(&loaded, drive);

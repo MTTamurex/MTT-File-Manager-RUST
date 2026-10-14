@@ -231,7 +231,8 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         std::thread::spawn(move || {
             let mut handle_notifications =
                 device_notifications::VolumeHandleNotifications::default();
-            let discovered = usn_journal::discover_volumes();
+            let discovered =
+                usn_journal::discover_volumes(|letter| lifecycle.is_drive_suspended(letter));
             log_discovered_volumes(&discovered);
             spawn_indexers_for_discovered_volumes(
                 discovered,
@@ -255,7 +256,8 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                     break;
                 }
 
-                let discovered = usn_journal::discover_volumes();
+                let discovered =
+                    usn_journal::discover_volumes(|letter| lifecycle.is_drive_suspended(letter));
                 spawn_indexers_for_discovered_volumes(
                     discovered,
                     &lifecycle,
@@ -350,6 +352,7 @@ fn spawn_volume_indexer(
 
     let drive_letter = volume.drive_letter;
     let volume_id = volume.volume_id.clone();
+    let volume_serial = volume.volume_serial;
     let stop = ticket.stop_signal();
     let label = if volume.label.is_empty() {
         "(no label)"
@@ -379,6 +382,7 @@ fn spawn_volume_indexer(
                 volume_indexers::index_volume(
                     drive_letter,
                     volume_id,
+                    volume_serial,
                     indices,
                     indexing_progress,
                     db,
@@ -388,6 +392,7 @@ fn spawn_volume_indexer(
                 volume_indexers::index_non_ntfs_volume(
                     drive_letter,
                     volume_id,
+                    volume_serial,
                     volume.file_system,
                     indices,
                     indexing_progress,

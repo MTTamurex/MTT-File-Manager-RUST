@@ -182,3 +182,24 @@ unsafe extern "system" fn device_wnd_proc(
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::device_wnd_proc;
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{DBT_DEVICEQUERYREMOVE, WM_DEVICECHANGE};
+
+    #[test]
+    fn volume_query_remove_is_explicitly_granted_by_the_app_window() {
+        let result = unsafe {
+            device_wnd_proc(
+                HWND::default(),
+                WM_DEVICECHANGE,
+                WPARAM(DBT_DEVICEQUERYREMOVE as usize),
+                LPARAM(0),
+            )
+        };
+
+        assert_eq!(result.0, 1);
+    }
+}

@@ -8,6 +8,7 @@ pub(super) const SIZE_REFRESH_BATCH_RECORDS: usize = 4_096;
 pub(super) struct PendingPersistSnapshot {
     pub(super) drive_letter: char,
     pub(super) volume_id: String,
+    pub(super) volume_serial: u32,
     pub(super) journal_id: u64,
     pub(super) last_usn: i64,
     pub(super) files_indexed: usize,
@@ -58,6 +59,7 @@ pub(super) fn take_pending_snapshot(
     Ok(PendingPersistSnapshot {
         drive_letter: vol_index.drive_letter,
         volume_id: vol_index.volume_id.clone(),
+        volume_serial: vol_index.volume_serial,
         journal_id: vol_index.journal_id,
         last_usn: vol_index.last_usn,
         files_indexed: vol_index.records.len(),
@@ -89,6 +91,7 @@ pub(super) fn persist_pending_snapshot(
         if let Err(e) = db.save_volume_state_snapshot(
             snapshot.drive_letter,
             &snapshot.volume_id,
+            snapshot.volume_serial,
             snapshot.journal_id,
             snapshot.last_usn,
             snapshot.files_indexed,
@@ -107,6 +110,7 @@ pub(super) fn persist_pending_snapshot(
         &index_db::PersistedVolumeState {
             drive_letter: snapshot.drive_letter,
             volume_id: snapshot.volume_id.clone(),
+            volume_serial: snapshot.volume_serial,
             journal_id: snapshot.journal_id,
             last_usn: snapshot.last_usn,
             files_indexed: snapshot.files_indexed as u64,

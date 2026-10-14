@@ -34,6 +34,7 @@ enum NonUsnWaitResult {
 pub(crate) fn index_non_ntfs_volume(
     drive_letter: char,
     volume_id: String,
+    volume_serial: u32,
     file_system: String,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
@@ -46,7 +47,11 @@ pub(crate) fn index_non_ntfs_volume(
     }
     let persisted_record_estimate = db
         .load_volume_state(drive_letter)
-        .filter(|state| state.volume_id.eq_ignore_ascii_case(&volume_id))
+        .filter(|state| {
+            volume_serial != 0
+                && state.volume_id.eq_ignore_ascii_case(&volume_id)
+                && state.volume_serial == volume_serial
+        })
         .map(|state| state.files_indexed.min(usize::MAX as u64) as usize);
 
     let cadence = non_usn_scan_cadence(&file_system);
@@ -76,6 +81,7 @@ pub(crate) fn index_non_ntfs_volume(
         .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
         .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
     cached_index.volume_id = volume_id.clone();
+    cached_index.volume_serial = volume_serial;
     let cached_count = if persisted_record_estimate.is_some() {
         db.load_into_index(&mut cached_index, |_| {}).ok().flatten()
     } else {
@@ -124,6 +130,7 @@ pub(crate) fn index_non_ntfs_volume(
             .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
             .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
         scanned_index.volume_id = volume_id.clone();
+        scanned_index.volume_serial = volume_serial;
         scanned_index.state = file_index::IndexState::Scanning;
         indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
 

@@ -16,6 +16,7 @@ mod size_refresh;
 pub(crate) fn index_volume(
     drive_letter: char,
     volume_id: String,
+    volume_serial: u32,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
@@ -32,11 +33,12 @@ pub(crate) fn index_volume(
         mut index,
         sqlite_state,
         binary_candidate,
-    }) = cache::load_volume_cache(drive_letter, &volume_id, &db, &shutdown)
+    }) = cache::load_volume_cache(drive_letter, &volume_id, volume_serial, &db, &shutdown)
     else {
         indexing_progress.clear(drive_letter);
         return;
     };
+    index.volume_serial = volume_serial;
     if shutdown.is_stopped() {
         indexing_progress.clear(drive_letter);
         return;
@@ -103,6 +105,7 @@ pub(crate) fn index_volume(
         (Some((bin_index, bin_state)), _) => {
             index = bin_index;
             index.volume_id = volume_id.clone();
+            index.volume_serial = volume_serial;
             (Some(bin_state), true)
         }
         (None, Some(sqlite_state)) => (Some(sqlite_state), false),
@@ -136,6 +139,8 @@ pub(crate) fn index_volume(
                     drive_letter,
                     state.files_indexed.min(usize::MAX as u64) as usize,
                 );
+                index.volume_id = volume_id.clone();
+                index.volume_serial = volume_serial;
                 indexing_progress.update(
                     drive_letter,
                     "scanning",
@@ -303,6 +308,7 @@ pub(crate) fn index_volume(
         index = match full_scan::build_and_persist(
             drive_letter,
             &volume_id,
+            volume_serial,
             volume_handle,
             &journal_info,
             &indexing_progress,

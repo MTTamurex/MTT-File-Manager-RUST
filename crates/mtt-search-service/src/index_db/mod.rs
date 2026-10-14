@@ -136,6 +136,7 @@ pub(crate) fn init_data_dir_for_tests() {
 pub struct PersistedVolumeState {
     pub drive_letter: char,
     pub volume_id: String,
+    pub volume_serial: u32,
     pub journal_id: u64,
     pub last_usn: i64,
     pub files_indexed: u64,
@@ -422,6 +423,7 @@ impl IndexDb {
             "CREATE TABLE IF NOT EXISTS volume_state (
                 drive_letter TEXT PRIMARY KEY,
                 volume_id TEXT NOT NULL DEFAULT '',
+                volume_serial INTEGER NOT NULL DEFAULT 0,
                 journal_id INTEGER NOT NULL,
                 last_usn INTEGER NOT NULL,
                 files_indexed INTEGER NOT NULL,
@@ -649,6 +651,24 @@ impl IndexDb {
             .map_err(|e| format!("Volume_state identity migration error: {}", e))?;
         }
 
+        let has_volume_serial: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('volume_state')
+                 WHERE name = 'volume_serial'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_volume_serial == 0 {
+            eprintln!("[DB] Migrating volume_state to record filesystem serials...");
+            conn.execute(
+                "ALTER TABLE volume_state
+                 ADD COLUMN volume_serial INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Volume_state serial migration error: {}", e))?;
+        }
+
         let has_is_reparse_col: u32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('file_records')
@@ -685,7 +705,7 @@ impl IndexDb {
         let conn = self.open_read_connection().ok()?;
         let mut stmt = conn
             .prepare(
-                "SELECT volume_id, journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
+                "SELECT volume_id, volume_serial, journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
                  FROM volume_state WHERE drive_letter = ?1",
             )
             .ok()?;
@@ -694,11 +714,12 @@ impl IndexDb {
             Ok(PersistedVolumeState {
                 drive_letter,
                 volume_id: row.get(0)?,
-                journal_id: row.get::<_, i64>(1)? as u64,
-                last_usn: row.get(2)?,
-                files_indexed: row.get::<_, i64>(3)? as u64,
-                has_hardlink_parent_data: row.get::<_, i64>(4)? != 0,
-                has_reparse_point_data: row.get::<_, i64>(5)? != 0,
+                volume_serial: row.get::<_, i64>(1)? as u32,
+                journal_id: row.get::<_, i64>(2)? as u64,
+                last_usn: row.get(3)?,
+                files_indexed: row.get::<_, i64>(4)? as u64,
+                has_hardlink_parent_data: row.get::<_, i64>(5)? != 0,
+                has_reparse_point_data: row.get::<_, i64>(6)? != 0,
             })
         })
         .ok()
@@ -838,12 +859,14 @@ mod tests {
         let db = IndexDb::open(&path).unwrap();
         let migrated = db.load_volume_state('R').unwrap();
         assert!(migrated.volume_id.is_empty());
+        assert_eq!(migrated.volume_serial, 0);
 
         let volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\";
-        db.save_volume_state_snapshot('R', volume_id, 11, 21, 31, true, true)
+        db.save_volume_state_snapshot('R', volume_id, 0x1234_abcd, 11, 21, 31, true, true)
             .unwrap();
         let saved = db.load_volume_state('R').unwrap();
         assert_eq!(saved.volume_id, volume_id);
+        assert_eq!(saved.volume_serial, 0x1234_abcd);
         assert_eq!(saved.journal_id, 11);
 
         drop(db);
