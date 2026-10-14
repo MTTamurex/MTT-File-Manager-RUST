@@ -1,22 +1,18 @@
+use super::shortcuts::{fast_is_directory, resolve_shortcut_target};
 use crate::domain::cloud_root::CloudRoot;
 use std::collections::HashSet;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use windows::core::{Interface, PCWSTR, PWSTR};
+use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
 use windows::Win32::Storage::FileSystem::{
-    GetFileAttributesW, GetVolumeInformationW, QueryDosDeviceW, FILE_ATTRIBUTE_DIRECTORY,
-    INVALID_FILE_ATTRIBUTES,
-};
-use windows::Win32::System::Com::{
-    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
+    GetFileAttributesW, GetVolumeInformationW, QueryDosDeviceW, INVALID_FILE_ATTRIBUTES,
 };
 use windows::Win32::System::Registry::{
     RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegGetValueW, RegOpenKeyExW, HKEY,
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE, RRF_RT_REG_EXPAND_SZ,
     RRF_RT_REG_SZ,
 };
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_UNCPRIORITY};
 
 const SYNC_ROOT_MANAGER_KEY: &str =
     "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager";
@@ -288,50 +284,6 @@ fn volume_supports_remote_storage(drive_path: &str) -> bool {
         .is_ok()
             && (file_system_flags & FILE_SUPPORTS_REMOTE_STORAGE) != 0
     }
-}
-
-fn resolve_shortcut_target(shortcut_path: &Path) -> Option<PathBuf> {
-    let _com =
-        crate::infrastructure::windows::recycle_bin::ComApartmentGuard::init_sta_best_effort();
-
-    unsafe {
-        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
-        let persist: IPersistFile = link.cast().ok()?;
-        let shortcut_wide: Vec<u16> = shortcut_path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        persist
-            .Load(PCWSTR(shortcut_wide.as_ptr()), STGM_READ)
-            .ok()?;
-
-        let mut target = vec![0u16; 32_768];
-        link.GetPath(&mut target, std::ptr::null_mut(), SLGP_UNCPRIORITY.0 as u32)
-            .ok()?;
-        let nul = target
-            .iter()
-            .position(|ch| *ch == 0)
-            .unwrap_or(target.len());
-        if nul == 0 {
-            return None;
-        }
-
-        let target_text = String::from_utf16_lossy(&target[..nul]);
-        Some(PathBuf::from(
-            super::environment::expand_environment_strings(&target_text),
-        ))
-    }
-}
-
-fn fast_is_directory(path: &Path) -> bool {
-    let path_wide: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let attrs = unsafe { GetFileAttributesW(PCWSTR(path_wide.as_ptr())) };
-    attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0
 }
 
 fn is_hidden_or_system(path: &Path) -> bool {

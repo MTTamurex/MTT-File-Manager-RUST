@@ -13,6 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::domain::file_entry::SyncStatus;
 mod attributes;
+mod google_drive_shell;
+mod google_drive_status;
 mod directory_enum;
 mod path_detection;
 mod pin_state;
@@ -381,6 +383,31 @@ where
     path_detection::refresh_cloud_sync_roots_from_paths(paths);
 }
 
+pub fn refresh_google_drive_roots_from_paths<I, S>(paths: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    path_detection::refresh_google_drive_roots_from_paths(paths);
+}
+
+/// Check if a path is inside a Google Drive for Desktop root (DriveFS virtual
+/// drive or a mirrored folder reached through one of its `.lnk` shortcuts).
+///
+/// Google Drive does not register with Explorer's SyncRootManager and does not
+/// use the Windows Cloud Files API, so `attrib`-based pin operations never
+/// apply to these paths.
+pub fn is_google_drive_sync_path(path: &Path) -> bool {
+    path_detection::is_google_drive_sync_path(path)
+}
+
+/// True when the path belongs to a Windows Cloud Files (CfAPI) provider
+/// (OneDrive, Proton Drive, etc.) — the paths that react to `attrib +P/-U`
+/// pin-state operations. Google Drive roots are excluded.
+pub fn is_cloud_files_pin_capable_path(path: &Path) -> bool {
+    is_cloud_sync_path(path) && !is_google_drive_sync_path(path)
+}
+
 /// Returns true if `path` is a direct child of a OneDrive root or the user
 /// profile directory (Documents, Pictures, Desktop, Downloads, etc.).
 /// Pure string comparison — no I/O.
@@ -437,24 +464,34 @@ pub fn is_file_open(path: &Path) -> bool {
 }
 
 /// Determine sync status from file attributes.
-/// Only assigns sync status when `is_onedrive` is true (path confirmed to be under a cloud root).
-/// Note: `is_onedrive` should already account for alternate mount points via
+/// Only assigns sync status when `is_cloud_sync` is true (path confirmed to be under a
+/// cloud root: CfAPI sync roots such as OneDrive/Proton, or Google Drive roots).
+/// Note: `is_cloud_sync` should already account for alternate mount points via
 /// `path_has_cloud_attributes()` at the directory level. We intentionally do NOT
 /// fall back to per-file cloud attributes here, because files copied FROM OneDrive
 /// retain their cloud attributes even in non-OneDrive locations.
-pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
-    attributes::get_sync_status(attrs, is_onedrive)
+pub fn get_sync_status(attrs: u32, is_cloud_sync: bool) -> SyncStatus {
+    attributes::get_sync_status(attrs, is_cloud_sync)
 }
 
 /// Re-read Cloud Files attributes for one path and convert them to a sync badge status.
 ///
 /// Intended for watcher/open completion paths, not hot enumeration loops.
 pub fn sync_status_for_path(path: &Path) -> Option<SyncStatus> {
+    // Google Drive's overlays are refreshed asynchronously by the UI bridge;
+    // CfAPI attributes cannot supply its per-file state.
+    if is_google_drive_sync_path(path) {
+        return None;
+    }
     if !is_cloud_sync_path(path) {
         return None;
     }
 
     attributes::sync_status_for_cloud_path(path)
+}
+
+pub fn google_drive_cached_sync_status(path: &Path, ctx: &eframe::egui::Context) -> SyncStatus {
+    google_drive_status::cached_status(path, ctx)
 }
 
 /// Check if a file is available locally (not cloud-only).
@@ -601,7 +638,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sync_status_none_when_not_onedrive() {
+    fn test_sync_status_none_when_not_cloud_sync() {
         assert_eq!(get_sync_status(0, false), SyncStatus::None);
     }
 

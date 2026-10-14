@@ -1,52 +1,5 @@
 use super::*;
 
-fn icon_resource_path(resource: &str) -> Option<std::path::PathBuf> {
-    let trimmed = resource.trim().trim_matches('"');
-    let path_part = trimmed
-        .rfind(',')
-        .map(|idx| &trimmed[..idx])
-        .unwrap_or(trimmed)
-        .trim()
-        .trim_matches('"');
-    (!path_part.is_empty()).then(|| std::path::PathBuf::from(path_part))
-}
-
-fn folder_desktop_ini_icon_resource(folder: &std::path::Path) -> Option<String> {
-    let path = folder.join("desktop.ini");
-    let bytes = std::fs::read(path).ok()?;
-
-    let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
-        let words: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        String::from_utf16_lossy(&words)
-    } else if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
-        let words: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-            .collect();
-        String::from_utf16_lossy(&words)
-    } else if bytes.iter().skip(1).step_by(2).take(16).any(|b| *b == 0) {
-        let words: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        String::from_utf16_lossy(&words)
-    } else {
-        String::from_utf8_lossy(&bytes).into_owned()
-    };
-
-    text.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let (key, value) = trimmed.split_once('=')?;
-        key.trim()
-            .eq_ignore_ascii_case("IconResource")
-            .then(|| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-    })
-}
-
 fn folder_path_icon_cache_key(folder_path: &str) -> String {
     folder_path
         .to_lowercase()
@@ -54,7 +7,7 @@ fn folder_path_icon_cache_key(folder_path: &str) -> String {
         .to_string()
 }
 
-fn cloud_root_icon_cache_key(root_path: &str, icon_resource: Option<&str>) -> String {
+pub(super) fn cloud_root_icon_cache_key(root_path: &str, icon_resource: Option<&str>) -> String {
     let resource_key = icon_resource
         .map(str::trim)
         .filter(|resource| !resource.is_empty())
@@ -315,117 +268,6 @@ impl IconLoader {
         let cache_key = folder_path_icon_cache_key(folder_path);
         self.registered_folder_icon_resources
             .contains_key(&cache_key)
-    }
-
-    /// Gets or loads a Cloud Files sync-root icon (non-blocking).
-    ///
-    /// Sync roots such as Proton Drive can expose a normal filesystem path plus
-    /// a provider icon resource registered in Explorer. Prefer the registered
-    /// provider icon so this matches Explorer's sidebar instead of the generic
-    /// folder icon for the backing filesystem path.
-    pub fn get_or_load_cloud_root_icon(
-        &mut self,
-        _ctx: &egui::Context,
-        root_path: &str,
-        icon_resource: Option<&str>,
-    ) -> Option<egui::TextureHandle> {
-        let cache_key = cloud_root_icon_cache_key(root_path, icon_resource);
-
-        if self.failed_drive_icons.peek(&cache_key).is_some() {
-            return None;
-        }
-
-        if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
-            return Some(icon.clone());
-        }
-
-        if self.loading_drive_icons.contains(&cache_key) {
-            return None;
-        }
-
-        let tx = self.icon_result_tx.clone();
-        let path_owned = root_path.to_string();
-        let resource = icon_resource
-            .map(str::trim)
-            .filter(|resource| !resource.is_empty())
-            .map(str::to_string);
-        let resource_path = resource.as_deref().and_then(icon_resource_path);
-        let active = self.auxiliary_icon_threads.clone();
-
-        if !super::try_reserve_auxiliary_icon_thread(&active) {
-            return None;
-        }
-
-        self.loading_drive_icons.insert(cache_key.clone());
-        let thread_cache_key = cache_key.clone();
-        let thread_active = active.clone();
-        let spawn_result = std::thread::Builder::new()
-            .name("cloud-root-icon-worker".to_string())
-            .spawn(move || {
-                let _guard = super::ThreadCountGuard(thread_active);
-                let _com = super::ComStaGuard::new();
-                let data = (|| {
-                    if let Some(resource) = resource.as_ref() {
-                        if let Ok(icon) = windows::extract_icon_resource(resource, IconSize::Jumbo)
-                        {
-                            return Ok(icon);
-                        }
-                    }
-
-                    if let Some(path) = resource_path.as_ref() {
-                        if path.is_dir() {
-                            if let Some(resource) = folder_desktop_ini_icon_resource(path) {
-                                if let Ok(icon) =
-                                    windows::extract_icon_resource(&resource, IconSize::Jumbo)
-                                {
-                                    return Ok(icon);
-                                }
-                            }
-
-                            if let Ok(icon) = windows::extract_drive_icon(
-                                &path.to_string_lossy(),
-                                IconSize::Jumbo,
-                            ) {
-                                return Ok(icon);
-                            }
-                        }
-
-                        if let Ok(icon) = windows::extract_file_icon_by_path(path, IconSize::Jumbo)
-                        {
-                            return Ok(icon);
-                        }
-                    }
-
-                    windows::extract_drive_icon(&path_owned, IconSize::Jumbo).or_else(|_| {
-                        resource_path
-                            .as_ref()
-                            .ok_or_else(|| "missing icon resource".into())
-                            .and_then(|path| {
-                                windows::extract_file_icon_by_path(path, IconSize::Jumbo)
-                            })
-                    })
-                })()
-                .map_err(|e| {
-                    log::trace!(
-                        "[Icon] Cloud root icon extraction failed for {}: {}",
-                        path_owned,
-                        e
-                    )
-                })
-                .ok();
-                let _ = tx.send(AsyncIconResult {
-                    key: thread_cache_key,
-                    data,
-                });
-            });
-
-        if let Err(error) = spawn_result {
-            active.fetch_sub(1, Ordering::Relaxed);
-            self.loading_drive_icons.remove(&cache_key);
-            log::error!("[Icon] Failed to spawn cloud-root-icon-worker: {}", error);
-        }
-
-        None
     }
 
     /// Pre-load icons for known special folders.

@@ -847,7 +847,7 @@ impl ImageViewerApp {
             // through IContextMenu on newer Windows 11 builds, so we add them natively.
             if !is_drive {
                 let cloud_sync = paths.first().and_then(|p| {
-                    if !crate::infrastructure::onedrive::is_cloud_sync_path(p) {
+                    if !crate::infrastructure::onedrive::is_cloud_files_pin_capable_path(p) {
                         return None;
                     }
                     // Use cached sync_status from already-loaded items (no I/O)

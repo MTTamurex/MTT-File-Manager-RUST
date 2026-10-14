@@ -63,8 +63,8 @@ pub(super) fn is_file_open(path: &Path) -> bool {
     }
 }
 
-pub(super) fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
-    if !is_onedrive {
+pub(super) fn get_sync_status(attrs: u32, is_cloud_sync: bool) -> SyncStatus {
+    if !is_cloud_sync {
         return SyncStatus::None;
     }
 

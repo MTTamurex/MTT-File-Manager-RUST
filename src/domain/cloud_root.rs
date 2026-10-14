@@ -45,7 +45,22 @@ impl CloudRoot {
         }
     }
 
-    pub fn is_windows_cloud_files(&self) -> bool {
-        self.kind == CloudRootKind::WindowsCloudFiles
+    pub fn is_google_drive_shortcut(&self) -> bool {
+        self.kind == CloudRootKind::GoogleDriveShortcut
+    }
+
+    /// Paths tracked as cloud sync roots for sync-status detection.
+    ///
+    /// Google Drive entries track both the DriveFS virtual drive root and the
+    /// mirrored folder resolved from the shortcut, so status icons apply to both
+    /// surfaces.
+    pub fn sync_root_paths(&self) -> Vec<&str> {
+        match self.kind {
+            CloudRootKind::WindowsCloudFiles => vec![self.path.as_str()],
+            CloudRootKind::GoogleDriveShortcut => match self.source_path.as_deref() {
+                Some(source) if !source.trim().is_empty() => vec![source, self.path.as_str()],
+                _ => vec![self.path.as_str()],
+            },
+        }
     }
 }

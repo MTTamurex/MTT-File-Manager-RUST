@@ -23,6 +23,7 @@ macro_rules! debug_log {
 mod dual_panel_events;
 mod file_op_events;
 mod global_search_events;
+mod google_drive_events;
 mod helpers;
 mod panel_tab_cache;
 mod rebuild_events;
@@ -221,6 +222,8 @@ impl ImageViewerApp {
 
         let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx, true);
         self.apply_ready_tag_view_hides();
+
+        self.process_google_drive_statuses(ctx);
 
         // GLOBAL SEARCH: Process search results from worker
         self.process_global_search_events(true);

@@ -136,6 +136,43 @@ where
     }
 }
 
+/// Cached Google Drive for Desktop roots (DriveFS virtual drive + mirrored folders).
+static GOOGLE_DRIVE_ROOTS: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
+
+pub(super) fn is_google_drive_sync_path(path: &Path) -> bool {
+    let path_lower = normalize_root_for_compare(&path.to_string_lossy());
+    google_drive_roots_lock()
+        .read()
+        .map(|roots| {
+            roots
+                .iter()
+                .any(|root| path_is_under_root(&path_lower, root))
+        })
+        .unwrap_or(false)
+}
+
+pub(super) fn refresh_google_drive_roots_from_paths<I, S>(paths: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut roots: Vec<String> = paths
+        .into_iter()
+        .map(|root| normalize_root_for_compare(root.as_ref()))
+        .filter(|root| !root.is_empty())
+        .collect();
+    roots.sort();
+    roots.dedup();
+    log::info!("[GoogleDrive] Refreshed roots: {:?}", roots);
+    if let Ok(mut cached) = google_drive_roots_lock().write() {
+        std::mem::swap(&mut *cached, &mut roots);
+    }
+}
+
+fn google_drive_roots_lock() -> &'static RwLock<Vec<String>> {
+    GOOGLE_DRIVE_ROOTS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
 fn cloud_sync_roots_lock() -> &'static RwLock<Vec<String>> {
     CLOUD_SYNC_ROOTS.get_or_init(|| {
         let roots = normalize_cloud_sync_roots(

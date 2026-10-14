@@ -483,10 +483,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 selected_shell_item_text.and_then(cloud_files_pin_command_from_text);
 
             if let Some(command) = direct_cloud_files_pin_command {
-                let is_cloud_target = context_menu
-                    .target_paths
-                    .iter()
-                    .any(|path| crate::infrastructure::onedrive::is_cloud_sync_path(path));
+                let is_cloud_target = context_menu.target_paths.iter().any(|path| {
+                    crate::infrastructure::onedrive::is_cloud_files_pin_capable_path(path)
+                });
 
                 if is_cloud_target {
                     app.pending_shell_menu_invocation_id
@@ -565,11 +564,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // the shell invoke (some shell extensions fire silently).
                 if let Some(text) = selected_shell_item_text {
                     if let Some(command) = cloud_files_pin_command_from_text(text) {
-                        if context_menu
-                            .target_paths
-                            .iter()
-                            .any(|path| crate::infrastructure::onedrive::is_cloud_sync_path(path))
-                        {
+                        if context_menu.target_paths.iter().any(|path| {
+                            crate::infrastructure::onedrive::is_cloud_files_pin_capable_path(path)
+                        }) {
                             apply_cloud_files_pin(app, &context_menu.target_paths, command);
                         }
                     }

@@ -37,6 +37,7 @@ pub mod shell_context_menu;
 pub mod shell_folder;
 pub mod shell_new;
 pub mod shell_operations;
+pub mod shortcuts;
 pub mod sync_roots;
 pub mod system_info;
 pub mod system_spec;

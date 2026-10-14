@@ -22,17 +22,22 @@ fn pending_name_click_id(scope: Id) -> Id {
     scope.with("pending_inline_rename_name_click")
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct NameClickFlags {
+    is_selected: bool,
+    clicked_on_name: bool,
+    double_clicked: bool,
+}
+
 fn update_pending_name_click(
     pending: Option<PendingNameClick>,
     item_path: &Path,
     name_rect: Rect,
-    is_selected: bool,
-    clicked_on_name: bool,
-    double_clicked: bool,
+    flags: NameClickFlags,
     now: f64,
     delay: f64,
 ) -> (Option<PendingNameClick>, bool) {
-    if double_clicked {
+    if flags.double_clicked {
         return (None, false);
     }
 
@@ -43,7 +48,7 @@ fn update_pending_name_click(
         return (None, true);
     }
 
-    if clicked_on_name && is_selected {
+    if flags.clicked_on_name && flags.is_selected {
         return (
             Some(PendingNameClick {
                 path: item_path.to_path_buf(),
@@ -120,9 +125,11 @@ pub(crate) fn selected_name_click_starts_rename(
         pending,
         item_path,
         name_rect,
-        is_selected,
-        clicked_on_name,
-        response.double_clicked() || response.triple_clicked(),
+        NameClickFlags {
+            is_selected,
+            clicked_on_name,
+            double_clicked: response.double_clicked() || response.triple_clicked(),
+        },
         now,
         delay,
     );
@@ -146,7 +153,7 @@ pub(crate) fn selected_name_click_starts_rename(
 
 #[cfg(test)]
 mod tests {
-    use super::{update_pending_name_click, PendingNameClick};
+    use super::{update_pending_name_click, NameClickFlags, PendingNameClick};
     use eframe::egui::{Pos2, Rect, Vec2};
     use std::path::Path;
 
@@ -154,18 +161,48 @@ mod tests {
     fn selected_name_click_waits_for_double_click_interval() {
         let path = Path::new("file.txt");
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(10.0));
-        let (pending, started) =
-            update_pending_name_click(None, path, rect, true, true, false, 1.0, 0.3);
+        let (pending, started) = update_pending_name_click(
+            None,
+            path,
+            rect,
+            NameClickFlags {
+                is_selected: true,
+                clicked_on_name: true,
+                double_clicked: false,
+            },
+            1.0,
+            0.3,
+        );
         assert!(!started);
         assert_eq!(pending.as_ref().map(|pending| pending.deadline), Some(1.3));
 
-        let (pending, started) =
-            update_pending_name_click(pending, path, rect, true, false, false, 1.2, 0.3);
+        let (pending, started) = update_pending_name_click(
+            pending,
+            path,
+            rect,
+            NameClickFlags {
+                is_selected: true,
+                clicked_on_name: false,
+                double_clicked: false,
+            },
+            1.2,
+            0.3,
+        );
         assert!(!started);
         assert!(pending.is_some());
 
-        let (pending, started) =
-            update_pending_name_click(pending, path, rect, true, false, false, 1.31, 0.3);
+        let (pending, started) = update_pending_name_click(
+            pending,
+            path,
+            rect,
+            NameClickFlags {
+                is_selected: true,
+                clicked_on_name: false,
+                double_clicked: false,
+            },
+            1.31,
+            0.3,
+        );
         assert!(started);
         assert!(pending.is_none());
     }
@@ -179,8 +216,18 @@ mod tests {
             rect,
             deadline: 1.3,
         });
-        let (pending, started) =
-            update_pending_name_click(pending, path, rect, true, true, true, 1.1, 0.3);
+        let (pending, started) = update_pending_name_click(
+            pending,
+            path,
+            rect,
+            NameClickFlags {
+                is_selected: true,
+                clicked_on_name: true,
+                double_clicked: true,
+            },
+            1.1,
+            0.3,
+        );
         assert!(!started);
         assert!(pending.is_none());
     }

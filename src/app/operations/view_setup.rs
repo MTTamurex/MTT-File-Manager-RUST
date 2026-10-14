@@ -383,14 +383,24 @@ impl ImageViewerApp {
                 self.drive_state.cloud_roots = scan_result.cloud_roots;
                 self.item_icon_loader
                     .set_cloud_root_icon_resources(&self.drive_state.cloud_roots);
+                self.item_icon_loader
+                    .refresh_google_drive_root_icons(&self.drive_state.cloud_roots);
 
                 if cloud_roots_changed {
+                    let mut sync_root_paths: Vec<&str> = Vec::new();
+                    let mut google_drive_paths: Vec<&str> = Vec::new();
+                    for root in &self.drive_state.cloud_roots {
+                        if root.is_google_drive_shortcut() {
+                            google_drive_paths.extend(root.sync_root_paths());
+                        }
+                        sync_root_paths.extend(root.sync_root_paths());
+                    }
+
                     crate::infrastructure::onedrive::refresh_cloud_sync_roots_from_paths(
-                        self.drive_state
-                            .cloud_roots
-                            .iter()
-                            .filter(|root| root.is_windows_cloud_files())
-                            .map(|root| root.path.as_str()),
+                        sync_root_paths,
+                    );
+                    crate::infrastructure::onedrive::refresh_google_drive_roots_from_paths(
+                        google_drive_paths,
                     );
                 }
 

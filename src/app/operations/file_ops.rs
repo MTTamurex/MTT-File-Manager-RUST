@@ -80,6 +80,17 @@ fn open_cloud_sync_file_async(
 
 impl ImageViewerApp {
     pub fn open_with_shell_guarded(&mut self, path: &Path) {
+        // Shortcuts resolving to a folder stay in-app: navigating a folder carries
+        // no code-execution risk, so no source confirmation gate applies.
+        if !self.navigation_state.is_recycle_bin_view {
+            if let Some(folder) =
+                crate::infrastructure::windows::shortcuts::resolve_folder_shortcut_target(path)
+            {
+                self.navigate_to(&folder.to_string_lossy());
+                return;
+            }
+        }
+
         if is_high_risk_shell_open_source(path) {
             let now = Instant::now();
             let confirmed = self
@@ -428,14 +439,12 @@ impl ImageViewerApp {
             {
                 return false;
             }
-        } else {
-            if new_name.is_empty()
-                || path
-                    .file_name()
-                    .is_some_and(|current_name| current_name.to_string_lossy() == new_name)
-            {
-                return false;
-            }
+        } else if new_name.is_empty()
+            || path
+                .file_name()
+                .is_some_and(|current_name| current_name.to_string_lossy() == new_name)
+        {
+            return false;
         }
 
         self.file_operation_state.file_ops_in_progress += 1;

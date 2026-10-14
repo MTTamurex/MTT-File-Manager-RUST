@@ -38,8 +38,8 @@ pub(crate) fn add_tray_icon(hwnd: HWND) -> bool {
         return true;
     }
 
-    let mut data = notify_icon_data(hwnd);
-    let added = unsafe { Shell_NotifyIconW(NIM_ADD, &mut data).as_bool() };
+    let data = notify_icon_data(hwnd);
+    let added = unsafe { Shell_NotifyIconW(NIM_ADD, &data).as_bool() };
     if added {
         TRAY_ICON_ADDED.store(true, Ordering::Release);
     }
@@ -50,9 +50,9 @@ pub(crate) fn remove_tray_icon(hwnd: HWND) {
     if !TRAY_ICON_ADDED.swap(false, Ordering::AcqRel) {
         return;
     }
-    let mut data = notify_icon_data(hwnd);
+    let data = notify_icon_data(hwnd);
     unsafe {
-        let _ = Shell_NotifyIconW(NIM_DELETE, &mut data);
+        let _ = Shell_NotifyIconW(NIM_DELETE, &data);
     }
 }
 
@@ -110,13 +110,15 @@ pub(crate) fn show_window(hwnd: HWND) {
 }
 
 fn notify_icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
-    let mut data = NOTIFYICONDATAW::default();
-    data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
-    data.hWnd = hwnd;
-    data.uID = TRAY_ICON_ID;
-    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    data.uCallbackMessage = TRAY_CALLBACK_MESSAGE;
-    data.hIcon = window_icon(hwnd);
+    let mut data = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: hwnd,
+        uID: TRAY_ICON_ID,
+        uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+        uCallbackMessage: TRAY_CALLBACK_MESSAGE,
+        hIcon: window_icon(hwnd),
+        ..Default::default()
+    };
     let tooltip: Vec<u16> = "MTT File Manager"
         .encode_utf16()
         .chain(std::iter::once(0))
@@ -145,8 +147,8 @@ fn show_context_menu(hwnd: HWND) {
     let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
         return;
     };
-    let open_label = wide(&rust_i18n::t!("tray.open").to_string());
-    let exit_label = wide(&rust_i18n::t!("tray.exit").to_string());
+    let open_label = wide(&rust_i18n::t!("tray.open"));
+    let exit_label = wide(&rust_i18n::t!("tray.exit"));
     unsafe {
         let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN_ID, PCWSTR(open_label.as_ptr()));
         let _ = AppendMenuW(menu, MF_STRING, MENU_EXIT_ID, PCWSTR(exit_label.as_ptr()));

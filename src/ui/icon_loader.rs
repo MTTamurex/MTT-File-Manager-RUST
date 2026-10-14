@@ -18,6 +18,7 @@ use crate::domain::file_entry::IconSize;
 use crate::infrastructure::windows;
 
 mod async_ops;
+mod cloud_root_icons;
 mod file_icons;
 mod special_icons;
 
