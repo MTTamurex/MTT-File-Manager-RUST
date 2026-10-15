@@ -7,7 +7,7 @@ use rust_i18n::t;
 
 pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let locked = app.current_folder_locked;
-    let mut view_mode_changed = false;
+    let mut requested_mode = None;
 
     ui.scope(|ui| {
         if locked {
@@ -24,11 +24,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         .clicked()
             && !matches!(app.view_mode, ViewMode::List)
         {
-            app.view_mode = ViewMode::List;
-            if !locked {
-                app.view_mode_normal = ViewMode::List;
-            }
-            view_mode_changed = true;
+            requested_mode = Some(ViewMode::List);
         }
 
         if widgets::toggle_icon_button(
@@ -41,11 +37,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         .clicked()
             && !matches!(app.view_mode, ViewMode::ColumnList)
         {
-            app.view_mode = ViewMode::ColumnList;
-            if !locked {
-                app.view_mode_normal = ViewMode::ColumnList;
-            }
-            view_mode_changed = true;
+            requested_mode = Some(ViewMode::ColumnList);
         }
 
         if widgets::toggle_icon_button(
@@ -58,11 +50,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         .clicked()
             && !matches!(app.view_mode, ViewMode::Grid)
         {
-            app.view_mode = ViewMode::Grid;
-            if !locked {
-                app.view_mode_normal = ViewMode::Grid;
-            }
-            view_mode_changed = true;
+            requested_mode = Some(ViewMode::Grid);
         }
 
         if widgets::toggle_icon_button(
@@ -75,30 +63,12 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         .clicked()
             && !matches!(app.view_mode, ViewMode::Miller)
         {
-            app.view_mode = ViewMode::Miller;
-            if !locked {
-                app.view_mode_normal = ViewMode::Miller;
-            }
-            view_mode_changed = true;
+            requested_mode = Some(ViewMode::Miller);
         }
     });
 
-    if view_mode_changed {
-        app.watch_current_folder();
-        let selection_is_outside_current_folder = app
-            .selected_file
-            .as_ref()
-            .is_some_and(|selected| !app.items.iter().any(|item| item.path == selected.path));
-        if !matches!(app.view_mode, ViewMode::Miller) && selection_is_outside_current_folder {
-            app.clear_file_view_selection();
-        }
-        if matches!(
-            app.view_mode,
-            ViewMode::Grid | ViewMode::ColumnList | ViewMode::Miller
-        ) {
-            app.folder_size_state.cancel_batch();
-        }
-        app.save_preferences();
+    if let Some(mode) = requested_mode {
+        app.change_view_mode(mode);
     }
 
     ui.separator();

@@ -113,6 +113,7 @@ pub(super) fn render_list_item(
     ui.push_id(i, |ui| {
         let hidden_opacity = if item.is_hidden { 0.5 } else { 1.0 };
         let response = ui.interact(rect, ui.id().with(i), Sense::click_and_drag());
+        crate::ui::new_tab_request::item_middle_click(&response, item, ctx.is_recycle_bin_view);
 
         if response.clicked() {
             *clicked_item = Some(i);

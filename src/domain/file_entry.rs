@@ -360,6 +360,15 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    pub fn cycle(self, forward: bool) -> Self {
+        match (self, forward) {
+            (Self::Grid, true) | (Self::ColumnList, false) => Self::List,
+            (Self::List, true) | (Self::Miller, false) => Self::ColumnList,
+            (Self::ColumnList, true) | (Self::Grid, false) => Self::Miller,
+            (Self::Miller, true) | (Self::List, false) => Self::Grid,
+        }
+    }
+
     pub const fn preference_value(self) -> &'static str {
         match self {
             Self::Grid => "grid",

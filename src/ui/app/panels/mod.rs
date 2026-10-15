@@ -41,6 +41,9 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     // 4. Central Panel
     let t_central = std::time::Instant::now();
     content::render_central_panel_layout(app, root_ui);
+    if let Some(request) = crate::ui::new_tab_request::take(&ctx) {
+        app.open_location_in_new_tab(request.panel, &request.path);
+    }
     let central_ms = t_central.elapsed().as_millis();
 
     // 5. Focus release: When user clicks anywhere outside the video player,
@@ -633,6 +636,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 /// attributing navigate_to I/O to sidebar render time.
 fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
     match action {
+        SidebarAction::OpenInNewTab(path) => {
+            app.open_location_in_new_tab(app.dual_panel_active, &path);
+        }
         SidebarAction::NavigateTo(path) => {
             // Avoid synchronous existence probes on the UI thread. Deleted pinned folders
             // are pruned by the existing async cleanup path.

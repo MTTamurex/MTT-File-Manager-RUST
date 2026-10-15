@@ -375,7 +375,7 @@ settings:
   shortcuts_reset_all: "Επαναφορά όλων στην προεπιλογή"
   shortcuts_reset: "Επαναφορά στην προεπιλογή"
   shortcuts_press_binding: "Πατήστε τη συντόμευση..."
-  shortcuts_press_binding_hint: "Πατήστε τη νέα συντόμευση. Το Esc ακυρώνει την καταγραφή."
+  shortcuts_press_binding_hint: "Πατήστε τη νέα συντόμευση. Οι λειτουργίες προβολής δέχονται και τροποποιητές + κύλιση. Το Esc ακυρώνει την καταγραφή."
   shortcuts_error_conflict: "Αυτός ο συνδυασμός χρησιμοποιείται ήδη από την ενέργεια %{action}."
   shortcuts_error_reserved: "Αυτός ο συνδυασμός είναι δεσμευμένος από τα Windows και δεν μπορεί να χρησιμοποιηθεί."
   shortcuts_error_unsupported: "Χρησιμοποιήστε Ctrl, Alt ή Shift με έναν υποστηριζόμενο πλήκτρο, ή ένα απλό πλήκτρο όπως F2, F5, Delete ή Space."
@@ -449,6 +449,9 @@ settings:
   shortcut_create_folder: "Νέος φάκελος"
   shortcut_preview_selected: "Άνοιγμα εσωτερικής προεπισκόπησης"
   shortcut_select_all: "Επιλογή όλων"
+  shortcut_next_view_mode: "Επόμενη λειτουργία προβολής"
+  shortcut_previous_view_mode: "Προηγούμενη λειτουργία προβολής"
+  shortcuts_view_mode_scroll_note: "Προεπιλογή: Ctrl + κύλιση αλλάζει τη λειτουργία προβολής. Ctrl + Shift + κύλιση προσαρμόζει το μέγεθος μικρογραφιών στο πλέγμα."
 preview:
   select_item: "Επιλέξτε ένα στοιχείο για να δείτε λεπτομέρειες"
   items_selected: "%{count} επιλεγμένα στοιχεία"

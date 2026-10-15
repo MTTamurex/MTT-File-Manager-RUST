@@ -375,7 +375,7 @@ settings:
   shortcuts_reset_all: "全部恢复默认"
   shortcuts_reset: "恢复默认"
   shortcuts_press_binding: "请按下快捷键..."
-  shortcuts_press_binding_hint: "按下新快捷键，ESC取消录制。"
+  shortcuts_press_binding_hint: "按下新快捷键。视图模式也支持修饰键 + 滚轮。Esc 取消录制。"
   shortcuts_error_conflict: "该组合键已被%{action}占用。"
   shortcuts_error_reserved: "该组合键由Windows保留，不可使用。"
   shortcuts_error_unsupported: "请使用Ctrl、Alt、Shift配合其他按键，或使用F2、F5、Delete、Space等单键。"
@@ -449,6 +449,9 @@ settings:
   shortcut_create_folder: "新建文件夹"
   shortcut_preview_selected: "打开内置预览"
   shortcut_select_all: "全选"
+  shortcut_next_view_mode: "下一个视图模式"
+  shortcut_previous_view_mode: "上一个视图模式"
+  shortcuts_view_mode_scroll_note: "默认：Ctrl + 滚轮切换视图模式。Ctrl + Shift + 滚轮调整网格缩略图大小。"
 preview:
   select_item: "请选择单个项目查看详情"
   items_selected: "已选中%{count}个项目"

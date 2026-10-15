@@ -449,6 +449,7 @@ fn interaction(
             input.pointer.button_down(egui::PointerButton::Primary),
         )
     });
+    crate::ui::new_tab_request::item_middle_click(response, item, false);
     if crate::ui::views::common::should_start_item_drag(
         response.drag_started_by(egui::PointerButton::Primary),
         response.dragged_by(egui::PointerButton::Primary),

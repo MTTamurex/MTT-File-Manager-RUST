@@ -10,6 +10,8 @@ use rust_i18n::t;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
+#[cfg(test)]
+mod middle_click_tests;
 mod tags;
 pub use tags::render_tags_section;
 
@@ -84,6 +86,7 @@ pub struct SidebarContext<'a> {
 
 /// Actions that can be triggered by the sidebar
 pub enum SidebarAction {
+    OpenInNewTab(String),
     NavigateTo(String),
     NavigateToComputer,
     NavigateToRecycleBin,
@@ -193,6 +196,11 @@ pub fn render_sidebar_this_pc(
 
     if header_response.clicked() && !ctx.is_renaming {
         action = Some(SidebarAction::NavigateToComputer);
+    }
+    if header_response.middle_clicked() && !ctx.is_renaming {
+        action = Some(SidebarAction::OpenInNewTab(
+            crate::domain::special_paths::COMPUTER_VIEW_ID.to_string(),
+        ));
     }
 
     ui.add_space(4.0);
@@ -343,6 +351,10 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
                 && ui.ctx().input(|input| input.pointer.primary_released());
             if released_over_drop_target && !ctx.is_renaming {
                 action = Some(SidebarAction::DropItemsToRecycleBin);
+            } else if response.middle_clicked() && !ctx.is_renaming {
+                action = Some(SidebarAction::OpenInNewTab(
+                    crate::domain::special_paths::RECYCLE_BIN_VIEW_ID.to_string(),
+                ));
             } else if response.clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::NavigateToRecycleBin);
             }
@@ -731,6 +743,12 @@ pub fn render_sidebar_drives(
             {
                 action = Some(SidebarAction::EjectDrive(disk_path.to_string()));
             } else if action.is_none()
+                && response.middle_clicked()
+                && !ctx.is_renaming
+                && !ctx.is_item_dragging
+            {
+                action = Some(SidebarAction::OpenInNewTab(disk_path.to_string()));
+            } else if action.is_none()
                 && (response.double_clicked() || response.clicked())
                 && !ctx.is_renaming
                 && !ctx.is_item_dragging
@@ -846,6 +864,9 @@ pub fn render_sidebar_drives(
                 {
                     if action.is_none() {
                         match tree_action {
+                            crate::ui::sidebar_tree::SidebarTreeAction::OpenInNewTab(path) => {
+                                action = Some(SidebarAction::OpenInNewTab(path));
+                            }
                             crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
                                 action = Some(SidebarAction::NavigateTo(path));
                             }
@@ -1069,6 +1090,9 @@ fn render_pinned_folders(
         }
 
         // Handle click: check if the click landed on the pin icon or the rest of the row
+        if response.middle_clicked() && !ctx.is_renaming && action.is_none() {
+            *action = Some(SidebarAction::OpenInNewTab(pinned.path.clone()));
+        }
         if response.clicked() && !ctx.is_renaming && action.is_none() {
             let click_pos = ui.input(|inp| inp.pointer.interact_pos());
             let clicked_pin = click_pos.map(|p| pin_rect.contains(p)).unwrap_or(false);

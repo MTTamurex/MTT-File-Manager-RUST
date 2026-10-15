@@ -207,7 +207,7 @@ impl TabState {
             path: path.to_string(),
             title,
             navigation: NavigationHistory::new(path.to_string()),
-            is_computer_view: false,
+            is_computer_view: path == COMPUTER_VIEW_ID,
             items: Arc::new(Vec::new()),
             all_items: Arc::new(Vec::new()),
             items_revision: 0,
@@ -736,6 +736,9 @@ impl TabManager {
         self.tabs.len()
     }
 }
+
+#[cfg(test)]
+mod new_location_tests;
 
 #[cfg(test)]
 mod tests {

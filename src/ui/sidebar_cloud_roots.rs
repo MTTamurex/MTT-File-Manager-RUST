@@ -178,6 +178,12 @@ pub fn render_cloud_roots(
         }
 
         if action.is_none()
+            && response.middle_clicked()
+            && !ctx.is_renaming
+            && !ctx.is_item_dragging
+        {
+            *action = Some(SidebarAction::OpenInNewTab(root.path.clone()));
+        } else if action.is_none()
             && (response.double_clicked() || response.clicked())
             && !ctx.is_renaming
             && !ctx.is_item_dragging
@@ -225,6 +231,9 @@ pub fn render_cloud_roots(
             {
                 if action.is_none() {
                     match tree_action {
+                        crate::ui::sidebar_tree::SidebarTreeAction::OpenInNewTab(path) => {
+                            *action = Some(SidebarAction::OpenInNewTab(path));
+                        }
                         crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
                             *action = Some(SidebarAction::NavigateTo(path));
                         }

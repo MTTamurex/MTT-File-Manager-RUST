@@ -1,6 +1,5 @@
 use crate::app::shortcuts::{ShortcutAction, ShortcutBinding};
 use crate::app::ImageViewerApp;
-use crate::domain::file_entry::ViewMode;
 use crate::infrastructure::windows::is_virtual_key_down;
 use crate::ui::address_bar;
 use crate::workers::idle_warmup::IdleWarmupMessage;
@@ -380,20 +379,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl+Scroll: adjust thumbnail size (grid mode only)
-        // eframe/winit converts Ctrl+Scroll into zoom_delta before smooth_scroll_delta
-        // Read zoom_delta and reset the UI zoom factor back to 1.0
-        let zoom_delta = ctx.input(|i| i.zoom_delta());
-        if (zoom_delta - 1.0).abs() > 0.001 && app.view_mode == ViewMode::Grid {
-            // zoom_delta > 1.0 = scroll up (increase), < 1.0 = decrease
-            // Scale: each wheel notch produces delta ~0.1 -> 0.1 x 24 = ~2.4px per notch
-            let change = (zoom_delta - 1.0) * 24.0;
-            app.thumbnail_size =
-                (app.thumbnail_size + change).clamp(crate::ui::theme::THUMBNAIL_MIN, 256.0);
-            // Prevent egui from applying zoom to the UI itself
-            ctx.set_zoom_factor(1.0);
-            app.save_preferences();
-            user_active = true;
+        if !text_input_active && !app.navigation_state.show_settings_window && app_has_focus {
+            user_active |= super::view_mode_input::handle_view_mode_input(app, ctx);
         }
 
         if app

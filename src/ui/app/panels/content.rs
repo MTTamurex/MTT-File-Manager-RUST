@@ -643,6 +643,13 @@ fn render_physical_panel_content(
     clip_rect: egui::Rect,
 ) {
     let panel_id = physical_panel_ui_id(ui.id(), panel);
+    crate::ui::new_tab_request::set_render_panel(
+        ui.ctx(),
+        panel,
+        !app.navigation_state.is_recycle_bin_view
+            && app.renaming_state.is_none()
+            && !app.file_panel_input_blocked_by_drag_move_confirmation(),
+    );
     ui.scope_builder(
         egui::UiBuilder::new().id(panel_id).max_rect(content_rect),
         |ui| {

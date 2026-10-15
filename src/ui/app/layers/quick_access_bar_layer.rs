@@ -30,6 +30,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
         .collect();
     let mut reorder = None;
     let mut navigate = None;
+    let mut new_tab_path = None;
     let mut context_menu_path = None;
     let mut unpin_path = None;
     let mut pin_path = None;
@@ -159,6 +160,14 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             {
                                 navigate = Some(None);
                             }
+                            if response.middle_clicked()
+                                && !app.is_item_dragging
+                                && app.renaming_state.is_none()
+                            {
+                                new_tab_path = Some(
+                                    crate::domain::special_paths::RECYCLE_BIN_VIEW_ID.to_string(),
+                                );
+                            }
                         }
 
                         let drag_id = egui::Id::new("qa_bar_reorder_drag");
@@ -274,6 +283,9 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             {
                                 navigate = Some(Some(path.clone()));
                             }
+                            if item_response.middle_clicked() && app.renaming_state.is_none() {
+                                new_tab_path = Some(path.clone());
+                            }
                             if pin_response.clicked() {
                                 unpin_path = Some(path.clone());
                             }
@@ -385,6 +397,9 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
             Some(path) => app.navigate_to(&path),
             None => app.navigate_to_recycle_bin(),
         }
+    }
+    if let Some(path) = new_tab_path {
+        app.open_location_in_new_tab(app.dual_panel_active, &path);
     }
     if let Some((from, to)) = reorder {
         app.reorder_pinned_folder(from, to);

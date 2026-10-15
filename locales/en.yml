@@ -375,7 +375,7 @@ settings:
   shortcuts_reset_all: "Reset all to defaults"
   shortcuts_reset: "Reset to default"
   shortcuts_press_binding: "Press the shortcut..."
-  shortcuts_press_binding_hint: "Press the new shortcut. Esc cancels capture."
+  shortcuts_press_binding_hint: "Press the new shortcut. View modes also accept modifiers + scroll. Esc cancels capture."
   shortcuts_error_conflict: "This combination is already used by %{action}."
   shortcuts_error_reserved: "This combination is reserved by Windows and cannot be used."
   shortcuts_error_unsupported: "Use Ctrl, Alt or Shift with a supported key, or a single key like F2, F5, Delete or Space."
@@ -449,6 +449,9 @@ settings:
   shortcut_create_folder: "New folder"
   shortcut_preview_selected: "Open internal preview"
   shortcut_select_all: "Select all"
+  shortcut_next_view_mode: "Next view mode"
+  shortcut_previous_view_mode: "Previous view mode"
+  shortcuts_view_mode_scroll_note: "Default: Ctrl + scroll cycles view modes. Ctrl + Shift + scroll adjusts grid thumbnail size."
 preview:
   select_item: "Select a single item to see details"
   items_selected: "%{count} items selected"

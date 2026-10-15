@@ -55,6 +55,12 @@ pub fn render_shortcut_settings_section(
     );
     ui.add_space(12.0);
 
+    ui.label(
+        RichText::new(t!("settings.shortcuts_view_mode_scroll_note"))
+            .size(12.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
+
     if ui
         .add_enabled(
             shortcuts.any_customized(),
@@ -98,14 +104,19 @@ pub fn render_shortcut_settings_section(
                     editor_state.begin_capture(action);
                 }
 
-                if ui
-                    .add_enabled(
-                        !shortcuts.is_default(action),
-                        egui::Button::new(t!("settings.shortcuts_reset")),
-                    )
-                    .clicked()
-                {
-                    shortcuts.reset(action);
+                let reset_error = shortcuts
+                    .validate_candidate(action, action.default_binding())
+                    .err();
+                let reset_response = ui.add_enabled(
+                    !shortcuts.is_default(action) && reset_error.is_none(),
+                    egui::Button::new(t!("settings.shortcuts_reset")),
+                );
+                let reset_response = if let Some(error) = reset_error {
+                    reset_response.on_disabled_hover_text(validation_message(error))
+                } else {
+                    reset_response
+                };
+                if reset_response.clicked() && shortcuts.reset(action).is_ok() {
                     if is_capturing {
                         editor_state.clear();
                     }
@@ -160,6 +171,8 @@ fn action_label(action: ShortcutAction) -> String {
         ShortcutAction::CreateFolder => t!("settings.shortcut_create_folder").to_string(),
         ShortcutAction::PreviewSelected => t!("settings.shortcut_preview_selected").to_string(),
         ShortcutAction::SelectAll => t!("settings.shortcut_select_all").to_string(),
+        ShortcutAction::NextViewMode => t!("settings.shortcut_next_view_mode").to_string(),
+        ShortcutAction::PreviousViewMode => t!("settings.shortcut_previous_view_mode").to_string(),
     }
 }
 

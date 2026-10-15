@@ -148,6 +148,7 @@ fn render_column_item(
 
     ui.push_id(("column_item", index), |ui| {
         let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
+        crate::ui::new_tab_request::item_middle_click(&response, item, ctx.is_recycle_bin_view);
         if response.clicked() {
             *clicked_item = Some(index);
         }

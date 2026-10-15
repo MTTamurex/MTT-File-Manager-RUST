@@ -4,6 +4,7 @@ pub mod lifecycle;
 pub mod menu_handler;
 pub mod notifications;
 pub mod panels;
+mod view_mode_input;
 
 pub use input::*;
 pub use lifecycle::*;

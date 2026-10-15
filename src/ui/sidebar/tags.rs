@@ -116,7 +116,7 @@ pub fn render_tags_section(
         rect.max.x = clip_rect.max.x;
 
         // Start internal drag for reordering (anywhere on the row, like Quick Access)
-        if response.drag_started() {
+        if response.drag_started_by(egui::PointerButton::Primary) {
             ui.ctx().data_mut(|data| data.insert_temp(drag_id, tag.id));
         }
 
@@ -191,7 +191,15 @@ pub fn render_tags_section(
             }
         }
 
-        if response.clicked() && !ctx.is_renaming && action.is_none() {
+        if response.middle_clicked()
+            && !ctx.is_renaming
+            && !ctx.is_item_dragging
+            && action.is_none()
+        {
+            *action = Some(SidebarAction::OpenInNewTab(
+                crate::domain::special_paths::tag_view_path(tag.id),
+            ));
+        } else if response.clicked() && !ctx.is_renaming && action.is_none() {
             let next = if is_selected { None } else { Some(tag.id) };
             *action = Some(SidebarAction::FilterByTag(next));
         }

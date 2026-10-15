@@ -375,7 +375,7 @@ settings:
   shortcuts_reset_all: "Restaurar todos os padrões"
   shortcuts_reset: "Restaurar padrão"
   shortcuts_press_binding: "Pressione a combinação..."
-  shortcuts_press_binding_hint: "Pressione a nova combinação. Esc cancela a captura."
+  shortcuts_press_binding_hint: "Pressione a nova combinação. Para os modos de visualização, também é possível usar modificadores + scroll. Esc cancela a captura."
   shortcuts_error_conflict: "Esta combinação já está em uso por %{action}."
   shortcuts_error_reserved: "Esta combinação é reservada pelo Windows e não pode ser usada."
   shortcuts_error_unsupported: "Use Ctrl, Alt ou Shift com uma tecla suportada, ou uma tecla isolada como F2, F5, Delete ou Espaço."
@@ -449,6 +449,9 @@ settings:
   shortcut_create_folder: "Nova pasta"
   shortcut_preview_selected: "Abrir preview interno"
   shortcut_select_all: "Selecionar tudo"
+  shortcut_next_view_mode: "Próximo modo de visualização"
+  shortcut_previous_view_mode: "Modo de visualização anterior"
+  shortcuts_view_mode_scroll_note: "Padrão: Ctrl + scroll alterna os modos de visualização. Ctrl + Shift + scroll ajusta o tamanho das miniaturas no grid."
 preview:
   select_item: "Selecione um único item para ver detalhes"
   items_selected: "%{count} itens selecionados"

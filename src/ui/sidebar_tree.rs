@@ -2,8 +2,13 @@ use crate::app::state::sidebar_tree_state::{FolderNode, SidebarTreeState};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use std::path::Path;
 
+#[cfg(test)]
+mod middle_click_tests;
+
 /// Actions emitted by the folder tree widget.
 pub enum SidebarTreeAction {
+    /// User middle-clicked a folder — open it in a new tab in the active panel.
+    OpenInNewTab(String),
     /// User clicked a folder name — navigate the central panel there.
     NavigateTo(String),
     /// User clicked the expand/collapse arrow on a node.
@@ -213,6 +218,11 @@ fn render_tree_node(
     }
 
     // ── Handle clicks ──
+    if response.middle_clicked() && action.is_none() && !ctx.is_renaming && !ctx.is_item_dragging {
+        *action = Some(SidebarTreeAction::OpenInNewTab(
+            node.path.to_string_lossy().into_owned(),
+        ));
+    }
     if (response.double_clicked() || response.clicked())
         && action.is_none()
         && !ctx.is_renaming
