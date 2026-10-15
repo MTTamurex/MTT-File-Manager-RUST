@@ -142,6 +142,14 @@ impl ImageViewerApp {
             self.dual_panel_enabled = active.dual_panel_enabled;
             self.dual_panel_active = active.dual_panel_active;
             self.layout.dual_panel_split_ratio = active.dual_panel_split_ratio;
+            // Session-restored tabs have no listing yet. Loaded dual-panel tabs
+            // retain the pending request owned by their active pane.
+            self.pending_list_column_autofit = self.items.is_empty()
+                || (active.dual_panel_enabled
+                    && panel_tabs
+                        .as_ref()
+                        .and_then(|tabs| tabs.panel(self.dual_panel_active).active())
+                        .is_some_and(|tab| tab.snapshot.pending_list_column_autofit));
             if active.dual_panel_enabled {
                 if let Some(widths) = active.dual_panel_active_list_column_widths {
                     widths.apply_to_layout(&mut self.layout);

@@ -123,6 +123,8 @@ impl SessionPanelTab {
         snapshot.group_descending = self.group_descending;
         snapshot.active_tag_filter = self.active_tag_filter;
         snapshot.list_column_widths = self.column_widths.to_widths();
+        // Refit using this pane's actual width once its restored listing is ready.
+        snapshot.pending_list_column_autofit = true;
         snapshot.items = std::sync::Arc::new(Vec::new());
         snapshot.all_items = std::sync::Arc::new(Vec::new());
         snapshot.items_snapshot_compact = false;

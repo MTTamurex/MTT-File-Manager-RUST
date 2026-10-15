@@ -436,16 +436,14 @@ impl ImageViewerApp {
                 )
             };
 
-        // Auto-fit list columns when transitioning from dual-panel to mono-panel.
+        // Auto-fit list columns after navigation, session restore or layout changes.
         // Measures content for Size/Type/Date columns and gives remaining space to Name.
         // Save is deferred until after ListViewContext is dropped (borrow release).
-        // If items are empty, keep the flag so auto-fit retries on the next render
-        // with actual content.
-        let needs_save_after_autofit =
-            !column_list && !compact && self.pending_list_column_autofit && !items.is_empty();
-        if !column_list && !compact && self.pending_list_column_autofit && !items.is_empty() {
-            self.pending_list_column_autofit = false;
-            list_view::auto_fit_columns(
+        // Keep the request pending until both content and a valid width exist.
+        let needs_save_after_autofit = !column_list
+            && !compact
+            && self.pending_list_column_autofit
+            && list_view::auto_fit_columns(
                 ui,
                 &items,
                 self.navigation_state.is_computer_view,
@@ -459,6 +457,8 @@ impl ImageViewerApp {
                 col_status_width,
                 &self.folder_size_state.batch_cache,
             );
+        if needs_save_after_autofit {
+            self.pending_list_column_autofit = false;
         }
 
         let mut folder_size_requests: Vec<PathBuf> = Vec::new();

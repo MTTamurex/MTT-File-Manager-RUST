@@ -471,7 +471,7 @@ fn scale_column_widths(
 }
 
 /// Auto-fits list view column widths to content after opening a folder or
-/// transitioning from dual-panel to mono-panel mode.
+/// restoring a session or transitioning from dual-panel to mono-panel mode.
 ///
 /// Measures the text width of the "smaller" columns (Size, Type, Date/Last
 /// Modified) from a sample of visible items and their header labels, then
@@ -480,6 +480,7 @@ fn scale_column_widths(
 /// This is a one-shot operation triggered by `pending_list_column_autofit`.
 /// The existing `scale_column_widths` still runs afterward and will shrink
 /// columns if the total exceeds available space.
+/// Returns whether the widths were fitted; unavailable content or width must retry.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_fit_columns(
     ui: &Ui,
@@ -494,7 +495,7 @@ pub(crate) fn auto_fit_columns(
     col_size_width: &mut f32,
     col_status_width: &mut f32,
     folder_size_cache: &LruCache<PathBuf, u64>,
-) {
+) -> bool {
     const MAX_SAMPLE: usize = 200;
     const CONTENT_PADDING: f32 = 16.0;
     const HEADER_RESERVE: f32 = 30.0;
@@ -502,13 +503,13 @@ pub(crate) fn auto_fit_columns(
     const MIN_NAME_WIDTH: f32 = 100.0;
     const SCROLLBAR_RESERVE: f32 = 8.0;
 
-    if items.is_empty() {
-        return;
+    if items.is_empty() || !available_w.is_finite() {
+        return false;
     }
 
     let max_total_width = (available_w - SCROLLBAR_RESERVE).max(0.0);
     if max_total_width <= 0.0 {
-        return;
+        return false;
     }
 
     let font_id = FontId::proportional(12.0);
@@ -611,4 +612,5 @@ pub(crate) fn auto_fit_columns(
         };
         *col_name_width = (max_total_width - other_total).max(MIN_NAME_WIDTH);
     }
+    true
 }
