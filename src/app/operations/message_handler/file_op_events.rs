@@ -851,6 +851,7 @@ impl ImageViewerApp {
         deleted_paths: Vec<PathBuf>,
         current_path_norm: &str,
     ) {
+        self.invalidate_deleted_content_ancestor_sizes(&parent_folders);
         let current_folder_deleted =
             self.remove_deleted_paths_from_navigation_history(&deleted_paths);
 

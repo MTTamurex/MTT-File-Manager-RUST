@@ -22,6 +22,7 @@ macro_rules! debug_log {
 
 mod dual_panel_events;
 mod file_op_events;
+mod file_op_sizes;
 mod global_search_events;
 mod google_drive_events;
 mod helpers;
