@@ -124,7 +124,8 @@ $requiredFiles = @(
     "$RepoRoot\mpv_ui\portable_config\script-opts\osc.conf",
     "$RepoRoot\mpv_ui\portable_config\fonts\Material-Design-Iconic-Font.ttf",
     "$RepoRoot\installer\languages\ChineseSimplified.isl",
-    "$RepoRoot\installer\languages\Russian.isl"
+    "$RepoRoot\installer\languages\Russian.isl",
+    "$RepoRoot\installer\languages\Greek.isl"
 )
 
 foreach ($dir in $requiredDirectories) {

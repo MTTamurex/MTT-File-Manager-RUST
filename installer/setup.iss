@@ -47,6 +47,7 @@ Name: "english";    MessagesFile: "compiler:Default.isl"
 Name: "portuguese";  MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 Name: "chinese";     MessagesFile: "languages\ChineseSimplified.isl"
 Name: "russian";     MessagesFile: "languages\Russian.isl"
+Name: "greek";       MessagesFile: "languages\Greek.isl"
 
 [Tasks]
 Name: "desktopicon";  Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -322,7 +323,9 @@ begin
     else if ActiveLanguage = 'chinese' then
       RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'zh-CN')
     else if ActiveLanguage = 'russian' then
-      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'ru');
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'ru')
+    else if ActiveLanguage = 'greek' then
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'el');
     RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallGeneration',
       GetDateTimeString('yyyy-mm-dd hh:nn:ss.zzz', '-', ':'));
   end;
@@ -391,3 +394,12 @@ russian.CacheCleanupError=Не удалось безопасно удалить 
 russian.VCRedistWarning=Предупреждение: Microsoft Visual C++ Redistributable (x64) не найден.
 russian.VCRedistRequired=Для работы приложения требуется этот компонент.
 russian.VCRedistDownload=Скачать его можно по адресу:
+
+greek.InstallSearchService=Εγκατάσταση της υπηρεσίας αναζήτησης...
+greek.StartSearchService=Εκκίνηση της υπηρεσίας αναζήτησης...
+greek.SecureInstallDirectoryError=Το MTT File Manager πρέπει να εγκατασταθεί στον προστατευμένο κατάλογο Program Files.
+greek.SearchServiceStopTimeout=Η υπηρεσία αναζήτησης δεν σταμάτησε εντός 30 δευτερολέπτων. Η εγκατάσταση διακόπηκε πριν ενημερωθούν αρχεία.
+greek.CacheCleanupError=Δεν ήταν δυνατή η ασφαλής αφαίρεση της προηγούμενης cache του ευρετηρίου αναζήτησης. Η εγκατάσταση διακόπηκε πριν από την εγκατάσταση της ενημέρωσης.
+greek.VCRedistWarning=Προσοχή: δεν φαίνεται να είναι εγκατεστημένο το Microsoft Visual C++ Redistributable (x64).
+greek.VCRedistRequired=Η εφαρμογή απαιτεί αυτό το στοιχείο για να εκτελεστεί.
+greek.VCRedistDownload=Μπορείτε να το κατεβάσετε από:

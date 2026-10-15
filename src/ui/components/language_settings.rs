@@ -11,6 +11,7 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
     ("zh-CN", "简体中文"),
     ("ru", "Русский"),
+    ("el", "Ελληνικά"),
 ];
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
@@ -100,6 +101,26 @@ mod tests {
         assert_eq!(
             rust_i18n::t!("status_bar.item_many", locale = "ru", count = 3).as_ref(),
             "Элементов: 3"
+        );
+    }
+
+    #[test]
+    fn greek_locale_is_embedded_and_translates() {
+        assert_eq!(
+            rust_i18n::t!("settings.appearance", locale = "el").as_ref(),
+            "Εμφάνιση"
+        );
+        assert_eq!(
+            rust_i18n::t!("settings.theme_system", locale = "el").as_ref(),
+            "Σύστημα"
+        );
+    }
+
+    #[test]
+    fn greek_locale_translates_a_positional_argument() {
+        assert_eq!(
+            rust_i18n::t!("status_bar.item_many", locale = "el", count = 3).as_ref(),
+            "3 στοιχεία"
         );
     }
 }
