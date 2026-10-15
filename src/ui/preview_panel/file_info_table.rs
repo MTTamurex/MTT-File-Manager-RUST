@@ -318,7 +318,9 @@ pub fn render_file_info_table(
                         add_detail(
                             ui,
                             &t!("file_info.bios_date"),
-                            spec.bios_release_date.clone(),
+                            crate::infrastructure::windows::format_bios_date(
+                                &spec.bios_release_date,
+                            ),
                         );
                     }
                     if let Some(uefi) = spec.firmware_is_uefi {
@@ -393,7 +395,7 @@ pub fn render_file_info_table(
                         crate::infrastructure::windows::format_date(file.modified)
                     } else {
                         file.deletion_date()
-                            .map(|s| s.to_string())
+                            .map(crate::infrastructure::windows::format_metadata_date)
                             .unwrap_or_else(|| "-".to_string())
                     };
                     (t!("file_info.date_deleted").to_string(), value)
@@ -560,7 +562,11 @@ pub fn render_file_info_table(
                     add_detail(ui, &t!("file_info.camera_model"), model.clone());
                 }
                 if let Some(date) = &meta.date_taken {
-                    add_detail(ui, &t!("file_info.capture_date"), date.clone());
+                    add_detail(
+                        ui,
+                        &t!("file_info.capture_date"),
+                        crate::infrastructure::windows::format_metadata_date(date),
+                    );
                 }
                 if let Some(f) = &meta.f_stop {
                     add_detail(ui, &t!("file_info.fstop"), f.clone());

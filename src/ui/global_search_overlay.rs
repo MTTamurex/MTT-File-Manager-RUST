@@ -8,7 +8,7 @@ use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use date_filter::{
     date_input_to_unix_ts, date_input_to_unix_ts_end_of_day, format_date_input,
-    formatted_date_cursor_index, DateInputOrder,
+    formatted_date_cursor_index,
 };
 use eframe::egui;
 use filters::{category_label, format_exact_number};
@@ -16,7 +16,7 @@ use rust_i18n::t;
 use std::time::Duration;
 
 pub(crate) mod actions;
-mod date_filter;
+pub(crate) mod date_filter;
 pub(crate) mod filters;
 mod result_row;
 mod results_panel;
@@ -868,7 +868,17 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         let label_color = egui::Color32::from_gray(140);
 
         // Render one masked input styled to match the other filter controls.
-        fn date_edit(ui: &mut egui::Ui, text: &mut String, hint: &str) -> bool {
+        fn date_edit(
+            ui: &mut egui::Ui,
+            text: &mut String,
+            order: &mut crate::domain::date_format::DateFormat,
+        ) -> bool {
+            date_filter::reformat_date_input(
+                text,
+                order,
+                crate::domain::date_format::date_format(),
+            );
+            let hint = order.hint();
             let mut changed = false;
             let widget_visuals = ui.visuals().widgets.inactive;
             let text_color = ui.visuals().text_color();
@@ -890,12 +900,13 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         let cursor_range = edit_state
                             .as_ref()
                             .and_then(|state| state.cursor.char_range());
-                        let primary_index = cursor_range
-                            .map(|range| formatted_date_cursor_index(text, range.primary.index.0));
-                        let secondary_index = cursor_range.map(|range| {
-                            formatted_date_cursor_index(text, range.secondary.index.0)
+                        let primary_index = cursor_range.map(|range| {
+                            formatted_date_cursor_index(text, range.primary.index.0, *order)
                         });
-                        *text = format_date_input(text);
+                        let secondary_index = cursor_range.map(|range| {
+                            formatted_date_cursor_index(text, range.secondary.index.0, *order)
+                        });
+                        *text = format_date_input(text, *order);
 
                         if let (Some(mut state), Some(primary), Some(secondary)) =
                             (edit_state, primary_index, secondary_index)
@@ -913,13 +924,6 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             changed
         }
 
-        let date_order = if matches!(&*rust_i18n::locale(), "pt-BR" | "ru") {
-            DateInputOrder::DayMonthYear
-        } else {
-            DateInputOrder::MonthDayYear
-        };
-        let date_hint = t!("search.hint_date");
-
         // Created after
         ui.label(
             egui::RichText::new(t!("search.filter_created_after"))
@@ -929,10 +933,12 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         if date_edit(
             ui,
             &mut app.global_search.created_after_text,
-            date_hint.as_ref(),
+            &mut app.global_search.created_after_input_format,
         ) {
-            app.global_search.created_after =
-                date_input_to_unix_ts(&app.global_search.created_after_text, date_order);
+            app.global_search.created_after = date_input_to_unix_ts(
+                &app.global_search.created_after_text,
+                app.global_search.created_after_input_format,
+            );
             app.global_search.clear_result_selection();
         }
 
@@ -947,11 +953,11 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         if date_edit(
             ui,
             &mut app.global_search.created_before_text,
-            date_hint.as_ref(),
+            &mut app.global_search.created_before_input_format,
         ) {
             app.global_search.created_before = date_input_to_unix_ts_end_of_day(
                 &app.global_search.created_before_text,
-                date_order,
+                app.global_search.created_before_input_format,
             );
             app.global_search.clear_result_selection();
         }

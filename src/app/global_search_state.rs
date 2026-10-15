@@ -136,6 +136,9 @@ pub struct GlobalSearchState {
     /// Localized text buffers for the created-date inputs.
     pub created_after_text: String,
     pub created_before_text: String,
+    /// Partial edits retain their original order until completed, avoiding reinterpretation.
+    pub created_after_input_format: crate::domain::date_format::DateFormat,
+    pub created_before_input_format: crate::domain::date_format::DateFormat,
     pub active: bool,
     pub opened_at: Instant,
     pub loading: bool,
@@ -266,6 +269,8 @@ impl GlobalSearchState {
             tag_filter: GlobalSearchTagFilter::All,
             created_after_text: String::new(),
             created_before_text: String::new(),
+            created_after_input_format: crate::domain::date_format::date_format(),
+            created_before_input_format: crate::domain::date_format::date_format(),
             active: false,
             opened_at: Instant::now(),
             loading: false,

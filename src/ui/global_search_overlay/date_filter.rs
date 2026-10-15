@@ -1,19 +1,51 @@
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
 use windows::Win32::System::Time::{SystemTimeToFileTime, TzSpecificLocalTimeToSystemTime};
 
-#[derive(Clone, Copy)]
-pub(super) enum DateInputOrder {
-    DayMonthYear,
-    MonthDayYear,
+pub(super) use crate::domain::date_format::DateFormat as DateInputOrder;
+
+pub(crate) fn reformat_search_dates(
+    search: &mut crate::app::global_search_state::GlobalSearchState,
+    new: DateInputOrder,
+) {
+    reformat_date_input(
+        &mut search.created_after_text,
+        &mut search.created_after_input_format,
+        new,
+    );
+    reformat_date_input(
+        &mut search.created_before_text,
+        &mut search.created_before_input_format,
+        new,
+    );
 }
 
-pub(super) fn format_date_input(input: &str) -> String {
+pub(super) fn reformat_date_input(
+    text: &mut String,
+    order: &mut DateInputOrder,
+    new: DateInputOrder,
+) {
+    if *order == new {
+        return;
+    }
+    if text.is_empty() {
+        *order = new;
+    } else if let Some((month, day, year)) = parse_date_input(text, *order) {
+        *text = new.format(i64::from(year), i64::from(month), i64::from(day));
+        *order = new;
+    }
+}
+
+pub(super) fn format_date_input(input: &str, order: DateInputOrder) -> String {
     let digits: String = input.chars().filter(char::is_ascii_digit).take(8).collect();
     let mut formatted = String::with_capacity(10);
 
     for (index, digit) in digits.chars().enumerate() {
-        if index == 2 || index == 4 {
-            formatted.push('/');
+        if order.separator_positions().contains(&index) {
+            formatted.push(if order == DateInputOrder::YearMonthDay {
+                '-'
+            } else {
+                '/'
+            });
         }
         formatted.push(digit);
     }
@@ -21,7 +53,11 @@ pub(super) fn format_date_input(input: &str) -> String {
     formatted
 }
 
-pub(super) fn formatted_date_cursor_index(input: &str, cursor_index: usize) -> usize {
+pub(super) fn formatted_date_cursor_index(
+    input: &str,
+    cursor_index: usize,
+    order: DateInputOrder,
+) -> usize {
     let digits_before_cursor = input
         .chars()
         .take(cursor_index)
@@ -30,8 +66,11 @@ pub(super) fn formatted_date_cursor_index(input: &str, cursor_index: usize) -> u
         .count();
 
     digits_before_cursor
-        + usize::from(digits_before_cursor >= 3)
-        + usize::from(digits_before_cursor >= 5)
+        + order
+            .separator_positions()
+            .iter()
+            .filter(|&&position| digits_before_cursor > position)
+            .count()
 }
 
 pub(super) fn date_input_to_unix_ts(input: &str, order: DateInputOrder) -> Option<u64> {
@@ -44,18 +83,26 @@ pub(super) fn date_input_to_unix_ts_end_of_day(input: &str, order: DateInputOrde
     date_components_to_unix_ts_end_of_day(month, day, year)
 }
 
-fn parse_date_input(input: &str, order: DateInputOrder) -> Option<(u32, u32, u32)> {
+pub(super) fn parse_date_input(input: &str, order: DateInputOrder) -> Option<(u32, u32, u32)> {
     let digits: String = input.chars().filter(char::is_ascii_digit).collect();
     if digits.len() != 8 {
         return None;
     }
 
+    if order == DateInputOrder::YearMonthDay {
+        return Some((
+            digits[4..6].parse().ok()?,
+            digits[6..8].parse().ok()?,
+            digits[0..4].parse().ok()?,
+        ));
+    }
     let first = digits[0..2].parse().ok()?;
     let second = digits[2..4].parse().ok()?;
     let year = digits[4..8].parse().ok()?;
     let (month, day) = match order {
         DateInputOrder::DayMonthYear => (second, first),
         DateInputOrder::MonthDayYear => (first, second),
+        DateInputOrder::YearMonthDay => unreachable!(),
     };
 
     Some((month, day, year))
@@ -168,6 +215,10 @@ fn is_leap_year(year: u32) -> bool {
 }
 
 #[cfg(test)]
+#[path = "date_filter_review_tests.rs"]
+mod review_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         date_components_to_unix_ts, date_components_to_unix_ts_end_of_day, date_input_to_unix_ts,
@@ -175,19 +226,60 @@ mod tests {
     };
 
     #[test]
+    fn iso_mask_cursor_and_leap_day_match_the_selected_format() {
+        let order = DateInputOrder::YearMonthDay;
+        assert_eq!(format_date_input("202602", order), "2026-02");
+        assert_eq!(format_date_input("20240229", order), "2024-02-29");
+        assert_eq!(formatted_date_cursor_index("20240", 5, order), 6);
+        assert_eq!(formatted_date_cursor_index("2024022", 7, order), 9);
+        assert_eq!(parse_date_input("2024-02-29", order), Some((2, 29, 2024)));
+        assert_eq!(date_input_to_unix_ts("2023-02-29", order), None);
+        assert_eq!(
+            date_input_to_unix_ts("2024-02-29", order),
+            date_input_to_unix_ts("29/02/2024", DateInputOrder::DayMonthYear)
+        );
+    }
+
+    #[test]
+    fn switching_formats_preserves_ambiguous_dates_and_filter_bounds() {
+        let formats = [
+            DateInputOrder::DayMonthYear,
+            DateInputOrder::MonthDayYear,
+            DateInputOrder::YearMonthDay,
+        ];
+        for old in formats {
+            let original = old.format(2026, 2, 3);
+            let (month, day, year) = parse_date_input(&original, old).unwrap();
+            for new in formats {
+                let converted = new.format(i64::from(year), i64::from(month), i64::from(day));
+                assert_eq!(
+                    date_input_to_unix_ts(&original, old),
+                    date_input_to_unix_ts(&converted, new)
+                );
+                assert_eq!(
+                    super::date_input_to_unix_ts_end_of_day(&original, old),
+                    super::date_input_to_unix_ts_end_of_day(&converted, new)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn date_input_formats_digits_as_a_single_field() {
-        assert_eq!(format_date_input("1"), "1");
-        assert_eq!(format_date_input("3112"), "31/12");
-        assert_eq!(format_date_input("31/12/2026"), "31/12/2026");
-        assert_eq!(format_date_input("31-12-2026-extra"), "31/12/2026");
+        let order = DateInputOrder::DayMonthYear;
+        assert_eq!(format_date_input("1", order), "1");
+        assert_eq!(format_date_input("3112", order), "31/12");
+        assert_eq!(format_date_input("31/12/2026", order), "31/12/2026");
+        assert_eq!(format_date_input("31-12-2026-extra", order), "31/12/2026");
     }
 
     #[test]
     fn date_input_cursor_moves_past_inserted_separators() {
-        assert_eq!(formatted_date_cursor_index("12", 2), 2);
-        assert_eq!(formatted_date_cursor_index("123", 3), 4);
-        assert_eq!(formatted_date_cursor_index("12345", 5), 7);
-        assert_eq!(formatted_date_cursor_index("12/3", 4), 4);
+        let order = DateInputOrder::DayMonthYear;
+        assert_eq!(formatted_date_cursor_index("12", 2, order), 2);
+        assert_eq!(formatted_date_cursor_index("123", 3, order), 4);
+        assert_eq!(formatted_date_cursor_index("12345", 5, order), 7);
+        assert_eq!(formatted_date_cursor_index("12/3", 4, order), 4);
     }
 
     #[test]

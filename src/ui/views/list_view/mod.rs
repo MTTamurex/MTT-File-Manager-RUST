@@ -531,7 +531,7 @@ pub(crate) fn auto_fit_columns(
                 format_date(item.modified)
             } else {
                 item.deletion_date()
-                    .map(|s| s.to_string())
+                    .map(crate::infrastructure::windows::format_metadata_date)
                     .unwrap_or_else(|| "-".to_string())
             }
         } else {

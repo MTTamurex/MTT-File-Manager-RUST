@@ -2,7 +2,7 @@ use crate::domain::file_entry::{is_archive_extension, FileEntry, FoldersPosition
 use rayon::prelude::*;
 use std::cmp::Ordering;
 
-/// Parse recycle bin dates like `dd/mm/yyyy hh:mm` (or with seconds) into
+/// Parse canonical ISO or legacy DMY recycle bin dates (optionally with seconds) into
 /// sortable tuple `(year, month, day, hour, minute, second)`.
 #[inline]
 fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u32)> {
@@ -16,9 +16,16 @@ fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u
     let time_part = parts.next().unwrap_or("00:00:00");
 
     let mut date_it = date_part.split(['/', '-', '.']);
-    let day = date_it.next()?.parse::<u32>().ok()?;
+    let first = date_it.next()?;
+    let first_number = first.parse::<u32>().ok()?;
     let month = date_it.next()?.parse::<u32>().ok()?;
-    let year = date_it.next()?.parse::<u32>().ok()?;
+    let last = date_it.next()?.parse::<u32>().ok()?;
+    // Stored fallback dates are canonical ISO or legacy DMY, never the UI preference.
+    let (year, day) = if first.len() == 4 {
+        (first_number, last)
+    } else {
+        (last, first_number)
+    };
     if !(1..=31).contains(&day) || !(1..=12).contains(&month) || year < 1601 {
         return None;
     }
@@ -47,8 +54,8 @@ fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u
 /// For recycle bin items with deletion_date, uses the deletion date string for comparison.
 /// For all other items, uses the modified timestamp.
 ///
-/// For recycle bin items, attempts semantic parsing of date string first, and
-/// falls back to lexicographic comparison only when parsing fails.
+/// Recycle bin items prefer numeric timestamps, then parse canonical/legacy source
+/// strings. Neither sorting path depends on the current display preference.
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
     match (a.deletion_date(), b.deletion_date()) {
         (Some(a_date), Some(b_date)) => {
@@ -161,5 +168,26 @@ pub(super) fn sort_items(
         items.par_sort_by(compare);
     } else {
         items.sort_by(compare);
+    }
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::parse_recycle_date_sort_key;
+
+    #[test]
+    fn stored_recycle_dates_sort_independently_of_display_order() {
+        assert_eq!(
+            parse_recycle_date_sort_key("2026-02-03 10:20"),
+            Some((2026, 2, 3, 10, 20, 0))
+        );
+        assert_eq!(
+            parse_recycle_date_sort_key("03/02/2026 10:20"),
+            Some((2026, 2, 3, 10, 20, 0))
+        );
+        assert!(
+            parse_recycle_date_sort_key("2025-12-31 23:59")
+                < parse_recycle_date_sort_key("2026-01-01 00:00")
+        );
     }
 }

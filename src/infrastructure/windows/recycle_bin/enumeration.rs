@@ -109,8 +109,15 @@ pub(super) fn enumerate_recycle_bin_streaming(
 
                 // Process other properties using existing helper
                 if let Some(mut item) = process_shell_item(&shell_item) {
-                    // Overwrite with the date obtained from column view
-                    item.date_deleted = date_deleted;
+                    // Keep the unambiguous property value for sorting and live formatting.
+                    // The localized column text is only a last-resort display fallback.
+                    if item.date_deleted_unix == 0
+                        && crate::domain::date_format::DateFormat::YearMonthDay
+                            .reformat_year_first(&item.date_deleted)
+                            .is_none()
+                    {
+                        item.date_deleted = date_deleted;
+                    }
 
                     batch.push(item);
                     total_count += 1;
@@ -314,7 +321,7 @@ unsafe fn get_shell_item_filetime_property(
         let result = str_ptr.to_string().unwrap_or_default();
         CoTaskMemFree(Some(str_ptr.0 as *mut _));
         if !result.is_empty() {
-            // Format: '2026/01/12:19:21:00.000' -> '12/01/2026 19:21'
+            // Store a canonical source value, independent of the active UI format.
             let formatted = format_recycle_date(&result);
             // Try to also read FILETIME for stable numeric sorting.
             if let Ok(ft) = item.GetFileTime(pkey) {
@@ -334,7 +341,10 @@ unsafe fn get_shell_item_filetime_property(
         if let Some(unix_secs) = filetime_to_unix_secs(ft_val) {
             return Ok((
                 unix_secs,
-                crate::infrastructure::windows::formatting::format_date(unix_secs),
+                crate::infrastructure::windows::formatting::format_date_with_format(
+                    unix_secs,
+                    crate::domain::date_format::DateFormat::YearMonthDay,
+                ),
             ));
         }
     }
@@ -354,7 +364,7 @@ fn filetime_to_unix_secs(filetime: u64) -> Option<u64> {
     Some((filetime - FILETIME_TO_UNIX) / 10_000_000)
 }
 
-/// Format recycle bin date from '2026/01/12:19:21:00.000' to '12/01/2026 19:21'.
+/// Keep source dates in an unambiguous, preference-independent format.
 fn format_recycle_date(raw: &str) -> String {
     // Input format: '2026/01/12:19:21:00.000'
     // Split by : to separate date from time parts.
@@ -367,10 +377,10 @@ fn format_recycle_date(raw: &str) -> String {
         if date_parts.len() == 3 {
             // date_parts = ["2026", "01", "12"]
             return format!(
-                "{}/{}/{} {}:{}",
-                date_parts[2], // day
-                date_parts[1], // month
+                "{}-{}-{} {}:{}",
                 date_parts[0], // year
+                date_parts[1], // month
+                date_parts[2], // day
                 parts[1],      // hour
                 parts[2]       // minute
             );
@@ -449,3 +459,7 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
 
     rust_i18n::t!("file_info.unknown_date").to_string()
 }
+
+#[cfg(test)]
+#[path = "date_tests.rs"]
+mod date_tests;

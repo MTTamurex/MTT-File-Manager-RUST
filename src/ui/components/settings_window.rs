@@ -13,6 +13,7 @@ pub struct SettingsWindowOutput {
     pub keep_open: bool,
     pub language_changed: bool,
     pub theme_changed: bool,
+    pub startup_date_changed: bool,
     pub backend_changed: bool,
     pub interpolation_changed: bool,
     pub shortcuts_changed: bool,
@@ -62,6 +63,7 @@ pub fn render_settings_window(
     let mut keep_open = app.navigation_state.show_settings_window;
     let mut language_changed = false;
     let mut theme_changed = false;
+    let mut startup_date_changed = false;
     let mut backend_changed = false;
     let mut interpolation_changed = false;
     let mut shortcuts_changed = false;
@@ -203,6 +205,7 @@ pub fn render_settings_window(
                                             let general = crate::ui::components::general_settings::render_general_settings_section(ui, app);
                                             language_changed |= general.language_changed;
                                             theme_changed |= general.theme_changed;
+                                            startup_date_changed |= general.startup_date_changed;
                                             quick_access_changed |= general.quick_access_changed;
                                             recycle_bin_changed |= general.recycle_bin_changed;
                                             minimize_to_tray_changed |= general.minimize_to_tray_changed;
@@ -282,6 +285,7 @@ pub fn render_settings_window(
         keep_open,
         language_changed,
         theme_changed,
+        startup_date_changed,
         backend_changed,
         interpolation_changed,
         shortcuts_changed,

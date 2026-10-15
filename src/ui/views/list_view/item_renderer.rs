@@ -492,7 +492,7 @@ fn list_item_content_contains_pointer(
             format_date(item.modified)
         } else {
             item.deletion_date()
-                .map(|s| s.to_string())
+                .map(crate::infrastructure::windows::format_metadata_date)
                 .unwrap_or_else(|| "-".to_string())
         }
     } else {
@@ -664,7 +664,7 @@ fn render_regular_columns(
             format_date(item.modified)
         } else {
             item.deletion_date()
-                .map(|s| s.to_string())
+                .map(crate::infrastructure::windows::format_metadata_date)
                 .unwrap_or_else(|| "-".to_string())
         }
     } else {

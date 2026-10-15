@@ -611,7 +611,7 @@ impl eframe::App for ImageViewerApp {
                 self.save_preferences();
                 self.force_save_preferences();
             }
-            if output.language_changed {
+            if output.language_changed || output.startup_date_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }

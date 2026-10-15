@@ -314,6 +314,8 @@ pub struct ImageViewerApp {
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
     pub show_quick_access: bool, // Show Quick Access
     pub minimize_to_tray: bool,
+    pub startup_location: crate::app::startup_location::StartupLocation,
+    pub startup_custom_path: String,
     pub default_file_manager_settings: DefaultFileManagerSettingsState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar

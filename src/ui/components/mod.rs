@@ -18,6 +18,7 @@ pub mod organizer_settings;
 pub mod settings_ui;
 pub mod settings_window;
 pub mod shortcut_settings;
+pub mod startup_date_settings;
 pub mod tag_manager_modal;
 pub mod tag_settings;
 pub mod video_controls_state;

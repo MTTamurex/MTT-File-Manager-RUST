@@ -180,6 +180,20 @@ impl ImageViewerApp {
             custom_folder_icon,
         } = bootstrap_app(&ctx);
 
+        let mut startup_folder_path = startup_folder.and_then(|folder| {
+            validate_requested_folder(folder)
+                .map_err(|()| {
+                    log::warn!("[INIT] Ignoring an invalid folder requested by the Windows shell");
+                })
+                .ok()
+        });
+        let mut startup_preferences = startup_preferences;
+        let fixed_startup_path =
+            startup_preferences.prepare_fixed_startup(startup_folder_path.as_deref());
+        if fixed_startup_path.is_some() {
+            startup_folder_path = None;
+        }
+
         let StartupPreferences {
             sort_mode,
             sort_mode_computer,
@@ -225,7 +239,12 @@ impl ImageViewerApp {
             initial_indexing_notice_generation,
             mut saved_tab_session,
             minimize_to_tray,
+            startup_location,
+            startup_custom_path,
+            date_format,
         } = startup_preferences;
+
+        crate::domain::date_format::set_date_format(date_format);
 
         // Apply saved language preference
         rust_i18n::set_locale(&language);
@@ -276,7 +295,12 @@ impl ImageViewerApp {
             session.replace_invalid_tag_filters(|id| tag_definitions.contains_key(&id));
         }
 
-        let (fallback_path, fallback_is_computer_view) = determine_initial_path(&app_state_db);
+        let (fallback_path, fallback_is_computer_view) = if let Some(path) = fixed_startup_path {
+            let is_computer = path == COMPUTER_VIEW_ID;
+            (path, is_computer)
+        } else {
+            determine_initial_path(&app_state_db)
+        };
         let mut active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
         let (initial_path, is_computer_view_initial) = if let Some(session) = &saved_tab_session {
@@ -291,20 +315,6 @@ impl ImageViewerApp {
         } else {
             (fallback_path, fallback_is_computer_view)
         };
-
-        // A shell folder activation is applied after restoring the previous
-        // session, so it becomes a new tab instead of replacing that session.
-        let startup_folder_path =
-            startup_folder.and_then(|folder| match validate_requested_folder(folder) {
-                Ok(path) => {
-                    log::info!("[INIT] Queued Windows shell folder for a new tab");
-                    Some(path)
-                }
-                Err(()) => {
-                    log::warn!("[INIT] Ignoring an invalid folder requested by the Windows shell");
-                    None
-                }
-            });
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
         let crate::infrastructure::shell_menu_worker::ShellMenuWorkerChannels {
@@ -475,6 +485,8 @@ impl ImageViewerApp {
             minimize_to_tray,
             default_file_manager_settings:
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
+            startup_location,
+            startup_custom_path,
             quick_access_placement, // Loaded from SQLite
             show_tags,              // Loaded from SQLite
             collapse_quick_access: false,
@@ -962,10 +974,6 @@ impl ImageViewerApp {
             }
         }
 
-        if let Some(path) = startup_folder_path {
-            app.open_integrated_folder_in_new_context(&path);
-        }
-
         if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
             app.set_diagnostic_mode(true);
         } else if diagnostic_mode_needs_persist {
@@ -997,6 +1005,10 @@ impl ImageViewerApp {
                     }
                 }
             }
+        }
+
+        if let Some(path) = startup_folder_path {
+            app.open_integrated_folder_in_new_context(&path);
         }
 
         // Log GPU adapter info to file for diagnostics (works without console).

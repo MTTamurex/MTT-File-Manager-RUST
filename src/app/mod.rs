@@ -38,6 +38,9 @@ pub(crate) mod organizer_history_state;
 pub mod organizer_state;
 pub mod shortcuts;
 pub mod startup_folder;
+pub mod startup_location;
+#[cfg(test)]
+mod startup_preferences_tests;
 pub mod state;
 pub mod ui_state;
 

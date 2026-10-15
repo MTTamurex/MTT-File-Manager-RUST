@@ -8,6 +8,7 @@ use rust_i18n::t;
 pub struct GeneralSettingsOutput {
     pub language_changed: bool,
     pub theme_changed: bool,
+    pub startup_date_changed: bool,
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
     pub minimize_to_tray_changed: bool,
@@ -23,6 +24,7 @@ pub fn render_general_settings_section(
     let mut output = GeneralSettingsOutput {
         language_changed: false,
         theme_changed: false,
+        startup_date_changed: false,
         quick_access_changed: false,
         recycle_bin_changed: false,
         minimize_to_tray_changed: false,
@@ -38,6 +40,8 @@ pub fn render_general_settings_section(
             ui,
             &mut app.theme_mode,
         );
+    ui.add_space(20.0);
+    output.startup_date_changed = crate::ui::components::startup_date_settings::render(ui, app);
     ui.add_space(20.0);
     if settings_ui::toggle_row(
         ui,

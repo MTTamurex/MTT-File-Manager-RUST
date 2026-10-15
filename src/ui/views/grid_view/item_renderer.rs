@@ -265,7 +265,7 @@ pub(super) fn render_grid_item(
                                                 )
                                             } else {
                                                 item.deletion_date()
-                                                    .map(|s| s.to_string())
+                                                    .map(crate::infrastructure::windows::format_metadata_date)
                                                     .unwrap_or_else(|| "-".to_string())
                                             },
                                         )

@@ -52,6 +52,9 @@ pub(super) struct StartupPreferences {
     pub(super) initial_indexing_notice_generation: Option<String>,
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
     pub(super) minimize_to_tray: bool,
+    pub(super) startup_location: crate::app::startup_location::StartupLocation,
+    pub(super) startup_custom_path: String,
+    pub(super) date_format: crate::domain::date_format::DateFormat,
 }
 
 impl StartupPreferences {
@@ -351,6 +354,22 @@ impl StartupPreferences {
             .unwrap_or(false);
 
         Self {
+            startup_location: crate::app::startup_location::StartupLocation::from_preference(
+                prefs
+                    .get("startup_location")
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+            ),
+            startup_custom_path: prefs
+                .get("startup_custom_path")
+                .cloned()
+                .unwrap_or_default(),
+            date_format: crate::domain::date_format::DateFormat::from_preference(
+                prefs
+                    .get("date_format")
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+            ),
             sort_mode,
             sort_mode_computer,
             sort_mode_normal,

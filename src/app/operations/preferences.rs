@@ -81,6 +81,17 @@ impl ImageViewerApp {
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
         let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(50);
+        prefs.push((
+            "startup_location",
+            self.startup_location.preference_value().to_owned(),
+        ));
+        prefs.push(("startup_custom_path", self.startup_custom_path.clone()));
+        prefs.push((
+            "date_format",
+            crate::domain::date_format::date_format()
+                .preference_value()
+                .to_owned(),
+        ));
 
         // Always save the "normal" (unlocked) values so that locked-folder
         // overrides don't corrupt the persisted global preferences.
