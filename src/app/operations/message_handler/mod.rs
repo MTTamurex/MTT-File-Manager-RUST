@@ -95,6 +95,7 @@ impl ImageViewerApp {
         self.redirect_tabs_from_removed_drives(&removed);
 
         self.process_pending_folder_cover_removals();
+        self.poll_folder_access();
 
         if !upload_textures {
             let current_path_norm =

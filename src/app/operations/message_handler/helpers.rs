@@ -414,7 +414,7 @@ impl ImageViewerApp {
         }
     }
 
-    pub(super) fn normalize_for_match(p: &Path) -> String {
+    pub(in crate::app::operations) fn normalize_for_match(p: &Path) -> String {
         let s = p.to_string_lossy().to_lowercase();
         if let Some(stripped) = s.strip_prefix(r"\\?\") {
             stripped.to_string()

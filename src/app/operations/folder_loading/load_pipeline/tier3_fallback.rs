@@ -321,7 +321,9 @@ pub(super) fn run_tier3_fallback(
             }
             Err(error) => {
                 let base_path_buf = PathBuf::from(base_path);
-                let failure = if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
+                let failure = if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+                    crate::app::state::FolderLoadError::access_denied(base_path_buf)
+                } else if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
                     log::warn!(
                         "[FOLDER-LOADING] Directory vanished during load: {:?}",
                         base_path_buf

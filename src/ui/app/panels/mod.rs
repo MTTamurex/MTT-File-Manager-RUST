@@ -4,6 +4,7 @@ use crate::ui::sidebar::SidebarAction;
 use eframe::egui;
 
 mod content;
+mod folder_error;
 mod panel_tab_bar;
 
 // Sidebar width constraints

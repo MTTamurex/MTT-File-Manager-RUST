@@ -13,6 +13,7 @@ pub(crate) mod environment;
 pub mod file_flags;
 pub mod file_system;
 pub mod file_type;
+pub mod folder_access;
 pub mod folder_enumeration;
 pub mod folder_size;
 pub mod formatting;

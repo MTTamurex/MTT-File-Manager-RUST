@@ -35,6 +35,7 @@ pub mod dual_panel_ops;
 pub mod external_open;
 pub mod file_hash;
 pub mod file_ops;
+pub mod folder_access;
 pub mod folder_loading;
 pub mod folder_lock_ops;
 pub mod global_search;
