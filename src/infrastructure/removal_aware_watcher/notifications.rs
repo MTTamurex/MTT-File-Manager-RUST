@@ -154,6 +154,7 @@ unsafe extern "system" fn callback(
                 lifecycle::suspend(context.letter, deadline);
                 if action == CM_NOTIFY_ACTION_DEVICEREMOVECOMPLETE {
                     context.removed.store(true, std::sync::atomic::Ordering::Release);
+                    crate::infrastructure::windows::device_change::notify_volume_removed(context.letter);
                 }
             }
             CM_NOTIFY_ACTION_DEVICECUSTOMEVENT => match event_guid(event, size) {

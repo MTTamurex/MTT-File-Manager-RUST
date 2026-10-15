@@ -103,9 +103,10 @@ mod tests {
         }
 
         unsafe {
-            let link: IShellLinkW =
-                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).expect("create IShellLinkW");
-            link.SetPath(PCWSTR(wide(target).as_ptr())).expect("SetPath");
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .expect("create IShellLinkW");
+            link.SetPath(PCWSTR(wide(target).as_ptr()))
+                .expect("SetPath");
             let persist: IPersistFile = link.cast().expect("cast IPersistFile");
             persist
                 .Save(PCWSTR(wide(link_path).as_ptr()), false)

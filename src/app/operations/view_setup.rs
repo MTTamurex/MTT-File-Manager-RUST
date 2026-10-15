@@ -13,12 +13,6 @@ use crate::domain::file_entry::{DriveInfo, FileEntry};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows as windows_infra;
 
-fn normalize_drive_root_for_compare(path: &str) -> String {
-    path.to_lowercase()
-        .trim_end_matches(['\\', '/'])
-        .to_string()
-}
-
 impl ImageViewerApp {
     fn refresh_inactive_computer_view_if_visible(&mut self) {
         if !self.dual_panel_enabled
@@ -452,45 +446,16 @@ impl ImageViewerApp {
                         .cloud_roots
                         .iter()
                         .filter_map(|root| root.source_path.as_deref())
-                        .map(normalize_drive_root_for_compare)
+                        .map(str::to_owned)
                         .collect();
-                    let removed_drives: Vec<String> = old_disks
-                        .iter()
-                        .filter(|(old_path, _)| {
-                            let old_key = normalize_drive_root_for_compare(old_path);
-                            !reclassified_drive_roots.contains(&old_key)
-                                && !self
-                                    .drive_state
-                                    .disks
-                                    .iter()
-                                    .any(|(new_path, _)| new_path == old_path)
-                        })
-                        .map(|(path, _)| path.clone())
-                        .collect();
+                    let removed_drives = super::drive_removal::removed_drive_roots(
+                        &old_disks,
+                        &self.drive_state.disks,
+                        &reclassified_drive_roots,
+                    );
 
                     if !removed_drives.is_empty() {
-                        for drive in &removed_drives {
-                            self.file_operation_state.mounted_iso_drives.remove(drive);
-                        }
-
-                        log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
-
-                        // Check if user is currently browsing inside a removed drive
-                        let current = self.navigation_state.current_path.clone();
-                        let on_removed_drive = !self.navigation_state.is_computer_view
-                            && !self.navigation_state.is_recycle_bin_view
-                            && removed_drives.iter().any(|d| current.starts_with(d));
-
-                        if on_removed_drive {
-                            log::warn!(
-                                "[DRIVE-REFRESH] Current path '{}' is on a removed drive, redirecting to Este Computador",
-                                current
-                            );
-                            self.directory_cache.clear();
-                            self.navigate_to_computer();
-                            self.refresh_inactive_computer_view_if_visible();
-                            return;
-                        }
+                        self.redirect_tabs_from_removed_drives(&removed_drives);
                     }
 
                     // AUTO-FOCUS FOR RECENTLY MOUNTED ISO

@@ -28,6 +28,32 @@ static DEVICE_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 static DEVICE_LISTENER_THREAD_ID: OnceLock<u32> = OnceLock::new();
 static DEVICE_NOTIFICATION_HANDLE: Mutex<Option<DeviceNotificationHandle>> = Mutex::new(None);
+static REMOVED_VOLUMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub(crate) fn notify_volume_removed(letter: char) {
+    let letter = letter.to_ascii_uppercase();
+    if !letter.is_ascii_uppercase() {
+        return;
+    }
+    REMOVED_VOLUMES.fetch_or(
+        1 << (letter as u8 - b'A'),
+        std::sync::atomic::Ordering::AcqRel,
+    );
+    if let Some(sender) = DEVICE_EVENT_SENDER.get() {
+        let _ = sender.send(());
+    }
+    if let Some(ctx) = EGUI_CONTEXT.get() {
+        ctx.request_repaint();
+    }
+}
+
+pub(crate) fn take_removed_volumes() -> Vec<String> {
+    let mask = REMOVED_VOLUMES.swap(0, std::sync::atomic::Ordering::AcqRel);
+    (0..26)
+        .filter(|bit| mask & (1 << bit) != 0)
+        .map(|bit| format!("{}:\\", (b'A' + bit) as char))
+        .collect()
+}
 
 struct DeviceNotificationHandle(HDEVNOTIFY);
 
@@ -176,6 +202,15 @@ unsafe extern "system" fn device_wnd_proc(
             }
 
             if event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE {
+                if event == DBT_DEVICEREMOVECOMPLETE {
+                    if let Some(mask) = volume_event_unitmask(lparam) {
+                        for bit in 0..26 {
+                            if mask & (1 << bit) != 0 {
+                                notify_volume_removed((b'A' + bit) as char);
+                            }
+                        }
+                    }
+                }
                 #[cfg(feature = "notify-watcher")]
                 if event == DBT_DEVICEARRIVAL {
                     resume_arriving_volumes(lparam);
@@ -196,7 +231,7 @@ unsafe extern "system" fn device_wnd_proc(
 
 #[cfg(feature = "notify-watcher")]
 unsafe fn resume_arriving_volumes(lparam: LPARAM) {
-    let Some(unitmask) = volume_arrival_unitmask(lparam) else {
+    let Some(unitmask) = volume_event_unitmask(lparam) else {
         return;
     };
     for bit in 0..26 {
@@ -206,8 +241,7 @@ unsafe fn resume_arriving_volumes(lparam: LPARAM) {
     }
 }
 
-#[cfg(feature = "notify-watcher")]
-unsafe fn volume_arrival_unitmask(lparam: LPARAM) -> Option<u32> {
+unsafe fn volume_event_unitmask(lparam: LPARAM) -> Option<u32> {
     use windows::Win32::UI::WindowsAndMessaging::{
         DBT_DEVTYP_VOLUME, DEV_BROADCAST_HDR, DEV_BROADCAST_VOLUME,
     };
@@ -244,6 +278,39 @@ mod tests {
         assert_eq!(result.0, 1);
     }
 
+    #[test]
+    fn tabs_are_not_notified_until_volume_removal_is_complete() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DBT_DEVICEREMOVECOMPLETE, DBT_DEVICEREMOVEPENDING, DBT_DEVTYP_VOLUME,
+        };
+        let _ = super::take_removed_volumes();
+        let payload = [20u32, DBT_DEVTYP_VOLUME.0, 0, (1 << 17) | (1 << 18), 0];
+        let pointer = LPARAM(payload.as_ptr() as isize);
+        for action in [DBT_DEVICEQUERYREMOVE, DBT_DEVICEREMOVEPENDING] {
+            unsafe {
+                device_wnd_proc(
+                    HWND::default(),
+                    WM_DEVICECHANGE,
+                    WPARAM(action as usize),
+                    pointer,
+                );
+            }
+            assert!(super::take_removed_volumes().is_empty());
+        }
+        for _ in 0..2 {
+            unsafe {
+                device_wnd_proc(
+                    HWND::default(),
+                    WM_DEVICECHANGE,
+                    WPARAM(DBT_DEVICEREMOVECOMPLETE as usize),
+                    pointer,
+                );
+            }
+        }
+        assert_eq!(super::take_removed_volumes(), vec![r"R:\", r"S:\"]);
+        assert!(super::take_removed_volumes().is_empty());
+    }
+
     #[cfg(feature = "notify-watcher")]
     #[test]
     fn arrival_parser_uses_only_volume_unitmask_payloads() {
@@ -252,11 +319,11 @@ mod tests {
         };
         let mask = (1u32 << 22) | (1u32 << 23);
         let parse = |payload: &[u32; 5]| unsafe {
-            super::volume_arrival_unitmask(LPARAM(payload.as_ptr() as isize))
+            super::volume_event_unitmask(LPARAM(payload.as_ptr() as isize))
         };
         assert_eq!(parse(&[20, DBT_DEVTYP_VOLUME.0, 0, mask, 0]), Some(mask));
         assert_eq!(parse(&[12, DBT_DEVTYP_VOLUME.0, 0, mask, 0]), None);
         assert_eq!(parse(&[20, DBT_DEVTYP_DEVICEINTERFACE.0, 0, mask, 0]), None);
-        assert_eq!(unsafe { super::volume_arrival_unitmask(LPARAM(0)) }, None);
+        assert_eq!(unsafe { super::volume_event_unitmask(LPARAM(0)) }, None);
     }
 }

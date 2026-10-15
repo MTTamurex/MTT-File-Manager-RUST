@@ -30,6 +30,7 @@ pub mod disk_analysis;
 pub mod drag_drop;
 pub mod drive_health;
 pub mod drive_refresh;
+mod drive_removal;
 pub mod dual_panel_ops;
 pub mod external_open;
 pub mod file_hash;

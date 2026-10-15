@@ -91,6 +91,8 @@ impl ImageViewerApp {
 
     fn process_incoming_messages_impl(&mut self, ctx: &egui::Context, upload_textures: bool) {
         let _t_msg_start = Instant::now();
+        let removed = crate::infrastructure::windows::device_change::take_removed_volumes();
+        self.redirect_tabs_from_removed_drives(&removed);
 
         self.process_pending_folder_cover_removals();
 

@@ -13,9 +13,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::domain::file_entry::SyncStatus;
 mod attributes;
+mod directory_enum;
 mod google_drive_shell;
 mod google_drive_status;
-mod directory_enum;
 mod path_detection;
 mod pin_state;
 mod timeout_ops;
