@@ -1,6 +1,7 @@
 //! List view rendering - modular structure
 //! Splits rendering into header, virtualization, item rendering, and helpers
 
+pub(crate) mod autofit_layout;
 mod header;
 mod helpers;
 pub(crate) mod item_renderer;

@@ -439,10 +439,12 @@ impl ImageViewerApp {
         // Auto-fit list columns after navigation, session restore or layout changes.
         // Measures content for Size/Type/Date columns and gives remaining space to Name.
         // Save is deferred until after ListViewContext is dropped (borrow release).
+        // Window geometry may settle after the first restored listing is drawn.
+        // Refit each physical pane if its available width subsequently changes.
         // Keep the request pending until both content and a valid width exist.
         let needs_save_after_autofit = !column_list
             && !compact
-            && self.pending_list_column_autofit
+            && list_view::autofit_layout::needs_refit(ui, self.pending_list_column_autofit)
             && list_view::auto_fit_columns(
                 ui,
                 &items,
@@ -459,6 +461,7 @@ impl ImageViewerApp {
             );
         if needs_save_after_autofit {
             self.pending_list_column_autofit = false;
+            list_view::autofit_layout::record_fitted_width(ui);
         }
 
         let mut folder_size_requests: Vec<PathBuf> = Vec::new();
