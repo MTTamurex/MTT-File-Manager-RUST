@@ -214,6 +214,7 @@ pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
     }
     apply_scroll_style(ctx);
     apply_popup_style(ctx);
+    crate::ui::fonts::apply_text_contrast(ctx);
 }
 
 /// Pins the theme preference and applies the dedicated-viewer visuals. Same

@@ -319,6 +319,7 @@ pub struct ImageViewerApp {
     pub minimize_to_tray: bool,
     pub startup_location: crate::app::startup_location::StartupLocation,
     pub startup_custom_path: String,
+    pub tab_preferences: crate::app::tab_preferences::TabPreferences,
     pub default_file_manager_settings: DefaultFileManagerSettingsState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar

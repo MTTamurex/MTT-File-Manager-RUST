@@ -7,6 +7,18 @@
 
 use eframe::egui;
 
+/// Slightly strengthen partially covered pixels on light backgrounds. This
+/// changes edge coverage, not glyph size or layout; keep dark-mode compensation.
+pub(crate) fn apply_text_contrast(ctx: &egui::Context) {
+    ctx.global_style_mut(|style| {
+        style.visuals.text_options.color_transfer_function = if style.visuals.dark_mode {
+            egui::epaint::FontColorTransferFunction::DARK_MODE_DEFAULT
+        } else {
+            egui::epaint::FontColorTransferFunction::Gamma(0.85)
+        };
+    });
+}
+
 /// Loads the Windows system fonts into `fonts` and registers them as fallbacks
 /// in the proportional and monospace families.
 ///

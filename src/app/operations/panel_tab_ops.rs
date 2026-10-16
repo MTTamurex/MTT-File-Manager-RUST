@@ -222,9 +222,12 @@ impl ImageViewerApp {
             return false;
         }
 
-        let path = target_path
-            .map(str::to_owned)
-            .unwrap_or_else(|| self.navigation_state.current_path.clone());
+        let path = target_path.map(str::to_owned).unwrap_or_else(|| {
+            self.tab_preferences.location.resolve(
+                &self.navigation_state.current_path,
+                &self.tab_preferences.custom_path,
+            )
+        });
         let snapshot = self.new_panel_tab_snapshot(&path);
         let index = {
             let tabs = self

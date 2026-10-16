@@ -358,6 +358,10 @@ list_view:
   status: "状态"
 settings:
   startup_location: "启动位置"
+  tabs: "标签页"
+  new_tab_location: "新标签页的默认位置"
+  new_tab_current: "当前位置"
+  archives_in_new_tab: "在新标签页中打开压缩文件"
   startup_location_description: "继续上次会话，或仅打开所选位置。从 Windows 打开的文件夹优先。如果位置不可用，则打开“此电脑”。"
   startup_previous_session: "继续上次会话"
   startup_computer: "此电脑"

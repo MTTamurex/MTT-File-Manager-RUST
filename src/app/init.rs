@@ -243,6 +243,7 @@ impl ImageViewerApp {
             startup_location,
             startup_custom_path,
             date_format,
+            tab_preferences,
         } = startup_preferences;
 
         crate::domain::date_format::set_date_format(date_format);
@@ -491,6 +492,7 @@ impl ImageViewerApp {
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
             startup_location,
             startup_custom_path,
+            tab_preferences,
             quick_access_placement, // Loaded from SQLite
             show_tags,              // Loaded from SQLite
             collapse_quick_access: false,

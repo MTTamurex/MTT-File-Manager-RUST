@@ -27,6 +27,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn interface_at_default_preserves_windows_two_hundred_percent_dpi() {
+        let ctx = egui::Context::default();
+        apply(&ctx, DEFAULT);
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .native_pixels_per_point = Some(2.0);
+        let _ = ctx.run_ui(input, |_| {});
+        assert_eq!(ctx.zoom_factor(), 1.0);
+        assert_eq!(ctx.pixels_per_point(), 2.0);
+    }
+
+    #[test]
     fn scale_composes_with_native_dpi_and_can_be_reset() {
         let ctx = egui::Context::default();
         apply(&ctx, 1.5);

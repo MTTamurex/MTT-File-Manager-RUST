@@ -55,6 +55,7 @@ pub(super) struct StartupPreferences {
     pub(super) minimize_to_tray: bool,
     pub(super) startup_location: crate::app::startup_location::StartupLocation,
     pub(super) startup_custom_path: String,
+    pub(super) tab_preferences: crate::app::tab_preferences::TabPreferences,
     pub(super) date_format: crate::domain::date_format::DateFormat,
 }
 
@@ -371,6 +372,7 @@ impl StartupPreferences {
                 .get("startup_custom_path")
                 .cloned()
                 .unwrap_or_default(),
+            tab_preferences: crate::app::tab_preferences::TabPreferences::load(&prefs),
             date_format: crate::domain::date_format::DateFormat::from_preference(
                 prefs
                     .get("date_format")

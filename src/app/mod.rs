@@ -42,6 +42,7 @@ pub mod startup_location;
 #[cfg(test)]
 mod startup_preferences_tests;
 pub mod state;
+pub mod tab_preferences;
 pub mod ui_state;
 
 // Re-export navigation module for easy access

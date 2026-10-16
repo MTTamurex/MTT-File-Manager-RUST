@@ -33,28 +33,7 @@ fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context)
 }
 
 fn create_new_tab(app: &mut ImageViewerApp) {
-    // PERF-05: enforce the tab cap before touching tab state.
-    if !app.tab_manager.can_add_tab() {
-        app.notifications
-            .warning(rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string());
-        return;
-    }
-    let prev_view_mode = app.view_mode;
-    let prev_sort_mode = app.sort_mode;
-    let prev_sort_descending = app.sort_descending;
-    let prev_folders_position = app.folders_position;
-    app.sync_to_tab();
-    app.tab_manager.new_tab();
-    let active = app.tab_manager.active_mut();
-    active.view_mode = prev_view_mode;
-    active.sort_mode = prev_sort_mode;
-    active.sort_descending = prev_sort_descending;
-    active.folders_position = prev_folders_position;
-    app.sync_from_tab();
-    app.setup_computer_view();
-    app.sync_to_tab();
-    app.update_video_visibility();
-    app.save_preferences();
+    app.create_default_tab();
 }
 
 fn close_current_tab(app: &mut ImageViewerApp, ctx: &egui::Context) {

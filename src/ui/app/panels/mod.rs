@@ -45,6 +45,7 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     if let Some(request) = crate::ui::new_tab_request::take(&ctx) {
         app.open_location_in_new_tab(request.panel, &request.path);
     }
+    app.process_pending_archive_activations();
     let central_ms = t_central.elapsed().as_millis();
 
     // 5. Focus release: When user clicks anywhere outside the video player,

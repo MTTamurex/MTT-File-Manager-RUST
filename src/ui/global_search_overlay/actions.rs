@@ -81,8 +81,8 @@ pub(crate) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, 
 pub(crate) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
     app.close_global_search();
 
-    if is_dir {
-        app.navigate_to(full_path);
+    if is_dir || app.tab_preferences.archive_activation_candidate(full_path) {
+        app.activate_location(full_path);
     } else {
         let path = std::path::PathBuf::from(full_path);
         app.open_with_shell_guarded(&path);

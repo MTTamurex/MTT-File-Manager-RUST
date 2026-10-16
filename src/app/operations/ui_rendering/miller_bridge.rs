@@ -92,7 +92,7 @@ impl ImageViewerApp {
             // Drive root: nothing to the left, but Miller remains name-only.
             self.render_list_view_compact(ui);
             if let Some(target) = pending_nav {
-                self.navigate_to(&target);
+                self.activate_location(&target);
                 ui.ctx().request_repaint();
             }
             return;
@@ -309,7 +309,7 @@ impl ImageViewerApp {
         );
 
         if let Some(target) = pending_nav {
-            self.navigate_to(&target);
+            self.activate_location(&target);
             ui.ctx().request_repaint();
         }
     }

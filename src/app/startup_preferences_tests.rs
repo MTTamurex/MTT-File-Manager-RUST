@@ -108,3 +108,28 @@ fn startup_and_date_preferences_default_and_load_saved_values() {
     assert_eq!(invalid.startup_location, StartupLocation::PreviousSession);
     assert_eq!(invalid.date_format, DateFormat::DayMonthYear);
 }
+
+#[test]
+fn tab_preferences_load_independently_from_startup_location() {
+    use super::tab_preferences::NewTabLocation;
+    let db = AppStateDb::new_in_memory().unwrap();
+    db.set_preference("language", "en").unwrap();
+    let defaults = StartupPreferences::load(&db);
+    assert_eq!(defaults.tab_preferences.location, NewTabLocation::Current);
+    assert!(!defaults.tab_preferences.archives_in_new_tab);
+    db.set_preference("startup_location", "documents").unwrap();
+    db.set_preference("new_tab_location", "custom").unwrap();
+    db.set_preference("new_tab_custom_path", r"D:\Documents\Project")
+        .unwrap();
+    db.set_preference("archives_in_new_tab", "true").unwrap();
+    let loaded = StartupPreferences::load(&db);
+    assert_eq!(loaded.startup_location, StartupLocation::Documents);
+    assert_eq!(loaded.tab_preferences.location, NewTabLocation::Custom);
+    assert_eq!(loaded.tab_preferences.custom_path, r"D:\Documents\Project");
+    assert!(loaded.tab_preferences.archives_in_new_tab);
+    db.set_preference("new_tab_location", "invalid").unwrap();
+    assert_eq!(
+        StartupPreferences::load(&db).tab_preferences.location,
+        NewTabLocation::Current
+    );
+}

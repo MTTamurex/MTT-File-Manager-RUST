@@ -238,7 +238,7 @@ impl ImageViewerApp {
                     let selected_path = selected.path.clone();
                     if selected.is_dir {
                         let target = selected_path.to_string_lossy();
-                        self.navigate_to(target.as_ref());
+                        self.activate_location(target.as_ref());
                         return; // Exit early after navigation
                     } else {
                         open_with_shell(self, &selected_path);
@@ -503,7 +503,7 @@ impl ImageViewerApp {
                     }
 
                     if let Some(path) = path_to_navigate {
-                        self.navigate_to(&path.to_string_lossy());
+                        self.activate_location(&path.to_string_lossy());
                     }
                 }
                 Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
@@ -595,7 +595,7 @@ impl ImageViewerApp {
         // Execute collected actions
         for action in actions {
             match action {
-                GridAction::NavigateTo(path) => self.navigate_to(&path),
+                GridAction::NavigateTo(path) => self.activate_location(&path),
                 GridAction::OpenWithShell(path) => open_with_shell(self, &path),
                 GridAction::RequestThumbnailLoad(path, size, modified) => {
                     self.request_thumbnail_load_with_modified(path, size, modified)

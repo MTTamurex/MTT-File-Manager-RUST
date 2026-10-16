@@ -780,12 +780,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 path.to_string_lossy().as_ref(),
                                 is_directory,
                             );
-                        } else if is_directory {
+                        } else if is_directory
+                            || app
+                                .tab_preferences
+                                .archive_activation_candidate(&path.to_string_lossy())
+                        {
                             let target = path.to_string_lossy();
                             let target = target.into_owned();
                             let origin_panel = context_menu.origin_panel_is_left;
                             run_in_context_panel(app, origin_panel, move |app| {
-                                app.navigate_to(&target);
+                                app.activate_location(&target);
                             });
                         } else {
                             app.open_with_shell_guarded(&path);

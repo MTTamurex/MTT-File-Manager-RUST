@@ -87,6 +87,18 @@ impl ImageViewerApp {
         ));
         prefs.push(("startup_custom_path", self.startup_custom_path.clone()));
         prefs.push((
+            "new_tab_location",
+            self.tab_preferences.location.preference_value().to_owned(),
+        ));
+        prefs.push((
+            "new_tab_custom_path",
+            self.tab_preferences.custom_path.clone(),
+        ));
+        prefs.push((
+            "archives_in_new_tab",
+            self.tab_preferences.archives_in_new_tab.to_string(),
+        ));
+        prefs.push((
             "date_format",
             crate::domain::date_format::date_format()
                 .preference_value()

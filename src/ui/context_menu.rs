@@ -8,21 +8,26 @@ pub use crate::application::context_menu::{ContextMenuItem, ContextMenuState};
 use crate::ui::svg_icons::SvgIconManager;
 
 mod sizing;
+mod viewport;
 
 // Track submenu hierarchy: each depth level stores which item is active at that level
 // Example: hovering "7-Zip" -> [Some(7zip_id)]
 // Hovering item inside 7-Zip submenu -> [Some(7zip_id), Some(sub_item_id)]
 thread_local! {
     static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = const { RefCell::new(Vec::new()) };
+    static SUBMENU_RECTS: RefCell<Vec<egui::Rect>> = const { RefCell::new(Vec::new()) };
 }
 
 fn clear_submenu_hierarchy() {
     SUBMENU_HIERARCHY.with(|hierarchy| hierarchy.borrow_mut().clear());
 }
 
-fn reset_submenu_hierarchy_for_new_session(menu_state: &mut ContextMenuState) {
+fn reset_submenu_hierarchy_for_new_session(menu_state: &mut ContextMenuState) -> bool {
     if menu_state.take_submenu_reset_request() {
         clear_submenu_hierarchy();
+        true
+    } else {
+        false
     }
 }
 
@@ -116,7 +121,10 @@ pub fn render_context_menu(
         return false;
     }
 
-    reset_submenu_hierarchy_for_new_session(menu_state);
+    if reset_submenu_hierarchy_for_new_session(menu_state) {
+        viewport::reset_scroll(ctx);
+    }
+    SUBMENU_RECTS.with(|rects| rects.borrow_mut().clear());
 
     // Suppress item tooltips while the context menu is visible
     set_tooltip_suppression(ctx, true);
@@ -190,9 +198,7 @@ pub fn render_context_menu(
         + (separator_count as f32 * 6.0)
         + 8.0; // inner_margin * 2
 
-    if menu_pos.y + expected_height > screen_rect.bottom() {
-        menu_pos.y = (screen_rect.bottom() - expected_height).max(0.0);
-    }
+    menu_pos = viewport::clamp_position(screen_rect, menu_pos, expected_height);
 
     // Render the menu popup
     let menu_id = egui::Id::new("context_menu");
@@ -210,37 +216,38 @@ pub fn render_context_menu(
                     ui.set_min_width(menu_width); // Tight fit to header bar
                     ui.set_max_width(menu_width); // Prevent extra empty space
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
+                    viewport::scroll(ui, menu_id, screen_rect, |ui| {
+                        // ========== HEADER BAR (Primary items as icons) ==========
+                        if !primary_items.is_empty() {
+                            render_header_bar(
+                                ui,
+                                &primary_items,
+                                &mut action_executed,
+                                svg_icon_manager,
+                            );
+                            ui.separator();
+                        }
 
-                    // ========== HEADER BAR (Primary items as icons) ==========
-                    if !primary_items.is_empty() {
-                        render_header_bar(
+                        // ========== SECONDARY ITEMS (Regular menu items) ==========
+                        render_menu_items(
                             ui,
-                            &primary_items,
-                            &mut action_executed,
-                            svg_icon_manager,
-                        );
-                        ui.separator();
-                    }
-
-                    // ========== SECONDARY ITEMS (Regular menu items) ==========
-                    render_menu_items(
-                        ui,
-                        &secondary_items,
-                        &mut action_executed,
-                        &mut pending_load_item,
-                        svg_icon_manager,
-                    );
-
-                    // ========== OVERFLOW ("Show more options") ==========
-                    if let Some(item) = &overflow_item {
-                        render_overflow_submenu(
-                            ui,
-                            item,
+                            &secondary_items,
                             &mut action_executed,
                             &mut pending_load_item,
                             svg_icon_manager,
                         );
-                    }
+
+                        // ========== OVERFLOW ("Show more options") ==========
+                        if let Some(item) = &overflow_item {
+                            render_overflow_submenu(
+                                ui,
+                                item,
+                                &mut action_executed,
+                                &mut pending_load_item,
+                                svg_icon_manager,
+                            );
+                        }
+                    });
                 });
         });
     crate::ui::video_overlay::register_rect(ctx, menu_id, response.response.rect);
@@ -258,7 +265,9 @@ pub fn render_context_menu(
     // Close menu on left-click outside (use released to avoid capturing the opening click)
     if !should_close && ctx.input(|i| i.pointer.primary_released()) {
         if let Some(pos) = ctx.pointer_interact_pos() {
-            if !response.response.rect.contains(pos) {
+            if !response.response.rect.contains(pos)
+                && !SUBMENU_RECTS.with(|rects| rects.borrow().iter().any(|rect| rect.contains(pos)))
+            {
                 should_close = true;
             }
         }
@@ -652,14 +661,7 @@ fn render_single_item(
 
         // VERTICAL CLAMPING: Prevent submenu from extending below the screen
         let submenu_height = item.sub_items.len() as f32 * (ITEM_HEIGHT + 1.0) + 8.0;
-        let submenu_pos = if submenu_pos.y + submenu_height > screen_rect.bottom() {
-            egui::pos2(
-                submenu_pos.x,
-                (screen_rect.bottom() - submenu_height).max(0.0),
-            )
-        } else {
-            submenu_pos
-        };
+        let submenu_pos = viewport::clamp_position(screen_rect, submenu_pos, submenu_height);
 
         // Create an EXPANDED rect that includes the submenu direction area
         // This prevents flickering when mouse is between parent and submenu
@@ -771,16 +773,18 @@ fn render_single_item(
                         .show(ui, |ui| {
                             ui.set_width(menu_width);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
-                            for sub in &item.sub_items {
-                                render_single_item(
-                                    ui,
-                                    sub,
-                                    action,
-                                    depth + 1,
-                                    lazy_load,
-                                    svg_icon_manager,
-                                );
-                            }
+                            viewport::scroll(ui, submenu_id, screen_rect, |ui| {
+                                for sub in &item.sub_items {
+                                    render_single_item(
+                                        ui,
+                                        sub,
+                                        action,
+                                        depth + 1,
+                                        lazy_load,
+                                        svg_icon_manager,
+                                    );
+                                }
+                            });
                         });
                 });
             crate::ui::video_overlay::register_rect(
@@ -788,6 +792,7 @@ fn render_single_item(
                 submenu_id,
                 area_response.response.rect,
             );
+            SUBMENU_RECTS.with(|rects| rects.borrow_mut().push(area_response.response.rect));
 
             // Store submenu rect for hover detection outside the main menu rect
             submenu_rect = Some(area_response.response.rect);
