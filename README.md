@@ -37,7 +37,6 @@
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Windows Integration
-- **Default folder handling (experimental)** — In Settings > General, optionally route Windows folder-open requests to MTT, add **Open in MTT** to folder context menus, or route Win+E and Explorer launch requests to MTT. These options modify Windows Registry settings and may prompt for UAC confirmation. Win+E redirection is experimental and can prevent Explorer from opening if MTT cannot start; turning the option off restores Explorer.
 - **Windows 11 compact context menu** — Installer builds configured with a trusted signing certificate can register **Open in MTT** in Explorer's modern context menu through a sparse package. Builds without that package retain the classic context-menu integration.
 
 ### Tags
@@ -96,7 +95,7 @@
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 - **Initial indexing feedback** — After an installer-driven index rebuild, a persistent notification reports preparation and live item counts until every indexed volume is ready
 
-> **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights. The optional shell integration in Settings > General separately prompts for an elevated Registry Editor operation when enabled.
+> **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights.
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
@@ -130,6 +129,20 @@
 - **Idle memory trimming** — Trims the Windows process working set after idle periods when it exceeds a configured threshold
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`; event bursts are coalesced into debounced reloads
 
+## Optional Windows Integration
+
+These options are available in **Settings > General**. They modify the current user's Registry settings without requiring administrator privileges or UAC confirmation.
+
+### Set MTT as the default file manager
+
+Use MTT as the default handler for filesystem folders and drives and add **Open in MTT** to folder context menus. Virtual folders such as Control Panel retain their native Windows handlers. Default folder handling is experimental.
+
+### Open MTT with Win+E
+
+This separate option redirects Win+E and Explorer launch requests to MTT.
+
+Pressing Win+E and running explorer.exe will open MTT instead of Windows File Explorer. In situations where specific execution of explorer.exe is required, this will not be possible. This option modifies the current user's Registry settings.
+
 ## Graphics Backend
 
 The app supports three rendering backend choices, selectable in **Settings > General > GPU Backend** (requires app restart):
@@ -158,7 +171,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 - **Administrator permission during installation** — Required to install and start the Global Search and drive telemetry Windows Service (`mtt-search-service.exe`).
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).
 
-The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated service access is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated. Optional folder and Win+E integration uses a separate UAC-confirmed Registry Editor operation when enabled.
+The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated service access is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
 
 ## Technologies
 

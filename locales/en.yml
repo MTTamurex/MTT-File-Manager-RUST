@@ -419,7 +419,7 @@ settings:
   default_file_manager_description: "Set MTT as your default file manager"
   default_file_manager_experimental_note: "Experimental: folder opens will use MTT and Open in MTT will be added to folder menus. This changes the Windows Registry; some antivirus products may flag it as malware (a false positive)."
   win_e_open_mtt_description: "Use MTT for Win+E and Explorer launch requests."
-  win_e_open_mtt_experimental_note: "Experimental and risky: Win+E and launches of explorer.exe will open MTT instead of Windows Explorer. If MTT cannot start, Explorer will not open. Turn this off to restore Explorer. This changes current-user Registry settings."
+  win_e_open_mtt_experimental_note: "Pressing Win+E and running explorer.exe will open MTT instead of Windows File Explorer. In situations where specific execution of explorer.exe is required, this will not be possible. This option modifies the current user's Registry settings."
   diagnostics: "Diagnostics"
   diagnostics_description: "Write only anonymous technical diagnostics to the file, without file names, folder names, or full paths."
   diagnostics_enable: "Enable diagnostic mode"

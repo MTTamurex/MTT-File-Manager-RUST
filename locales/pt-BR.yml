@@ -419,7 +419,7 @@ settings:
   default_file_manager_description: "Definir MTT como gerenciador padrão"
   default_file_manager_experimental_note: "Experimental: as pastas serão abertas no MTT e “Abrir no MTT” será adicionado ao menu de contexto. O recurso altera o Registro do Windows e pode gerar falso positivo em alguns antivírus."
   win_e_open_mtt_description: "Usar o MTT ao pressionar Win+E e em solicitações para abrir o Explorer."
-  win_e_open_mtt_experimental_note: "Experimental e com riscos: Win+E e as inicializações do explorer.exe abrirão o MTT no lugar do Windows Explorer. Se o MTT não iniciar, o Explorer não abrirá. Desative esta opção para restaurar o Explorer. Ela altera o Registro do usuário."
+  win_e_open_mtt_experimental_note: "Pressionar Win+E e executar explorer.exe abrirá o MTT em vez do Explorador de Arquivos do Windows. Em situações em que seja necessário executar especificamente o explorer.exe, isso não será possível. Esta opção modifica as configurações do Registro do usuário atual."
   graphics: "Gráficos"
   graphics_description: "Configure o backend de renderização gráfica."
   backend_title: "Backend Gráfico"

@@ -419,7 +419,7 @@ settings:
   default_file_manager_description: "将 MTT 设为默认文件管理器"
   default_file_manager_experimental_note: "实验性功能：文件夹将在 MTT 中打开，且文件夹菜单会添加“在 MTT 中打开”。此功能会修改 Windows 注册表，某些杀毒软件可能会误报。"
   win_e_open_mtt_description: "按 Win+E 或通过资源管理器启动请求打开 MTT。"
-  win_e_open_mtt_experimental_note: "实验性功能且存在风险：按 Win+E 或启动 explorer.exe 都会打开 MTT，而不是 Windows 资源管理器。若 MTT 无法启动，资源管理器将无法打开。关闭此选项可恢复资源管理器。此操作会修改当前用户的注册表。"
+  win_e_open_mtt_experimental_note: "按下 Win+E 或运行 explorer.exe 将打开 MTT，而不是 Windows 文件资源管理器。在需要专门运行 explorer.exe 的情况下，将无法执行该操作。此选项会修改当前用户的注册表设置。"
   diagnostics: "诊断"
   diagnostics_description: "仅向文件写入匿名技术诊断数据，不含文件名、文件夹名、完整路径。"
   diagnostics_enable: "启用诊断模式"
