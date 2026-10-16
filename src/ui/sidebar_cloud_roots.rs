@@ -90,7 +90,7 @@ pub fn render_cloud_roots(
         let editing = ctx.folder_rename.filter(|editing| editing.matches(&target));
         let is_expanded = ctx.tree_state.is_expanded(root_path);
         let is_tree_loading = ctx.tree_state.is_loading(root_path);
-        let is_selected = !ctx.is_computer_view
+        let navigation_selected = !ctx.is_computer_view
             && !ctx.is_recycle_bin_view
             && path_starts_with_case_insensitive(ctx.current_path, &root.path);
 
@@ -100,6 +100,13 @@ pub fn render_cloud_roots(
             28.0,
             Sense::click(),
         );
+        let is_selected =
+            crate::ui::sidebar_selection::row_is_selected(
+                ctx.context_selection,
+                root_path,
+                Some(target.node_id),
+                navigation_selected,
+            ) || (response.secondary_clicked() && !ctx.is_renaming && !ctx.is_item_dragging);
 
         let arrow_zone = Rect::from_min_size(
             Pos2::new(rect.min.x, rect.min.y),
@@ -251,6 +258,7 @@ pub fn render_cloud_roots(
                 is_renaming: ctx.is_renaming,
                 is_item_dragging: ctx.is_item_dragging,
                 renaming: ctx.folder_rename,
+                context_selection: ctx.context_selection,
                 tree_id,
             };
             if let Some(tree_action) =

@@ -24,6 +24,7 @@ pub struct SidebarTreeContext<'a> {
     pub is_item_dragging: bool,
     pub tree_id: egui::Id,
     pub renaming: Option<&'a SidebarFolderRename>,
+    pub context_selection: Option<crate::ui::sidebar_selection::SidebarContextSelection<'a>>,
 }
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -61,6 +62,7 @@ pub fn render_drive_tree(
                     is_renaming,
                     is_item_dragging,
                     renaming: ctx.renaming,
+                    context_selection: ctx.context_selection,
                     tree_id: ctx.tree_id,
                 };
                 render_tree_node(ui, node, 1, &mut node_ctx, &mut action);
@@ -87,7 +89,7 @@ fn render_tree_node(
     let is_expanded = ctx.tree_state.is_expanded(&node.path);
     let is_loading = ctx.tree_state.is_loading(&node.path);
     let has_children = node.has_subfolders.unwrap_or(true); // optimistic: show arrow until proven empty
-    let is_selected = ctx
+    let navigation_selected = ctx
         .current_path
         .eq_ignore_ascii_case(&node.path.to_string_lossy());
 
@@ -99,6 +101,13 @@ fn render_tree_node(
     let row_width = ui.available_width().max(content_min_width);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(row_width, ROW_HEIGHT), Sense::click());
+    let is_selected =
+        crate::ui::sidebar_selection::row_is_selected(
+            ctx.context_selection,
+            &node.path,
+            Some(node_id),
+            navigation_selected,
+        ) || (response.secondary_clicked() && !ctx.is_renaming && !ctx.is_item_dragging);
 
     if ui.is_rect_visible(rect) {
         let dark_mode = ui.visuals().dark_mode;
@@ -314,6 +323,7 @@ fn render_tree_node(
                     is_renaming,
                     is_item_dragging,
                     renaming: ctx.renaming,
+                    context_selection: ctx.context_selection,
                     tree_id: ctx.tree_id,
                 };
                 render_tree_node(ui, child, depth + 1, &mut child_ctx, action);

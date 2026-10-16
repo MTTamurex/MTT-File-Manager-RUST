@@ -37,7 +37,7 @@ fn frame(
                 cloud_roots: &roots,
                 network_locations: &[],
                 current_path: "D:\\",
-                highlighted_drive_path: None,
+                context_selection: None,
                 is_computer_view: false,
                 is_recycle_bin_view: false,
                 computer_icon: None,

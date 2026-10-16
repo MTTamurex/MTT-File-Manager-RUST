@@ -27,6 +27,7 @@ fn frame(ctx: &egui::Context, editing: &mut Option<SidebarFolderRename>, show_no
                     is_item_dragging: false,
                     tree_id,
                     renaming: editing.as_ref(),
+                    context_selection: None,
                 };
                 render_tree_node(ui, &node, 1, &mut context, &mut None);
             }

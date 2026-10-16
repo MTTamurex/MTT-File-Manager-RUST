@@ -125,15 +125,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             } else {
                 None
             };
-            let highlighted_drive_path = if app.context_menu.is_open
-                && app.context_menu.target_paths.len() == 1
-            {
-                app.context_menu.target_paths[0].to_str().filter(|path| {
-                    crate::infrastructure::windows::is_drive_root_path(std::path::Path::new(path))
-                })
-            } else {
-                None
-            };
+            let context_selection =
+                crate::ui::sidebar_selection::SidebarContextSelection::from_menu(&app.context_menu);
 
             let sidebar_renaming_ref = app
                 .sidebar_renaming
@@ -186,7 +179,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     cloud_roots: &app.drive_state.cloud_roots,
                     network_locations: &app.drive_state.network_locations,
                     current_path: &app.navigation_state.current_path,
-                    highlighted_drive_path,
+                    context_selection,
                     is_computer_view,
                     is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                     computer_icon: app.cache_manager.computer_icon.as_ref(),
@@ -264,7 +257,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     cloud_roots: &app.drive_state.cloud_roots,
                     network_locations: &app.drive_state.network_locations,
                     current_path: &app.navigation_state.current_path,
-                    highlighted_drive_path,
+                    context_selection,
                     is_computer_view,
                     is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                     computer_icon: app.cache_manager.computer_icon.as_ref(),
@@ -447,7 +440,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 cloud_roots: &app.drive_state.cloud_roots,
                 network_locations: &app.drive_state.network_locations,
                 current_path: &app.navigation_state.current_path,
-                highlighted_drive_path,
+                context_selection,
                 is_computer_view,
                 is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                 computer_icon: app.cache_manager.computer_icon.as_ref(),

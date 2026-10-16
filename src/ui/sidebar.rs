@@ -53,7 +53,7 @@ pub struct SidebarContext<'a> {
     pub cloud_roots: &'a [CloudRoot],
     pub network_locations: &'a [crate::domain::network_location::NetworkLocation],
     pub current_path: &'a str,
-    pub highlighted_drive_path: Option<&'a str>,
+    pub context_selection: Option<crate::ui::sidebar_selection::SidebarContextSelection<'a>>,
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
@@ -494,9 +494,6 @@ pub fn render_sidebar_drives(
         ui.add_space(4.0);
 
         for (disk_path, disk_label) in drives {
-            let is_selected = ctx.highlighted_drive_path == Some(disk_path.as_str())
-                || (!ctx.is_computer_view && ctx.current_path.starts_with(disk_path));
-
             let root_path = std::path::Path::new(disk_path.as_str());
             let is_expanded = ctx.tree_state.is_expanded(root_path);
             let is_tree_loading = ctx.tree_state.is_loading(root_path);
@@ -511,6 +508,13 @@ pub fn render_sidebar_drives(
 
             let (rect, response) =
                 allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 32.0, Sense::click());
+            let is_selected =
+                crate::ui::sidebar_selection::row_is_selected(
+                    ctx.context_selection,
+                    root_path,
+                    None,
+                    !ctx.is_computer_view && ctx.current_path.starts_with(disk_path),
+                ) || (response.secondary_clicked() && !ctx.is_renaming && !ctx.is_item_dragging);
 
             // Track arrow click zone for this drive row
             let arrow_zone = Rect::from_min_size(
@@ -868,6 +872,7 @@ pub fn render_sidebar_drives(
                     is_renaming: ctx.is_renaming,
                     is_item_dragging: ctx.is_item_dragging,
                     renaming: ctx.folder_rename,
+                    context_selection: ctx.context_selection,
                     tree_id: egui::Id::new("drive_tree").with(disk_path),
                 };
                 if let Some(tree_action) =

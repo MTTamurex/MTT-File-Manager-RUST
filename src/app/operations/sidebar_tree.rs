@@ -87,5 +87,6 @@ impl ImageViewerApp {
         self.context_menu.sidebar_folder_target = folder;
         self.capture_context_menu_panel_origin();
         self.populate_context_menu(ctx, &[path], false, None);
+        ctx.request_repaint();
     }
 }

@@ -37,6 +37,15 @@ fn click_section(
     renaming: bool,
     dragging: bool,
 ) -> Option<SidebarAction> {
+    click_section_with_feedback(section, button, renaming, dragging).0
+}
+
+fn click_section_with_feedback(
+    section: Section,
+    button: egui::PointerButton,
+    renaming: bool,
+    dragging: bool,
+) -> (Option<SidebarAction>, bool) {
     let ctx = egui::Context::default();
     let mut fonts = egui::FontDefinitions::default();
     fonts.families.insert(
@@ -75,8 +84,8 @@ fn click_section(
             drive_info_cache: &drive_info,
             cloud_roots: &clouds,
             network_locations: &network_locations,
-            current_path: "C:\\",
-            highlighted_drive_path: None,
+            current_path: "D:\\",
+            context_selection: None,
             is_computer_view: false,
             is_recycle_bin_view: false,
             computer_icon: None,
@@ -130,8 +139,9 @@ fn click_section(
         })
         .expect("section item is visible");
     let mut result = None;
+    let mut highlighted = false;
     for pressed in [true, false] {
-        let _ = ctx.run_ui(
+        let output = ctx.run_ui(
             egui::RawInput {
                 events: vec![
                     egui::Event::PointerMoved(pos),
@@ -150,8 +160,31 @@ fn click_section(
                 }
             },
         );
+        if !pressed {
+            let color = crate::ui::theme::selection_color(ctx.global_style().visuals.dark_mode);
+            highlighted = output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::epaint::Shape::Rect(rect) if rect.fill == color && rect.rect.contains(pos))
+            });
+        }
     }
-    result
+    (result, highlighted)
+}
+
+#[test]
+fn sidebar_right_click_immediately_highlights_the_drive_or_cloud_root_without_navigation() {
+    let (action, highlighted) =
+        click_section_with_feedback(Section::Local, egui::PointerButton::Secondary, false, false);
+    assert!(
+        matches!(action, Some(SidebarAction::OpenDriveContextMenu(path)) if path == Section::Local.destination())
+    );
+    assert!(highlighted);
+    let (action, highlighted) =
+        click_section_with_feedback(Section::Cloud, egui::PointerButton::Secondary, false, false);
+    assert!(
+        matches!(action, Some(SidebarAction::OpenTreeContextMenu(target)) if target.path == std::path::Path::new(&Section::Cloud.destination()))
+    );
+    assert!(highlighted);
 }
 
 #[test]
