@@ -51,6 +51,9 @@ pub const ICON_RENAME: &[u8] =
     include_bytes!("../assets/icons/rename_duotone_black_blue_lighter2.svg");
 pub const ICON_SEARCH: &[u8] = include_bytes!("../assets/icons/search.svg");
 pub const ICON_SEARCH_COMPUTER: &[u8] = include_bytes!("../assets/icons/search_computer.svg");
+pub const ICON_SELECT_ALL: &[u8] = include_bytes!("../assets/icons/select_all.svg");
+pub const ICON_SELECT_NONE: &[u8] = include_bytes!("../assets/icons/select_none.svg");
+pub const ICON_INVERT_SELECTION: &[u8] = include_bytes!("../assets/icons/invert_selection.svg");
 pub const ICON_SETTINGS: &[u8] = include_bytes!("../assets/icons/settings.svg");
 pub const ICON_TAG: &[u8] = include_bytes!("../assets/icons/tag.svg");
 pub const ICON_TERMINAL: &[u8] = include_bytes!("../assets/icons/terminal.svg");
@@ -101,6 +104,9 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "rename" => Some(ICON_RENAME),
         "search" => Some(ICON_SEARCH),
         "search_computer" => Some(ICON_SEARCH_COMPUTER),
+        "select_all" => Some(ICON_SELECT_ALL),
+        "select_none" => Some(ICON_SELECT_NONE),
+        "invert_selection" => Some(ICON_INVERT_SELECTION),
         "settings" => Some(ICON_SETTINGS),
         "tag" => Some(ICON_TAG),
         "terminal" => Some(ICON_TERMINAL),

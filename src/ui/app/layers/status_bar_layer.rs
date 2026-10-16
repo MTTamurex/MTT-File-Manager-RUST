@@ -66,8 +66,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
         ctx.request_repaint(); // Keep UI refreshing while processing
     }
 
+    let compact_status_layout =
+        root_ui.available_width() < crate::ui::status_bar::STATUS_BAR_COMPACT_WIDTH;
     egui::Panel::bottom("status_bar")
-        .exact_size(24.0)
+        .exact_size(if compact_status_layout { 48.0 } else { 24.0 })
         .frame(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 0))
@@ -94,6 +96,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                 &mut app.svg_icon_manager,
                 &mut app.is_loading_folder,
                 app.total_items,
+                app.items.len(),
+                app.selected_item.is_some()
+                    || app.selected_file.is_some()
+                    || !app.multi_selection.is_empty(),
                 app.navigation_state.is_computer_view,
                 app.navigation_state.is_recycle_bin_view,
                 bulk_active || is_scanning,
@@ -102,6 +108,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                 &mut app.thumbnail_size,
                 video_preview_active,
                 active_tag_filter_name.as_deref(),
+                compact_status_layout,
             );
             match action {
                 StatusBarAction::OpenSettings => {
@@ -260,6 +267,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                     app.sidebar_tree.set_show_hidden(app.show_hidden_files);
                 }
                 StatusBarAction::ClearTagFilter => app.set_tag_filter(None),
+                StatusBarAction::SelectAll => {
+                    app.select_all_current_items();
+                }
+                StatusBarAction::ClearSelection => app.clear_file_view_selection(),
+                StatusBarAction::InvertSelection => {
+                    app.invert_current_items_selection();
+                }
                 _ => {}
             }
         });

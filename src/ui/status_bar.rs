@@ -5,12 +5,16 @@
 //! process metrics are intentionally not exposed in the UI.
 
 use crate::domain::file_entry::ViewMode;
+use crate::ui::components::selection_controls::{self, SelectionControlAction};
+use crate::ui::components::status_bar_thumbnail_controls;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use rust_i18n::t;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub(crate) const STATUS_BAR_COMPACT_WIDTH: f32 = 720.0;
 
 // --- Kernel resource monitoring (GDI Objects, USER Objects, Handle Count) ---
 // These metrics make resource leaks visible at runtime.
@@ -238,6 +242,12 @@ pub enum StatusBarAction {
     ShowHiddenChanged,
     /// Clear the active tag filter
     ClearTagFilter,
+    /// Select every item in the active panel's current listing
+    SelectAll,
+    /// Clear the active panel's file selection
+    ClearSelection,
+    /// Invert selection in the active panel's current listing
+    InvertSelection,
     /// No action
     None,
 }
@@ -250,6 +260,8 @@ pub fn render_status_bar(
     svg_manager: &mut SvgIconManager,
     is_loading_folder: &mut bool,
     total_items: usize,
+    current_item_count: usize,
+    has_selection: bool,
     is_computer_view: bool,
     is_recycle_bin_view: bool,
     bulk_scan_active: bool,
@@ -258,6 +270,7 @@ pub fn render_status_bar(
     thumbnail_size: &mut f32,
     video_preview_active: bool,
     active_tag_filter_name: Option<&str>,
+    compact_layout: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -290,7 +303,21 @@ pub fn render_status_bar(
         // low-level process metrics in the status bar.
         let _ = get_kernel_resources_cached(false, video_preview_active);
 
-        ui.horizontal_centered(|ui| {
+        let bar_rect = ui.max_rect();
+        let main_row_rect = if compact_layout {
+            egui::Rect::from_min_size(
+                egui::pos2(bar_rect.left(), bar_rect.bottom() - 24.0),
+                egui::vec2(bar_rect.width(), 24.0),
+            )
+        } else {
+            bar_rect
+        };
+        let mut main_row_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(main_row_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        main_row_ui.horizontal_centered(|ui| {
             // === LEFTMOST: Settings button ===
             if widgets::toggle_icon_button_sized(
                 ui,
@@ -389,89 +416,30 @@ pub fn render_status_bar(
                 }
             }); // end Frame
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: 0,
-                        right: 0,
-                        top: 0,
-                        bottom: 2,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        ui.scope(|ui| {
-                            let is_dark = ui.visuals().dark_mode;
-                            let slider_track = if is_dark {
-                                egui::Color32::from_gray(78)
-                            } else {
-                                egui::Color32::from_gray(228)
-                            };
-                            let slider_track_stroke = if is_dark {
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(98))
-                            } else {
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(214))
-                            };
-                            let slider_fill = if is_dark {
-                                egui::Color32::from_rgb(36, 170, 231)
-                            } else {
-                                egui::Color32::from_rgb(33, 176, 236)
-                            };
-                            let slider_knob = if is_dark {
-                                egui::Color32::from_gray(220)
-                            } else {
-                                egui::Color32::from_gray(224)
-                            };
-                            let slider_knob_stroke = if is_dark {
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(150))
-                            } else {
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(190))
-                            };
-                            let slider_knob_hover = if is_dark {
-                                egui::Color32::from_gray(232)
-                            } else {
-                                egui::Color32::from_gray(234)
-                            };
-
-                            ui.visuals_mut().selection.bg_fill = slider_fill;
-
-                            ui.visuals_mut().widgets.noninteractive.bg_fill = slider_track;
-                            ui.visuals_mut().widgets.noninteractive.weak_bg_fill = slider_track;
-                            ui.visuals_mut().widgets.noninteractive.fg_stroke = slider_knob_stroke;
-                            ui.visuals_mut().widgets.noninteractive.bg_stroke = slider_track_stroke;
-
-                            ui.visuals_mut().widgets.inactive.bg_fill = slider_track;
-                            ui.visuals_mut().widgets.inactive.weak_bg_fill = slider_track;
-                            ui.visuals_mut().widgets.inactive.fg_stroke = slider_knob_stroke;
-                            ui.visuals_mut().widgets.inactive.bg_stroke = slider_track_stroke;
-
-                            ui.visuals_mut().widgets.hovered.bg_fill = slider_knob_hover;
-                            ui.visuals_mut().widgets.hovered.weak_bg_fill = slider_track;
-                            ui.visuals_mut().widgets.hovered.fg_stroke = slider_knob_stroke;
-                            ui.visuals_mut().widgets.hovered.bg_stroke = slider_track_stroke;
-
-                            ui.visuals_mut().widgets.active.bg_fill = slider_knob;
-                            ui.visuals_mut().widgets.active.weak_bg_fill = slider_track;
-                            ui.visuals_mut().widgets.active.fg_stroke = slider_knob_stroke;
-                            ui.visuals_mut().widgets.active.bg_stroke = slider_track_stroke;
-
-                            let slider_enabled =
-                                !matches!(view_mode, ViewMode::List | ViewMode::ColumnList);
-                            ui.label(
-                                egui::RichText::new(t!("status_bar.thumbnail_size").to_string())
-                                    .color(theme::text_color(is_dark)),
-                            );
-                            ui.spacing_mut().slider_width = 56.0;
-                            ui.spacing_mut().interact_size.y = 14.0;
-                            ui.add_enabled(
-                                slider_enabled,
-                                egui::Slider::new(thumbnail_size, theme::THUMBNAIL_MIN..=256.0)
-                                    .show_value(false)
-                                    .trailing_fill(true),
-                            );
-                        });
-                    });
-            });
+            status_bar_thumbnail_controls::render(ui, view_mode, thumbnail_size);
         });
+
+        let selection_row_rect = if compact_layout {
+            egui::Rect::from_min_max(
+                bar_rect.min,
+                egui::pos2(bar_rect.right(), main_row_rect.top()),
+            )
+        } else {
+            bar_rect
+        };
+        if let Some(selection_action) = selection_controls::render(
+            ui,
+            selection_row_rect,
+            svg_manager,
+            current_item_count,
+            has_selection,
+        ) {
+            action = match selection_action {
+                SelectionControlAction::SelectAll => StatusBarAction::SelectAll,
+                SelectionControlAction::Clear => StatusBarAction::ClearSelection,
+                SelectionControlAction::Invert => StatusBarAction::InvertSelection,
+            };
+        }
     });
 
     action

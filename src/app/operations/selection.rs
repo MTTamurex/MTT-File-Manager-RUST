@@ -8,7 +8,18 @@
 use crate::app::state::{ImageViewerApp, PendingVideoPlayerAction};
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
+use crate::ui::cache::FxHashSet;
 use std::path::Path;
+
+fn inverted_visible_selection<'a>(
+    visible_paths: impl Iterator<Item = &'a std::path::PathBuf>,
+    selected_paths: &FxHashSet<std::path::PathBuf>,
+) -> FxHashSet<std::path::PathBuf> {
+    visible_paths
+        .filter(|path| !selected_paths.contains(*path))
+        .cloned()
+        .collect()
+}
 
 enum SelectedPreviewOverlayAction {
     None,
@@ -854,6 +865,45 @@ impl ImageViewerApp {
         true
     }
 
+    /// Inverts selection for the currently visible items without changing the
+    /// active search or filters.
+    pub fn invert_current_items_selection(&mut self) -> bool {
+        if self.items.is_empty() {
+            return false;
+        }
+
+        let inverted_selection = inverted_visible_selection(
+            self.items.iter().map(|item| &item.path),
+            &self.multi_selection,
+        );
+        if inverted_selection.is_empty() {
+            self.clear_file_view_selection();
+            return true;
+        }
+
+        let previous_selected_path = self.selected_file.as_ref().map(|item| item.path.clone());
+        let focus_index = self
+            .items
+            .iter()
+            .position(|item| inverted_selection.contains(&item.path))
+            .expect("an inverted non-empty selection has a visible focus item");
+        let focused_item = self.items[focus_index].clone();
+        let focused_path = focused_item.path.clone();
+
+        self.multi_selection = inverted_selection;
+        self.selected_item = Some(focus_index);
+        self.selected_file = Some(focused_item);
+        self.selection_anchor = Some(focus_index);
+        self.rectangle_selection_state = None;
+        self.scroll_to_selected = true;
+
+        if previous_selected_path.as_ref() != Some(&focused_path) {
+            self.update_selected_thumbnail();
+        }
+        self.ui_ctx.request_repaint();
+        true
+    }
+
     /// Clears the current selection, persistent thumbnail, metadata and search.
     /// Useful during navigation between folders.
     /// NOTE: Only clears media_preview if current tab is the owner.
@@ -916,8 +966,9 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::selected_path_is_in_miller_ancestor;
-    use std::path::Path;
+    use super::{inverted_visible_selection, selected_path_is_in_miller_ancestor};
+    use crate::ui::cache::FxHashSet;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn identifies_only_items_from_miller_ancestor_directories() {
@@ -939,5 +990,26 @@ mod tests {
             current,
             Path::new(r"C:\A\Other\video.mp4")
         ));
+    }
+
+    #[test]
+    fn inverts_only_visible_paths_and_drops_selection_outside_the_listing() {
+        let visible = [PathBuf::from("first.txt"), PathBuf::from("second.txt")];
+        let selected: FxHashSet<_> = [PathBuf::from("first.txt"), PathBuf::from("outside.txt")]
+            .into_iter()
+            .collect();
+
+        assert_eq!(
+            inverted_visible_selection(visible.iter(), &selected),
+            [PathBuf::from("second.txt")].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn inverting_a_full_visible_selection_returns_no_selected_paths() {
+        let visible = [PathBuf::from("first.txt"), PathBuf::from("second.txt")];
+        let selected: FxHashSet<_> = visible.iter().cloned().collect();
+
+        assert!(inverted_visible_selection(visible.iter(), &selected).is_empty());
     }
 }

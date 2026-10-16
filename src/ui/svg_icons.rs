@@ -321,4 +321,16 @@ mod tests {
             .iter()
             .any(|pixel| pixel.b() > pixel.r() && pixel.b() > pixel.g()));
     }
+
+    #[test]
+    fn selection_control_icons_render() {
+        for name in ["select_all", "select_none", "invert_selection"] {
+            let svg = crate::embedded_assets::get_icon(name)
+                .expect("selection control icon should be embedded");
+            let image = render_svg_to_image(svg, 16, [60, 60, 60, 255], 1.0, false)
+                .expect("selection control icon should be valid SVG");
+
+            assert_eq!(image.size, [16, 16], "{name}");
+        }
+    }
 }
