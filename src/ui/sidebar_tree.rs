@@ -1,21 +1,18 @@
 use crate::app::state::sidebar_tree_state::{FolderNode, SidebarTreeState};
+use crate::application::sidebar_tree::{SidebarFolderRename, SidebarFolderTarget};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use std::path::Path;
 
+mod actions;
+pub use actions::SidebarTreeAction;
+
+#[cfg(test)]
+mod context_menu_tests;
 #[cfg(test)]
 mod middle_click_tests;
-
-/// Actions emitted by the folder tree widget.
-pub enum SidebarTreeAction {
-    /// User middle-clicked a folder — open it in a new tab in the active panel.
-    OpenInNewTab(String),
-    /// User clicked a folder name — navigate the central panel there.
-    NavigateTo(String),
-    /// User clicked the expand/collapse arrow on a node.
-    ToggleExpand(std::path::PathBuf),
-    /// Items were dropped onto a tree node folder.
-    DropItemsTo(String),
-}
+pub(crate) mod rename;
+#[cfg(test)]
+mod rename_lifecycle_tests;
 
 /// Shared context references needed for tree rendering.
 pub struct SidebarTreeContext<'a> {
@@ -25,6 +22,8 @@ pub struct SidebarTreeContext<'a> {
     pub is_renaming: bool,
     /// Whether an item drag is currently in progress (from the main content area).
     pub is_item_dragging: bool,
+    pub tree_id: egui::Id,
+    pub renaming: Option<&'a SidebarFolderRename>,
 }
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -61,6 +60,8 @@ pub fn render_drive_tree(
                     icon_loader: &mut *ctx.icon_loader,
                     is_renaming,
                     is_item_dragging,
+                    renaming: ctx.renaming,
+                    tree_id: ctx.tree_id,
                 };
                 render_tree_node(ui, node, 1, &mut node_ctx, &mut action);
             }
@@ -79,6 +80,10 @@ fn render_tree_node(
     action: &mut Option<SidebarTreeAction>,
 ) {
     let indent = BASE_INDENT + (depth as f32) * INDENT_PX;
+    let node_id = ctx.tree_id.with(&node.path);
+    let editing = ctx
+        .renaming
+        .filter(|editing| editing.target.node_id == node_id && editing.target.path == node.path);
     let is_expanded = ctx.tree_state.is_expanded(&node.path);
     let is_loading = ctx.tree_state.is_loading(&node.path);
     let has_children = node.has_subfolders.unwrap_or(true); // optimistic: show arrow until proven empty
@@ -208,16 +213,37 @@ fn render_tree_node(
         }
         .gamma_multiply(hidden_opacity);
 
-        ui.painter().text(
-            Pos2::new(cursor_x, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            &node.name,
-            egui::FontId::proportional(11.0),
-            text_color,
+        if editing.is_none() {
+            ui.painter().text(
+                Pos2::new(cursor_x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &node.name,
+                egui::FontId::proportional(11.0),
+                text_color,
+            );
+        }
+    }
+
+    if let Some(editing) = editing {
+        let name_rect = Rect::from_min_max(
+            Pos2::new(
+                rect.min.x + indent + ARROW_WIDTH + ICON_SIZE + 4.0,
+                rect.min.y + 1.0,
+            ),
+            Pos2::new(rect.max.x - 4.0, rect.max.y - 1.0),
         );
+        if let Some(rename_action) = rename::render(ui, name_rect, editing) {
+            *action = Some(rename_action);
+        }
     }
 
     // ── Handle clicks ──
+    if response.secondary_clicked() && action.is_none() && !ctx.is_renaming && !ctx.is_item_dragging
+    {
+        *action = Some(SidebarTreeAction::OpenContextMenu(
+            SidebarFolderTarget::new(ctx.tree_id, &node.path, &node.name),
+        ));
+    }
     if response.middle_clicked() && action.is_none() && !ctx.is_renaming && !ctx.is_item_dragging {
         *action = Some(SidebarTreeAction::OpenInNewTab(
             node.path.to_string_lossy().into_owned(),
@@ -287,6 +313,8 @@ fn render_tree_node(
                     icon_loader: &mut *ctx.icon_loader,
                     is_renaming,
                     is_item_dragging,
+                    renaming: ctx.renaming,
+                    tree_id: ctx.tree_id,
                 };
                 render_tree_node(ui, child, depth + 1, &mut child_ctx, action);
             }

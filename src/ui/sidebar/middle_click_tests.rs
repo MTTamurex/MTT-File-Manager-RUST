@@ -96,6 +96,7 @@ fn click_section(
             collapse_network_drives: false,
             sidebar_renaming: None,
             sidebar_rename_focus: false,
+            folder_rename: None,
             mounted_iso_drives: &mounted_iso_drives,
             tree_state: &tree,
             tag_definitions: &tags,

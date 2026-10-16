@@ -731,6 +731,7 @@ impl ImageViewerApp {
         self.invalidate_panel_tab_snapshots_for_path(&path);
         let new_path =
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
+        self.sidebar_tree.remap_renamed_folder(&path, &new_path);
         self.move_tag_assignments_for_path(&path, &new_path);
 
         if self.global_search.active {

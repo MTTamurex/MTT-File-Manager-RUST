@@ -9,6 +9,7 @@ impl ImageViewerApp {
             || self.batch_rename_state.is_some()
             || self.renaming_state.is_some()
             || self.sidebar_renaming.is_some()
+            || self.sidebar_folder_rename.is_some()
             || self.is_item_dragging
             || self.file_panel_input_blocked_by_drag_move_confirmation()
         {

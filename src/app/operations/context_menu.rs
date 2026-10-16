@@ -381,6 +381,9 @@ impl ImageViewerApp {
         self.invalidate_context_menu_workers();
         let is_global_search = self.context_menu.origin
             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch;
+        let is_sidebar_tree = self.context_menu.origin
+            == crate::application::context_menu::ContextMenuOrigin::SidebarTree;
+        let uses_file_view_location = self.context_menu.origin.uses_file_view_location();
 
         let drive_target_path = if !is_empty_area && paths.len() == 1 {
             let target = &paths[0];
@@ -395,7 +398,7 @@ impl ImageViewerApp {
 
         let mut items = Vec::new();
 
-        if !is_global_search
+        if uses_file_view_location
             && is_empty_area
             && (self.navigation_state.is_computer_view
                 || crate::domain::special_paths::tag_id_from_view_path(
@@ -419,7 +422,7 @@ impl ImageViewerApp {
         }
 
         // Special menu for Recycle Bin items
-        if !is_global_search && self.navigation_state.is_recycle_bin_view && !is_empty_area {
+        if uses_file_view_location && self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
             items.push(
                 ContextMenuItem::new(-52, t!("context_menu.restore"))
@@ -448,7 +451,7 @@ impl ImageViewerApp {
         }
 
         // Special menu for empty area in Recycle Bin
-        if !is_global_search && self.navigation_state.is_recycle_bin_view && is_empty_area {
+        if uses_file_view_location && self.navigation_state.is_recycle_bin_view && is_empty_area {
             items.push(
                 ContextMenuItem::new(-54, t!("context_menu.empty_recycle_bin"))
                     .with_command("empty_recycle_bin")
@@ -461,17 +464,20 @@ impl ImageViewerApp {
             return;
         }
 
-        let explicit_operation_location = self
-            .context_menu
-            .primary_is_directory
-            .and_then(|_| paths.first())
-            .and_then(|path| {
-                if is_empty_area {
-                    Some(path.as_path())
-                } else {
-                    path.parent()
-                }
-            });
+        let explicit_operation_location = if is_sidebar_tree {
+            self.context_menu.operation_directory.as_deref()
+        } else {
+            self.context_menu
+                .primary_is_directory
+                .and_then(|_| paths.first())
+                .and_then(|path| {
+                    if is_empty_area {
+                        Some(path.as_path())
+                    } else {
+                        path.parent()
+                    }
+                })
+        };
         let operation_location_is_archive = explicit_operation_location
             .is_some_and(Self::path_is_archive_namespace)
             || (explicit_operation_location.is_none()
@@ -573,7 +579,7 @@ impl ImageViewerApp {
         // PE executables (.exe, .msi, .com, .scr) never show "Open with" in Windows Explorer.
         let target_is_file = if is_empty_area || is_drive {
             false
-        } else if is_global_search {
+        } else if is_global_search || is_sidebar_tree {
             !self.context_menu.primary_is_directory.unwrap_or(false)
                 && paths.first().is_some_and(|path| {
                     path.extension().is_none_or(|ext| {
@@ -606,7 +612,7 @@ impl ImageViewerApp {
             && !paths
                 .iter()
                 .any(|path| self.path_is_network_operation_root(path))
-            && (is_global_search || self.can_copy_from_current_location());
+            && (is_global_search || is_sidebar_tree || self.can_copy_from_current_location());
         let can_cut_target = !is_drive
             && paths.iter().all(|path| {
                 !self.path_is_network_operation_root(path)
@@ -618,7 +624,9 @@ impl ImageViewerApp {
                 !self.path_is_network_operation_root(path)
                     && !self.path_is_same_or_ancestor_of_open_panel(path)
             });
-        let can_rename_target = if is_global_search {
+        let can_rename_target = if is_sidebar_tree && drive_target_path.is_none() {
+            paths.len() == 1 && self.can_rename_sidebar_folder(&paths[0])
+        } else if is_global_search {
             paths.len() == 1
                 && !is_drive
                 && paths.first().is_some_and(|path| {
@@ -649,6 +657,7 @@ impl ImageViewerApp {
         let can_tag_targets = !is_empty_area
             && !is_drive
             && (is_global_search
+                || is_sidebar_tree
                 || (!self.navigation_state.is_computer_view
                     && !self.navigation_state.is_recycle_bin_view))
             && !paths.is_empty()
@@ -696,7 +705,7 @@ impl ImageViewerApp {
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Paste),
                     )
-                    .enabled(can_paste && !is_drive),
+                    .enabled(can_paste && (!is_drive || is_sidebar_tree)),
             );
         }
 
@@ -829,8 +838,10 @@ impl ImageViewerApp {
                     is_empty_area,
                     is_drive,
                     is_global_search,
-                    is_computer_view: self.navigation_state.is_computer_view,
-                    is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
+                    is_computer_view: uses_file_view_location
+                        && self.navigation_state.is_computer_view,
+                    is_recycle_bin_view: uses_file_view_location
+                        && self.navigation_state.is_recycle_bin_view,
                 },
             ) {
                 items.push(compress_menu_item());

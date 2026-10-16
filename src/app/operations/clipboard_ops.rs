@@ -493,4 +493,20 @@ mod tests {
             Some(origin)
         );
     }
+
+    #[test]
+    fn sidebar_tree_paste_targets_the_clicked_folder_or_drive_not_its_parent() {
+        for target in [r"C:\Folder\Subfolder", r"D:\", r"\\server\share\Folder"] {
+            let mut menu = crate::application::context_menu::ContextMenuState::default();
+            menu.open_for_sidebar_tree(eframe::egui::Pos2::ZERO, PathBuf::from(target));
+            assert_eq!(
+                context_paste_destination(
+                    &menu.target_paths,
+                    menu.operation_directory.as_deref(),
+                    menu.primary_is_directory
+                ),
+                Some(PathBuf::from(target)),
+            );
+        }
+    }
 }

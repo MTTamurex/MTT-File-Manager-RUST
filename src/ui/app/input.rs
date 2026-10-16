@@ -9,6 +9,7 @@ fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context)
     // Ignore while typing/editing any text input context
     if app.renaming_state.is_some()
         || app.sidebar_renaming.is_some()
+        || app.sidebar_folder_rename.is_some()
         || app.is_address_editing
         || app.global_search.active
         || ctx.egui_wants_keyboard_input()
@@ -149,6 +150,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
     if app.renaming_state.is_none()
         && app.sidebar_renaming.is_none()
+        && app.sidebar_folder_rename.is_none()
         && !app.is_address_editing
         && app.batch_rename_state.is_none()
         && app.pending_drag_move_confirmation.is_none()
@@ -537,6 +539,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.batch_rename_state = None;
             } else if app.pending_drag_move_confirmation.is_some() {
                 app.cancel_pending_drag_move();
+            } else if app.sidebar_folder_rename.is_some() {
+                app.cancel_sidebar_folder_rename();
             } else {
                 app.renaming_state = None;
                 app.focus_rename = false;

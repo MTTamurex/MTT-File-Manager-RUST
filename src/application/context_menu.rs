@@ -189,10 +189,15 @@ pub enum ContextMenuOrigin {
     #[default]
     FileView,
     GlobalSearch,
+    SidebarTree,
 }
 
 impl ContextMenuOrigin {
     pub fn allows_paste(self) -> bool {
+        self != Self::GlobalSearch
+    }
+
+    pub fn uses_file_view_location(self) -> bool {
         self == Self::FileView
     }
 }
@@ -208,6 +213,7 @@ pub struct ContextMenuState {
     pub origin: ContextMenuOrigin,
     pub primary_is_directory: Option<bool>,
     pub origin_panel_is_left: Option<bool>,
+    pub sidebar_folder_target: Option<super::sidebar_tree::SidebarFolderTarget>,
 
     /// Dynamic items extracted from Shell or built for empty area
     pub items: Vec<ContextMenuItem>,
@@ -249,6 +255,7 @@ impl Default for ContextMenuState {
             origin: ContextMenuOrigin::FileView,
             primary_is_directory: None,
             origin_panel_is_left: None,
+            sidebar_folder_target: None,
             items: Vec::new(),
             partition_dirty: true,
             primary_indices: Vec::new(),
@@ -295,6 +302,15 @@ impl ContextMenuState {
         self.origin = ContextMenuOrigin::FileView;
         self.primary_is_directory = is_empty_area.then_some(true);
         self.origin_panel_is_left = None;
+        self.sidebar_folder_target = None;
+    }
+
+    pub fn open_for_sidebar_tree(&mut self, position: egui::Pos2, path: PathBuf) {
+        let directory = path.parent().unwrap_or(&path).to_path_buf();
+        self.open(position, None, vec![path], false);
+        self.origin = ContextMenuOrigin::SidebarTree;
+        self.primary_is_directory = Some(true);
+        self.operation_directory = Some(directory);
     }
 
     pub fn open_for_global_search(
@@ -318,6 +334,7 @@ impl ContextMenuState {
         self.origin = ContextMenuOrigin::GlobalSearch;
         self.primary_is_directory = Some(primary_is_directory);
         self.origin_panel_is_left = None;
+        self.sidebar_folder_target = None;
     }
 
     /// Closes the context menu
@@ -330,6 +347,7 @@ impl ContextMenuState {
         self.origin = ContextMenuOrigin::FileView;
         self.primary_is_directory = None;
         self.origin_panel_is_left = None;
+        self.sidebar_folder_target = None;
         self.items.clear();
         self.partition_dirty = true;
         self.primary_indices.clear();
@@ -408,6 +426,49 @@ mod tests {
     fn global_search_context_menu_never_offers_paste() {
         assert!(ContextMenuOrigin::FileView.allows_paste());
         assert!(!ContextMenuOrigin::GlobalSearch.allows_paste());
+    }
+
+    #[test]
+    fn sidebar_node_identity_is_cleared_when_a_menu_is_closed_or_replaced() {
+        let target = crate::application::sidebar_tree::SidebarFolderTarget::new(
+            eframe::egui::Id::new("cloud_tree"),
+            std::path::Path::new(r"C:\Folder"),
+            "Folder",
+        );
+        for replacement in 0..3 {
+            let mut menu = ContextMenuState::default();
+            menu.open_for_sidebar_tree(eframe::egui::Pos2::ZERO, target.path.clone());
+            menu.sidebar_folder_target = Some(target.clone());
+            match replacement {
+                0 => menu.close(),
+                1 => menu.open(eframe::egui::Pos2::ZERO, None, Vec::new(), true),
+                _ => menu.open_for_global_search(eframe::egui::Pos2::ZERO, Vec::new(), false),
+            }
+            assert!(menu.sidebar_folder_target.is_none());
+        }
+    }
+
+    #[test]
+    fn sidebar_tree_menu_replaces_prior_targets_and_does_not_inherit_the_file_view_location() {
+        let mut menu = ContextMenuState::default();
+        menu.open_for_global_search(
+            eframe::egui::Pos2::ZERO,
+            vec![r"C:\Other\file.txt".into()],
+            false,
+        );
+        let folder = std::path::PathBuf::from(r"D:\Folder\Subfolder");
+        menu.open_for_sidebar_tree(eframe::egui::pos2(10.0, 20.0), folder.clone());
+        assert_eq!(menu.origin, ContextMenuOrigin::SidebarTree);
+        assert!(menu.origin.allows_paste());
+        assert!(!menu.origin.uses_file_view_location());
+        assert_eq!(menu.target_paths, vec![folder.clone()]);
+        assert_eq!(menu.primary_is_directory, Some(true));
+        assert_eq!(menu.operation_directory.as_deref(), folder.parent());
+        assert!(menu.item_index.is_none());
+        assert!(!menu.is_empty_area);
+        menu.close();
+        assert!(menu.target_paths.is_empty());
+        assert!(menu.origin.uses_file_view_location());
     }
 
     #[test]

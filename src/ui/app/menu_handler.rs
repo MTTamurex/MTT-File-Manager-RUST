@@ -423,6 +423,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     app.context_menu.origin = context_menu.origin;
     app.context_menu.primary_is_directory = context_menu.primary_is_directory;
     app.context_menu.origin_panel_is_left = context_menu.origin_panel_is_left;
+    app.context_menu
+        .sidebar_folder_target
+        .clone_from(&context_menu.sidebar_folder_target);
 
     if let Some(id) = context_menu.selected_command_id.take() {
         let selected_command =
@@ -737,6 +740,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                     source_index,
                                 );
                             }
+                        } else if context_menu.origin
+                            == crate::application::context_menu::ContextMenuOrigin::SidebarTree
+                            && !crate::infrastructure::windows::is_drive_root_path(&path)
+                        {
+                            app.begin_sidebar_folder_rename(&path);
                         } else if crate::infrastructure::windows::is_drive_root_path(&path) {
                             // Inline rename in sidebar — don't navigate to Este Computador
                             let drive_path_str = path.to_string_lossy();

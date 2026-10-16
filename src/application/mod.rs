@@ -8,6 +8,7 @@ pub mod grouping;
 pub mod navigation;
 pub mod notification;
 pub mod renaming;
+pub mod sidebar_tree;
 pub mod sorting;
 pub mod watcher;
 

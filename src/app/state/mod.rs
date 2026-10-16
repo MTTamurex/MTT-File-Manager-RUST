@@ -447,10 +447,12 @@ pub struct ImageViewerApp {
     // BATCH RENAME STATE
     pub batch_rename_state: Option<crate::app::batch_rename::BatchRenameState>,
 
-    // SIDEBAR DRIVE RENAME (inline in sidebar, not in main view)
-    /// (drive_path, editable_label) â€” active inline rename in the sidebar
+    // SIDEBAR RENAME (inline in sidebar, not in main view)
+    /// (drive_path, editable_label) for the inline drive editor.
     pub sidebar_renaming: Option<(String, String)>,
     pub sidebar_rename_focus: bool,
+    /// Folder editing is bound to the specific tree row that opened its menu.
+    pub sidebar_folder_rename: Option<crate::application::sidebar_tree::SidebarFolderRename>,
 
     // WATCHER SYSTEM (AUTO-REFRESH)
     // Per-folder notify-based watcher

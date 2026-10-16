@@ -3,6 +3,9 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use rust_i18n::t;
 use std::path::Path;
 
+#[cfg(test)]
+mod rename_tests;
+
 pub fn render_cloud_roots(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
@@ -77,6 +80,14 @@ pub fn render_cloud_roots(
 
     for root in ctx.cloud_roots {
         let root_path = Path::new(&root.path);
+        let tree_id = egui::Id::new("cloud_tree").with(&root.path);
+        let name = root_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| root.label.as_str().into());
+        let target =
+            crate::application::sidebar_tree::SidebarFolderTarget::new(tree_id, root_path, &name);
+        let editing = ctx.folder_rename.filter(|editing| editing.matches(&target));
         let is_expanded = ctx.tree_state.is_expanded(root_path);
         let is_tree_loading = ctx.tree_state.is_loading(root_path);
         let is_selected = !ctx.is_computer_view
@@ -164,17 +175,31 @@ pub fn render_cloud_roots(
             }
             cursor_x += 24.0;
 
-            ui.painter().text(
-                Pos2::new(cursor_x, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &root.label,
-                egui::FontId::proportional(11.5),
-                if is_selected {
-                    crate::ui::theme::selection_text_color(dark_mode)
-                } else {
-                    ui.visuals().text_color()
-                },
+            if editing.is_none() {
+                ui.painter().text(
+                    Pos2::new(cursor_x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &root.label,
+                    egui::FontId::proportional(11.5),
+                    if is_selected {
+                        crate::ui::theme::selection_text_color(dark_mode)
+                    } else {
+                        ui.visuals().text_color()
+                    },
+                );
+            }
+        }
+
+        if let Some(editing) = editing {
+            let name_rect = Rect::from_min_max(
+                Pos2::new(rect.min.x + 44.0, rect.min.y + 2.0),
+                Pos2::new(rect.max.x - 4.0, rect.max.y - 2.0),
             );
+            if let Some(rename_action) =
+                crate::ui::sidebar_tree::rename::render(ui, name_rect, editing)
+            {
+                *action = Some(rename_action.into());
+            }
         }
 
         if action.is_none()
@@ -201,7 +226,7 @@ pub fn render_cloud_roots(
                 }
             }
         } else if action.is_none() && response.secondary_clicked() && !ctx.is_renaming {
-            *action = Some(SidebarAction::OpenDriveContextMenu(root.path.clone()));
+            *action = Some(SidebarAction::OpenTreeContextMenu(target));
         }
 
         if ctx.is_item_dragging && action.is_none() {
@@ -225,25 +250,14 @@ pub fn render_cloud_roots(
                 icon_loader: ctx.icon_loader,
                 is_renaming: ctx.is_renaming,
                 is_item_dragging: ctx.is_item_dragging,
+                renaming: ctx.folder_rename,
+                tree_id,
             };
             if let Some(tree_action) =
                 crate::ui::sidebar_tree::render_drive_tree(ui, &root.path, &mut tree_ctx)
             {
                 if action.is_none() {
-                    match tree_action {
-                        crate::ui::sidebar_tree::SidebarTreeAction::OpenInNewTab(path) => {
-                            *action = Some(SidebarAction::OpenInNewTab(path));
-                        }
-                        crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
-                            *action = Some(SidebarAction::NavigateTo(path));
-                        }
-                        crate::ui::sidebar_tree::SidebarTreeAction::ToggleExpand(path) => {
-                            *action = Some(SidebarAction::TreeToggleExpand(path));
-                        }
-                        crate::ui::sidebar_tree::SidebarTreeAction::DropItemsTo(path) => {
-                            *action = Some(SidebarAction::DropItemsTo(path));
-                        }
-                    }
+                    *action = Some(tree_action.into());
                 }
             }
         }

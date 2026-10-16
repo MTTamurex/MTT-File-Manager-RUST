@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use crate::infrastructure::directory_cache::DirectoryCache;
 
+mod rename;
+
 /// A single folder node in the sidebar tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FolderNode {
@@ -263,7 +265,10 @@ impl SidebarTreeState {
     pub fn poll_loaded(&mut self) -> bool {
         let mut any = false;
         while let Ok(result) = self.rx.try_recv() {
-            self.loading.remove(&result.parent);
+            if !self.loading.remove(&result.parent) {
+                // A rename or drive removal superseded this directory request.
+                continue;
+            }
 
             match result.children {
                 Some(children) => {

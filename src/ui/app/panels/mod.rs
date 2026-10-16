@@ -87,6 +87,7 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
 fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Option<SidebarAction> {
     let t_sidebar_fn = std::time::Instant::now();
     if !app.show_left_sidebar {
+        app.cancel_sidebar_folder_rename();
         return None;
     }
 
@@ -100,6 +101,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
     // Resize is handled via manual drag handles rendered separately
     let dark_mode = root_ui.visuals().dark_mode;
     let ctx = root_ui.ctx().clone();
+    crate::ui::sidebar_tree::rename::begin_frame(&ctx);
     let can_drop_items_to_recycle_bin = app.can_drop_drag_payload_to_recycle_bin();
     let sidebar_response = egui::Panel::left("sidebar")
         .exact_size(target_width)
@@ -188,7 +190,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     is_computer_view,
                     is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                     computer_icon: app.cache_manager.computer_icon.as_ref(),
-                    is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
+                    is_renaming: app.renaming_state.is_some()
+                        || app.sidebar_renaming.is_some()
+                        || app.sidebar_folder_rename.is_some(),
                     icon_loader: &mut app.item_icon_loader,
                     pinned_folders: &app.pinned_folders,
                     is_item_dragging: app.is_item_dragging,
@@ -204,6 +208,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     collapse_network_drives: app.collapse_network_drives,
                     sidebar_renaming: sidebar_renaming_ref,
                     sidebar_rename_focus: app.sidebar_rename_focus,
+                    folder_rename: app.sidebar_folder_rename.as_ref(),
                     mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                     tree_state: &app.sidebar_tree,
                     tag_definitions: &app.tag_definitions,
@@ -263,7 +268,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     is_computer_view,
                     is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                     computer_icon: app.cache_manager.computer_icon.as_ref(),
-                    is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
+                    is_renaming: app.renaming_state.is_some()
+                        || app.sidebar_renaming.is_some()
+                        || app.sidebar_folder_rename.is_some(),
                     icon_loader: &mut app.item_icon_loader,
                     pinned_folders: &app.pinned_folders,
                     is_item_dragging: app.is_item_dragging,
@@ -279,6 +286,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     collapse_network_drives: app.collapse_network_drives,
                     sidebar_renaming: sidebar_renaming_ref,
                     sidebar_rename_focus: app.sidebar_rename_focus,
+                    folder_rename: app.sidebar_folder_rename.as_ref(),
                     mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                     tree_state: &app.sidebar_tree,
                     tag_definitions: &app.tag_definitions,
@@ -443,7 +451,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 is_computer_view,
                 is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                 computer_icon: app.cache_manager.computer_icon.as_ref(),
-                is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
+                is_renaming: app.renaming_state.is_some()
+                    || app.sidebar_renaming.is_some()
+                    || app.sidebar_folder_rename.is_some(),
                 icon_loader: &mut app.item_icon_loader,
                 pinned_folders: &app.pinned_folders,
                 is_item_dragging: app.is_item_dragging,
@@ -459,6 +469,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 collapse_network_drives: app.collapse_network_drives,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
+                folder_rename: app.sidebar_folder_rename.as_ref(),
                 mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                 tree_state: &app.sidebar_tree,
                 tag_definitions: &app.tag_definitions,
@@ -610,16 +621,15 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
     // Consume focus flag after rendering so it only fires once
     app.sidebar_rename_focus = false;
+    crate::ui::sidebar_tree::rename::finish_frame(&ctx, &mut app.sidebar_folder_rename);
 
     let sidebar_action = match sidebar_response.inner {
         Some(SidebarAction::OpenDriveContextMenu(path)) => {
-            let path_buf = std::path::PathBuf::from(&path);
-            let pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or_default());
-
-            app.context_menu
-                .open(pos, None, vec![path_buf.clone()], false);
-            app.context_menu.primary_is_directory = Some(true);
-            app.populate_context_menu(&ctx, &[path_buf], false, None);
+            app.open_sidebar_context_menu(&ctx, path);
+            None
+        }
+        Some(SidebarAction::OpenTreeContextMenu(target)) => {
+            app.open_sidebar_folder_context_menu(&ctx, target);
             None
         }
         other => other,
@@ -651,6 +661,18 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::NavigateToComputer => app.navigate_to_computer(),
         SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
         SidebarAction::OpenDriveContextMenu(_) => {}
+        SidebarAction::OpenTreeContextMenu(_) => {}
+        SidebarAction::TreeRenameChanged(name) => {
+            if let Some(editing) = app.sidebar_folder_rename.as_mut() {
+                editing.text = name;
+            }
+        }
+        SidebarAction::CommitTreeRename { node_id, new_name } => {
+            app.commit_sidebar_folder_rename(node_id, new_name);
+        }
+        SidebarAction::CancelTreeRename => {
+            app.cancel_sidebar_folder_rename();
+        }
         SidebarAction::PinFolder(path) => app.pin_folder(&path),
         SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
         SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),

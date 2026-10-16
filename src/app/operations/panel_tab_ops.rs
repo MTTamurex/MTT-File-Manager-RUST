@@ -57,6 +57,7 @@ impl ImageViewerApp {
     }
 
     fn restore_panel_tab_snapshot(&mut self, mut snapshot: PanelSnapshot) {
+        self.cancel_sidebar_edits();
         self.context_menu.close();
         let old_path = self.navigation_state.current_path.clone();
         let restored_path = snapshot.path.clone();

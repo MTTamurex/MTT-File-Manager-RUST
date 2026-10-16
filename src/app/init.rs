@@ -550,6 +550,7 @@ impl ImageViewerApp {
             batch_rename_state: None,
             sidebar_renaming: None,
             sidebar_rename_focus: false,
+            sidebar_folder_rename: None,
 
             #[cfg(feature = "notify-watcher")]
             watcher: None,

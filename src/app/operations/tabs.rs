@@ -13,6 +13,7 @@ mod sync_to;
 impl ImageViewerApp {
     /// Syncs the active tab state to the app
     pub fn sync_from_tab(&mut self) {
+        self.cancel_sidebar_edits();
         self.context_menu.close();
         let sync_start = std::time::Instant::now();
         self.invalidate_active_items_rebuild();

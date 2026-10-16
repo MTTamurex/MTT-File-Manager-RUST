@@ -20,7 +20,9 @@ impl ImageViewerApp {
     pub(crate) fn path_is_network_operation_root(&self, path: &Path) -> bool {
         network_operation_root(
             path,
-            self.navigation_state.is_computer_view && !self.global_search.active,
+            self.navigation_state.is_computer_view
+                && !self.global_search.active
+                && self.context_menu.origin.uses_file_view_location(),
             &self.drive_state.network_locations,
         )
     }
