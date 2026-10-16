@@ -2,6 +2,8 @@
 
 **Native Windows file manager** built in Rust with a modern UI, disk usage analysis, archive browsing and creation, advanced media preview, and Windows integration.
 
+<img width="3839" height="2062" alt="Untitled-1" src="https://github.com/user-attachments/assets/6ae29e6d-9f08-4d07-97bd-3e9e61a1f699" />
+
 ## Download & Install (Windows)
 
 **[Download the latest release](../../releases/latest)**
@@ -17,8 +19,6 @@
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
 - **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
 - **Updating:** close MTT and run the newer installer. No manual uninstall is needed.
-
-<img width="3839" height="2062" alt="Untitled-1" src="https://github.com/user-attachments/assets/6ae29e6d-9f08-4d07-97bd-3e9e61a1f699" />
 
 ## Key Features
 
