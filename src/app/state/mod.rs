@@ -266,6 +266,8 @@ pub struct ImageViewerApp {
     pub folder_load_failure_sender: Sender<(usize, FolderLoadError)>,
     pub folder_load_error: Option<FolderLoadError>,
     pub folder_access: crate::app::operations::folder_access::FolderAccessState,
+    pub(crate) network_location_wizard:
+        crate::app::operations::network_location_wizard::NetworkLocationWizardState,
     pub is_loading_folder: bool,
     pub loading_started_at: Instant, // Track when loading started for timeout safety
 

@@ -1281,10 +1281,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             )
             .on_hover_cursor(egui::CursorIcon::Default);
 
-        if !file_panel_input_blocked
-            && interact_response.secondary_clicked()
-            && app.can_open_empty_area_context_menu()
-        {
+        if !file_panel_input_blocked && interact_response.secondary_clicked() {
             app.context_menu.target_paths.clear();
 
             // Use current path for shell menu

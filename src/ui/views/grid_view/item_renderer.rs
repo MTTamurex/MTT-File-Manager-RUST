@@ -392,6 +392,7 @@ fn render_item_slot_for_grid(
             focus_rename: ctx.focus_rename,
             rename_name_rect: None,
             is_recycle_bin_view: ctx.is_recycle_bin_view,
+            is_computer_view: ctx.is_computer_view,
             texture_cache: ctx.texture_cache,
             attempted_thumbnail_bucket: ctx.attempted_thumbnail_bucket,
             icon_loader: ctx.item_icon_loader,

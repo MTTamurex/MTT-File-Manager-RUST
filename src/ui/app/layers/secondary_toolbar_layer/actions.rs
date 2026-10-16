@@ -1,5 +1,4 @@
 use crate::app::ImageViewerApp;
-use crate::domain::network_path::is_network_location_root;
 use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
@@ -27,11 +26,11 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
     let in_archive_namespace = app.current_location_is_archive_namespace();
     let selection_cannot_move = app.multi_selection.iter().any(|path| {
-        is_network_location_root(path)
+        app.path_is_network_operation_root(path)
             || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
             || app.path_is_same_or_ancestor_of_open_panel(path)
     }) || app.selected_file.as_ref().is_some_and(|item| {
-        is_network_location_root(&item.path)
+        app.path_is_network_operation_root(&item.path)
             || crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
             || app.path_is_same_or_ancestor_of_open_panel(&item.path)
     });
@@ -39,11 +38,11 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let selection_has_network_location = app
         .multi_selection
         .iter()
-        .any(|path| is_network_location_root(path))
+        .any(|path| app.path_is_network_operation_root(path))
         || app
             .selected_file
             .as_ref()
-            .is_some_and(|item| is_network_location_root(&item.path));
+            .is_some_and(|item| app.path_is_network_operation_root(&item.path));
     let can_copy =
         has_selection && app.can_copy_from_current_location() && !selection_has_network_location;
     let can_rename = app.multi_selection.len() <= 1

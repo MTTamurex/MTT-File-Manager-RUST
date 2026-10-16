@@ -2,7 +2,6 @@
 
 use crate::app::operations::file_operation_policy::path_accepts_file_children;
 use crate::app::state::ImageViewerApp;
-use crate::domain::network_path::is_network_location_root;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
@@ -24,7 +23,11 @@ impl ImageViewerApp {
         }
 
         let sources = self.gather_selected_paths();
-        if sources.is_empty() || sources.iter().any(|path| is_network_location_root(path)) {
+        if sources.is_empty()
+            || sources
+                .iter()
+                .any(|path| self.path_is_network_operation_root(path))
+        {
             return;
         }
 
@@ -65,7 +68,11 @@ impl ImageViewerApp {
         }
 
         let sources = self.gather_selected_paths();
-        if sources.is_empty() || sources.iter().any(|path| is_network_location_root(path)) {
+        if sources.is_empty()
+            || sources
+                .iter()
+                .any(|path| self.path_is_network_operation_root(path))
+        {
             return;
         }
 

@@ -76,6 +76,8 @@ pub struct ItemSlotContext<'a> {
     pub rename_name_rect: Option<egui::Rect>,
     /// Whether in Recycle Bin view (avoids heavy IO and thumbnails)
     pub is_recycle_bin_view: bool,
+    /// Whether the slot is shown in This PC (saved UNC destinations use a network icon).
+    pub is_computer_view: bool,
     /// Cache de texturas (LRU)
     pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Bucket sizes most recently requested for each path. Used to decide

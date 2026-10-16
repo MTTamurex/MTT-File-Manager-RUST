@@ -782,9 +782,7 @@ impl ImageViewerApp {
                     self.toggle_group_collapsed(key);
                     ui.ctx().request_repaint();
                 }
-                Some(list_view::ListViewAction::EmptyAreaSecondaryClick)
-                    if !is_renaming && self.can_open_empty_area_context_menu() =>
-                {
+                Some(list_view::ListViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
                     let path = PathBuf::from(&self.navigation_state.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);

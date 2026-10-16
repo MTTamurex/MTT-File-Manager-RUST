@@ -17,6 +17,7 @@ pub(crate) mod new_tab_request;
 pub mod preview_panel;
 pub mod sidebar;
 pub mod sidebar_cloud_roots;
+pub(crate) mod sidebar_network_locations;
 pub mod sidebar_tree;
 pub mod status_bar;
 pub mod svg_icons;

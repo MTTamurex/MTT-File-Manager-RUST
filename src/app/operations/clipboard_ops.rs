@@ -167,7 +167,11 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn copy_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() || paths.iter().any(|path| is_network_location_root(path)) {
+        if paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| self.path_is_network_operation_root(path))
+        {
             return;
         }
         let owner = self.shell_op_hwnd();
@@ -178,7 +182,7 @@ impl ImageViewerApp {
     pub fn command_cut(&mut self, idx: Option<usize>) {
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
             if self.context_menu.target_paths.iter().any(|path| {
-                is_network_location_root(path)
+                self.path_is_network_operation_root(path)
                     || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             }) {
@@ -213,7 +217,7 @@ impl ImageViewerApp {
 
         if !files.is_empty()
             && !files.iter().any(|path| {
-                is_network_location_root(path)
+                self.path_is_network_operation_root(path)
                     || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })
@@ -226,7 +230,7 @@ impl ImageViewerApp {
     pub(crate) fn cut_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
         if paths.is_empty()
             || paths.iter().any(|path| {
-                is_network_location_root(path)
+                self.path_is_network_operation_root(path)
                     || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })

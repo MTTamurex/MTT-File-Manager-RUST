@@ -361,10 +361,6 @@ impl ImageViewerApp {
         )])
     }
 
-    pub fn can_open_empty_area_context_menu(&self) -> bool {
-        !self.navigation_state.is_computer_view
-    }
-
     pub fn dismiss_context_menu(&mut self) {
         if !self.context_menu.is_open {
             return;
@@ -385,12 +381,6 @@ impl ImageViewerApp {
         self.invalidate_context_menu_workers();
         let is_global_search = self.context_menu.origin
             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch;
-
-        if !is_global_search && is_empty_area && !self.can_open_empty_area_context_menu() {
-            self.context_menu.close();
-            self.shell_menu_loading = false;
-            return;
-        }
 
         let drive_target_path = if !is_empty_area && paths.len() == 1 {
             let target = &paths[0];
@@ -414,6 +404,15 @@ impl ImageViewerApp {
                 .is_some())
         {
             items.push(grouping_menu_item(self));
+            if self.navigation_state.is_computer_view {
+                items.push(ContextMenuItem::separator());
+                items.push(
+                    ContextMenuItem::new(-84, t!("context_menu.add_network_location"))
+                        .with_command("add_network_location")
+                        .with_svg_icon("folder_new")
+                        .enabled(!self.network_location_wizard_pending()),
+                );
+            }
             self.context_menu.items = items;
             self.context_menu.partition_items();
             return;
@@ -604,17 +603,19 @@ impl ImageViewerApp {
             false
         };
         let can_copy_target = !is_drive
-            && !paths.iter().any(|path| is_network_location_root(path))
+            && !paths
+                .iter()
+                .any(|path| self.path_is_network_operation_root(path))
             && (is_global_search || self.can_copy_from_current_location());
         let can_cut_target = !is_drive
             && paths.iter().all(|path| {
-                !is_network_location_root(path)
+                !self.path_is_network_operation_root(path)
                     && !crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     && !self.path_is_same_or_ancestor_of_open_panel(path)
             });
         let can_delete_target = !is_drive
             && paths.iter().all(|path| {
-                !is_network_location_root(path)
+                !self.path_is_network_operation_root(path)
                     && !self.path_is_same_or_ancestor_of_open_panel(path)
             });
         let can_rename_target = if is_global_search {
@@ -814,9 +815,13 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-26, t!("context_menu.create_shortcut"))
                     .with_svg_icon("external-link")
-                    .enabled(super::file_operation_policy::path_accepts_file_children(
-                        operation_location,
-                    )),
+                    .enabled(
+                        super::file_operation_policy::path_accepts_file_children(
+                            operation_location,
+                        ) && !paths
+                            .iter()
+                            .any(|path| self.path_is_network_operation_root(path)),
+                    ),
             );
             if should_offer_compress(
                 paths,

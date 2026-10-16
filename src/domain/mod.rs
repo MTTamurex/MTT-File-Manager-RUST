@@ -6,6 +6,7 @@ pub mod errors;
 pub mod file_entry;
 pub mod file_tag;
 pub mod folder_lock;
+pub mod network_location;
 pub mod network_path;
 pub mod organizer_conflict;
 pub mod organizer_operation;

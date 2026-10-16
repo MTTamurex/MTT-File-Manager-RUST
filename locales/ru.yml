@@ -8,6 +8,7 @@ sidebar:
   cloud_drives: "Облачные диски"
   local_disks: "Локальные диски"
   network_drives: "Сетевые диски"
+  network_locations: "Сетевые расположения"
   eject_drive: "Извлечь смонтированный образ ISO"
   collapse_section: "Свернуть раздел"
   expand_section: "Развернуть раздел"
@@ -222,6 +223,7 @@ operations:
   error_worker_unavailable: "Процесс обработки файлов недоступен"
   high_risk_source: "Источник повышенного риска (UNC/Shell). Нажмите ещё раз, чтобы подтвердить открытие."
   open_failed: "Не удалось открыть элемент с помощью приложения по умолчанию."
+  network_location_wizard_failed: "Не удалось открыть мастер Windows для добавления сетевого расположения."
   mount_iso: "Монтирование ISO: %{name}"
   mount_iso_failed: "Не удалось смонтировать ISO-образ: %{error}"
   eject_iso: "Извлечён ISO-образ: %{name}"
@@ -245,6 +247,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Закрепить текущую папку в быстром доступе"
 context_menu:
+  add_network_location: "Добавить сетевое расположение"
   open_in_mtt: "Открыть в MTT"
   open: "Открыть"
   open_with: "Открыть с помощью..."

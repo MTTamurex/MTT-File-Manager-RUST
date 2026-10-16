@@ -8,6 +8,7 @@ sidebar:
   cloud_drives: "云盘"
   local_disks: "本地磁盘"
   network_drives: "网络驱动器"
+  network_locations: "网络位置"
   eject_drive: "弹出已挂载的ISO"
   collapse_section: "折叠分区"
   expand_section: "展开分区"
@@ -222,6 +223,7 @@ operations:
   error_worker_unavailable: "文件操作工作进程不可用"
   high_risk_source: "高风险来源（UNC/Shell）。再次点击确认打开。"
   open_failed: "无法使用默认应用打开该项目。"
+  network_location_wizard_failed: "无法打开 Windows 添加网络位置向导。"
   mount_iso: "正在挂载ISO：%{name}"
   mount_iso_failed: "挂载ISO失败：%{error}"
   eject_iso: "已弹出ISO：%{name}"
@@ -245,6 +247,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "将当前文件夹固定到快速访问"
 context_menu:
+  add_network_location: "添加网络位置"
   open_in_mtt: "在 MTT 中打开"
   open: "打开"
   open_with: "打开方式..."

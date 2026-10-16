@@ -45,6 +45,7 @@ pub mod image_conversion;
 pub mod message_handler;
 pub mod metadata;
 pub mod navigation;
+pub(crate) mod network_location_wizard;
 mod new_tab;
 pub mod panel_tab_ops;
 pub mod pinned_folder_ops;

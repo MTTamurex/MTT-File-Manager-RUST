@@ -8,6 +8,7 @@ sidebar:
   cloud_drives: "Δίσκοι cloud"
   local_disks: "Τοπικοί δίσκοι"
   network_drives: "Δικτυακοί δίσκοι"
+  network_locations: "Θέσεις δικτύου"
   eject_drive: "Εξαγωγή προσαρτημένου ISO"
   collapse_section: "Σύμπτυξη ενότητας"
   expand_section: "Ανάπτυξη ενότητας"
@@ -222,6 +223,7 @@ operations:
   error_worker_unavailable: "Η υπηρεσία εργασιών αρχείων δεν είναι διαθέσιμη"
   high_risk_source: "Προέλευση υψηλού κινδύνου (UNC/Shell). Κάντε ξανά κλικ για επιβεβαίωση ανοίγματος."
   open_failed: "Αδυναμία ανοίγματος στοιχείου με την προεπιλεγμένη εφαρμογή."
+  network_location_wizard_failed: "Δεν ήταν δυνατό το άνοιγμα του οδηγού των Windows για προσθήκη θέσης δικτύου."
   mount_iso: "Προσάρτηση ISO: %{name}"
   mount_iso_failed: "Αποτυχία προσάρτησης ISO: %{error}"
   eject_iso: "Το ISO εξήχθη: %{name}"
@@ -245,6 +247,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Καρφίτσωμα τρέχοντος φακέλου στη γρήγορη πρόσβαση"
 context_menu:
+  add_network_location: "Προσθήκη θέσης δικτύου"
   open_in_mtt: "Άνοιγμα στο MTT"
   open: "Άνοιγμα"
   open_with: "Άνοιγμα με..."

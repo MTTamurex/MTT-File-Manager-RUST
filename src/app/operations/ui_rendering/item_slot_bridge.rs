@@ -44,9 +44,10 @@ impl ImageViewerApp {
         // Create context with mutable reference to the clone
         {
             let renaming_text = renaming_text_clone.as_mut();
-            let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(
-                &self.navigation_state.current_path,
-            );
+            let skip_folder_media_reads = self.navigation_state.is_computer_view
+                || crate::infrastructure::windows::is_windows_system_path(
+                    &self.navigation_state.current_path,
+                );
 
             let mut ctx = ItemSlotContext {
                 item,
@@ -58,6 +59,7 @@ impl ImageViewerApp {
                 focus_rename: self.focus_rename,
                 rename_name_rect: None,
                 is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
+                is_computer_view: self.navigation_state.is_computer_view,
                 texture_cache: &mut self.cache_manager.texture_cache,
                 attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
                 icon_loader: &mut self.item_icon_loader,

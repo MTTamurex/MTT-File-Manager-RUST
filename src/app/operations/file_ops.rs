@@ -5,7 +5,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
-use crate::domain::network_path::is_network_location_root;
 use crate::infrastructure::security::classify_shell_namespace_path;
 use eframe::egui;
 use rust_i18n::t;
@@ -173,7 +172,8 @@ impl ImageViewerApp {
         let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
         if paths.is_empty()
             || paths.iter().any(|path| {
-                is_network_location_root(path) || self.path_is_same_or_ancestor_of_open_panel(path)
+                self.path_is_network_operation_root(path)
+                    || self.path_is_same_or_ancestor_of_open_panel(path)
             })
         {
             return;
@@ -209,7 +209,7 @@ impl ImageViewerApp {
     pub(crate) fn can_delete_with_shell_paths(&self, paths: &[PathBuf]) -> bool {
         !paths.is_empty()
             && !paths.iter().any(|path| {
-                is_network_location_root(path)
+                self.path_is_network_operation_root(path)
                     || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })
@@ -340,7 +340,7 @@ impl ImageViewerApp {
 
     pub fn can_rename_path(&self, target_path: &Path) -> bool {
         if self.navigation_state.is_recycle_bin_view
-            || is_network_location_root(target_path)
+            || self.path_is_network_operation_root(target_path)
             || crate::domain::file_entry::is_path_inside_existing_archive_file(target_path)
         {
             return false;
@@ -433,7 +433,7 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn rename_path_with_shell(&mut self, path: PathBuf, new_name: String) -> bool {
-        if is_network_location_root(&path) {
+        if self.path_is_network_operation_root(&path) {
             return false;
         }
         if crate::infrastructure::windows::is_drive_root_path(&path) {
@@ -499,7 +499,7 @@ impl ImageViewerApp {
             .filter(|item| {
                 // Skip drives – cannot batch-rename volume labels
                 item.drive_info.is_none()
-                    && !is_network_location_root(&item.path)
+                    && !self.path_is_network_operation_root(&item.path)
                     && !crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
                     && self.multi_selection.contains(&item.path)
             })
@@ -528,7 +528,7 @@ impl ImageViewerApp {
             .into_iter()
             .filter(|row| {
                 !row.conflict
-                    && !is_network_location_root(&row.source)
+                    && !self.path_is_network_operation_root(&row.source)
                     && !crate::domain::file_entry::is_path_inside_existing_archive_file(&row.source)
             })
             .map(|row| (row.source, row.new_name))

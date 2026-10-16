@@ -1,5 +1,6 @@
 use crate::domain::cloud_root::CloudRoot;
 use crate::domain::file_entry::DriveInfo;
+use crate::domain::network_location::NetworkLocation;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
@@ -18,12 +19,14 @@ pub use drive_info_refresh::{
 pub struct DriveScanResult {
     pub disks: Vec<(String, String)>,
     pub cloud_roots: Vec<CloudRoot>,
+    pub network_locations: Vec<NetworkLocation>,
     pub unavailable_label_roots: HashSet<String>,
 }
 
 pub struct DriveState {
     pub disks: Vec<(String, String)>,
     pub cloud_roots: Vec<CloudRoot>,
+    pub network_locations: Vec<NetworkLocation>,
     /// Deferred full drive/cloud detection from startup (delivers once, then set to None).
     pub cloud_root_rx: Option<Receiver<DriveScanResult>>,
     pub last_drive_bitmask_check: Instant,
@@ -208,6 +211,7 @@ mod tests {
         DriveState {
             disks,
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             cloud_root_rx: Some(scan_rx),
             last_drive_bitmask_check: Instant::now(),
             last_drive_full_refresh: Instant::now(),
@@ -377,6 +381,7 @@ mod tests {
                 ("F:\\".to_string(), "Data (F:)".to_string()),
             ],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut scan_result);
@@ -390,6 +395,7 @@ mod tests {
         let mut confirmed_removed = DriveScanResult {
             disks: vec![("F:\\".to_string(), "Data (F:)".to_string())],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut confirmed_removed);
@@ -407,6 +413,7 @@ mod tests {
         let mut scan_result = DriveScanResult {
             disks: vec![("E:\\".to_string(), "ISO (E:)".to_string())],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut scan_result);
@@ -423,6 +430,7 @@ mod tests {
         let mut scan_result = DriveScanResult {
             disks: vec![("z:\\".to_string(), "Local Disk (Z:)".to_string())],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::from(["Z:\\".to_string()]),
         };
 
@@ -440,6 +448,7 @@ mod tests {
         let mut scan_result = DriveScanResult {
             disks: vec![("Z:\\".to_string(), "New (Z:)".to_string())],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::new(),
         };
 
@@ -457,6 +466,7 @@ mod tests {
         let mut scan_result = DriveScanResult {
             disks: vec![("Z:\\".to_string(), "Local Disk (Z:)".to_string())],
             cloud_roots: Vec::new(),
+            network_locations: Vec::new(),
             unavailable_label_roots: HashSet::from(["Z:\\".to_string()]),
         };
 

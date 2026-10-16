@@ -97,6 +97,7 @@ impl ImageViewerApp {
 
         self.process_pending_folder_cover_removals();
         self.poll_folder_access();
+        self.poll_network_location_wizard();
 
         if !upload_textures {
             let current_path_norm =

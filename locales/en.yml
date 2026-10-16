@@ -8,6 +8,7 @@ sidebar:
   cloud_drives: "Cloud Drives"
   local_disks: "Local Disks"
   network_drives: "Network Drives"
+  network_locations: "Network Locations"
   eject_drive: "Eject mounted ISO"
   collapse_section: "Collapse section"
   expand_section: "Expand section"
@@ -222,6 +223,7 @@ operations:
   error_worker_unavailable: "The file operation worker is unavailable"
   high_risk_source: "High-risk source (UNC/Shell). Click again to confirm opening."
   open_failed: "Failed to open item with default application."
+  network_location_wizard_failed: "Unable to open the Windows Add Network Location wizard."
   mount_iso: "Mounting ISO: %{name}"
   mount_iso_failed: "Failed to mount ISO: %{error}"
   eject_iso: "Ejected ISO: %{name}"
@@ -245,6 +247,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Pin current folder to quick access"
 context_menu:
+  add_network_location: "Add a network location"
   open_in_mtt: "Open in MTT"
   open: "Open"
   open_with: "Open with..."

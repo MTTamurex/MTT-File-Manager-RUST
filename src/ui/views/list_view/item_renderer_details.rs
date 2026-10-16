@@ -222,6 +222,21 @@ pub(crate) fn render_item_icon(
     }
 
     if item.is_dir && !item.is_archive() {
+        if ctx.is_computer_view && item.path.to_string_lossy().starts_with(r"\\") {
+            let icon = ctx
+                .item_icon_loader
+                .get_or_load_network_location_icon(ui.ctx())
+                .or_else(|| ctx.folder_icon_texture.cloned());
+            if let Some(icon) = icon {
+                ui.painter().image(
+                    icon.id(),
+                    icon_rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    tint,
+                );
+            }
+            return;
+        }
         let path_lower = item.path.to_string_lossy().to_lowercase();
         let is_virtual_archive =
             crate::domain::file_entry::path_contains_archive_segment(&path_lower);

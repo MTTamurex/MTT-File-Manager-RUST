@@ -9,9 +9,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::{DriveInfo, FileEntry};
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use crate::domain::file_entry::FileEntry;
+use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 use crate::infrastructure::windows as windows_infra;
+
+mod computer;
 
 impl ImageViewerApp {
     fn refresh_inactive_computer_view_if_visible(&mut self) {
@@ -188,102 +190,6 @@ impl ImageViewerApp {
         });
     }
 
-    /// Sets up the "This PC" view without affecting history
-    pub fn setup_computer_view(&mut self) {
-        self.active_tag_filter = None;
-        // CRITICAL: Advance generation to invalidate any pending items_rebuild results
-        // from the previous folder load. Without this, stale rebuild results (matching
-        // the old generation) arrive on the next frame and overwrite our computer view items.
-        // Use the same globally-unique generation space as folder loads so
-        // delayed dual-panel batches cannot be routed into this special view.
-        self.bump_folder_load_generation();
-        self.invalidate_active_items_rebuild();
-        if self.should_preserve_inactive_dual_panel_thumbnail_pipeline() {
-            self.prune_thumbnail_pipeline_for_dual_panel_navigation("computer-view");
-        } else {
-            self.release_thumbnail_pipeline_for_inactive_view("computer-view", true);
-        }
-
-        // Set computer view
-        self.navigation_state.current_path = COMPUTER_VIEW_ID.to_string();
-        self.navigation_state.is_computer_view = true;
-        self.navigation_state.is_recycle_bin_view = false;
-        self.navigation_state.path_input = COMPUTER_VIEW_ID.to_string();
-
-        self.apply_folder_lock_if_present();
-
-        // Populate items with drives using FAST-ONLY calls (no I/O blocking)
-        // detect_drive_type uses GetDriveTypeW which is cached and < 1ms
-        // get_volume_info is deferred to background thread
-        let mut computer_items = Vec::new();
-        for (path, label) in &self.drive_state.disks {
-            let drive_type = windows_infra::detect_drive_type(path);
-            let drive_info = self
-                .drive_state
-                .cached_drive_info(path)
-                .unwrap_or(DriveInfo {
-                    file_system: String::new(),
-                    total_space: 0,
-                    free_space: 0,
-                    drive_type,
-                    model: None,
-                    serial_number: None,
-                    firmware_revision: None,
-                    bus_type: None,
-                    health: None,
-                });
-            let entry = FileEntry {
-                path: PathBuf::from(path),
-                name: label.clone(),
-                is_dir: true,
-                size: 0,
-                modified: 0,
-                created: None,
-                folder_cover: None,
-                drive_info: Some(drive_info),
-                sync_status: crate::domain::file_entry::SyncStatus::None,
-                is_hidden: false,
-                recycle_bin: None,
-            };
-            computer_items.push(entry);
-        }
-
-        // Populate drive_info_cache with skeleton entries so the details panel
-        // can show drive_type immediately, even before background volume info arrives.
-        for item in &computer_items {
-            if let Some(info) = &item.drive_info {
-                let path_str = item.path.to_string_lossy().to_string();
-                self.drive_state.cache_drive_info(&path_str, info.clone());
-            }
-        }
-
-        self.all_items = Arc::new(computer_items);
-        self.items_revision = self.items_revision.wrapping_add(1);
-        self.sort_items();
-
-        // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
-        self.navigation_state.computer_view_local_indices.clear();
-        self.navigation_state.computer_view_network_indices.clear();
-
-        for (i, item) in self.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().is_some_and(|di| {
-                di.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
-            if is_remote {
-                self.navigation_state.computer_view_network_indices.push(i);
-            } else {
-                self.navigation_state.computer_view_local_indices.push(i);
-            }
-        }
-
-        self.reset_selection_and_search();
-        self.total_items = self.drive_state.disks.len();
-        self.is_loading_folder = false;
-        self.folder_load_error = None;
-
-        self.refresh_drive_info_async();
-    }
-
     /// Launches a background thread to scan drives. Non-blocking.
     pub fn reload_drive_list_async(&mut self) {
         if self.drive_state.drive_scan_pending {
@@ -298,6 +204,7 @@ impl ImageViewerApp {
             let scan_result = crate::app::drive_state::DriveScanResult {
                 disks,
                 cloud_roots,
+                network_locations: windows_infra::network_locations::get_network_locations(),
                 unavailable_label_roots,
             };
             let _ = tx.send(scan_result);
@@ -372,9 +279,14 @@ impl ImageViewerApp {
                 let old_disks = std::mem::take(&mut self.drive_state.disks);
                 let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
                 let cloud_roots_changed = scan_result.cloud_roots != old_cloud_roots;
-                let changed = scan_result.disks != old_disks || cloud_roots_changed;
+                let network_locations_changed =
+                    scan_result.network_locations != self.drive_state.network_locations;
+                let changed = scan_result.disks != old_disks
+                    || cloud_roots_changed
+                    || network_locations_changed;
                 self.drive_state.disks = scan_result.disks;
                 self.drive_state.cloud_roots = scan_result.cloud_roots;
+                self.drive_state.network_locations = scan_result.network_locations;
                 self.item_icon_loader
                     .set_cloud_root_icon_resources(&self.drive_state.cloud_roots);
                 self.item_icon_loader

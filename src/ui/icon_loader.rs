@@ -20,6 +20,7 @@ use crate::infrastructure::windows;
 mod async_ops;
 mod cloud_root_icons;
 mod file_icons;
+mod network_location_icons;
 mod special_icons;
 
 #[derive(Default)]

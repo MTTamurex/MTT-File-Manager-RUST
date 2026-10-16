@@ -105,6 +105,7 @@ pub(in crate::app) fn build_drive_state(
     DriveState {
         disks,
         cloud_roots,
+        network_locations: Vec::new(),
         cloud_root_rx: Some(cloud_root_rx),
         last_drive_bitmask_check: now,
         last_drive_full_refresh: now,

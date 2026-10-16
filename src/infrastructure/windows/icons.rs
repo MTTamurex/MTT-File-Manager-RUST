@@ -3,6 +3,7 @@
 
 mod file_icons;
 mod special;
+mod stock_icons;
 mod thumbnails;
 
 /// Returns the canonical extension for icon lookups.
@@ -39,6 +40,7 @@ pub use file_icons::{
     extract_icon_resource, get_file_type_icon,
 };
 pub use special::{extract_computer_icon, extract_recycle_bin_icon, extract_shell_icon};
+pub use stock_icons::extract_network_location_icon;
 pub use thumbnails::{
     extract_thumbnail, extract_thumbnail_without_windows_cache,
     extract_thumbnail_without_windows_cache_with_size, force_extract_folder_preview,

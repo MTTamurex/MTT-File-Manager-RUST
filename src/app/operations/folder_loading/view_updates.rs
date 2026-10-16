@@ -46,9 +46,9 @@ impl ImageViewerApp {
                     folders_position,
                 );
                 self.share_visible_items_from_all_items();
-                self.rebuild_computer_view_indices();
             }
         }
+        self.rebuild_computer_view_indices();
         self.total_items = self.items.len();
         self.rebuild_group_projection();
 
@@ -170,7 +170,8 @@ impl ImageViewerApp {
         for (i, item) in self.items.iter().enumerate() {
             let is_remote = item.drive_info.as_ref().is_some_and(|di| {
                 di.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
+            }) || (item.drive_info.is_none()
+                && item.path.to_string_lossy().starts_with(r"\\"));
             if is_remote {
                 self.navigation_state.computer_view_network_indices.push(i);
             } else {

@@ -59,6 +59,7 @@ pub enum GroupKey {
     Size(SizeGroup),
     LocalDrives,
     NetworkDrives,
+    NetworkLocations,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,35 +106,8 @@ pub fn build_group_projection(
     build_group_projection_at(items, mode, descending, now)
 }
 
-pub fn build_computer_projection(items: &[FileEntry]) -> GroupProjection {
-    let mut local = Vec::new();
-    let mut network = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        let is_remote = item.drive_info.as_ref().is_some_and(|drive| {
-            drive.drive_type == crate::infrastructure::windows::DriveType::Remote
-        });
-        if is_remote {
-            network.push(index);
-        } else {
-            local.push(index);
-        }
-    }
-
-    let mut sections = Vec::with_capacity(2);
-    if !local.is_empty() {
-        sections.push(GroupSection {
-            key: GroupKey::LocalDrives,
-            item_indices: local.into(),
-        });
-    }
-    if !network.is_empty() {
-        sections.push(GroupSection {
-            key: GroupKey::NetworkDrives,
-            item_indices: network.into(),
-        });
-    }
-    GroupProjection { sections }
-}
+mod computer;
+pub use computer::build_computer_projection;
 
 pub fn group_label(key: &GroupKey) -> String {
     match key {
@@ -171,6 +145,7 @@ pub fn group_label(key: &GroupKey) -> String {
         GroupKey::Size(SizeGroup::Unspecified) => t!("grouping.unspecified").to_string(),
         GroupKey::LocalDrives => t!("sidebar.local_disks").to_string(),
         GroupKey::NetworkDrives => t!("sidebar.network_drives").to_string(),
+        GroupKey::NetworkLocations => t!("sidebar.network_locations").to_string(),
     }
 }
 

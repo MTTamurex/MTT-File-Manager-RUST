@@ -580,6 +580,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 },
             );
             if let Some(command) = selected_command.as_deref() {
+                if command == "add_network_location" {
+                    app.start_network_location_wizard();
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
                 if let Some(handler_id) =
                     crate::infrastructure::open_with_worker::handler_id_from_command(command)
                 {

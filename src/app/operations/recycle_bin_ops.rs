@@ -80,7 +80,7 @@ impl ImageViewerApp {
         if paths.is_empty()
             || paths
                 .iter()
-                .any(|path| crate::domain::network_path::is_network_location_root(path))
+                .any(|path| self.path_is_network_operation_root(path))
         {
             return;
         }

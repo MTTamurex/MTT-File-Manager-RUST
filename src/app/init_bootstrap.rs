@@ -497,6 +497,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         let _ = cloud_root_tx.send(crate::app::drive_state::DriveScanResult {
             disks,
             cloud_roots,
+            network_locations: windows_infra::network_locations::get_network_locations(),
             unavailable_label_roots,
         });
     });

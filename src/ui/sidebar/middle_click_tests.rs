@@ -8,6 +8,7 @@ enum Section {
     Cloud,
     Local,
     Tag,
+    NetworkLocation,
 }
 
 impl Section {
@@ -16,6 +17,7 @@ impl Section {
             Self::Cloud => "Cloud Root",
             Self::Local => "Local Disk",
             Self::Tag => "Tag Name",
+            Self::NetworkLocation => "Network Folder",
         }
     }
 
@@ -24,6 +26,7 @@ impl Section {
             Self::Cloud => r"C:\Cloud".to_string(),
             Self::Local => "C:\\".to_string(),
             Self::Tag => crate::domain::special_paths::tag_view_path(7),
+            Self::NetworkLocation => r"\\server\share\folder".into(),
         }
     }
 }
@@ -47,6 +50,10 @@ fn click_section(
         Section::Cloud.label().to_string(),
         None,
     )];
+    let network_locations = vec![crate::domain::network_location::NetworkLocation {
+        path: Section::NetworkLocation.destination(),
+        label: Section::NetworkLocation.label().into(),
+    }];
     let tags = FxHashMap::from_iter([(
         7,
         FileTag {
@@ -67,6 +74,7 @@ fn click_section(
             disks: &disks,
             drive_info_cache: &drive_info,
             cloud_roots: &clouds,
+            network_locations: &network_locations,
             current_path: "C:\\",
             highlighted_drive_path: None,
             is_computer_view: false,
@@ -97,7 +105,9 @@ fn click_section(
             collapse_tags: false,
         };
         match section {
-            Section::Cloud | Section::Local => render_sidebar_drives(ui, &mut sidebar, 260.0),
+            Section::Cloud | Section::Local | Section::NetworkLocation => {
+                render_sidebar_drives(ui, &mut sidebar, 260.0)
+            }
             Section::Tag => {
                 let mut action = None;
                 render_tags_section(ui, &mut sidebar, &mut action);
@@ -141,6 +151,19 @@ fn click_section(
         );
     }
     result
+}
+
+#[test]
+fn network_locations_support_navigation_and_middle_click_without_remote_metadata() {
+    let section = Section::NetworkLocation;
+    assert!(
+        matches!(click_section(section, egui::PointerButton::Primary, false, false), Some(SidebarAction::NavigateTo(path)) if path == section.destination())
+    );
+    assert!(
+        matches!(click_section(section, egui::PointerButton::Middle, false, false), Some(SidebarAction::OpenInNewTab(path)) if path == section.destination())
+    );
+    assert!(click_section(section, egui::PointerButton::Middle, true, false).is_none());
+    assert!(click_section(section, egui::PointerButton::Middle, false, true).is_none());
 }
 
 #[test]

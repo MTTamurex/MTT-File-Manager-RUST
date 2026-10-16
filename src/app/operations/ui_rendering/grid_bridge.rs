@@ -275,9 +275,10 @@ impl ImageViewerApp {
         // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
         self.pending_ops.clear();
 
-        let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(
-            &self.navigation_state.current_path,
-        );
+        let skip_folder_media_reads = self.navigation_state.is_computer_view
+            || crate::infrastructure::windows::is_windows_system_path(
+                &self.navigation_state.current_path,
+            );
 
         // Non-blocking in render loop: use cached profile only.
         // Unknown drives fall back to HDD behavior to avoid UI stalls.
@@ -535,9 +536,7 @@ impl ImageViewerApp {
                         self.capture_context_menu_panel_origin();
                     }
                 }
-                Some(grid_view::GridViewAction::EmptyAreaSecondaryClick)
-                    if !is_renaming && self.can_open_empty_area_context_menu() =>
-                {
+                Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
                     let path = PathBuf::from(&self.navigation_state.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);

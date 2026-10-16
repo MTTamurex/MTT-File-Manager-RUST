@@ -37,6 +37,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
+    let item_path_text = item.path.to_string_lossy();
+    let is_network_location = ctx.is_computer_view && item_path_text.starts_with(r"\\");
     if ctx.allow_thumbnail_requests && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
         // --- LAZY LOAD TRIGGER ---
         // If no cover AND not yet scanned: Trigger Scan.
@@ -49,10 +51,18 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         // raw cover thumbnail here, or every folder creates a second upload wave.
     }
 
-    // GEOMETRY - Increased to 0.85 for larger folder preview
+    // Saved locations use the drive icon scale in This PC; folders use preview geometry.
     let available_h = rect.height();
-    let folder_w = ctx.thumbnail_size * 0.85;
-    let folder_h = folder_w * 0.85;
+    let folder_w = if is_network_location {
+        (ctx.thumbnail_size * 0.4).min(rect.width() * 0.5)
+    } else {
+        ctx.thumbnail_size * 0.85
+    };
+    let folder_h = if is_network_location {
+        folder_w
+    } else {
+        folder_w * 0.85
+    };
     let ppp = ui.ctx().pixels_per_point().max(1.0);
     let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
@@ -89,7 +99,6 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // Special folders (Documents, Pictures, Desktop, etc.) always use their native
     // Windows icon — skip the composed preview entirely so it doesn't replace them.
-    let item_path_text = item.path.to_string_lossy();
     let has_registered_folder_icon = ctx.icon_loader.has_registered_folder_icon(&item_path_text);
     let registered_folder_icon = has_registered_folder_icon
         .then(|| {
@@ -97,12 +106,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 .get_or_load_registered_folder_icon(ui.ctx(), &item_path_text)
         })
         .flatten();
-    let is_special = has_registered_folder_icon
+    let is_special = is_network_location
+        || has_registered_folder_icon
         || crate::infrastructure::onedrive::is_special_icon_folder(&item.path);
 
     if is_special {
-        // Special icons are square (256x256). Use a larger, square-ish rect so they
-        // match the visual weight of composed folder previews.
+        // Native icons are square; retain the scale chosen for this slot.
         let special_side = folder_w;
         let special_rect = egui::Rect::from_center_size(
             folder_rect.center(),
@@ -110,12 +119,18 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         );
         let special_rect = scaled_visual_rect(special_rect, ctx.hover_scale);
 
-        // Icons are pre-loaded at startup — no placeholder needed.
-        let icon = registered_folder_icon.or_else(|| {
+        // Network icons are loaded asynchronously and shared with the sidebar.
+        let icon = if is_network_location {
             ctx.icon_loader
-                .get_or_load_folder_path_icon(ui.ctx(), &item_path_text)
+                .get_or_load_network_location_icon(ui.ctx())
                 .or_else(|| ctx.icon_loader.folder_icon().cloned())
-        });
+        } else {
+            registered_folder_icon.or_else(|| {
+                ctx.icon_loader
+                    .get_or_load_folder_path_icon(ui.ctx(), &item_path_text)
+                    .or_else(|| ctx.icon_loader.folder_icon().cloned())
+            })
+        };
         if let Some(icon) = icon {
             paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
         }

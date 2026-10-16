@@ -51,6 +51,7 @@ pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
     pub drive_info_cache: &'a HashMap<String, DriveInfo>,
     pub cloud_roots: &'a [CloudRoot],
+    pub network_locations: &'a [crate::domain::network_location::NetworkLocation],
     pub current_path: &'a str,
     pub highlighted_drive_path: Option<&'a str>,
     pub is_computer_view: bool,
@@ -896,6 +897,13 @@ pub fn render_sidebar_drives(
         network_drives,
         ctx.collapse_network_drives,
         SidebarAction::ToggleNetworkDrives,
+    );
+
+    crate::ui::sidebar_network_locations::render_network_locations(
+        ui,
+        ctx,
+        &mut action,
+        sidebar_viewport_width,
     );
 
     let drives_ms = t_drives.elapsed().as_millis();
