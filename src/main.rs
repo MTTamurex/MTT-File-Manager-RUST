@@ -468,6 +468,13 @@ fn main() -> eframe::Result<()> {
     #[cfg(target_os = "windows")]
     mtt_file_manager::infrastructure::windows::app_theme::init_windows_dark_mode();
 
+    {
+        use mtt_file_manager::infrastructure::windows::default_file_manager;
+        if default_file_manager::migrate_legacy_registration().is_err() {
+            log::error!("[DEFAULT-FILE-MANAGER] Could not migrate legacy folder registration");
+        }
+    }
+
     // Standalone dedicated image viewer mode (separate process).
     let mut startup_folder = None;
     let mut args = std::env::args_os();
@@ -564,6 +571,11 @@ fn main() -> eframe::Result<()> {
                 std::process::exit(2);
             };
             let path = PathBuf::from(path_arg);
+            use mtt_file_manager::infrastructure::windows::default_file_manager;
+            if !default_file_manager::is_supported_folder_target(&path) {
+                log::error!("[OPEN-FOLDER] Unsupported folder target");
+                return Ok(());
+            }
             if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_folder_to_main_app(
                 &path.to_string_lossy(),
             ) {

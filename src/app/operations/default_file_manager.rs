@@ -25,7 +25,6 @@ impl ImageViewerApp {
 
         let (sender, receiver) = mpsc::channel();
         self.default_file_manager_settings.result_receiver = Some(receiver);
-        let owner_window = self.native_hwnd.map(|hwnd| hwnd.0 as isize);
         let context_menu_label = rust_i18n::t!("context_menu.open_in_mtt").to_string();
         let ctx = self.ui_ctx.clone();
         let worker = std::thread::Builder::new()
@@ -33,13 +32,13 @@ impl ImageViewerApp {
             .spawn(move || {
                 let result = match action {
                     RegistryOperation::FolderDefault(true) => {
-                        default_file_manager::set_as_default(owner_window, &context_menu_label)
+                        default_file_manager::set_as_default(&context_menu_label)
                     }
                     RegistryOperation::FolderDefault(false) => {
-                        default_file_manager::restore_explorer(owner_window, &context_menu_label)
+                        default_file_manager::restore_explorer(&context_menu_label)
                     }
                     RegistryOperation::WinE(enable) => {
-                        default_file_manager::set_win_e_enabled(enable, owner_window)
+                        default_file_manager::set_win_e_enabled(enable)
                     }
                 };
                 let _ = sender.send(result);
@@ -86,10 +85,6 @@ impl ImageViewerApp {
         match result {
             Ok(status) => {
                 self.default_file_manager_settings.status = status;
-            }
-            Err(RegistryActionError::Cancelled) => {
-                self.default_file_manager_settings.status =
-                    default_file_manager::registration_status();
             }
             Err(RegistryActionError::Failed) => {
                 self.default_file_manager_settings.status =
