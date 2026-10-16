@@ -2,12 +2,32 @@
 
 **Native Windows file manager** built in Rust with a modern UI, disk usage analysis, archive browsing and creation, advanced media preview, and Windows integration.
 
+## Download & Install (Windows)
+
+**[Download the latest release](../../releases/latest)**
+
+1. On the release page, expand **Assets** and download **`MTT-File-Manager-Setup-<version>.exe`**. The **Source code** ZIP/TAR files are for developers, not installers.
+2. Open the downloaded installer and approve the Windows administrator prompt. Administrator access is needed to install the background search and drive-information service; normal use of the file manager does not require it.
+3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
+4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
+
+**Small text on a high-resolution display?** Open **Settings > General > Appearance > Text and interface size**. Choose 100–200%; release the slider to apply and save the size. This enlarges text and controls on top of Windows display scaling. Use **Reset to 100%** to follow Windows scaling alone. Thumbnail size remains separately adjustable.
+
+### Installation help
+
+- **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
+- **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
+- **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
+- **Updating:** close MTT and run the newer installer. No manual uninstall is needed.
+- **Silent deployment:** install the Microsoft component first. MTT setup reports the missing prerequisite before changing app files or services if it is unavailable.
+
 <img width="3839" height="2062" alt="Untitled-1" src="https://github.com/user-attachments/assets/6ae29e6d-9f08-4d07-97bd-3e9e61a1f699" />
 
 ## Key Features
 
 ### Interface & Navigation
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, DOCX, XLSX, and text viewers with native title bar support via DWM
+- **Text and interface scaling** — Persistent 100–200% scaling in Settings > General > Appearance, applied on top of Windows DPI scaling; text and controls grow together, with a one-click reset to 100%
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop

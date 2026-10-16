@@ -250,11 +250,7 @@ impl eframe::App for ImageViewerApp {
         ui.set_style(ctx.global_style());
         let t_frame_start = std::time::Instant::now();
 
-        // L-15: Only reset zoom when it has drifted (Ctrl+Scroll captured by input handler).
-        // Avoids a no-op write to context state on every frame when zoom is already 1.0.
-        if (ctx.zoom_factor() - 1.0).abs() > f32::EPSILON {
-            ctx.set_zoom_factor(1.0);
-        }
+        crate::ui::interface_scale::apply(ctx, self.interface_scale);
 
         let primary_press_received_by_egui = ctx.input(|i| {
             i.events.iter().any(|event| {
@@ -608,6 +604,7 @@ impl eframe::App for ImageViewerApp {
                 self.system_theme_dark = self.theme_mode.resolve_dark();
                 self.last_system_theme_poll = std::time::Instant::now();
                 crate::ui::theme::apply_theme_visuals(ctx, self.theme_mode);
+                crate::ui::interface_scale::apply(ctx, self.interface_scale);
                 self.save_preferences();
                 self.force_save_preferences();
             }

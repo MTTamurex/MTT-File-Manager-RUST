@@ -33,6 +33,7 @@ pub(super) struct StartupPreferences {
     pub(super) show_tags: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
+    pub(super) interface_scale: f32,
     pub(super) gpu_backend_preference: String,
     pub(super) scroll_interpolation_enabled: bool,
     pub(super) diagnostic_mode: bool,
@@ -237,6 +238,12 @@ impl StartupPreferences {
             })
             .unwrap_or(ThemeMode::Light);
 
+        let interface_scale = crate::ui::interface_scale::from_preference(
+            prefs
+                .get(crate::ui::interface_scale::PREFERENCE_KEY)
+                .map(String::as_str),
+        );
+
         let gpu_backend_preference = prefs
             .get("gpu_backend")
             .map(|backend| match backend.as_str() {
@@ -395,6 +402,7 @@ impl StartupPreferences {
             show_tags,
             language,
             theme_mode,
+            interface_scale,
             gpu_backend_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
@@ -429,6 +437,25 @@ mod tests {
         let db = AppStateDb::new_in_memory().unwrap();
         db.set_preference("language", "en").unwrap();
         db
+    }
+
+    #[test]
+    fn interface_scale_loads_saved_values_and_recovers_from_invalid_preferences() {
+        let db = test_db();
+        assert_eq!(StartupPreferences::load(&db).interface_scale, 1.0);
+        for (value, expected) in [
+            ("1.5", 1.5),
+            ("2", 2.0),
+            ("0.5", 1.0),
+            ("3", 2.0),
+            ("NaN", 1.0),
+            ("inf", 1.0),
+            ("invalid", 1.0),
+        ] {
+            db.set_preference(crate::ui::interface_scale::PREFERENCE_KEY, value)
+                .unwrap();
+            assert_eq!(StartupPreferences::load(&db).interface_scale, expected);
+        }
     }
 
     #[test]

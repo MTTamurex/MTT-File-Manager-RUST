@@ -220,6 +220,7 @@ impl ImageViewerApp {
             show_tags,
             language,
             theme_mode,
+            interface_scale,
             gpu_backend_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
@@ -251,6 +252,7 @@ impl ImageViewerApp {
 
         // Apply saved theme preference
         crate::ui::theme::apply_theme_visuals(&ctx, theme_mode);
+        crate::ui::interface_scale::apply(&ctx, interface_scale);
 
         // Load folder locks from database
         let folder_locks = app_state_db.get_all_folder_locks();
@@ -812,6 +814,7 @@ impl ImageViewerApp {
             session_volume,
 
             theme_mode,
+            interface_scale,
             system_theme_dark: theme_mode.resolve_dark(),
             last_system_theme_poll: Instant::now(),
 

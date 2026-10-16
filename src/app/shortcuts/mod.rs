@@ -223,7 +223,6 @@ pub fn capture_shortcut(ctx: &egui::Context) -> Option<ShortcutCapture> {
                     .retain(|event| binding_from_event(event) != Some(binding));
                 clear_scroll(input);
             });
-            ctx.set_zoom_factor(1.0);
         }
     }
     capture

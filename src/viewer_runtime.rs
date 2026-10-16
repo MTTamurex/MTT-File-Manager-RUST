@@ -103,6 +103,26 @@ fn theme_poll_remaining(now: Instant, last_poll: Instant) -> Duration {
     THEME_POLL_INTERVAL.saturating_sub(now.duration_since(last_poll))
 }
 
+/// Keep standalone viewer controls at the same scale as the main file manager.
+fn poll_saved_interface_scale(ctx: &egui::Context) {
+    let id = egui::Id::new("saved_interface_scale_poll");
+    let now = Instant::now();
+    let cached = ctx.data(|data| data.get_temp::<(Instant, f32)>(id));
+    let (last_poll, scale) = match cached {
+        Some((last_poll, scale)) if now.duration_since(last_poll) < THEME_POLL_INTERVAL => {
+            (last_poll, scale)
+        }
+        _ => {
+            let value = read_pref_readonly(crate::ui::interface_scale::PREFERENCE_KEY);
+            let scale = crate::ui::interface_scale::from_preference(value.as_deref());
+            ctx.data_mut(|data| data.insert_temp(id, (now, scale)));
+            (now, scale)
+        }
+    };
+    crate::ui::interface_scale::apply(ctx, scale);
+    ctx.request_repaint_after(theme_poll_remaining(now, last_poll));
+}
+
 /// Build [`eframe::NativeOptions`] tuned for a low-baseline-RAM viewer
 /// subprocess. See the module-level docs for the rationale of each knob.
 pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {
@@ -161,6 +181,7 @@ fn viewer_font_cell() -> &'static Arc<Mutex<ViewerFontState>> {
 /// While loading, it schedules a short repaint so the caller keeps polling
 /// without blocking the UI thread. Callers should invoke this every frame.
 pub fn poll_viewer_fonts(ctx: &egui::Context) -> bool {
+    poll_saved_interface_scale(ctx);
     let cell = viewer_font_cell();
     let mut state = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 

@@ -156,6 +156,28 @@ fn thumbnail_gesture_is_distinct_from_view_mode_switching() {
 }
 
 #[test]
+fn view_and_thumbnail_shortcuts_preserve_interface_scale() {
+    let ctx = egui::Context::default();
+    crate::ui::interface_scale::apply(&ctx, 1.5);
+    let shortcuts = ShortcutBindings::default();
+    for modifiers in [
+        egui::Modifiers::CTRL,
+        egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+    ] {
+        read_frame(
+            &ctx,
+            &shortcuts,
+            ViewMode::Grid,
+            1.0,
+            vec![wheel(1.0, egui::MouseWheelUnit::Line, modifiers)],
+        );
+        // A reset queued during shortcut handling takes effect on the next pass.
+        read_frame(&ctx, &shortcuts, ViewMode::Grid, 1.1, vec![]);
+        assert_eq!(ctx.zoom_factor(), 1.5);
+    }
+}
+
+#[test]
 fn ordinary_scroll_after_a_shortcut_remains_available_to_the_view() {
     let ctx = egui::Context::default();
     let shortcuts = ShortcutBindings::default();

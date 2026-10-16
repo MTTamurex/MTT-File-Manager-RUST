@@ -139,9 +139,6 @@ fn read_view_mode_input(
         requested_mode = requested_mode.cycle(false);
         activity = true;
     }
-    if consumed_wheel {
-        ctx.set_zoom_factor(1.0);
-    }
     ViewModeInput {
         requested_mode,
         thumbnail_delta,

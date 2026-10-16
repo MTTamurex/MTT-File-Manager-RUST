@@ -125,6 +125,8 @@ Filename: "{sys}\sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSe
 Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
 
 [Code]
+#include "vcredist.iss"
+
 const
   ProgramDataCacheDir = 'C:\ProgramData\MTT-File-Manager';
   DefaultFolderOpenCommandKey = 'Software\Classes\Folder\shell\open\command';
@@ -177,20 +179,6 @@ begin
     RegDeleteValue(HKCU, DefaultWinECommandKey, '');
     RegDeleteValue(HKCU, DefaultWinECommandKey, 'DelegateExecute');
   end;
-end;
-
-// Check if VC++ Redistributable 2015-2022 (x64) is installed
-function IsVCRedistInstalled: Boolean;
-var
-  Version: String;
-begin
-  Result := RegQueryStringValue(HKLM,
-    'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
-    'Version', Version);
-  if not Result then
-    Result := RegQueryStringValue(HKLM,
-      'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
-      'Version', Version);
 end;
 
 function DeleteProgramDataCache: Boolean;
@@ -345,61 +333,34 @@ begin
   end;
 end;
 
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  if CurPageID = wpReady then
-  begin
-    if not IsVCRedistInstalled then
-      MsgBox(CustomMessage('VCRedistWarning') + #13#10 +
-             CustomMessage('VCRedistRequired') + #13#10#13#10 +
-             CustomMessage('VCRedistDownload') + #13#10 +
-             'https://aka.ms/vs/17/release/vc_redist.x64.exe',
-             mbInformation, MB_OK);
-  end;
-end;
-
 [CustomMessages]
+#include "vcredist_messages.iss"
 english.InstallSearchService=Installing search service...
 english.StartSearchService=Starting search service...
 english.SecureInstallDirectoryError=MTT File Manager must be installed in its protected Program Files directory.
 english.SearchServiceStopTimeout=The search service did not stop within 30 seconds. Setup was stopped before updating any files.
 english.CacheCleanupError=Unable to securely remove the previous search index cache. Setup was stopped before installing the update.
-english.VCRedistWarning=Warning: Microsoft Visual C++ Redistributable (x64) does not appear to be installed.
-english.VCRedistRequired=The application requires it to run.
-english.VCRedistDownload=You can download it from:
 
 portuguese.InstallSearchService=Instalando o serviço de busca...
 portuguese.StartSearchService=Iniciando o serviço de busca...
 portuguese.SecureInstallDirectoryError=O MTT File Manager deve ser instalado na pasta protegida Arquivos de Programas.
 portuguese.SearchServiceStopTimeout=O serviço de busca não foi interrompido em 30 segundos. A instalação foi interrompida antes da atualização dos arquivos.
 portuguese.CacheCleanupError=Não foi possível remover com segurança o cache anterior do índice de busca. A instalação foi interrompida antes da atualização.
-portuguese.VCRedistWarning=Aviso: o Microsoft Visual C++ Redistributable (x64) não parece estar instalado.
-portuguese.VCRedistRequired=O aplicativo precisa desse componente para ser executado.
-portuguese.VCRedistDownload=Você pode baixá-lo em:
 
 chinese.InstallSearchService=正在安装搜索服务...
 chinese.StartSearchService=正在启动搜索服务...
 chinese.SecureInstallDirectoryError=MTT File Manager 必须安装在受保护的“程序文件”目录中。
 chinese.SearchServiceStopTimeout=搜索服务未能在 30 秒内停止。安装程序已停止，尚未更新任何文件。
 chinese.CacheCleanupError=无法安全删除之前的搜索索引缓存。安装程序已停止，尚未安装更新。
-chinese.VCRedistWarning=警告：未检测到 Microsoft Visual C++ Redistributable (x64)。
-chinese.VCRedistRequired=应用程序需要此组件才能运行。
-chinese.VCRedistDownload=您可以从以下地址下载：
 
 russian.InstallSearchService=Установка службы поиска...
 russian.StartSearchService=Запуск службы поиска...
 russian.SecureInstallDirectoryError=MTT File Manager необходимо установить в защищённую папку Program Files.
 russian.SearchServiceStopTimeout=Служба поиска не остановилась за 30 секунд. Установка прервана до обновления файлов.
 russian.CacheCleanupError=Не удалось безопасно удалить предыдущий кэш индекса поиска. Установка прервана до установки обновления.
-russian.VCRedistWarning=Предупреждение: Microsoft Visual C++ Redistributable (x64) не найден.
-russian.VCRedistRequired=Для работы приложения требуется этот компонент.
-russian.VCRedistDownload=Скачать его можно по адресу:
 
 greek.InstallSearchService=Εγκατάσταση της υπηρεσίας αναζήτησης...
 greek.StartSearchService=Εκκίνηση της υπηρεσίας αναζήτησης...
 greek.SecureInstallDirectoryError=Το MTT File Manager πρέπει να εγκατασταθεί στον προστατευμένο κατάλογο Program Files.
 greek.SearchServiceStopTimeout=Η υπηρεσία αναζήτησης δεν σταμάτησε εντός 30 δευτερολέπτων. Η εγκατάσταση διακόπηκε πριν ενημερωθούν αρχεία.
 greek.CacheCleanupError=Δεν ήταν δυνατή η ασφαλής αφαίρεση της προηγούμενης cache του ευρετηρίου αναζήτησης. Η εγκατάσταση διακόπηκε πριν από την εγκατάσταση της ενημέρωσης.
-greek.VCRedistWarning=Προσοχή: δεν φαίνεται να είναι εγκατεστημένο το Microsoft Visual C++ Redistributable (x64).
-greek.VCRedistRequired=Η εφαρμογή απαιτεί αυτό το στοιχείο για να εκτελεστεί.
-greek.VCRedistDownload=Μπορείτε να το κατεβάσετε από:

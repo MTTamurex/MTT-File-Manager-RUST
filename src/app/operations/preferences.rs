@@ -351,6 +351,10 @@ impl ImageViewerApp {
             ThemeMode::System => "system",
         };
         prefs.push(("theme_mode", theme_str.to_string()));
+        prefs.push((
+            crate::ui::interface_scale::PREFERENCE_KEY,
+            self.interface_scale.to_string(),
+        ));
 
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));

@@ -39,6 +39,7 @@ pub fn render_general_settings_section(
         crate::ui::components::appearance_settings::render_appearance_settings_section(
             ui,
             &mut app.theme_mode,
+            &mut app.interface_scale,
         );
     ui.add_space(20.0);
     output.startup_date_changed = crate::ui::components::startup_date_settings::render(ui, app);

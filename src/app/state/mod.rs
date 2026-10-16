@@ -761,6 +761,7 @@ pub struct ImageViewerApp {
     pub session_volume: f32,
     // User-selected theme (Light / Dark / System)
     pub theme_mode: ThemeMode,
+    pub interface_scale: f32,
     // Last resolved dark state for ThemeMode::System, used to detect OS changes.
     pub system_theme_dark: bool,
     pub last_system_theme_poll: Instant,

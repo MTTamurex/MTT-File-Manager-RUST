@@ -118,6 +118,8 @@ pub fn render_settings_window(
     window_style.visuals.widgets.active.bg_stroke = Stroke::NONE;
     ctx.set_global_style(window_style);
 
+    let available = (ctx.viewport_rect().size() - egui::vec2(24.0, 24.0)).max(egui::vec2(1.0, 1.0));
+    let min_size = egui::vec2(700.0, 420.0).min(available);
     egui::Window::new(t!("settings.window_title"))
         .id(egui::Id::new("settings_window"))
         .title_bar(false)
@@ -125,8 +127,8 @@ pub fn render_settings_window(
         .resizable(true)
         .default_width(912.0)
         .default_height(480.0)
-        .min_width(700.0)
-        .min_height(420.0)
+        .min_size(min_size)
+        .max_size(available)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .order(egui::Order::Foreground)
         .frame(frame)
@@ -135,7 +137,7 @@ pub fn render_settings_window(
                 original_style.visuals.widgets.hovered.bg_stroke;
             ui.visuals_mut().widgets.active.bg_stroke =
                 original_style.visuals.widgets.active.bg_stroke;
-            ui.set_min_size(egui::vec2(700.0, 420.0));
+            ui.set_min_size(min_size);
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
 
             render_settings_title_bar(ui, app, dark_mode, &mut keep_open);
