@@ -20,6 +20,9 @@ thread_local! {
 // On a cache hit (same path) the cached Vec is cloned; on a miss segments are
 // recomputed from Path::components() and the cache is updated.
 fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
+    if let Some(server) = crate::domain::network_path::unc_server_name(current_path) {
+        return vec![(server.to_string(), current_path.to_string())];
+    }
     BREADCRUMB_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         // Include locale in cache key so breadcrumbs refresh on language change
@@ -883,6 +886,16 @@ pub fn render_toolbar(
 mod tests {
     use super::*;
     use egui::{Event, PointerButton, Pos2, RawInput, Rect, Vec2};
+
+    #[test]
+    fn network_server_breadcrumb_preserves_the_unc_navigation_target() {
+        for path in [r"\\server", r"\\server\"] {
+            assert_eq!(
+                breadcrumb_segments(path),
+                vec![("server".into(), path.into())]
+            );
+        }
+    }
 
     struct ToolbarTestState {
         ctx: egui::Context,

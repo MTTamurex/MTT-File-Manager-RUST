@@ -34,6 +34,7 @@ mod drive_removal;
 pub mod dual_panel_ops;
 pub mod external_open;
 pub mod file_hash;
+pub(crate) mod file_operation_policy;
 pub mod file_ops;
 pub mod folder_access;
 pub mod folder_loading;

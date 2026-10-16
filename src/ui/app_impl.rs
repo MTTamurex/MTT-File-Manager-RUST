@@ -806,6 +806,17 @@ fn resolve_external_drop_destination_candidates(
     inactive_panel_folder: Option<PathBuf>,
     current_folder: Option<PathBuf>,
 ) -> Option<PathBuf> {
+    // Dropping onto a server container must not redirect the files into the
+    // active panel when the server is displayed in the inactive panel.
+    if hovered_folder
+        .as_ref()
+        .or(inactive_panel_folder.as_ref())
+        .is_some_and(|target| {
+            crate::domain::network_path::unc_server_name(&target.to_string_lossy()).is_some()
+        })
+    {
+        return None;
+    }
     hovered_folder
         .filter(|target| is_valid_external_drop_destination(target))
         .or_else(|| {
@@ -832,16 +843,31 @@ fn resolve_external_drop_pointer_position(
 }
 
 fn is_valid_external_drop_destination(target: &Path) -> bool {
-    !target.as_os_str().is_empty()
-        && !target
-            .to_str()
-            .is_some_and(crate::domain::special_paths::is_virtual_path)
-        && !ImageViewerApp::path_is_archive_namespace(target)
+    crate::app::operations::file_operation_policy::path_accepts_file_children(target)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_external_drop_rejects_server_background_without_retargeting() {
+        let server = PathBuf::from(r"\\server");
+        let share = PathBuf::from(r"\\server\share");
+        let local = PathBuf::from(r"C:\Folder");
+        assert_eq!(
+            resolve_external_drop_destination_candidates(None, None, Some(server.clone())),
+            None
+        );
+        assert_eq!(
+            resolve_external_drop_destination_candidates(None, Some(server.clone()), Some(local)),
+            None
+        );
+        assert_eq!(
+            resolve_external_drop_destination_candidates(Some(share.clone()), Some(server), None),
+            Some(share)
+        );
+    }
 
     fn idle_inputs() -> RepaintDeadlineInputs {
         RepaintDeadlineInputs {

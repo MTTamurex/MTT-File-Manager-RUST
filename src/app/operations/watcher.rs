@@ -54,7 +54,9 @@ impl ImageViewerApp {
         let current_path = self.navigation_state.current_path.clone();
 
         // Skip virtual views that aren't real filesystem paths (e.g. "Lixeira", "Computador").
-        if crate::domain::special_paths::is_virtual_path(&current_path) {
+        if crate::domain::special_paths::is_virtual_path(&current_path)
+            || crate::domain::network_path::unc_server_name(&current_path).is_some()
+        {
             #[cfg(feature = "notify-watcher")]
             {
                 self.notify_watcher_setup_request_id =
@@ -103,6 +105,9 @@ impl ImageViewerApp {
         let mut suspended_watch_paths = false;
 
         let mut push_watch_path = |path: String, label: &str| {
+            if crate::domain::network_path::unc_server_name(&path).is_some() {
+                return;
+            }
             let path_to_watch = PathBuf::from(&path);
             if crate::infrastructure::windows::extract_drive_letter(&path_to_watch)
                 .is_some_and(crate::infrastructure::removal_aware_watcher::is_suspended)

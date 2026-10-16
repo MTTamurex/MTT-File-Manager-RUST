@@ -12,6 +12,10 @@ pub(crate) fn is_valid_startup_folder_path(path: &str) -> bool {
         return false;
     }
 
+    if crate::domain::network_path::unc_server_name(path).is_some() {
+        return true; // Availability is checked by the background share loader.
+    }
+
     let path_buf = PathBuf::from(path);
     onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf)
 }
@@ -50,6 +54,14 @@ pub(crate) fn validate_requested_folder(folder: PathBuf) -> Result<String, ()> {
 #[cfg(test)]
 mod tests {
     use super::is_valid_saved_tab_path;
+
+    #[test]
+    fn network_server_tabs_restore_without_filesystem_attributes() {
+        for path in [r"\\server", r"\\server\"] {
+            assert!(super::is_valid_startup_folder_path(path));
+            assert!(is_valid_saved_tab_path(path));
+        }
+    }
 
     #[test]
     fn saved_tabs_accept_existing_archive_roots_and_entries() {

@@ -77,7 +77,11 @@ impl ImageViewerApp {
     }
 
     pub fn delete_permanently(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
+        if paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| crate::domain::network_path::is_network_location_root(path))
+        {
             return;
         }
 

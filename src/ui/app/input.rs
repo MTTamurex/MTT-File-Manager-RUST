@@ -386,8 +386,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if app
             .shortcuts
             .is_triggered(ShortcutAction::CreateFolder, ctx)
-            && !app.navigation_state.is_computer_view
-            && !app.navigation_state.is_recycle_bin_view
+            && app.can_create_folder_in_current_location()
         {
             app.create_new_folder();
             user_active = true;

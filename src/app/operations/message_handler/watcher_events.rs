@@ -123,6 +123,8 @@ impl ImageViewerApp {
             return;
         }
         if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+            || crate::domain::network_path::unc_server_name(&self.navigation_state.current_path)
+                .is_some()
             || is_archive_namespace_path(Path::new(&self.navigation_state.current_path))
         {
             return;
@@ -214,6 +216,7 @@ impl ImageViewerApp {
             || snapshot.is_computer_view
             || snapshot.is_recycle_bin_view
             || crate::domain::special_paths::is_virtual_path(&snapshot.path)
+            || crate::domain::network_path::unc_server_name(&snapshot.path).is_some()
             || is_archive_namespace_path(Path::new(&snapshot.path))
         {
             return;
@@ -341,6 +344,10 @@ impl ImageViewerApp {
     ) {
         let active_is_filesystem =
             !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+                && crate::domain::network_path::unc_server_name(
+                    &self.navigation_state.current_path,
+                )
+                .is_none()
                 && !is_archive_namespace_path(Path::new(&self.navigation_state.current_path));
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if active_is_filesystem {
@@ -380,6 +387,7 @@ impl ImageViewerApp {
         };
         if snapshot.is_computer_view
             || snapshot.is_recycle_bin_view
+            || crate::domain::network_path::unc_server_name(&snapshot.path).is_some()
             || is_archive_namespace_path(Path::new(&snapshot.path))
         {
             return;

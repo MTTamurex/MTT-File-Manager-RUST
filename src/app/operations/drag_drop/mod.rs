@@ -491,7 +491,7 @@ impl ImageViewerApp {
             return;
         };
 
-        if Self::path_is_archive_namespace(&target) {
+        if !super::file_operation_policy::path_accepts_file_children(&target) {
             self.drag_target_folder = None;
             return;
         }

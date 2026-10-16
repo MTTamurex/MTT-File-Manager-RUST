@@ -128,6 +128,7 @@ features = [
     "Win32_System_SystemInformation",
     "Win32_System_RemoteDesktop",
     "Win32_NetworkManagement_WNet",
+    "Win32_NetworkManagement_NetManagement",
     "Win32_Globalization",
     "Wdk_Storage_FileSystem",
     "Foundation",

@@ -4,6 +4,7 @@ use crate::infrastructure::adaptive_batch::{AdaptiveBatchConfig, AdaptiveBatchTr
 use crate::infrastructure::io_priority;
 use crate::infrastructure::onedrive;
 mod fast_paths;
+mod network_server;
 mod optimized_tiers;
 mod tier3_fallback;
 
@@ -93,6 +94,18 @@ pub(crate) fn run_folder_load_pipeline(
     }
 
     let scan_start = std::time::Instant::now();
+
+    if network_server::try_load_network_server(
+        &current_path,
+        show_hidden,
+        my_gen,
+        &gen_clone,
+        &file_entry_sender,
+        &folder_load_failure_sender,
+        &ctx,
+    ) {
+        return;
+    }
 
     let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
         format!("{}\\", current_path)

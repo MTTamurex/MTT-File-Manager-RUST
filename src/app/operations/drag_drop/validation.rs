@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::is_path_inside_existing_archive_file;
+use crate::domain::network_path::is_network_location_root;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +24,15 @@ impl ImageViewerApp {
         let Some(item) = self.items.get(item_idx) else {
             return Vec::new();
         };
+
+        if is_network_location_root(&item.path)
+            || self
+                .multi_selection
+                .iter()
+                .any(|path| is_network_location_root(path))
+        {
+            return Vec::new();
+        }
 
         if self.multi_selection.contains(&item.path) && !self.multi_selection.is_empty() {
             let mut paths: Vec<PathBuf> = self.multi_selection.iter().cloned().collect();
@@ -71,11 +81,11 @@ fn resolve_drag_operation_for_paths(
 }
 
 pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -> bool {
-    if paths.is_empty() {
+    if paths.is_empty() || paths.iter().any(|path| is_network_location_root(path)) {
         return false;
     }
 
-    if ImageViewerApp::path_is_archive_namespace(target) {
+    if !super::super::file_operation_policy::path_accepts_file_children(target) {
         return false;
     }
 
@@ -135,6 +145,27 @@ mod tests {
         should_confirm_drag_move, DragDropOperation,
     };
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn network_drops_distinguish_servers_shares_and_share_contents() {
+        let sources = vec![PathBuf::from(r"C:\Folder\file.txt")];
+        assert!(!is_valid_drop_target_for_paths(
+            &sources,
+            Path::new(r"\\server")
+        ));
+        assert!(is_valid_drop_target_for_paths(
+            &sources,
+            Path::new(r"\\server\share")
+        ));
+        assert!(!is_valid_drop_target_for_paths(
+            &[PathBuf::from(r"\\server\share")],
+            Path::new(r"C:\Folder")
+        ));
+        assert!(is_valid_drop_target_for_paths(
+            &[PathBuf::from(r"\\server\share\file.txt")],
+            Path::new(r"C:\Folder")
+        ));
+    }
 
     #[test]
     fn drag_payload_inside_archive_detects_virtual_paths() {

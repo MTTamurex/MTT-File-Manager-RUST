@@ -4,6 +4,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
+use crate::domain::network_path::{is_network_location_root, unc_server_name};
 use std::path::{Path, PathBuf};
 
 fn normalize_path_for_hierarchy(path: &Path) -> String {
@@ -27,7 +28,7 @@ fn path_is_same_or_ancestor(ancestor: &Path, descendant: &Path) -> bool {
 fn paste_target_is_valid_for_sources(sources: &[PathBuf], target: &Path) -> bool {
     !sources
         .iter()
-        .any(|source| path_is_same_or_ancestor(source, target))
+        .any(|source| is_network_location_root(source) || path_is_same_or_ancestor(source, target))
 }
 
 fn context_paste_destination(
@@ -115,6 +116,7 @@ impl ImageViewerApp {
 
     pub fn can_copy_from_current_location(&self) -> bool {
         !self.navigation_state.is_recycle_bin_view
+            && unc_server_name(&self.navigation_state.current_path).is_none()
     }
 
     pub fn can_paste_into_current_location(&self) -> bool {
@@ -125,11 +127,7 @@ impl ImageViewerApp {
 
     pub(crate) fn can_paste_into_path(&self, path: &Path) -> bool {
         self.clipboard.has_content()
-            && !path.as_os_str().is_empty()
-            && !path
-                .to_str()
-                .is_some_and(crate::domain::special_paths::is_virtual_path)
-            && !Self::path_is_archive_namespace(path)
+            && super::file_operation_policy::path_accepts_file_children(path)
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {
@@ -139,9 +137,7 @@ impl ImageViewerApp {
         }
 
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
-            let owner = self.shell_op_hwnd();
-            self.clipboard
-                .copy(&self.context_menu.target_paths.clone(), owner);
+            self.copy_paths_to_clipboard(&self.context_menu.target_paths.clone());
             return;
         }
 
@@ -166,13 +162,12 @@ impl ImageViewerApp {
         }
 
         if !files.is_empty() {
-            let owner = self.shell_op_hwnd();
-            self.clipboard.copy(&files, owner);
+            self.copy_paths_to_clipboard(&files);
         }
     }
 
     pub(crate) fn copy_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
+        if paths.is_empty() || paths.iter().any(|path| is_network_location_root(path)) {
             return;
         }
         let owner = self.shell_op_hwnd();
@@ -183,7 +178,8 @@ impl ImageViewerApp {
     pub fn command_cut(&mut self, idx: Option<usize>) {
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
             if self.context_menu.target_paths.iter().any(|path| {
-                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                is_network_location_root(path)
+                    || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             }) {
                 self.context_menu.target_paths.clear();
@@ -217,7 +213,8 @@ impl ImageViewerApp {
 
         if !files.is_empty()
             && !files.iter().any(|path| {
-                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                is_network_location_root(path)
+                    || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })
         {
@@ -229,7 +226,8 @@ impl ImageViewerApp {
     pub(crate) fn cut_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
         if paths.is_empty()
             || paths.iter().any(|path| {
-                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                is_network_location_root(path)
+                    || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     || self.path_is_same_or_ancestor_of_open_panel(path)
             })
         {
@@ -437,6 +435,19 @@ mod tests {
         context_paste_destination, paste_target_is_valid_for_sources, path_is_same_or_ancestor,
     };
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn network_share_roots_are_not_pasted_as_ordinary_folders() {
+        let destination = Path::new(r"C:\Folder");
+        assert!(!paste_target_is_valid_for_sources(
+            &[PathBuf::from(r"\\server\share")],
+            destination
+        ));
+        assert!(paste_target_is_valid_for_sources(
+            &[PathBuf::from(r"\\server\share\folder")],
+            destination
+        ));
+    }
 
     #[test]
     fn hierarchy_check_is_case_insensitive_and_separator_aware() {

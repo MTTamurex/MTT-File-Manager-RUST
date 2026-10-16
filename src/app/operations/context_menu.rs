@@ -5,6 +5,7 @@
 mod new_submenu;
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::network_path::{is_network_location_root, unc_server_name};
 use eframe::egui;
 use rust_i18n::t;
 use std::path::PathBuf;
@@ -101,6 +102,7 @@ fn should_offer_compress(paths: &[PathBuf], context: CompressMenuContext) -> boo
         && paths.iter().all(|path| {
             let path_text = path.to_string_lossy();
             !path_text.starts_with("shell:")
+                && !is_network_location_root(path)
                 && !crate::infrastructure::windows::is_drive_root_path(path)
                 && !crate::domain::file_entry::path_contains_archive_segment(
                     &path_text.to_lowercase(),
@@ -601,24 +603,28 @@ impl ImageViewerApp {
         } else {
             false
         };
-        let can_copy_target =
-            !is_drive && (is_global_search || self.can_copy_from_current_location());
+        let can_copy_target = !is_drive
+            && !paths.iter().any(|path| is_network_location_root(path))
+            && (is_global_search || self.can_copy_from_current_location());
         let can_cut_target = !is_drive
             && paths.iter().all(|path| {
-                !crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                !is_network_location_root(path)
+                    && !crate::domain::file_entry::is_path_inside_existing_archive_file(path)
                     && !self.path_is_same_or_ancestor_of_open_panel(path)
             });
         let can_delete_target = !is_drive
-            && paths
-                .iter()
-                .all(|path| !self.path_is_same_or_ancestor_of_open_panel(path));
+            && paths.iter().all(|path| {
+                !is_network_location_root(path)
+                    && !self.path_is_same_or_ancestor_of_open_panel(path)
+            });
         let can_rename_target = if is_global_search {
             paths.len() == 1
                 && !is_drive
                 && paths.first().is_some_and(|path| {
-                    !crate::domain::file_entry::path_contains_archive_segment(
-                        &path.to_string_lossy().to_lowercase(),
-                    )
+                    !is_network_location_root(path)
+                        && !crate::domain::file_entry::path_contains_archive_segment(
+                            &path.to_string_lossy().to_lowercase(),
+                        )
                 })
         } else if let Some(idx) = _item_index {
             self.can_rename_item(idx)
@@ -728,9 +734,12 @@ impl ImageViewerApp {
                 );
             }
         }
+        let operation_location = explicit_operation_location
+            .unwrap_or_else(|| std::path::Path::new(&self.navigation_state.current_path));
+        let is_server_background =
+            is_empty_area && unc_server_name(&operation_location.to_string_lossy()).is_some();
         let can_create_folder =
-            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
-                && !self.current_location_is_archive_namespace();
+            super::file_operation_policy::path_accepts_file_children(operation_location);
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(grouping_menu_item(self));
@@ -755,11 +764,13 @@ impl ImageViewerApp {
             }
             items.push(
                 ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
-                    .with_svg_icon("terminal"),
+                    .with_svg_icon("terminal")
+                    .enabled(!is_server_background),
             );
             items.push(
                 ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin"))
-                    .with_svg_icon("terminal"),
+                    .with_svg_icon("terminal")
+                    .enabled(!is_server_background),
             );
         } else {
             items.push(ContextMenuItem::separator());
@@ -802,7 +813,10 @@ impl ImageViewerApp {
             );
             items.push(
                 ContextMenuItem::new(-26, t!("context_menu.create_shortcut"))
-                    .with_svg_icon("external-link"),
+                    .with_svg_icon("external-link")
+                    .enabled(super::file_operation_policy::path_accepts_file_children(
+                        operation_location,
+                    )),
             );
             if should_offer_compress(
                 paths,
@@ -929,7 +943,7 @@ impl ImageViewerApp {
         // Dispatch to the STA worker so Shell extensions cannot block the UI thread.
         // Results arrive via `shell_menu_res_rx`; the app polls them in its update loop
         // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
-        if let Some(hwnd) = self.native_hwnd {
+        if let Some(hwnd) = self.native_hwnd.filter(|_| !is_server_background) {
             let target = if is_empty_area {
                 crate::infrastructure::shell_menu_worker::ShellMenuTarget::FolderBackground(
                     paths

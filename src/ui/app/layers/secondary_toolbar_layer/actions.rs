@@ -1,4 +1,5 @@
 use crate::app::ImageViewerApp;
+use crate::domain::network_path::is_network_location_root;
 use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
@@ -26,23 +27,32 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
     let in_archive_namespace = app.current_location_is_archive_namespace();
     let selection_cannot_move = app.multi_selection.iter().any(|path| {
-        crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+        is_network_location_root(path)
+            || crate::domain::file_entry::is_path_inside_existing_archive_file(path)
             || app.path_is_same_or_ancestor_of_open_panel(path)
     }) || app.selected_file.as_ref().is_some_and(|item| {
-        crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
+        is_network_location_root(&item.path)
+            || crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
             || app.path_is_same_or_ancestor_of_open_panel(&item.path)
     });
     let can_cut = has_selection && !selection_cannot_move;
-    let can_copy = has_selection && app.can_copy_from_current_location();
+    let selection_has_network_location = app
+        .multi_selection
+        .iter()
+        .any(|path| is_network_location_root(path))
+        || app
+            .selected_file
+            .as_ref()
+            .is_some_and(|item| is_network_location_root(&item.path));
+    let can_copy =
+        has_selection && app.can_copy_from_current_location() && !selection_has_network_location;
     let can_rename = app.multi_selection.len() <= 1
         && app
             .selected_file
             .as_ref()
             .is_some_and(|item| app.can_rename_path(&item.path));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
-    let can_create_folder =
-        !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
-            && !in_archive_namespace;
+    let can_create_folder = app.can_create_folder_in_current_location();
     let can_delete = has_selection && !in_archive_namespace && !selection_cannot_move;
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 

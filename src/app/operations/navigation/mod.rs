@@ -480,12 +480,21 @@ impl ImageViewerApp {
             return;
         }
 
-        if is_virtual_path(&self.navigation_state.current_path) {
+        if is_virtual_path(&self.navigation_state.current_path)
+            || crate::domain::network_path::unc_server_name(&self.navigation_state.current_path)
+                .is_some()
+        {
             self.navigate_to_computer();
             return;
         }
 
         // If we're at the root of a drive (C:\, D:\), going up navigates to "This PC"
+        if let Some(server) = crate::domain::network_path::unc_share_server_path(
+            std::path::Path::new(&self.navigation_state.current_path),
+        ) {
+            self.navigate_to(&server.to_string_lossy());
+            return;
+        }
         let parent = std::path::Path::new(&self.navigation_state.current_path)
             .parent()
             .map(std::path::Path::to_path_buf);

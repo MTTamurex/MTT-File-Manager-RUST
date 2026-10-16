@@ -192,9 +192,11 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                                 &path,
                             );
 
-                        if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(
-                            &expanded_path,
-                        )) {
+                        if crate::domain::network_path::unc_server_name(&expanded_path).is_some()
+                            || crate::infrastructure::onedrive::fast_path_exists(
+                                std::path::Path::new(&expanded_path),
+                            )
+                        {
                             app.navigate_to(&expanded_path);
                             app.is_address_editing = false;
                         } else {
