@@ -28,10 +28,24 @@ pub fn install_system_fonts(fonts: &mut egui::FontDefinitions) {
             return true;
         }
         if let Ok(data) = std::fs::read(fonts_dir.join(file)) {
-            fonts.font_data.insert(
-                key.to_owned(),
-                std::sync::Arc::new(egui::FontData::from_owned(data)),
-            );
+            // Fit stems to physical pixels rather than preserving fractional
+            // outlines. This matters most for small UI text on low-DPI screens.
+            let font = egui::FontData::from_owned(data).tweak(egui::FontTweak {
+                hinting: Some(true),
+                hinting_target: egui::epaint::text::HintingTarget::Smooth(
+                    egui::epaint::text::SmoothHinting {
+                        light: false,
+                        symmetric_rendering: false,
+                        preserve_linear_metrics: false,
+                    },
+                ),
+                // Keep the hinted outlines on whole pixels when placing glyphs.
+                subpixel_binning: Some(false),
+                ..Default::default()
+            });
+            fonts
+                .font_data
+                .insert(key.to_owned(), std::sync::Arc::new(font));
             loaded.push(key.to_owned());
             return true;
         }
