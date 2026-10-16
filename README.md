@@ -36,9 +36,6 @@
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
-### Windows Integration
-- **Windows 11 compact context menu** — Installer builds configured with a trusted signing certificate can register **Open in MTT** in Explorer's modern context menu through a sparse package. Builds without that package retain the classic context-menu integration.
-
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
 - **Dedicated Tag views** — Browse every item assigned to a tag from the resizable Tags section in the sidebar
@@ -133,9 +130,11 @@
 
 These options are available in **Settings > General**. They modify the current user's Registry settings without requiring administrator privileges or UAC confirmation.
 
+> **Warning:** Both options are experimental. Some antivirus software may detect this Registry-modifying behavior as malware and report a false positive.
+
 ### Set MTT as the default file manager
 
-Use MTT as the default handler for filesystem folders and drives and add **Open in MTT** to folder context menus. Virtual folders such as Control Panel retain their native Windows handlers. Default folder handling is experimental.
+Use MTT as the default handler for filesystem folders and drives and add **Open in MTT** to folder context menus. Virtual folders such as Control Panel retain their native Windows handlers.
 
 ### Open MTT with Win+E
 
