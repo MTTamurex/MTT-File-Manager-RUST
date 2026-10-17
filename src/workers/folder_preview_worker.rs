@@ -224,6 +224,7 @@ pub fn spawn_folder_preview_worker(
                     initialized: hr.is_ok(),
                 }
             };
+            let _wic = crate::workers::thumbnail::extraction::stage2_wic::WicContext::new();
 
             // Empty DashMap — content thumbnail extraction doesn't need deletion tracking
             let empty_deletions = dashmap::DashMap::new();

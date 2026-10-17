@@ -418,7 +418,6 @@ impl Drop for ComMfGuard {
                 let _ = MFShutdown();
             }
             if self.com_initialized {
-                crate::workers::thumbnail::extraction::stage2_wic::drop_thread_local_factory();
                 CoUninitialize();
             }
         }
@@ -445,11 +444,9 @@ fn thumbnail_worker_loop(
 
     // RAII guards: guarantee COM and Media Foundation cleanup even on panic.
     let _com = {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+        let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() };
         ComMfGuard {
-            com_initialized: true,
+            com_initialized: initialized,
             mf_initialized: false,
         }
     };
@@ -463,6 +460,7 @@ fn thumbnail_worker_loop(
             mf_initialized: mf_ok,
         }
     };
+    let _wic = crate::workers::thumbnail::extraction::stage2_wic::WicContext::new();
 
     // PERFORMANCE: Set background priority to minimize HDD contention with video playback
     // This applies to all 4 thumbnail worker threads.

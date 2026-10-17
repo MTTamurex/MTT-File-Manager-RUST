@@ -508,6 +508,10 @@ impl IconLoader {
 }
 
 #[cfg(test)]
+#[path = "icon_loader/com_lifecycle_tests.rs"]
+mod com_lifecycle_tests;
+
+#[cfg(test)]
 mod request_tracker_tests {
     use super::*;
     use std::path::Path;

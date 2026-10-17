@@ -144,6 +144,8 @@ impl PrefetchEngine {
             let spawn_result = std::thread::Builder::new()
                 .name(format!("image-viewer-loader-{}", worker_id))
                 .spawn(move || {
+                    #[cfg(target_os = "windows")]
+                    let _wic = crate::workers::thumbnail::extraction::stage2_wic::WicContext::new();
                     loop {
                         // Phase 1: Check urgent job (brief lock, released immediately).
                         // CRITICAL: The mutex must NOT be held during the blocking
@@ -318,15 +320,13 @@ impl PrefetchEngine {
 impl Drop for PrefetchEngine {
     fn drop(&mut self) {
         // Drop senders first so workers see the channel disconnect and
-        // exit their select! loops. Workers will then run their thread-local
-        // destructors (ComInitGuard → CoUninitialize + WIC factory release).
+        // exit their select! loops and drop their stack-owned WIC/COM scope.
         //
         // We deliberately do NOT join the worker threads here because:
         // 1. join() blocks the calling thread (UI thread) until the worker
         //    finishes its current decode, which can take seconds for large
         //    images/GIFs — this causes eframe's shutdown to hang/crash.
-        // 2. The ComInitGuard thread-local handles COM/WIC cleanup
-        //    automatically when the worker thread exits.
+        // 2. The worker's stack scope releases WIC before uninitializing COM.
         // 3. If the process exits before workers finish, the OS reclaims
         //    all resources (handles, COM apartments, threads) anyway.
         self.jobs_tx.take();
@@ -335,7 +335,7 @@ impl Drop for PrefetchEngine {
 
         // Drop the JoinHandles without joining. The threads become
         // detached and will exit on their own once channels are
-        // disconnected. Thread-local destructors handle cleanup.
+        // disconnected. Stack guards handle cleanup before thread exit.
         self.worker_handles.clear();
     }
 }

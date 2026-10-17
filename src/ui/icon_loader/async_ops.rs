@@ -159,6 +159,7 @@ impl IconLoader {
             .name("drive-icon-worker".to_string())
             .spawn(move || {
                 let _guard = super::ThreadCountGuard(thread_active);
+                let _com = super::ComStaGuard::new();
                 let data = windows::extract_drive_icon(&extraction_key, IconSize::Jumbo)
                     .map_err(|e| {
                         log::trace!(
@@ -221,6 +222,7 @@ impl IconLoader {
             .name("folder-path-icon-worker".to_string())
             .spawn(move || {
                 let _guard = super::ThreadCountGuard(thread_active);
+                let _com = super::ComStaGuard::new();
                 let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo)
                     .map_err(|e| {
                         log::trace!(

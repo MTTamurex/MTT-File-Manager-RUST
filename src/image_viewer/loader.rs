@@ -12,41 +12,6 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-// ── COM lifecycle guard ─────────────────────────────────────────────────
-//
-// Ensures every CoInitializeEx is paired with CoUninitialize when the
-// thread exits.  Without this, PrefetchEngine worker threads leak the
-// MTA reference count and WIC's internal per-apartment state is never
-// freed, causing gradual system-wide degradation.
-
-#[cfg(target_os = "windows")]
-struct ComInitGuard;
-
-#[cfg(target_os = "windows")]
-impl ComInitGuard {
-    fn init() -> Self {
-        unsafe {
-            let _ = windows::Win32::System::Com::CoInitializeEx(
-                None,
-                windows::Win32::System::Com::COINIT_MULTITHREADED,
-            );
-        }
-        Self
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for ComInitGuard {
-    fn drop(&mut self) {
-        // Release the per-thread WIC factory *before* CoUninitialize so
-        // that the COM pointers are freed while the apartment is still valid.
-        crate::workers::thumbnail::extraction::stage2_wic::drop_thread_local_factory();
-        unsafe {
-            windows::Win32::System::Com::CoUninitialize();
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodePriority {
     Interactive,
@@ -717,18 +682,6 @@ fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {
 }
 
 fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicImage> {
-    // WIC requires COM to be initialized on the calling thread.
-    // Use a thread-local lazy init so each worker thread sets it up once.
-    // The guard calls CoUninitialize on thread exit to keep the MTA refcount
-    // balanced and allow WIC's internal state to be properly cleaned up.
-    #[cfg(target_os = "windows")]
-    {
-        thread_local! {
-            static _COM_GUARD: ComInitGuard = ComInitGuard::init();
-        }
-        _COM_GUARD.with(|_| {});
-    }
-
     // On Windows, WIC (Windows Imaging Component) is significantly faster
     // than the pure-Rust image crate for common formats (JPEG, PNG, BMP,
     // TIFF, GIF). Try WIC first; fall back to the cross-platform path.
