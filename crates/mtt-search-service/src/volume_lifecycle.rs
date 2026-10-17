@@ -11,12 +11,16 @@ use crate::usn_journal::DiscoveredVolume;
 use crate::volume_indices::{self, SharedVolumeIndices};
 
 mod identity;
+mod publication;
+mod runtime;
+mod search_access;
 mod usage;
 mod worker;
 
 #[cfg(test)]
 use identity::normalize_volume_id;
 use identity::volume_ids_match;
+pub(crate) use search_access::VolumeSearchAccess;
 use usage::VolumeUsage;
 pub(crate) use usage::VolumeUseGuard;
 pub(crate) use worker::VolumeStopSignal;
@@ -75,6 +79,7 @@ impl VolumeLifecycle {
     }
 
     pub(crate) fn reconcile_discovered_volumes(&self, discovered: &[DiscoveredVolume]) {
+        self.retire_idle_replacements();
         let mut present = HashSet::new();
         for volume in discovered {
             if volume.volume_id.is_empty() {
@@ -101,7 +106,10 @@ impl VolumeLifecycle {
         }
     }
 
-    pub(crate) fn claim_worker(&self, volume: &DiscoveredVolume) -> Option<VolumeWorkerTicket> {
+    pub(crate) fn claim_worker(
+        self: &Arc<Self>,
+        volume: &DiscoveredVolume,
+    ) -> Option<VolumeWorkerTicket> {
         let runtime = self.ensure_runtime(volume)?;
         let mut worker = runtime.worker.lock();
         if runtime.usage.is_removing() || self.global_shutdown.load(Ordering::Acquire) {
@@ -114,7 +122,9 @@ impl VolumeLifecycle {
 
         let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
         let completion = Arc::new(WorkerCompletion::new());
-        let stop = VolumeStopSignal::new(self.global_shutdown.clone());
+        let stop = VolumeStopSignal::new(self.global_shutdown.clone()).with_publisher(
+            publication::VolumeIndexPublisher::new(self, &runtime, generation),
+        );
         *worker = Some(WorkerState {
             generation,
             stop: stop.clone(),
@@ -151,8 +161,11 @@ impl VolumeLifecycle {
             return true;
         };
 
-        runtime.usage.begin_removal();
-        let worker = runtime.worker.lock().clone();
+        let worker = {
+            let worker = runtime.worker.lock();
+            runtime.usage.begin_removal();
+            worker.clone()
+        };
         if let Some(worker) = &worker {
             worker.stop.request_stop();
         }
@@ -221,83 +234,6 @@ impl VolumeLifecycle {
         }
     }
 
-    pub(crate) fn acquire_all(&self) -> Result<Vec<VolumeUseGuard>, ()> {
-        let runtimes: Vec<_> = self.runtimes.lock().values().cloned().collect();
-        let mut guards = Vec::with_capacity(runtimes.len());
-        for runtime in runtimes {
-            match runtime.usage.acquire() {
-                Some(guard) => guards.push(guard),
-                None => return Err(()),
-            }
-        }
-        Ok(guards)
-    }
-
-    fn ensure_runtime(&self, volume: &DiscoveredVolume) -> Option<Arc<VolumeRuntime>> {
-        if volume.volume_id.is_empty() {
-            return None;
-        }
-
-        loop {
-            let existing = self.runtimes.lock().get(&volume.drive_letter).cloned();
-            match existing {
-                Some(runtime)
-                    if volume_ids_match(&runtime.volume_id, &volume.volume_id)
-                        && runtime.volume_serial == volume.volume_serial =>
-                {
-                    return Some(runtime);
-                }
-                Some(runtime) => {
-                    runtime.usage.begin_removal();
-                    let worker = runtime.worker.lock().clone();
-                    if let Some(worker) = &worker {
-                        worker.stop.request_stop();
-                    }
-                    self.remove_index_if_owned(&runtime);
-                    let deadline = Instant::now() + REMOVE_WAIT_TIMEOUT;
-                    let idle = runtime.usage.wait_until_idle(deadline);
-                    let finished = worker
-                        .as_ref()
-                        .is_none_or(|worker| worker.completion.wait_until(deadline));
-                    if !idle || !finished {
-                        return None;
-                    }
-
-                    let mut runtimes = self.runtimes.lock();
-                    if runtimes
-                        .get(&volume.drive_letter)
-                        .is_some_and(|current| Arc::ptr_eq(current, &runtime))
-                    {
-                        runtimes.remove(&volume.drive_letter);
-                    }
-                }
-                None => {
-                    let runtime = Arc::new(VolumeRuntime {
-                        drive_letter: volume.drive_letter,
-                        volume_id: volume.volume_id.clone(),
-                        volume_serial: volume.volume_serial,
-                        usage: Arc::new(VolumeUsage::default()),
-                        worker: Mutex::new(None),
-                    });
-                    let mut runtimes = self.runtimes.lock();
-                    match runtimes.get(&volume.drive_letter) {
-                        Some(current)
-                            if volume_ids_match(&current.volume_id, &volume.volume_id)
-                                && current.volume_serial == volume.volume_serial =>
-                        {
-                            return Some(current.clone());
-                        }
-                        Some(_) => continue,
-                        None => {
-                            runtimes.insert(volume.drive_letter, runtime.clone());
-                            return Some(runtime);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     fn runtime_for_identity(
         &self,
         volume_id: &str,
@@ -314,26 +250,28 @@ impl VolumeLifecycle {
     }
 
     fn disconnect_volume(&self, drive_letter: char, volume_id: &str, volume_serial: u32) {
-        let runtime = {
+        let disconnected = {
             let mut runtimes = self.runtimes.lock();
             let matches = runtimes.get(&drive_letter).is_some_and(|runtime| {
                 volume_ids_match(&runtime.volume_id, volume_id)
                     && runtime.volume_serial == volume_serial
             });
             if matches {
-                runtimes.remove(&drive_letter)
+                let runtime = runtimes.remove(&drive_letter).unwrap();
+                let worker = runtime.worker.lock();
+                runtime.usage.begin_removal();
+                if let Some(worker) = worker.as_ref() {
+                    worker.stop.request_stop();
+                }
+                self.remove_index_if_owned(&runtime);
+                self.indexing_progress.clear(drive_letter);
+                true
             } else {
-                None
+                false
             }
         };
 
-        if let Some(runtime) = runtime {
-            runtime.usage.begin_removal();
-            if let Some(worker) = runtime.worker.lock().as_ref() {
-                worker.stop.request_stop();
-            }
-            self.remove_index_if_owned(&runtime);
-            self.indexing_progress.clear(drive_letter);
+        if disconnected {
             let _ = self.discovery_wake.send(());
         }
     }

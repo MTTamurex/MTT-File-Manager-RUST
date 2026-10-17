@@ -209,8 +209,10 @@ pub fn run_ipc_server(
                     pipe,
                     &indices_for_client,
                     &progress_for_client,
-                    &warming_for_client,
-                    &warm_epoch_for_client,
+                    handler::WarmIndexState {
+                        is_warming: &warming_for_client,
+                        last_warm_epoch_secs: &warm_epoch_for_client,
+                    },
                     &policy_for_client,
                     &lifecycle_for_client,
                     &watchdog_tx,

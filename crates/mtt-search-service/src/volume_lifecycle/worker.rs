@@ -13,6 +13,7 @@ pub(super) struct WorkerCompletion {
 pub(crate) struct VolumeStopSignal {
     global_shutdown: Arc<AtomicBool>,
     local_stop: Arc<LocalStopState>,
+    publisher: Option<Arc<super::publication::VolumeIndexPublisher>>,
 }
 
 struct LocalStopState {
@@ -30,7 +31,24 @@ impl VolumeStopSignal {
                 wait_lock: Mutex::new(()),
                 wake: Condvar::new(),
             }),
+            publisher: None,
         }
+    }
+
+    pub(super) fn with_publisher(
+        mut self,
+        publisher: super::publication::VolumeIndexPublisher,
+    ) -> Self {
+        self.publisher = Some(Arc::new(publisher));
+        self
+    }
+
+    pub(crate) fn publish_index(
+        &self,
+        indices: &crate::volume_indices::SharedVolumeIndices,
+        index: crate::file_index::VolumeIndex,
+    ) -> Option<crate::volume_indices::VolumeIndexHandle> {
+        self.publisher.as_ref()?.publish(indices, index)
     }
 
     pub(crate) fn is_stopped(&self) -> bool {

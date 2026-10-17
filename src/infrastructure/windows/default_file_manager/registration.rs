@@ -1,5 +1,8 @@
 use std::path::Path;
 
+#[path = "win_e.rs"]
+mod win_e;
+
 pub(super) const VERB: &str = "MTT.FileManager.Default";
 pub(super) const CLASSES: [&str; 2] = ["Directory", "Drive"];
 pub(super) const NETWORK_LOCATION_CLASS: &str = "CLSID\\{0AFACED1-E828-11D1-9187-B532F1E9575D}";
@@ -165,21 +168,8 @@ fn apply_action(
             )?;
             remove_legacy(reg, &command)?;
         }
-        RegistryAction::EnableWinE => {
-            reg.write(WIN_E_COMMAND_KEY, "", &win_e_command(executable))?;
-            reg.write(WIN_E_COMMAND_KEY, "DelegateExecute", "")?;
-        }
-        RegistryAction::RestoreWinE => {
-            if owns(
-                reg.read(WIN_E_COMMAND_KEY, "")?.as_deref(),
-                &win_e_command(executable),
-            ) {
-                reg.delete(WIN_E_COMMAND_KEY, "")?;
-                if reg.read(WIN_E_COMMAND_KEY, "DelegateExecute")?.as_deref() == Some("") {
-                    reg.delete(WIN_E_COMMAND_KEY, "DelegateExecute")?;
-                }
-            }
-        }
+        RegistryAction::EnableWinE => win_e::enable(reg, executable)?,
+        RegistryAction::RestoreWinE => win_e::restore(reg, executable)?,
     }
     Ok(())
 }

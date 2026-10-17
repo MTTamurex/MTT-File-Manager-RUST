@@ -75,8 +75,18 @@ pub(super) fn persist_pending_snapshot(
     drive_letter: char,
     snapshot: PendingPersistSnapshot,
 ) -> bool {
-    let had_structural_changes = !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
     let skip_sqlite_data = crate::index_db::skip_sqlite_data_persistence();
+    persist_pending_snapshot_with_mode(db, handle, drive_letter, snapshot, skip_sqlite_data)
+}
+
+fn persist_pending_snapshot_with_mode(
+    db: &index_db::IndexDb,
+    handle: &VolumeIndexHandle,
+    drive_letter: char,
+    snapshot: PendingPersistSnapshot,
+    skip_sqlite_data: bool,
+) -> bool {
+    let had_structural_changes = !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
 
     if skip_sqlite_data && !flush_binary_snapshot_if_dirty(handle, drive_letter) {
         eprintln!(
@@ -88,16 +98,16 @@ pub(super) fn persist_pending_snapshot(
     }
 
     if skip_sqlite_data {
-        if let Err(e) = db.save_volume_state_snapshot(
-            snapshot.drive_letter,
-            &snapshot.volume_id,
-            snapshot.volume_serial,
-            snapshot.journal_id,
-            snapshot.last_usn,
-            snapshot.files_indexed,
-            true,
-            true,
-        ) {
+        if let Err(e) = db.save_volume_state_snapshot(&index_db::PersistedVolumeState {
+            drive_letter: snapshot.drive_letter,
+            volume_id: snapshot.volume_id.clone(),
+            volume_serial: snapshot.volume_serial,
+            journal_id: snapshot.journal_id,
+            last_usn: snapshot.last_usn,
+            files_indexed: snapshot.files_indexed as u64,
+            has_hardlink_parent_data: true,
+            has_reparse_point_data: true,
+        }) {
             eprintln!(
                 "[USN] {}:\\ Volume state persist error: {}",
                 drive_letter,
@@ -186,11 +196,29 @@ pub(super) fn should_prefer_sqlite_over_binary(
     binary_state: &index_db::PersistedVolumeState,
     current_journal_id: u64,
 ) -> bool {
+    prefer_sqlite_with_mode(
+        sqlite_state,
+        binary_state,
+        current_journal_id,
+        crate::index_db::skip_sqlite_data_persistence(),
+    )
+}
+
+fn prefer_sqlite_with_mode(
+    sqlite_state: &index_db::PersistedVolumeState,
+    binary_state: &index_db::PersistedVolumeState,
+    current_journal_id: u64,
+    skip_sqlite_data: bool,
+) -> bool {
     let sqlite_matches_current = sqlite_state.journal_id == current_journal_id;
     let binary_matches_current = binary_state.journal_id == current_journal_id;
-    let sqlite_is_fresher_same_journal = !crate::index_db::skip_sqlite_data_persistence()
+    let sqlite_is_fresher_same_journal = !skip_sqlite_data
         && sqlite_state.journal_id == binary_state.journal_id
         && sqlite_state.last_usn > binary_state.last_usn;
 
     sqlite_is_fresher_same_journal || (sqlite_matches_current && !binary_matches_current)
 }
+
+#[cfg(test)]
+#[path = "persistence_tests.rs"]
+mod tests;

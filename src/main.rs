@@ -351,20 +351,11 @@ fn main() -> eframe::Result<()> {
 
     // Dispatch the elevated helper before opening preferences or diagnostic logs.
     let mut helper_args = std::env::args_os().skip(1);
-    if helper_args
-        .next()
-        .is_some_and(|arg| arg == "--grant-folder-access")
-    {
-        let (Some(path), Some(sid)) = (helper_args.next(), helper_args.next()) else {
-            std::process::exit(87);
-        };
-        if helper_args.next().is_some() {
-            std::process::exit(87);
-        }
-        let code = mtt_file_manager::infrastructure::windows::folder_access::run_helper(
-            &PathBuf::from(path),
-            &sid.to_string_lossy(),
-        );
+    if helper_args.next().is_some_and(|arg| {
+        arg == mtt_file_manager::infrastructure::windows::folder_access::HELPER_FLAG
+    }) {
+        let code =
+            mtt_file_manager::infrastructure::windows::folder_access::run_helper(helper_args);
         std::process::exit(code);
     }
 

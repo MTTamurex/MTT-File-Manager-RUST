@@ -2,6 +2,9 @@ mod dispatcher;
 mod non_usn;
 mod usn;
 
+#[cfg(test)]
+mod test_support;
+
 use std::sync::OnceLock;
 
 pub(crate) use dispatcher::spawn_volume_indexer;
@@ -9,6 +12,14 @@ pub(crate) use non_usn::index_filesystem_fallback;
 pub(crate) use usn::index_volume;
 
 use crate::volume_lifecycle::VolumeStopSignal;
+
+#[derive(Clone)]
+pub(crate) struct IndexVolume {
+    drive_letter: char,
+    volume_id: String,
+    volume_serial: u32,
+    file_system: String,
+}
 
 fn index_build_lock() -> &'static parking_lot::Mutex<()> {
     static LOCK: OnceLock<parking_lot::Mutex<()>> = OnceLock::new();

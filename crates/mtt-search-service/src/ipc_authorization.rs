@@ -15,7 +15,7 @@ use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
 use crate::file_index;
-use crate::volume_indices::{self, SharedVolumeIndices};
+use crate::volume_indices::VolumeIndexHandle;
 use mtt_search_protocol::SearchResultItem;
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
@@ -372,7 +372,7 @@ where
 
 pub fn collect_authorized_search_page(
     pipe: HANDLE,
-    indices: &SharedVolumeIndices,
+    handles: &[VolumeIndexHandle],
     query: &str,
     offset: usize,
     limit: usize,
@@ -400,10 +400,7 @@ pub fn collect_authorized_search_page(
     // client request. The previous loop restarted `search_page` from record 0
     // for every raw batch and paid O(index * batches) under read locks before
     // authorization began.
-    let raw_page = {
-        let handles = volume_indices::snapshot_handles(indices);
-        file_index::search_page(&handles, query, 0, raw_scan_limit)
-    };
+    let raw_page = file_index::search_page(handles, query, 0, raw_scan_limit);
     let raw_has_more = raw_page.has_more;
 
     // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
@@ -477,7 +474,7 @@ mod tests {
 
     #[test]
     fn returns_empty_for_zero_limit_or_empty_query() {
-        let empty_indices = volume_indices::new_shared();
+        let empty_indices = Vec::new();
         let res_zero = collect_authorized_search_page(
             HANDLE(std::ptr::null_mut()),
             &empty_indices,

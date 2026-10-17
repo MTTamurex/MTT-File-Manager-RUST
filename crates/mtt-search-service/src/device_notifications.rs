@@ -24,7 +24,7 @@ pub(crate) struct DeviceNotificationRegistration {
 pub(crate) fn register_volume_notifications(
     lifecycle: Arc<VolumeLifecycle>,
 ) -> Result<DeviceNotificationRegistration, String> {
-    let mut filter = CM_NOTIFY_FILTER {
+    let filter = CM_NOTIFY_FILTER {
         cbSize: std::mem::size_of::<CM_NOTIFY_FILTER>() as u32,
         FilterType: CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE,
         u: CM_NOTIFY_FILTER_0 {
@@ -39,7 +39,7 @@ pub(crate) fn register_volume_notifications(
     let mut notification = HCMNOTIFICATION::default();
     let result = unsafe {
         CM_Register_Notification(
-            &mut filter,
+            &filter,
             Some(context),
             Some(device_notification_callback),
             &mut notification,

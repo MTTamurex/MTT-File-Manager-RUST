@@ -179,20 +179,10 @@ impl IndexDb {
         Ok(())
     }
 
-    pub fn save_volume_state_snapshot(
-        &self,
-        drive_letter: char,
-        volume_id: &str,
-        volume_serial: u32,
-        journal_id: u64,
-        last_usn: i64,
-        files_indexed: usize,
-        has_hardlink_parent_data: bool,
-        has_reparse_point_data: bool,
-    ) -> Result<(), String> {
+    pub fn save_volume_state_snapshot(&self, state: &PersistedVolumeState) -> Result<(), String> {
         let conn = self.conn.lock();
 
-        let drive = drive_letter.to_string();
+        let drive = state.drive_letter.to_string();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -204,14 +194,14 @@ impl IndexDb {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 drive,
-                volume_id,
-                volume_serial as i64,
-                journal_id as i64,
-                last_usn,
-                files_indexed as i64,
+                state.volume_id,
+                state.volume_serial as i64,
+                state.journal_id as i64,
+                state.last_usn,
+                state.files_indexed as i64,
                 now,
-                has_hardlink_parent_data,
-                has_reparse_point_data,
+                state.has_hardlink_parent_data,
+                state.has_reparse_point_data,
             ],
         )
         .map_err(|e| format!("Save volume_state error: {}", e))?;

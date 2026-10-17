@@ -16,6 +16,18 @@ const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
+fn apply_incremental_records(
+    index: &mut crate::file_index::VolumeIndex,
+    records: &[u8],
+    new_usn: i64,
+    current_usn: &mut i64,
+) -> Result<(), String> {
+    crate::usn_journal::parse_usn_records(records, index, &mut 0, true)?;
+    index.last_usn = new_usn;
+    *current_usn = new_usn;
+    Ok(())
+}
+
 pub(super) fn run_incremental(
     drive_letter: char,
     mut current_usn: i64,
@@ -46,17 +58,14 @@ pub(super) fn run_incremental(
                 while attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
                     match handle.try_write() {
                         Some(mut vol_index) => {
-                            let mut dummy_count = 0;
-                            let parse_result = crate::usn_journal::parse_usn_records(
-                                &buffer[8..bytes_returned as usize],
+                            let parse_result = apply_incremental_records(
                                 &mut vol_index,
-                                &mut dummy_count,
-                                true,
+                                &buffer[8..bytes_returned as usize],
+                                new_usn,
+                                &mut current_usn,
                             );
                             match parse_result {
                                 Ok(()) => {
-                                    vol_index.last_usn = new_usn;
-                                    current_usn = new_usn;
                                     applied = true;
                                     if attempt > 0 {
                                         contention_applied_after_retry += 1;
@@ -87,18 +96,14 @@ pub(super) fn run_incremental(
                 if !applied && !parse_failed {
                     match handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
                         Some(mut vol_index) => {
-                            let mut dummy_count = 0;
-                            let parse_result = crate::usn_journal::parse_usn_records(
-                                &buffer[8..bytes_returned as usize],
+                            let parse_result = apply_incremental_records(
                                 &mut vol_index,
-                                &mut dummy_count,
-                                true,
+                                &buffer[8..bytes_returned as usize],
+                                new_usn,
+                                &mut current_usn,
                             );
                             match parse_result {
-                                Ok(()) => {
-                                    vol_index.last_usn = new_usn;
-                                    current_usn = new_usn;
-                                }
+                                Ok(()) => {}
                                 Err(e) => eprintln!(
                                     "[USN] {}:\\ Incremental apply failed: {}",
                                     drive_letter, e
@@ -291,3 +296,7 @@ pub(super) fn run_incremental(
 
     eprintln!("[USN] {}:\\ Indexer stopped", drive_letter);
 }
+
+#[cfg(test)]
+#[path = "incremental_tests.rs"]
+mod tests;

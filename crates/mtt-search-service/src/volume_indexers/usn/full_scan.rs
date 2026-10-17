@@ -135,16 +135,16 @@ pub(super) fn build_and_persist(
     let skip_sqlite_data = crate::index_db::skip_sqlite_data_persistence();
 
     if !skip_sqlite_data || binary_saved {
-        if let Err(error) = db.save_volume_state_snapshot(
+        if let Err(error) = db.save_volume_state_snapshot(&index_db::PersistedVolumeState {
             drive_letter,
-            volume_id,
+            volume_id: volume_id.to_owned(),
             volume_serial,
-            index.journal_id,
-            index.last_usn,
-            index.records.len(),
-            index.hardlink_data_complete,
-            index.reparse_data_complete,
-        ) {
+            journal_id: index.journal_id,
+            last_usn: index.last_usn,
+            files_indexed: index.records.len() as u64,
+            has_hardlink_parent_data: index.hardlink_data_complete,
+            has_reparse_point_data: index.reparse_data_complete,
+        }) {
             eprintln!(
                 "[USN] {}:\\ SQLite volume state snapshot failed: {}",
                 drive_letter,

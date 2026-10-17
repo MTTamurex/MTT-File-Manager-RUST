@@ -6,6 +6,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
+#[path = "regression_tests.rs"]
+mod regressions;
+
 fn volume() -> DiscoveredVolume {
     DiscoveredVolume {
         drive_letter: 'R',

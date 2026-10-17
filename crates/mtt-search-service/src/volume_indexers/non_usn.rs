@@ -13,8 +13,10 @@ use crate::file_index;
 use crate::fs_walker;
 use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
-use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
+use crate::volume_indices::{SharedVolumeIndices, VolumeIndexHandle};
 use crate::volume_lifecycle::VolumeStopSignal;
+
+mod cache;
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -32,29 +34,25 @@ enum NonUsnWaitResult {
 }
 
 pub(crate) fn index_filesystem_fallback(
-    drive_letter: char,
-    volume_id: String,
-    volume_serial: u32,
-    file_system: String,
+    volume: super::IndexVolume,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: VolumeStopSignal,
 ) {
+    let super::IndexVolume {
+        drive_letter,
+        ref volume_id,
+        volume_serial,
+        ref file_system,
+    } = volume;
     if shutdown.is_stopped() {
         indexing_progress.clear(drive_letter);
         return;
     }
-    let persisted_record_estimate = db
-        .load_volume_state(drive_letter)
-        .filter(|state| {
-            volume_serial != 0
-                && state.volume_id.eq_ignore_ascii_case(&volume_id)
-                && state.volume_serial == volume_serial
-        })
-        .map(|state| state.files_indexed.min(usize::MAX as u64) as usize);
+    let persisted_record_estimate = cache::matching_record_estimate(&db, &volume);
 
-    let cadence = non_usn_scan_cadence(&file_system);
+    let cadence = non_usn_scan_cadence(file_system);
     let fs_lower = file_system.to_ascii_lowercase();
     // Treat change notifications as an early-rescan hint on every non-USN
     // filesystem, including FAT/exFAT. Some FAT drivers miss cross-process
@@ -77,23 +75,13 @@ pub(crate) fn index_filesystem_fallback(
 
     // Fast startup path: reuse persisted snapshot while a fresh scan runs.
     let mut handle: Option<VolumeIndexHandle> = None;
-    let mut cached_index = persisted_record_estimate
-        .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
-        .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
-    cached_index.volume_id = volume_id.clone();
-    cached_index.volume_serial = volume_serial;
-    let cached_count = if persisted_record_estimate.is_some() {
-        db.load_into_index(&mut cached_index, |_| {}).ok().flatten()
-    } else {
-        None
-    };
-    if let Some(cached_count) = cached_count {
-        cached_index.shrink_to_fit();
-        cached_index.journal_id = 0;
-        cached_index.last_usn = 0;
-        cached_index.state = file_index::IndexState::Ready;
+    if let Some(cached_index) = cache::load_cached_index(&db, &volume, persisted_record_estimate) {
+        let cached_count = cached_index.records.len();
 
-        handle = Some(volume_indices::upsert(&indices, cached_index));
+        let Some(published) = shutdown.publish_index(&indices, cached_index) else {
+            return;
+        };
+        handle = Some(published);
         crate::memory_trim::request_trim(format!("{}:\\ fallback cache load", drive_letter));
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
@@ -180,7 +168,10 @@ pub(crate) fn index_filesystem_fallback(
                 scanned_index.shrink_to_fit();
 
                 let records = stats.records_indexed;
-                handle = Some(volume_indices::upsert(&indices, scanned_index));
+                let Some(published) = shutdown.publish_index(&indices, scanned_index) else {
+                    break;
+                };
+                handle = Some(published);
                 indexing_progress.clear(drive_letter);
                 crate::memory_trim::request_trim(format!("{}:\\ fallback scan", drive_letter));
 

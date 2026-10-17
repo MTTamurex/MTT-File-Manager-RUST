@@ -131,7 +131,6 @@ const
   ProgramDataCacheDir = 'C:\ProgramData\MTT-File-Manager';
   DefaultFolderOpenCommandKey = 'Software\Classes\Folder\shell\open\command';
   DefaultFolderExploreCommandKey = 'Software\Classes\Folder\shell\explore\command';
-  DefaultWinECommandKey = 'Software\Classes\CLSID\{52205fd8-5dfb-447d-801a-d0b52f2e83e1}\shell\opennewwindow\command';
   ExplorerDelegateExecute = '{11dbb47c-a525-400b-9e80-a54615a090c0}';
 
 function MTTFolderCommand: String;
@@ -143,6 +142,8 @@ function MTTWinECommand: String;
 begin
   Result := '"' + ExpandConstant('{app}\{#MyAppExeName}') + '"';
 end;
+
+#include "win_e_restore.iss"
 
 procedure RestoreExplorerDefaultManagerIfOwned;
 var
@@ -173,12 +174,8 @@ begin
       'DelegateExecute', ExplorerDelegateExecute);
   end;
 
-  if RegQueryStringValue(HKCU, DefaultWinECommandKey, '', CurrentCommand) and
-    (CompareText(CurrentCommand, MTTWinECommand) = 0) then
-  begin
-    RegDeleteValue(HKCU, DefaultWinECommandKey, '');
-    RegDeleteValue(HKCU, DefaultWinECommandKey, 'DelegateExecute');
-  end;
+  if not RestoreWinEIfOwned then
+    Log('Could not restore Win+E completely; remaining recovery data was retained.');
 end;
 
 function DeleteProgramDataCache: Boolean;

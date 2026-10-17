@@ -335,16 +335,24 @@ fn repair_suspicious_zero_folder_size(
     (total_size, file_count, folder_count)
 }
 
+pub(super) struct WarmIndexState<'a> {
+    pub is_warming: &'a Arc<AtomicBool>,
+    pub last_warm_epoch_secs: &'a Arc<AtomicU64>,
+}
+
 pub(super) fn handle_client(
     pipe: HANDLE,
     indices: &SharedVolumeIndices,
     indexing_progress: &Arc<IndexingProgress>,
-    is_warming: &Arc<AtomicBool>,
-    last_warm_epoch_secs: &Arc<AtomicU64>,
+    warming: WarmIndexState<'_>,
     security_policy: &IpcSecurityPolicy,
     volume_lifecycle: &VolumeLifecycle,
     watchdog: &std::sync::mpsc::Sender<super::WatchdogEvent>,
 ) {
+    let WarmIndexState {
+        is_warming,
+        last_warm_epoch_secs,
+    } = warming;
     let request_data = match read_message(pipe) {
         Some(data) => data,
         None => return,
@@ -488,14 +496,12 @@ pub(super) fn handle_client(
                 return;
             }
 
-            let Some(_volume_uses) = super::volume_access::acquire_all(pipe, volume_lifecycle)
-            else {
-                return;
-            };
+            let volume_access = volume_lifecycle.acquire_search_access();
 
             // Always use in-memory search with a tiny reusable lowercase buffer
             // for ASCII SIMD matching.
-            let result = collect_authorized_search_page(pipe, indices, &text, offset, limit);
+            let result =
+                collect_authorized_search_page(pipe, volume_access.handles(), &text, offset, limit);
 
             match result {
                 Ok(page) => {
@@ -524,10 +530,7 @@ pub(super) fn handle_client(
             paths,
             threshold_secs,
         } => {
-            let Some(_volume_uses) = super::volume_access::acquire_all(pipe, volume_lifecycle)
-            else {
-                return;
-            };
+            let volume_access = volume_lifecycle.acquire_search_access();
 
             // SEC: Impersonate the connecting client before checking any paths.
             // Without this, any local user could probe modification times of
@@ -563,7 +566,7 @@ pub(super) fn handle_client(
                             Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
                             _ => return None,
                         };
-                        let handle = volume_indices::find_handle(indices, drive_letter)?;
+                        let handle = volume_access.find_handle(drive_letter)?;
                         let vol = handle.read();
                         if !matches!(vol.state, IndexState::Ready) {
                             return None;

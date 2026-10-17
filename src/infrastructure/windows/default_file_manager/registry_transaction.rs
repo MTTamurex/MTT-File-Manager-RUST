@@ -71,6 +71,7 @@ impl<R: Registry> RegistryTransaction<'_, R> {
             .map(|value| value.path.as_str())
             .filter(|path| {
                 path.contains("\\MTT.FileManager.Default")
+                    || *path == "Software\\MTT-File-Manager\\ShellIntegration\\WinE"
                     || path.starts_with(
                         "Software\\MTT-File-Manager\\ShellIntegration\\DefaultFolders\\",
                     )

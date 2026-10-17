@@ -3533,6 +3533,7 @@ dependencies = [
  "parking_lot",
  "rusqlite",
  "serde",
+ "tempfile",
  "windows",
  "windows-service",
  "winresource",

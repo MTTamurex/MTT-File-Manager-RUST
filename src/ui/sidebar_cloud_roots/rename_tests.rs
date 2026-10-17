@@ -110,7 +110,7 @@ fn sidebar_cloud_root_menu_and_editor_work_without_a_cached_parent_listing() {
     assert_eq!(target.name, "Cloud");
     assert_eq!(target.path, Path::new(r"C:\Cloud"));
     let expected = SidebarFolderTarget::new(
-        egui::Id::new("cloud_tree").with(&r"C:\Cloud".to_string()),
+        egui::Id::new("cloud_tree").with(r"C:\Cloud".to_string()),
         Path::new(r"C:\Cloud"),
         "Cloud",
     );

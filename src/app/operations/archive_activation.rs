@@ -38,13 +38,33 @@ mod tests {
             resolve_in_background(ctx.clone(), origin.clone(), path.clone())
                 .join()
                 .unwrap();
-            let results = take_results(&ctx);
+            let results = take_results(&ctx, false);
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].source, origin);
             assert_eq!(results[0].path, path);
             assert!(results[0].is_file);
-            assert!(take_results(&ctx).is_empty());
+            assert!(take_results(&ctx, false).is_empty());
         }
+    }
+
+    #[test]
+    fn blocked_navigation_keeps_results_until_they_can_be_consumed() {
+        let ctx = egui::Context::default();
+        let origin = source(ActivePanel::Right);
+        ctx.data_mut(|data| {
+            data.get_temp_mut_or_default::<Vec<ResolvedActivation>>(results_id())
+                .push(ResolvedActivation {
+                    source: origin.clone(),
+                    path: r"D:\Documents\archive.zip".into(),
+                    is_file: true,
+                });
+        });
+        assert!(take_results(&ctx, true).is_empty());
+        assert!(take_results(&ctx, true).is_empty());
+        let results = take_results(&ctx, false);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source, origin);
+        assert!(take_results(&ctx, false).is_empty());
     }
 
     #[test]
@@ -67,7 +87,7 @@ mod tests {
             )
             .join()
             .unwrap();
-            let results = take_results(&ctx);
+            let results = take_results(&ctx, false);
             assert_eq!(results.len(), 1);
             assert!(!results[0].is_file);
         }
@@ -85,7 +105,10 @@ fn results_id() -> egui::Id {
     egui::Id::new("resolved_archive_activations")
 }
 
-fn take_results(ctx: &egui::Context) -> Vec<ResolvedActivation> {
+fn take_results(ctx: &egui::Context, blocked: bool) -> Vec<ResolvedActivation> {
+    if blocked {
+        return Vec::new();
+    }
     ctx.data_mut(|data| {
         let results = data
             .get_temp::<Vec<ResolvedActivation>>(results_id())
@@ -143,10 +166,8 @@ impl ImageViewerApp {
 
     /// Called after both panes finish rendering, outside temporary panel swaps.
     pub(crate) fn process_pending_archive_activations(&mut self) {
-        for result in take_results(&self.ui_ctx) {
-            if self.tab_navigation_blocked() || self.in_inactive_panel_context {
-                continue;
-            }
+        let blocked = self.tab_navigation_blocked() || self.in_inactive_panel_context;
+        for result in take_results(&self.ui_ctx, blocked) {
             let panel = result.source.panel;
             let current_path = if self.dual_panel_enabled && panel != self.dual_panel_active {
                 self.dual_panel_inactive_state

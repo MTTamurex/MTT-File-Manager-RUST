@@ -1,4 +1,8 @@
 use super::*;
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Security::Authorization::*;
+use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+use windows::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
 
 #[test]
 fn arguments_preserve_trailing_slashes_spaces_and_unicode() {
@@ -15,8 +19,13 @@ fn arguments_preserve_trailing_slashes_spaces_and_unicode() {
 }
 
 #[test]
-fn helper_rejects_relative_paths_without_changing_permissions() {
-    assert_eq!(run_helper(Path::new("folder"), "S-1-5-18"), 87);
+fn helper_rejects_legacy_path_and_sid_arguments_without_changing_permissions() {
+    for path in ["folder", r"C:\", r"C:\Folder"] {
+        for sid in ["S-1-1-0", "S-1-5-32-544", "S-1-5-18"] {
+            assert_eq!(run_helper([path, sid].map(std::ffi::OsString::from)), 87);
+        }
+    }
+    assert_eq!(grant_access(Path::new("folder"), "S-1-5-18"), Err(87));
 }
 
 #[test]

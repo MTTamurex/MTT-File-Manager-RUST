@@ -816,6 +816,19 @@ mod tests {
 
     #[test]
     fn skip_sqlite_data_persistence_reads_env_var() {
+        // Isolate environment mutation from parallel cache/persistence tests.
+        if std::env::var_os("MTT_TEST_SQLITE_ENV_CHILD").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "index_db::tests::skip_sqlite_data_persistence_reads_env_var",
+                ])
+                .env("MTT_TEST_SQLITE_ENV_CHILD", "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
         // Default is false.
         std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
         assert!(!skip_sqlite_data_persistence());
@@ -862,8 +875,17 @@ mod tests {
         assert_eq!(migrated.volume_serial, 0);
 
         let volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\";
-        db.save_volume_state_snapshot('R', volume_id, 0x1234_abcd, 11, 21, 31, true, true)
-            .unwrap();
+        db.save_volume_state_snapshot(&PersistedVolumeState {
+            drive_letter: 'R',
+            volume_id: volume_id.to_owned(),
+            volume_serial: 0x1234_abcd,
+            journal_id: 11,
+            last_usn: 21,
+            files_indexed: 31,
+            has_hardlink_parent_data: true,
+            has_reparse_point_data: true,
+        })
+        .unwrap();
         let saved = db.load_volume_state('R').unwrap();
         assert_eq!(saved.volume_id, volume_id);
         assert_eq!(saved.volume_serial, 0x1234_abcd);

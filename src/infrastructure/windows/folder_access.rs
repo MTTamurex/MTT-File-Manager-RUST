@@ -2,15 +2,8 @@
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::{LocalFree, ERROR_CANCELLED, HLOCAL, HWND, WAIT_OBJECT_0};
-use windows::Win32::Security::Authorization::*;
-use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
-use windows::Win32::Storage::FileSystem::{
-    CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ALL_ACCESS,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
-};
 use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
 use windows::Win32::UI::Shell::{
     ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS,
@@ -19,6 +12,14 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 use super::owned_handle::OwnedHandle;
+
+mod acl;
+mod auth;
+mod pipe;
+mod protocol;
+
+#[cfg(test)]
+use acl::grant_access;
 
 pub const HELPER_FLAG: &str = "--grant-folder-access";
 
@@ -55,17 +56,9 @@ impl Drop for LocalAllocation {
     }
 }
 
-/// Preserve the original user's SID across over-the-shoulder UAC elevation.
+#[cfg(test)]
 fn current_user_sid() -> Result<String, AccessError> {
-    let (mut bytes, _) = crate::infrastructure::db_utils::get_current_user_sid_bytes()
-        .ok_or(AccessError::Failed(1))?;
-    let mut text = PWSTR::null();
-    unsafe {
-        ConvertSidToStringSidW(PSID(bytes.as_mut_ptr().cast()), &mut text)
-            .map_err(|_| AccessError::Failed(1))?;
-        let _allocation = LocalAllocation(text.0.cast());
-        text.to_string().map_err(|_| AccessError::Failed(1))
-    }
+    auth::current_user_sid().map_err(AccessError::Failed)
 }
 
 /// Quote an OS argument without a lossy UTF-16 conversion (including drive roots).
@@ -95,13 +88,14 @@ fn quoted_argument(value: &std::ffi::OsStr) -> Vec<u16> {
 /// Blocking: call only from a worker. Cancellation never changes permissions.
 pub fn request_access(path: &Path, owner_window: Option<isize>) -> Result<(), AccessError> {
     let _com = super::com_scope::ComScope::sta();
-    let sid = current_user_sid()?;
+    let payload = protocol::encode_path(path).map_err(AccessError::Failed)?;
+    let request = protocol::HelperRequest::new().map_err(AccessError::Failed)?;
     let exe = std::env::current_exe().map_err(|_| AccessError::Failed(1))?;
     let exe: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
     let verb: Vec<u16> = "runas".encode_utf16().chain(Some(0)).collect();
-    let mut parameters: Vec<u16> = format!("{HELPER_FLAG} ").encode_utf16().collect();
-    parameters.extend(quoted_argument(path.as_os_str()));
-    parameters.extend(format!(" {sid}\0").encode_utf16());
+    let mut parameters: Vec<u16> = format!("{HELPER_FLAG} --ipc-v1 ").encode_utf16().collect();
+    parameters.extend(quoted_argument(std::ffi::OsStr::new(&request.pipe_name)));
+    parameters.extend(format!(" {}\0", request.requester_pid).encode_utf16());
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
@@ -121,6 +115,13 @@ pub fn request_access(path: &Path, owner_window: Option<isize>) -> Result<(), Ac
             });
         }
         let process = OwnedHandle::new(info.hProcess).ok_or(AccessError::Failed(1))?;
+        let deadline = std::time::Instant::now() + pipe::HANDSHAKE_TIMEOUT;
+        let connection = (|| {
+            let connection = pipe::connect(&request.pipe_name, deadline, process.as_raw())?;
+            auth::verify_server(connection.as_raw(), process.as_raw())?;
+            pipe::send_path(connection.as_raw(), &payload, deadline, process.as_raw())?;
+            Ok::<_, u32>(connection)
+        })();
         // Keep the operation pending until the helper exits; a timeout would allow
         // another grant while the first process is still changing permissions.
         if WaitForSingleObject(process.as_raw(), INFINITE) != WAIT_OBJECT_0 {
@@ -131,6 +132,9 @@ pub fn request_access(path: &Path, owner_window: Option<isize>) -> Result<(), Ac
         let mut code = 1;
         GetExitCodeProcess(process.as_raw(), &mut code)
             .map_err(|error| AccessError::Failed(os_error_code(error)))?;
+        // Keep the client connection alive through helper exit so Windows can
+        // identify its token after reading the request, including cross-account UAC.
+        let _connection = connection.map_err(AccessError::Failed)?;
         if code == 0 {
             verify_access(path)
         } else {
@@ -139,95 +143,22 @@ pub fn request_access(path: &Path, owner_window: Option<isize>) -> Result<(), Ac
     }
 }
 
-/// Add a full-control ACE while preserving existing ACEs, owner and inheritance.
-/// Explicit denies and protected child ACLs are intentionally respected.
-fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
-    if !path.is_absolute()
-        || path.as_os_str().encode_wide().any(|unit| unit == 0)
-        || sid_text.contains('\0')
-    {
-        return Err(87);
-    }
-    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let sid_text: Vec<u16> = sid_text.encode_utf16().chain(Some(0)).collect();
-    unsafe {
-        // Pin the target through the whole read/merge/write operation. Using the
-        // path again for SetNamedSecurityInfoW could update a replacement object.
-        let handle = CreateFileW(
-            PCWSTR(name.as_ptr()),
-            READ_CONTROL.0 | WRITE_DAC.0 | FILE_READ_ATTRIBUTES.0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            None,
-        )
-        .map_err(os_error_code)?;
-        let directory = OwnedHandle::new(handle).ok_or(6u32)?;
-        let mut information = BY_HANDLE_FILE_INFORMATION::default();
-        GetFileInformationByHandle(directory.as_raw(), &mut information).map_err(os_error_code)?;
-        if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-            return Err(267);
-        }
-        let mut sid = PSID::default();
-        ConvertStringSidToSidW(PCWSTR(sid_text.as_ptr()), &mut sid).map_err(|_| 87u32)?;
-        let _sid_allocation = LocalAllocation(sid.0);
-        let mut old_acl = std::ptr::null_mut::<ACL>();
-        let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        let status = GetSecurityInfo(
-            directory.as_raw(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(&mut old_acl),
-            None,
-            Some(&mut descriptor),
-        );
-        let _descriptor_allocation = LocalAllocation(descriptor.0);
-        if status.0 != 0 {
-            return Err(status.0);
-        }
-        // A NULL DACL already permits everyone; replacing it would restrict access.
-        if old_acl.is_null() {
-            return Ok(());
-        }
-        let entry = EXPLICIT_ACCESS_W {
-            grfAccessPermissions: FILE_ALL_ACCESS.0,
-            grfAccessMode: GRANT_ACCESS,
-            grfInheritance: windows::Win32::Security::ACE_FLAGS(3),
-            Trustee: TRUSTEE_W {
-                TrusteeForm: TRUSTEE_IS_SID,
-                TrusteeType: TRUSTEE_IS_USER,
-                ptstrName: PWSTR(sid.0.cast()),
-                ..Default::default()
-            },
-        };
-        let mut new_acl = std::ptr::null_mut();
-        let status = SetEntriesInAclW(Some(&[entry]), Some(old_acl), &mut new_acl);
-        let _acl_allocation = LocalAllocation(new_acl.cast());
-        if status.0 != 0 {
-            return Err(status.0);
-        }
-        let status = SetSecurityInfo(
-            directory.as_raw(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(new_acl),
-            None,
-        );
-        if status.0 == 0 {
-            Ok(())
-        } else {
-            Err(status.0)
-        }
-    }
-}
-
-pub fn run_helper(path: &Path, sid: &str) -> i32 {
-    grant_access(path, sid).err().unwrap_or(0) as i32
+/// Only versioned IPC coordinates are accepted, never a target path or SID.
+pub fn run_helper(args: impl IntoIterator<Item = std::ffi::OsString>) -> i32 {
+    let result = (|| {
+        let request = protocol::HelperRequest::parse(args)?;
+        auth::require_elevated()?;
+        let requester = auth::Requester::open(request.requester_pid)?;
+        let server = pipe::create_server(&request.pipe_name)?;
+        let deadline = std::time::Instant::now() + pipe::HANDSHAKE_TIMEOUT;
+        pipe::wait_for_client(server.as_raw(), deadline, requester.process())?;
+        requester.verify_client(server.as_raw())?;
+        let payload = pipe::receive_path(server.as_raw(), deadline, requester.process())?;
+        let path = protocol::decode_path(&payload)?;
+        let sid = requester.client_sid(server.as_raw())?;
+        acl::grant_access(&path, &sid)
+    })();
+    result.err().unwrap_or(0) as i32
 }
 
 #[cfg(test)]
@@ -237,3 +168,7 @@ mod regression_tests;
 #[cfg(test)]
 #[path = "folder_access_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "folder_access/ipc_tests.rs"]
+mod ipc_tests;

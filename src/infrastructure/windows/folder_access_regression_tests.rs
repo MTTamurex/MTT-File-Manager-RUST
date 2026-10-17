@@ -1,4 +1,7 @@
 use super::*;
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Security::Authorization::*;
+use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
 use windows::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 
 struct RestoreAcl {
@@ -106,8 +109,11 @@ fn helper_reports_native_errors_for_missing_directories_and_files() {
     let file = directory.path().join("file.txt");
     std::fs::write(&file, b"sample").unwrap();
     let sid = current_user_sid().unwrap();
-    assert_eq!(run_helper(&file, &sid), 267);
-    assert_eq!(run_helper(&directory.path().join("missing"), &sid), 2);
+    assert_eq!(grant_access(&file, &sid), Err(267));
+    assert_eq!(
+        grant_access(&directory.path().join("missing"), &sid),
+        Err(2)
+    );
 }
 
 #[test]

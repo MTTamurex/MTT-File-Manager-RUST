@@ -4,7 +4,7 @@ use crate::file_index::{self, VolumeIndex};
 use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
 use crate::usn_journal::UsnJournalInfo;
-use crate::volume_indices::{self, SharedVolumeIndices};
+use crate::volume_indices::SharedVolumeIndices;
 use crate::volume_lifecycle::VolumeStopSignal;
 
 pub(super) fn publish_and_run(
@@ -21,7 +21,9 @@ pub(super) fn publish_and_run(
     let current_usn = index.last_usn;
     let sizes_already_loaded = index.sizes_loaded;
 
-    let handle = volume_indices::upsert(&indices, index);
+    let Some(handle) = shutdown.publish_index(&indices, index) else {
+        return;
+    };
     indexing_progress.clear(drive_letter);
     if sizes_already_loaded {
         crate::memory_trim::request_trim(format!("{}:\\ index ready", drive_letter));

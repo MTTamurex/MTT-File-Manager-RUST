@@ -18,9 +18,6 @@ pub(crate) fn spawn_volume_indexer(
     };
 
     let drive_letter = volume.drive_letter;
-    let volume_id = volume.volume_id.clone();
-    let volume_serial = volume.volume_serial;
-    let file_system = volume.file_system.clone();
     let stop = ticket.stop_signal();
     let label = if volume.label.is_empty() {
         "(no label)"
@@ -46,28 +43,17 @@ pub(crate) fn spawn_volume_indexer(
         .name(format!("volume-index-{drive_letter}"))
         .spawn(move || {
             let _ticket = ticket;
-            if volume.usn_supported {
-                super::index_volume(
-                    drive_letter,
-                    volume_id,
-                    volume_serial,
-                    file_system,
-                    indices,
-                    indexing_progress,
-                    db,
-                    stop,
-                );
+            let usn_supported = volume.usn_supported;
+            let volume = super::IndexVolume {
+                drive_letter,
+                volume_id: volume.volume_id,
+                volume_serial: volume.volume_serial,
+                file_system: volume.file_system,
+            };
+            if usn_supported {
+                super::index_volume(volume, indices, indexing_progress, db, stop);
             } else {
-                super::index_filesystem_fallback(
-                    drive_letter,
-                    volume_id,
-                    volume_serial,
-                    volume.file_system,
-                    indices,
-                    indexing_progress,
-                    db,
-                    stop,
-                );
+                super::index_filesystem_fallback(volume, indices, indexing_progress, db, stop);
             }
         });
     if let Err(error) = spawn_result {

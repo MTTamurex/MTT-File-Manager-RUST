@@ -17,15 +17,18 @@ mod size_refresh;
 mod volume_io;
 
 pub(crate) fn index_volume(
-    drive_letter: char,
-    volume_id: String,
-    volume_serial: u32,
-    file_system: String,
+    volume: super::IndexVolume,
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: VolumeStopSignal,
 ) {
+    let super::IndexVolume {
+        drive_letter,
+        volume_id,
+        volume_serial,
+        ..
+    } = volume.clone();
     if shutdown.is_stopped() {
         indexing_progress.clear(drive_letter);
         return;
@@ -33,10 +36,7 @@ pub(crate) fn index_volume(
     let startup_operation = crate::memory_trim::begin_active_operation("USN index startup");
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
     let filesystem_fallback = filesystem_fallback::FilesystemFallback::new(
-        drive_letter,
-        volume_id.clone(),
-        volume_serial,
-        file_system,
+        volume,
         indices.clone(),
         indexing_progress.clone(),
         db.clone(),

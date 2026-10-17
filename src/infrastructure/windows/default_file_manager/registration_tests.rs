@@ -26,6 +26,9 @@ const EXE: &str = r"C:\Program Files\Example\mtt-file-manager.exe";
 #[path = "command_upgrade_tests.rs"]
 mod command_upgrade;
 
+#[path = "win_e_tests.rs"]
+mod win_e;
+
 struct FailOnceRegistry {
     inner: MemoryRegistry,
     fail_at: usize,

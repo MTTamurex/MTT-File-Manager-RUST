@@ -5,6 +5,7 @@ use parking_lot::{Condvar, Mutex};
 #[derive(Default)]
 struct VolumeUsageState {
     removing: bool,
+    replacing: bool,
     active: usize,
 }
 
@@ -44,12 +45,13 @@ impl Default for VolumeUsage {
 
 impl VolumeUsage {
     pub(super) fn is_removing(&self) -> bool {
-        self.state.lock().removing
+        let state = self.state.lock();
+        state.removing || state.replacing
     }
 
     pub(super) fn acquire(self: &Arc<Self>) -> Option<VolumeUseGuard> {
         let mut state = self.state.lock();
-        if state.removing {
+        if state.removing || state.replacing {
             return None;
         }
         state.active += 1;
@@ -58,6 +60,15 @@ impl VolumeUsage {
 
     pub(super) fn begin_removal(&self) {
         self.state.lock().removing = true;
+    }
+
+    pub(super) fn begin_replacement(&self) {
+        self.state.lock().replacing = true;
+    }
+
+    pub(super) fn replacement_is_idle(&self) -> bool {
+        let state = self.state.lock();
+        state.replacing && !state.removing && state.active == 0
     }
 
     pub(super) fn cancel_removal(&self) {
