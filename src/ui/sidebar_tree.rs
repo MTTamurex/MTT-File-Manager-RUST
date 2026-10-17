@@ -218,7 +218,7 @@ fn render_tree_node(
         let text_color = if is_selected {
             crate::ui::theme::selection_text_color(dark_mode)
         } else {
-            ui.visuals().text_color()
+            crate::ui::theme::text_color(dark_mode)
         }
         .gamma_multiply(hidden_opacity);
 
