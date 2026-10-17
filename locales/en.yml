@@ -416,6 +416,7 @@ settings:
   interface_scale: "Text and interface size"
   interface_scale_reset: "Reset to 100%"
   interface_scale_description: "Release the slider to apply the size of text and controls, in addition to Windows display scaling. At 100%, the interface follows Windows scaling. Thumbnail size remains separately adjustable."
+  miscellaneous: "Miscellaneous"
   show_quick_access_sidebar: "Show Quick Access"
   quick_access_position: "Quick Access position"
   quick_access_position_sidebar: "Sidebar (vertical)"

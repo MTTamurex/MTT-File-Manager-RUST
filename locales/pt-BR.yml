@@ -416,6 +416,7 @@ settings:
   interface_scale: "Tamanho do texto e da interface"
   interface_scale_reset: "Restaurar para 100%"
   interface_scale_description: "Solte o controle deslizante para aplicar o tamanho dos textos e controles, além da escala de exibição do Windows. Em 100%, a interface acompanha a escala do Windows. O tamanho das miniaturas continua com ajuste separado."
+  miscellaneous: "Diversos"
   show_quick_access_sidebar: "Mostrar Acesso Rápido"
   quick_access_position: "Posição do Acesso Rápido"
   quick_access_position_sidebar: "Barra lateral (vertical)"

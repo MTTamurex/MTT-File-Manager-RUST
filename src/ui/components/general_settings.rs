@@ -46,6 +46,13 @@ pub fn render_general_settings_section(
     ui.add_space(20.0);
     output.startup_date_changed |= crate::ui::components::tab_settings::render(ui, app);
     ui.add_space(20.0);
+    ui.label(
+        RichText::new(t!("settings.miscellaneous"))
+            .size(16.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
+    ui.add_space(8.0);
     if settings_ui::toggle_row(
         ui,
         &t!("settings.show_quick_access_sidebar"),

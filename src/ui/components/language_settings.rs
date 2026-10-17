@@ -24,19 +24,11 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
         &t!("settings.general_description"),
     );
 
-    ui.label(
-        RichText::new(t!("settings.language"))
-            .size(14.0)
-            .strong()
-            .color(theme::text_color(dark_mode)),
+    settings_ui::section_header(
+        ui,
+        &t!("settings.language"),
+        &t!("settings.language_description"),
     );
-    ui.add_space(4.0);
-    ui.label(
-        RichText::new(t!("settings.language_description"))
-            .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
-    );
-    ui.add_space(10.0);
 
     let current_locale = rust_i18n::locale();
     let selected = LANGUAGES
