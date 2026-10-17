@@ -606,6 +606,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         GlobalSearchCategory::Videos,
         GlobalSearchCategory::Audio,
         GlobalSearchCategory::Documents,
+        GlobalSearchCategory::Applications,
     ];
 
     // Use cached drives to avoid O(N) recomputation every frame.

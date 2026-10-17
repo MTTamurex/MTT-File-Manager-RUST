@@ -339,6 +339,7 @@ search:
   category_videos: "Βίντεο"
   category_audio: "Ήχος"
   category_documents: "Έγγραφα"
+  category_applications: "Εφαρμογές"
   filter_min_size: "Ελάχ. μέγεθος (MB)"
   filter_max_size: "Μέγ. μέγεθος (MB)"
   filter_created_after: "Δημιουργήθηκε μετά"

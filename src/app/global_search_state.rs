@@ -47,6 +47,7 @@ pub enum GlobalSearchCategory {
     Videos,
     Audio,
     Documents,
+    Applications,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -339,6 +339,7 @@ search:
   category_videos: "Видео"
   category_audio: "Аудио"
   category_documents: "Документы"
+  category_applications: "Приложения"
   filter_min_size: "Минимальный размер (МБ)"
   filter_max_size: "Максимальный размер (МБ)"
   filter_created_after: "Созданы после"

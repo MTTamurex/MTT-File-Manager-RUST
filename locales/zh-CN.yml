@@ -339,6 +339,7 @@ search:
   category_videos: "视频"
   category_audio: "音频"
   category_documents: "文档"
+  category_applications: "应用程序"
   filter_min_size: "最小大小（MB）"
   filter_max_size: "最大大小（MB）"
   filter_created_after: "创建时间晚于"

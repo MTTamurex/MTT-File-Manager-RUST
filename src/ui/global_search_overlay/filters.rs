@@ -13,6 +13,7 @@ pub(super) fn category_label(category: GlobalSearchCategory) -> String {
         GlobalSearchCategory::Videos => t!("search.category_videos").to_string(),
         GlobalSearchCategory::Audio => t!("search.category_audio").to_string(),
         GlobalSearchCategory::Documents => t!("search.category_documents").to_string(),
+        GlobalSearchCategory::Applications => t!("search.category_applications").to_string(),
     }
 }
 
@@ -184,6 +185,15 @@ fn matches_category(
             &result.full_path,
             &["mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus"],
         ),
+        GlobalSearchCategory::Applications => {
+            !result.is_dir
+                && extension_in(
+                    &result.full_path,
+                    &[
+                        "exe", "msi", "msix", "appx", "com", "scr", "lnk", "bat", "cmd", "ps1",
+                    ],
+                )
+        }
         GlobalSearchCategory::Documents => extension_in(
             &result.full_path,
             &[
@@ -227,6 +237,9 @@ pub(super) fn format_exact_number(n: u64) -> String {
 
     out.chars().rev().collect()
 }
+
+#[cfg(test)]
+mod application_tests;
 
 #[cfg(test)]
 mod tests {
