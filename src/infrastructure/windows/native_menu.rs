@@ -15,7 +15,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 #[cfg(test)]
 mod first_open_tests;
 
+#[cfg(test)]
+mod drive_selection_tests;
+
 mod cold_start;
+mod drive_selection;
 pub(crate) use cold_start::extract as extract_background_context_menu;
 
 /// Represents a single item in the shell context menu
@@ -134,6 +138,11 @@ pub fn is_filtered_shell_text(text: &str) -> bool {
 }
 
 fn selection_has_single_parent(paths: &[std::path::PathBuf]) -> bool {
+    // Drive roots have no filesystem parent, but share the Shell's This PC folder.
+    // The resolved PIDL parents are still checked before GetUIObjectOf below.
+    if !paths.is_empty() && paths.iter().all(|path| super::is_drive_root_path(path)) {
+        return true;
+    }
     let Some(first_parent) = paths.first().and_then(|path| path.parent()) else {
         return paths.len() == 1;
     };
@@ -160,6 +169,10 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             E_INVALIDARG,
             "Shell context menus require items from one parent folder",
         ));
+    }
+
+    if paths.len() > 1 && paths.iter().all(|path| super::is_drive_root_path(path)) {
+        return drive_selection::extract(hwnd, paths);
     }
 
     unsafe {
@@ -584,5 +597,25 @@ mod tests {
             PathBuf::from(r"C:\Folder\a.txt"),
             PathBuf::from(r"C:\Other\b.txt"),
         ]));
+    }
+
+    #[test]
+    fn shell_selection_accepts_multiple_drive_roots() {
+        assert!(selection_has_single_parent(&[
+            PathBuf::from(r"C:\"),
+            PathBuf::from(r"D:\"),
+            PathBuf::from(r"Z:\"),
+        ]));
+    }
+
+    #[test]
+    fn shell_selection_rejects_drive_roots_mixed_with_other_items() {
+        for paths in [
+            [PathBuf::from(r"C:\"), PathBuf::from(r"D:\Folder")],
+            [PathBuf::from(r"D:\Folder"), PathBuf::from(r"C:\")],
+            [PathBuf::from(r"C:\Folder"), PathBuf::from(r"D:\Folder")],
+        ] {
+            assert!(!selection_has_single_parent(&paths));
+        }
     }
 }
