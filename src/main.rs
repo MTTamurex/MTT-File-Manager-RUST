@@ -572,7 +572,9 @@ fn main() -> eframe::Result<()> {
                 log::error!("[OPEN-FOLDER] missing path argument for --open-folder");
                 std::process::exit(2);
             };
-            let path = PathBuf::from(path_arg);
+            // Shell commands append `\.` to protect trailing backslashes from
+            // Windows argument quoting. Normalize components without disk I/O.
+            let path: PathBuf = PathBuf::from(path_arg).components().collect();
             use mtt_file_manager::infrastructure::windows::default_file_manager;
             let path = if flag_str.eq_ignore_ascii_case("--open-network-location") {
                 match default_file_manager::resolve_network_location_open_target(&path) {

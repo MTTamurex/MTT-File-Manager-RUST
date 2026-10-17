@@ -10,6 +10,7 @@ const DRIVE_REFRESH_INTERVAL_MS: u64 = 30000;
 const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 const DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 5000;
 const REMOTE_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 60000;
+mod computer_items;
 /// Configured virtual drives (Cryptomator and similar) route every volume query
 /// through a decrypting filesystem down to the backing HDD. Re-querying them
 /// every 5 s keeps waking that drive while browsing, so refresh them coarsely
@@ -99,16 +100,6 @@ fn drive_scope_matches(
             crate::infrastructure::windows::DriveType::Remote
                 | crate::infrastructure::windows::DriveType::Unknown
         ),
-    }
-}
-
-fn same_drive_root(left: &str, right: &str) -> bool {
-    match (
-        crate::app::drive_state::normalize_drive_root_key(left),
-        crate::app::drive_state::normalize_drive_root_key(right),
-    ) {
-        (Some(left), Some(right)) => left == right,
-        _ => false,
     }
 }
 
@@ -242,15 +233,7 @@ impl ImageViewerApp {
             return;
         }
 
-        for item in self.all_items_mut().iter_mut() {
-            let item_path = item.path.to_string_lossy();
-            if let Some((_, info)) = results
-                .iter()
-                .find(|(path, _)| same_drive_root(path, item_path.as_ref()))
-            {
-                item.drive_info = Some(info.clone());
-            }
-        }
+        computer_items::apply_drive_info(self.all_items_mut(), results);
         self.sort_items();
         self.sync_selected_file_from_all_items();
         if !self.in_inactive_panel_context {
@@ -416,14 +399,6 @@ mod tests {
             DriveInfoRefreshScope::Remote,
             DriveType::Unknown
         ));
-    }
-
-    #[test]
-    fn drive_info_results_match_equivalent_root_forms() {
-        assert!(same_drive_root("c:", "C:\\"));
-        assert!(same_drive_root("D:\\", "d:\\folder"));
-        assert!(!same_drive_root("C:\\", "D:\\"));
-        assert!(!same_drive_root("not-a-drive", "C:\\"));
     }
 
     #[test]

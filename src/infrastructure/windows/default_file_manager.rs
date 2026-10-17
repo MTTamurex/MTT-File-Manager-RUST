@@ -85,6 +85,9 @@ pub fn registration_status() -> RegistrationStatus {
 /// Upgrade owned legacy or pre-network-location registrations before Shell launch requests.
 pub fn migrate_legacy_registration() -> Result<(), RegistryActionError> {
     let executable = std::env::current_exe().map_err(|_| RegistryActionError::Failed)?;
+    if registration::needs_folder_command_upgrade(&UserRegistry, &executable) {
+        apply_action(RegistryAction::UpgradeFolderCommands)?;
+    }
     let command = folder_command(&executable);
     if registration::needs_network_location_upgrade(&UserRegistry, &executable)
         || LEGACY_KEYS

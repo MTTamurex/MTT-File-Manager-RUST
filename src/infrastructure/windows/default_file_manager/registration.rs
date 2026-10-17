@@ -21,6 +21,7 @@ pub(super) trait Registry {
 
 #[derive(Clone, Copy)]
 pub(super) enum RegistryAction {
+    UpgradeFolderCommands,
     EnableFolders,
     RestoreFolders,
     EnableWinE,
@@ -28,7 +29,41 @@ pub(super) enum RegistryAction {
 }
 
 pub(super) fn folder_command(executable: &Path) -> String {
+    // A root ends in a backslash, which would escape the closing quote in argv.
+    // Appending a directory component keeps it away from the quote; the receiver
+    // removes the lexical `.` component without filesystem access.
+    format!(
+        "\"{}\" --open-folder \"%1\\.\"",
+        executable.to_string_lossy()
+    )
+}
+
+pub(super) fn legacy_folder_command(executable: &Path) -> String {
     format!("\"{}\" --open-folder \"%1\"", executable.to_string_lossy())
+}
+
+pub(super) fn needs_folder_command_upgrade(reg: &impl Registry, executable: &Path) -> bool {
+    let old = legacy_folder_command(executable);
+    CLASSES
+        .iter()
+        .map(|class| format!("{}\\{VERB}\\command", shell_key(class)))
+        .chain(LEGACY_KEYS.iter().map(|key| key.to_string()))
+        .any(|key| owns(reg.read(&key, "").ok().flatten().as_deref(), &old))
+}
+
+fn upgrade_folder_commands(reg: &mut impl Registry, executable: &Path) -> Result<(), String> {
+    let old = legacy_folder_command(executable);
+    let new = folder_command(executable);
+    for key in CLASSES
+        .iter()
+        .map(|class| format!("{}\\{VERB}\\command", shell_key(class)))
+        .chain(LEGACY_KEYS.iter().map(|key| key.to_string()))
+    {
+        if owns(reg.read(&key, "")?.as_deref(), &old) {
+            reg.write(&key, "", &new)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn network_location_command(executable: &Path) -> String {
@@ -89,7 +124,16 @@ fn apply_action(
     executable: &Path,
 ) -> Result<(), String> {
     let command = folder_command(executable);
+    if matches!(
+        action,
+        RegistryAction::UpgradeFolderCommands
+            | RegistryAction::EnableFolders
+            | RegistryAction::RestoreFolders
+    ) {
+        upgrade_folder_commands(reg, executable)?;
+    }
     match action {
+        RegistryAction::UpgradeFolderCommands => {}
         RegistryAction::EnableFolders => {
             // Check every class before changing any existing association.
             for class in CLASSES {
@@ -222,3 +266,7 @@ fn remove_legacy(reg: &mut impl Registry, command: &str) -> Result<(), String> {
 #[cfg(test)]
 #[path = "registration_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shell_command_tests.rs"]
+mod shell_command_tests;

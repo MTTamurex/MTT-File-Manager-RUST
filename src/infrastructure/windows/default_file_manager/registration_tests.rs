@@ -23,6 +23,9 @@ impl Registry for MemoryRegistry {
 
 const EXE: &str = r"C:\Program Files\Example\mtt-file-manager.exe";
 
+#[path = "command_upgrade_tests.rs"]
+mod command_upgrade;
+
 struct FailOnceRegistry {
     inner: MemoryRegistry,
     fail_at: usize,
