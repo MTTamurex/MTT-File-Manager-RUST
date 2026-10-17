@@ -41,9 +41,14 @@ pub(super) fn scroll<R>(
     viewport: egui::Rect,
     contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
+    let max_height = content_height(viewport);
+    // Area reuses its last measured size. Give ScrollArea the viewport budget
+    // instead, or a short/loading popup permanently caps later, larger menus.
+    ui.set_max_height(max_height);
     let output = egui::ScrollArea::vertical()
         .id_salt(id.with("scroll"))
-        .max_height(content_height(viewport))
+        .max_height(max_height)
+        .min_scrolled_height(0.0)
         .auto_shrink([false, true])
         .show(ui, contents);
     ui.ctx().data_mut(|data| {
@@ -58,6 +63,77 @@ pub(super) fn scroll<R>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn popup_sizes(ctx: &egui::Context, viewport: egui::Rect, rows: usize) -> (f32, f32) {
+        let mut sizes = (0.0, 0.0);
+        let input = egui::RawInput {
+            screen_rect: Some(viewport),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let id = egui::Id::new("resizing_context_menu");
+            let area = egui::Area::new(id)
+                .fixed_pos(viewport.min + egui::vec2(4.0, 4.0))
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(4.0)
+                        .show(ui, |ui| {
+                            ui.set_width(220.0);
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            scroll(ui, id, viewport, |ui| {
+                                for _ in 0..rows {
+                                    ui.allocate_exact_size(
+                                        egui::vec2(220.0, 30.0),
+                                        egui::Sense::hover(),
+                                    );
+                                }
+                            })
+                        })
+                        .inner
+                });
+            sizes = (
+                area.inner.content_size.y,
+                area.inner
+                    .inner_rect
+                    .height()
+                    .min(area.inner.content_size.y),
+            );
+            // Expanding the layout budget must not force small popups to fill it.
+            assert!(area.response.rect.height() <= sizes.0.min(content_height(viewport)) + 12.0);
+        });
+        sizes
+    }
+
+    #[test]
+    fn consecutive_popup_sessions_grow_and_shrink_without_inheriting_height() {
+        let ctx = egui::Context::default();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 720.0));
+        for rows in [2, 12, 2, 60, 4] {
+            reset_scroll(&ctx);
+            for _ in 0..3 {
+                let (content, visible) = popup_sizes(&ctx, viewport, rows);
+                let expected = content.min(content_height(viewport));
+                assert!(
+                    (visible - expected).abs() <= 1.0,
+                    "{rows} rows: content={content}, visible={visible}, expected={expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lazy_popup_contents_can_grow_in_the_same_session() {
+        let ctx = egui::Context::default();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 720.0));
+        for rows in [1, 1, 10, 10] {
+            let (content, visible) = popup_sizes(&ctx, viewport, rows);
+            assert!(
+                (visible - content).abs() <= 1.0,
+                "{rows} rows: content={content}, visible={visible}"
+            );
+        }
+    }
 
     #[test]
     fn menu_sessions_reset_all_scroll_offsets_but_lazy_updates_preserve_them() {
