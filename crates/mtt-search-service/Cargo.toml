@@ -1,10 +1,13 @@
 [package]
 name = "mtt-search-service"
-version = "0.2.4"
+version.workspace = true
 edition = "2021"
 
 [[bin]]
 name = "mtt-search-service"
+
+[build-dependencies]
+winresource = "0.1"
 
 [dependencies]
 mtt-search-protocol = { path = "../mtt-search-protocol" }

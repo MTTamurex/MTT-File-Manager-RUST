@@ -3437,7 +3437,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-explorer-command"
-version = "0.1.0"
+version = "0.2.7"
 dependencies = [
  "windows",
  "windows-core",
@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.2.4"
+version = "0.2.7"
 dependencies = [
  "bincode",
  "serde",
@@ -3522,7 +3522,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.2.4"
+version = "0.2.7"
 dependencies = [
  "bincode",
  "libmimalloc-sys",
@@ -3535,6 +3535,7 @@ dependencies = [
  "serde",
  "windows",
  "windows-service",
+ "winresource",
  "zstd",
 ]
 
