@@ -240,7 +240,7 @@ fn render_column_item(
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
         let is_hovered = allow_hover && response.hovered() && !is_selected;
         let is_focused = ctx.selected_item == Some(index);
-        let accent = crate::ui::theme::COLOR_ACCENT;
+        let accent = crate::ui::theme::accent_color(ui.ctx());
         let visual_rect = rect.shrink2(egui::vec2(2.0, 0.0));
 
         if is_selected {
@@ -416,9 +416,9 @@ fn render_column_item_name(
     let display_name =
         truncate_text_for_column(name.as_ref(), COLUMN_WIDTH - 32.0 - tag_offset, &font, ui);
     let color = if is_selected {
-        crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
+        crate::ui::theme::selection_text_color(ui.ctx())
     } else {
-        crate::ui::theme::text_color(ui.visuals().dark_mode)
+        crate::ui::theme::text_color(ui.ctx())
     }
     .gamma_multiply(opacity);
     ui.painter().text(

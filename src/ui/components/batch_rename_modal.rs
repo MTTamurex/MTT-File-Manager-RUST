@@ -70,7 +70,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
 
     let dark_mode = ctx.global_style().visuals.dark_mode;
     let bg_color = if dark_mode {
-        Color32::from_rgb(50, 50, 50)
+        theme::palette::surface(ctx, Color32::from_rgb(50, 50, 50))
     } else {
         Color32::from_rgb(250, 250, 250)
     };
@@ -87,7 +87,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
         .stroke(Stroke::new(
             1.0,
             if dark_mode {
-                Color32::from_gray(70)
+                theme::palette::border(ctx, Color32::from_gray(70))
             } else {
                 Color32::from_gray(220)
             },
@@ -124,12 +124,12 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
                 RichText::new(&title)
                     .size(18.0)
                     .strong()
-                    .color(theme::text_color(dark_mode)),
+                    .color(theme::text_color(ui.ctx())),
             );
 
             ui.add_space(14.0);
 
-            render_controls(ui, &mut state, dark_mode);
+            render_controls(ui, &mut state);
 
             ui.add_space(6.0);
             ui.separator();
@@ -146,19 +146,19 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
             ui.label(
                 RichText::new(t!("batch_rename.rename_order"))
                     .strong()
-                    .color(theme::text_color(dark_mode)),
+                    .color(theme::text_color(ui.ctx())),
             );
             ui.add_space(2.0);
-            render_reorderable_list(ui, &mut state, &preview, half, dark_mode);
+            render_reorderable_list(ui, &mut state, &preview, half);
 
             ui.add_space(6.0);
             ui.label(
                 RichText::new(t!("batch_rename.preview"))
                     .strong()
-                    .color(theme::text_color(dark_mode)),
+                    .color(theme::text_color(ui.ctx())),
             );
             ui.add_space(2.0);
-            render_preview_table(ui, &preview, half, dark_mode);
+            render_preview_table(ui, &preview, half);
 
             // Conflict warning banner
             let conflict_count = preview.iter().filter(|r| r.conflict).count();
@@ -189,9 +189,9 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
                                 RichText::new(apply_label)
                                     .size(14.0)
                                     .strong()
-                                    .color(Color32::WHITE),
+                                    .color(theme::accent_text_color(ui.ctx())),
                             )
-                            .fill(theme::COLOR_ACCENT),
+                            .fill(theme::accent_color(ui.ctx())),
                         )
                         .clicked()
                     {
@@ -207,10 +207,10 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
                         egui::Button::new(
                             RichText::new(t!("batch_rename.btn_cancel"))
                                 .size(14.0)
-                                .color(theme::secondary_text_color(dark_mode)),
+                                .color(theme::secondary_text_color(ui.ctx())),
                         )
                         .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(1.0, theme::secondary_text_color(dark_mode))),
+                        .stroke(Stroke::new(1.0, theme::secondary_text_color(ui.ctx()))),
                     )
                     .clicked()
                 {
@@ -237,14 +237,14 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
 
 // ── Controls row ─────────────────────────────────────────────────────────────
 
-fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: bool) {
+fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState) {
     egui::Grid::new("batch_rename_controls")
         .num_columns(2)
         .spacing([12.0, 6.0])
         .show(ui, |ui| {
             // Row 1 — Name template
             ui.label(
-                RichText::new(t!("batch_rename.base_name")).color(theme::text_color(dark_mode)),
+                RichText::new(t!("batch_rename.base_name")).color(theme::text_color(ui.ctx())),
             );
             ui.add(
                 egui::TextEdit::singleline(&mut state.name_template)
@@ -254,9 +254,7 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: b
             ui.end_row();
 
             // Row 2 — Position + Separator
-            ui.label(
-                RichText::new(t!("batch_rename.position")).color(theme::text_color(dark_mode)),
-            );
+            ui.label(RichText::new(t!("batch_rename.position")).color(theme::text_color(ui.ctx())));
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("batch_pos")
                     .selected_text(state.position.display_name())
@@ -275,7 +273,7 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: b
                     });
 
                 ui.label(
-                    RichText::new(t!("batch_rename.separator")).color(theme::text_color(dark_mode)),
+                    RichText::new(t!("batch_rename.separator")).color(theme::text_color(ui.ctx())),
                 );
                 egui::ComboBox::from_id_salt("batch_sep")
                     .selected_text(state.separator.display_name())
@@ -297,23 +295,21 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: b
 
             // Row 3 — Start, Step, Padding
             ui.label(
-                RichText::new(t!("batch_rename.numbering")).color(theme::text_color(dark_mode)),
+                RichText::new(t!("batch_rename.numbering")).color(theme::text_color(ui.ctx())),
             );
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(t!("batch_rename.start")).color(theme::text_color(dark_mode)),
+                    RichText::new(t!("batch_rename.start")).color(theme::text_color(ui.ctx())),
                 );
                 ui.add(egui::DragValue::new(&mut state.start).range(0..=99999));
 
                 ui.add_space(8.0);
-                ui.label(
-                    RichText::new(t!("batch_rename.step")).color(theme::text_color(dark_mode)),
-                );
+                ui.label(RichText::new(t!("batch_rename.step")).color(theme::text_color(ui.ctx())));
                 ui.add(egui::DragValue::new(&mut state.step).range(1..=9999));
 
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new(t!("batch_rename.padding")).color(theme::text_color(dark_mode)),
+                    RichText::new(t!("batch_rename.padding")).color(theme::text_color(ui.ctx())),
                 );
                 ui.add(
                     egui::DragValue::new(&mut state.padding)
@@ -332,7 +328,6 @@ fn render_reorderable_list(
     state: &mut BatchRenameState,
     preview: &[PreviewRow],
     height: f32,
-    dark_mode: bool,
 ) {
     // Collect filenames before borrowing state mutably
     let filenames: Vec<String> = state
@@ -430,7 +425,7 @@ fn render_reorderable_list(
                             egui::Label::new(
                                 RichText::new(format!("{}.", i + 1))
                                     .weak()
-                                    .color(theme::secondary_text_color(dark_mode)),
+                                    .color(theme::secondary_text_color(ui.ctx())),
                             ),
                         );
 
@@ -438,7 +433,7 @@ fn render_reorderable_list(
                         let name_text = if has_conflict {
                             RichText::new(item).color(Color32::from_rgb(220, 80, 80))
                         } else {
-                            RichText::new(item).color(theme::text_color(dark_mode))
+                            RichText::new(item).color(theme::text_color(ui.ctx()))
                         };
                         ui.label(name_text);
 
@@ -539,7 +534,7 @@ fn render_reorderable_list(
 
 // ── Preview table ─────────────────────────────────────────────────────────────
 
-fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32, dark_mode: bool) {
+fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32) {
     egui::ScrollArea::vertical()
         .id_salt("batch_preview_scroll")
         .max_height(height)
@@ -554,17 +549,17 @@ fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32, 
                     ui.label(
                         RichText::new(t!("batch_rename.col_num"))
                             .strong()
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                     ui.label(
                         RichText::new(t!("batch_rename.col_original"))
                             .strong()
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                     ui.label(
                         RichText::new(t!("batch_rename.col_new"))
                             .strong()
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                     ui.end_row();
 
@@ -572,9 +567,9 @@ fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32, 
                         ui.label(
                             RichText::new(format!("{}.", i + 1))
                                 .weak()
-                                .color(theme::secondary_text_color(dark_mode)),
+                                .color(theme::secondary_text_color(ui.ctx())),
                         );
-                        ui.label(RichText::new(&row.old_name).color(theme::text_color(dark_mode)));
+                        ui.label(RichText::new(&row.old_name).color(theme::text_color(ui.ctx())));
 
                         if row.conflict {
                             ui.colored_label(
@@ -583,7 +578,7 @@ fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32, 
                             );
                         } else {
                             ui.label(
-                                RichText::new(&row.new_name).color(theme::text_color(dark_mode)),
+                                RichText::new(&row.new_name).color(theme::text_color(ui.ctx())),
                             );
                         }
                         ui.end_row();

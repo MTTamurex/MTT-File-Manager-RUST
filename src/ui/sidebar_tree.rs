@@ -110,7 +110,6 @@ fn render_tree_node(
         ) || (response.secondary_clicked() && !ctx.is_renaming && !ctx.is_item_dragging);
 
     if ui.is_rect_visible(rect) {
-        let dark_mode = ui.visuals().dark_mode;
         let hidden_opacity = if node.is_hidden { 0.5 } else { 1.0 };
 
         // Detect if the pointer is hovering this row during an external item drag.
@@ -133,13 +132,10 @@ fn render_tree_node(
             );
         } else if is_selected {
             ui.painter()
-                .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
+                .rect_filled(rect, 0.0, crate::ui::theme::selection_color(ui.ctx()));
         } else if response.hovered() && !ctx.is_item_dragging {
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                crate::ui::theme::selection_hover_color(dark_mode),
-            );
+            ui.painter()
+                .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(ui.ctx()));
         }
 
         let mut cursor_x = rect.min.x + indent;
@@ -216,9 +212,9 @@ fn render_tree_node(
 
         // ── Folder Name ──
         let text_color = if is_selected {
-            crate::ui::theme::selection_text_color(dark_mode)
+            crate::ui::theme::selection_text_color(ui.ctx())
         } else {
-            crate::ui::theme::text_color(dark_mode)
+            crate::ui::theme::text_color(ui.ctx())
         }
         .gamma_multiply(hidden_opacity);
 

@@ -16,7 +16,6 @@ const LANGUAGES: &[(&str, &str)] = &[
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;
-    let dark_mode = ui.visuals().dark_mode;
 
     settings_ui::section_header(
         ui,
@@ -48,7 +47,7 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     ui.label(
         RichText::new(t!("settings.language_apply_immediately"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
 
     language_changed

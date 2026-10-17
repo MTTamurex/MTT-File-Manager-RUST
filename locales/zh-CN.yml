@@ -412,6 +412,8 @@ settings:
   appearance_description: "选择应用视觉主题。"
   theme_light: "浅色"
   theme_dark: "深色"
+  theme_dark_deep: "深邃黑"
+  theme_github_dark: "午夜"
   theme_system: "跟随系统"
   theme_apply_immediately: "主题更改立即生效。"
   interface_scale: "文本和界面大小"

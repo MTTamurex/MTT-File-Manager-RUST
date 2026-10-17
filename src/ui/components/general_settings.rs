@@ -20,7 +20,6 @@ pub fn render_general_settings_section(
     ui: &mut egui::Ui,
     app: &mut ImageViewerApp,
 ) -> GeneralSettingsOutput {
-    let dark_mode = ui.visuals().dark_mode;
     let mut output = GeneralSettingsOutput {
         language_changed: false,
         theme_changed: false,
@@ -50,7 +49,7 @@ pub fn render_general_settings_section(
         RichText::new(t!("settings.miscellaneous"))
             .size(16.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(8.0);
     if settings_ui::toggle_row(
@@ -64,7 +63,7 @@ pub fn render_general_settings_section(
     ui.label(
         RichText::new(t!("settings.quick_access_position"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     let placements: [(QuickAccessPlacement, &str); 2] = [
         (

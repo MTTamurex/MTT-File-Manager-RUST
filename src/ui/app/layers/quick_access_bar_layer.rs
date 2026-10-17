@@ -19,7 +19,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
 
     let dark_mode = root_ui.visuals().dark_mode;
     let separator_color = if dark_mode {
-        Color32::from_rgb(80, 80, 80)
+        crate::ui::theme::palette::border(root_ui.ctx(), Color32::from_rgb(80, 80, 80))
     } else {
         Color32::from_rgb(210, 210, 210)
     };
@@ -44,7 +44,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
         .exact_size(QUICK_ACCESS_BAR_HEIGHT)
         .frame(egui::Frame {
             fill: if dark_mode {
-                Color32::from_rgb(45, 45, 45)
+                crate::ui::theme::palette::surface(root_ui.ctx(), Color32::from_rgb(45, 45, 45))
             } else {
                 Color32::from_rgb(243, 243, 243)
             },
@@ -96,7 +96,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             ui.painter().rect_filled(
                                 add_rect,
                                 5.0,
-                                crate::ui::theme::selection_hover_color(dark_mode),
+                                crate::ui::theme::selection_hover_color(ui.ctx()),
                             );
                         }
                         // Optically the 20pt "+" sits 1px low; nudge the glyph up.
@@ -451,11 +451,10 @@ fn paint_chip(
         return;
     }
 
-    let dark_mode = ui.visuals().dark_mode;
     let fill = if selected {
-        crate::ui::theme::selection_color(dark_mode)
+        crate::ui::theme::selection_color(ui.ctx())
     } else if hovered {
-        crate::ui::theme::selection_hover_color(dark_mode)
+        crate::ui::theme::selection_hover_color(ui.ctx())
     } else {
         Color32::TRANSPARENT
     };
@@ -483,7 +482,7 @@ fn paint_chip(
         label,
         egui::FontId::proportional(12.0),
         if selected {
-            crate::ui::theme::selection_text_color(dark_mode)
+            crate::ui::theme::selection_text_color(ui.ctx())
         } else {
             ui.visuals().text_color()
         },

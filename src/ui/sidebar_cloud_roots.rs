@@ -114,7 +114,6 @@ pub fn render_cloud_roots(
         );
 
         if ui.is_rect_visible(rect) {
-            let dark_mode = ui.visuals().dark_mode;
             let drag_hover = ctx.is_item_dragging
                 && ui
                     .input(|inp| inp.pointer.hover_pos())
@@ -130,12 +129,12 @@ pub fn render_cloud_roots(
                 );
             } else if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(ui.ctx()));
             } else if response.hovered() && !ctx.is_item_dragging {
                 ui.painter().rect_filled(
                     rect,
                     0.0,
-                    crate::ui::theme::selection_hover_color(dark_mode),
+                    crate::ui::theme::selection_hover_color(ui.ctx()),
                 );
             }
 
@@ -189,7 +188,7 @@ pub fn render_cloud_roots(
                     &root.label,
                     egui::FontId::proportional(11.5),
                     if is_selected {
-                        crate::ui::theme::selection_text_color(dark_mode)
+                        crate::ui::theme::selection_text_color(ui.ctx())
                     } else {
                         ui.visuals().text_color()
                     },

@@ -165,7 +165,6 @@ pub(super) fn render_result_row(
         is_dir,
     );
 
-    let dark_mode = ui.visuals().dark_mode;
     let is_selected = app.global_search.selected_indices.contains(&source_idx);
     let is_renaming = app
         .global_search
@@ -174,7 +173,7 @@ pub(super) fn render_result_row(
         .is_some_and(|rename| rename.source_index == source_idx);
     if is_selected {
         ui.painter()
-            .rect_filled(row_rect, 4.0, theme::selection_color(dark_mode));
+            .rect_filled(row_rect, 4.0, theme::selection_color(ui.ctx()));
     } else if row_resp.hovered() {
         ui.painter().rect_filled(row_rect, 4.0, hover_color);
     }
@@ -225,17 +224,17 @@ pub(super) fn render_result_row(
     let file_type = actions::file_type_label(&full_path, is_dir);
     let meta_text = actions::format_result_meta(&file_type);
     let text_color = if is_selected {
-        theme::selection_text_color(dark_mode)
+        theme::selection_text_color(ui.ctx())
     } else {
         ui.visuals().text_color()
     };
     let secondary_color = if is_selected {
-        theme::selection_text_color(dark_mode)
+        theme::selection_text_color(ui.ctx())
     } else {
         egui::Color32::from_gray(120)
     };
     let meta_color = if is_selected {
-        theme::selection_text_color(dark_mode)
+        theme::selection_text_color(ui.ctx())
     } else {
         egui::Color32::from_gray(140)
     };

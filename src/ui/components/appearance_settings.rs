@@ -10,7 +10,6 @@ pub fn render_appearance_settings_section(
     interface_scale: &mut f32,
 ) -> bool {
     let mut changed = false;
-    let dark_mode = ui.visuals().dark_mode;
 
     settings_ui::section_header(
         ui,
@@ -18,9 +17,11 @@ pub fn render_appearance_settings_section(
         &t!("settings.appearance_description"),
     );
 
-    let modes: [(ThemeMode, &str); 3] = [
+    let modes: [(ThemeMode, &str); 5] = [
         (ThemeMode::Light, &t!("settings.theme_light")),
         (ThemeMode::Dark, &t!("settings.theme_dark")),
+        (ThemeMode::DarkDeep, &t!("settings.theme_dark_deep")),
+        (ThemeMode::GitHubDark, &t!("settings.theme_github_dark")),
         (ThemeMode::System, &t!("settings.theme_system")),
     ];
     let selected = modes
@@ -28,7 +29,7 @@ pub fn render_appearance_settings_section(
         .position(|(mode, _)| mode == theme_mode)
         .unwrap_or(0);
     let labels: Vec<&str> = modes.iter().map(|(_, name)| *name).collect();
-    if let Some(idx) = settings_ui::segmented_choice(ui, &labels, selected) {
+    if let Some(idx) = settings_ui::choice_list(ui, &labels, selected) {
         *theme_mode = modes[idx].0;
         changed = true;
     }
@@ -37,7 +38,7 @@ pub fn render_appearance_settings_section(
     ui.label(
         RichText::new(t!("settings.theme_apply_immediately"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
 
     ui.add_space(16.0);
@@ -52,7 +53,7 @@ pub fn render_appearance_settings_section(
     ui.label(
         RichText::new(t!("settings.interface_scale_description"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
 
     changed

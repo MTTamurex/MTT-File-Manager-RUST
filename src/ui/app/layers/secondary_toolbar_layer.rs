@@ -12,7 +12,7 @@ mod view_zoom_controls;
 pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
     let dark_mode = root_ui.visuals().dark_mode;
     let separator_color = if dark_mode {
-        egui::Color32::from_rgb(80, 80, 80)
+        theme::palette::border(root_ui.ctx(), egui::Color32::from_rgb(80, 80, 80))
     } else {
         egui::Color32::from_rgb(210, 210, 210)
     };
@@ -22,7 +22,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: 
         .exact_size(46.0)
         .frame(egui::Frame {
             fill: if dark_mode {
-                egui::Color32::from_rgb(45, 45, 45)
+                theme::palette::surface(root_ui.ctx(), egui::Color32::from_rgb(45, 45, 45))
             } else {
                 egui::Color32::WHITE
             },

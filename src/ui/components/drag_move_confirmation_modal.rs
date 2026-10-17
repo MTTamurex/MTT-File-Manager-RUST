@@ -108,7 +108,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
         .show(ctx, |ui| {
             let dark_mode = ui.visuals().dark_mode;
             let bg_color = if dark_mode {
-                Color32::from_rgb(50, 50, 50)
+                theme::palette::surface(ui.ctx(), Color32::from_rgb(50, 50, 50))
             } else {
                 Color32::from_rgb(250, 250, 250)
             };
@@ -125,7 +125,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                 .stroke(egui::Stroke::new(
                     1.0,
                     if dark_mode {
-                        Color32::from_gray(70)
+                        theme::palette::border(ui.ctx(), Color32::from_gray(70))
                     } else {
                         Color32::from_gray(220)
                     },
@@ -144,7 +144,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                         RichText::new(t!("drag_drop.confirm_move_title"))
                             .size(18.0)
                             .strong()
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
 
                     ui.add_space(14.0);
@@ -158,14 +158,14 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                     ui.label(
                         RichText::new(summary)
                             .size(14.0)
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
 
                     ui.add_space(12.0);
 
                     // Destination block
                     let dest_bg = if dark_mode {
-                        Color32::from_rgb(40, 40, 40)
+                        theme::palette::raised(ui.ctx(), Color32::from_rgb(40, 40, 40))
                     } else {
                         Color32::from_rgb(240, 240, 240)
                     };
@@ -178,14 +178,14 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                             ui.label(
                                 RichText::new(t!("drag_drop.confirm_move_destination"))
                                     .size(12.0)
-                                    .color(theme::secondary_text_color(dark_mode)),
+                                    .color(theme::secondary_text_color(ui.ctx())),
                             );
                             ui.add_space(2.0);
                             ui.label(
                                 RichText::new(dest_folder)
                                     .size(13.0)
                                     .monospace()
-                                    .color(theme::text_color(dark_mode)),
+                                    .color(theme::text_color(ui.ctx())),
                             );
                         });
 
@@ -196,16 +196,20 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                         ui.label(
                             RichText::new(t!("drag_drop.confirm_move_items"))
                                 .size(12.0)
-                                .color(theme::secondary_text_color(dark_mode)),
+                                .color(theme::secondary_text_color(ui.ctx())),
                         );
                         ui.add_space(4.0);
                         for name in &item_names {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("•").size(12.0).color(theme::COLOR_ACCENT));
+                                ui.label(
+                                    RichText::new("•")
+                                        .size(12.0)
+                                        .color(theme::accent_color(ui.ctx())),
+                                );
                                 ui.label(
                                     RichText::new(name)
                                         .size(12.0)
-                                        .color(theme::text_color(dark_mode)),
+                                        .color(theme::text_color(ui.ctx())),
                                 );
                             });
                         }
@@ -216,7 +220,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                                         .to_string(),
                                 )
                                 .size(12.0)
-                                .color(theme::secondary_text_color(dark_mode))
+                                .color(theme::secondary_text_color(ui.ctx()))
                                 .italics(),
                             );
                         }
@@ -234,9 +238,9 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                                     RichText::new(t!("drag_drop.confirm_move_confirm"))
                                         .size(14.0)
                                         .strong()
-                                        .color(Color32::WHITE),
+                                        .color(theme::accent_text_color(ui.ctx())),
                                 )
-                                .fill(theme::COLOR_ACCENT),
+                                .fill(theme::accent_color(ui.ctx())),
                             )
                             .clicked()
                         {
@@ -251,12 +255,12 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                                 egui::Button::new(
                                     RichText::new(t!("drag_drop.confirm_move_cancel"))
                                         .size(14.0)
-                                        .color(theme::secondary_text_color(dark_mode)),
+                                        .color(theme::secondary_text_color(ui.ctx())),
                                 )
                                 .fill(Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::new(
                                     1.0,
-                                    theme::secondary_text_color(dark_mode),
+                                    theme::secondary_text_color(ui.ctx()),
                                 )),
                             )
                             .clicked()

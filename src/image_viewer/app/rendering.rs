@@ -26,7 +26,7 @@ fn take_zoom_wheel_delta(ui: &mut egui::Ui) -> f32 {
 impl super::DedicatedImageViewerApp {
     pub(super) fn render_top_bar(&mut self, root_ui: &mut egui::Ui) {
         let ctx = root_ui.ctx().clone();
-        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.ctx());
         egui::Panel::top("image_viewer_top_bar")
             .frame(
                 egui::Frame::new()
@@ -280,7 +280,7 @@ impl super::DedicatedImageViewerApp {
     }
 
     pub(super) fn render_bottom_bar(&mut self, root_ui: &mut egui::Ui) {
-        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.ctx());
         egui::Panel::bottom("image_viewer_bottom_bar")
             .frame(
                 egui::Frame::new()

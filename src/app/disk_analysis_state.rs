@@ -218,9 +218,9 @@ pub struct DiskAnalysisState {
     /// stored as the raw pointer value to keep the state `Send`.
     #[cfg(target_os = "windows")]
     pub viewport_hwnd: Option<isize>,
-    /// Last dark-mode flag applied to the viewport title bar.
+    /// Last theme and resolved appearance applied to the viewport title bar.
     #[cfg(target_os = "windows")]
-    pub viewport_title_bar_dark: Option<bool>,
+    pub viewport_title_bar_theme: Option<(crate::app::navigation_state::ThemeMode, bool)>,
     req_sender: Sender<DiskAnalysisRequest>,
     res_receiver: Receiver<DiskAnalysisMessage>,
     query_sender: Sender<QueryRequest>,
@@ -312,7 +312,7 @@ impl DiskAnalysisState {
             #[cfg(target_os = "windows")]
             viewport_hwnd: None,
             #[cfg(target_os = "windows")]
-            viewport_title_bar_dark: None,
+            viewport_title_bar_theme: None,
             req_sender,
             res_receiver,
             query_sender,

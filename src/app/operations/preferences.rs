@@ -8,7 +8,7 @@
 //! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
 
 use crate::app::dual_panel::ActivePanel;
-use crate::app::navigation_state::{QuickAccessPlacement, ThemeMode};
+use crate::app::navigation_state::QuickAccessPlacement;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
@@ -357,11 +357,7 @@ impl ImageViewerApp {
         prefs.push(("language", rust_i18n::locale().to_string()));
 
         // Theme preference
-        let theme_str = match self.theme_mode {
-            ThemeMode::Light => "light",
-            ThemeMode::Dark => "dark",
-            ThemeMode::System => "system",
-        };
+        let theme_str = self.theme_mode.preference();
         prefs.push(("theme_mode", theme_str.to_string()));
         prefs.push((
             crate::ui::interface_scale::PREFERENCE_KEY,

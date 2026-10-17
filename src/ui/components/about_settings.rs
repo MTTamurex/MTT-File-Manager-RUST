@@ -7,11 +7,9 @@ const APP_NAME: &str = "MTT File Manager";
 const REPOSITORY_URL: &str = "https://github.com/MTTamurex/MTT-File-Manager-RUST";
 
 pub fn render_about_settings_section(ui: &mut egui::Ui) {
-    let dark_mode = ui.visuals().dark_mode;
-
     settings_ui::section_header(ui, &t!("settings.about"), &t!("settings.about_description"));
 
-    settings_ui::card_frame(dark_mode).show(ui, |ui| {
+    settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
 
         ui.horizontal(|ui| {
@@ -19,7 +17,7 @@ pub fn render_about_settings_section(ui: &mut egui::Ui) {
                 RichText::new(APP_NAME)
                     .size(16.0)
                     .strong()
-                    .color(theme::text_color(dark_mode)),
+                    .color(theme::text_color(ui.ctx())),
             );
             ui.add_space(8.0);
             let warn = ui.visuals().warn_fg_color;
@@ -46,28 +44,27 @@ pub fn render_about_settings_section(ui: &mut egui::Ui) {
             .num_columns(2)
             .spacing([16.0, 10.0])
             .show(ui, |ui| {
-                about_row(ui, dark_mode, &t!("settings.about_version"), |ui| {
+                about_row(ui, &t!("settings.about_version"), |ui| {
                     ui.label(
-                        RichText::new(env!("CARGO_PKG_VERSION"))
-                            .color(theme::text_color(dark_mode)),
+                        RichText::new(env!("CARGO_PKG_VERSION")).color(theme::text_color(ui.ctx())),
                     );
                 });
 
-                about_row(ui, dark_mode, &t!("settings.about_repository"), |ui| {
+                about_row(ui, &t!("settings.about_repository"), |ui| {
                     ui.hyperlink_to(REPOSITORY_URL, REPOSITORY_URL);
                 });
 
-                about_row(ui, dark_mode, &t!("settings.about_license"), |ui| {
+                about_row(ui, &t!("settings.about_license"), |ui| {
                     ui.label(
                         RichText::new(t!("settings.about_license_value"))
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                 });
 
-                about_row(ui, dark_mode, &t!("settings.about_third_party"), |ui| {
+                about_row(ui, &t!("settings.about_third_party"), |ui| {
                     ui.label(
                         RichText::new(t!("settings.about_third_party_value"))
-                            .color(theme::text_color(dark_mode)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                 });
             });
@@ -77,17 +74,12 @@ pub fn render_about_settings_section(ui: &mut egui::Ui) {
     ui.label(
         RichText::new(t!("settings.about_notice"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
 }
 
-fn about_row(
-    ui: &mut egui::Ui,
-    dark_mode: bool,
-    label: &str,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    ui.label(RichText::new(label).color(theme::secondary_text_color(dark_mode)));
+fn about_row(ui: &mut egui::Ui, label: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    ui.label(RichText::new(label).color(theme::secondary_text_color(ui.ctx())));
     add_contents(ui);
     ui.end_row();
 }

@@ -412,6 +412,8 @@ settings:
   appearance_description: "Escolha o tema visual do aplicativo."
   theme_light: "Claro"
   theme_dark: "Escuro"
+  theme_dark_deep: "Escuro profundo"
+  theme_github_dark: "Meia-noite"
   theme_system: "Sistema"
   theme_apply_immediately: "As alterações de tema são aplicadas imediatamente."
   interface_scale: "Tamanho do texto e da interface"

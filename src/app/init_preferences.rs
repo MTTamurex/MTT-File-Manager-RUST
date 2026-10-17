@@ -232,11 +232,7 @@ impl StartupPreferences {
 
         let theme_mode = prefs
             .get("theme_mode")
-            .map(|s| match s.as_str() {
-                "dark" => ThemeMode::Dark,
-                "system" => ThemeMode::System,
-                _ => ThemeMode::Light,
-            })
+            .map(|s| ThemeMode::from_preference(s))
             .unwrap_or(ThemeMode::Light);
 
         let interface_scale = crate::ui::interface_scale::from_preference(

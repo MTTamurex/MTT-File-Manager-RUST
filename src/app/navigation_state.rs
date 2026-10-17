@@ -11,16 +11,38 @@ pub enum QuickAccessPlacement {
 pub enum ThemeMode {
     Light,
     Dark,
+    DarkDeep,
+    GitHubDark,
     System,
 }
 
 impl ThemeMode {
+    pub fn from_preference(value: &str) -> Self {
+        match value {
+            "dark" => Self::Dark,
+            "dark_deep" => Self::DarkDeep,
+            "github_dark" => Self::GitHubDark,
+            "system" => Self::System,
+            _ => Self::Light,
+        }
+    }
+
+    pub fn preference(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::DarkDeep => "dark_deep",
+            Self::GitHubDark => "github_dark",
+            Self::System => "system",
+        }
+    }
+
     /// Whether this mode should render dark right now. `System` follows the
     /// Windows "app mode" setting, falling back to light when it is unavailable.
     pub fn resolve_dark(self) -> bool {
         match self {
             ThemeMode::Light => false,
-            ThemeMode::Dark => true,
+            ThemeMode::Dark | ThemeMode::DarkDeep | ThemeMode::GitHubDark => true,
             ThemeMode::System => crate::infrastructure::windows::windows_app_is_dark(),
         }
     }

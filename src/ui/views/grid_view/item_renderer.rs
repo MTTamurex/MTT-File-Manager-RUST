@@ -148,7 +148,7 @@ pub(super) fn render_grid_item(
     let is_focused = ctx.selected_item == Some(index);
 
     let rounding = 4.0;
-    let accent_color = crate::ui::theme::COLOR_ACCENT;
+    let accent_color = crate::ui::theme::accent_color(ui.ctx());
 
     if is_selected {
         let stroke_width = if is_hovered_visual { 2.5 } else { 2.0 };

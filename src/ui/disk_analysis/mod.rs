@@ -25,9 +25,9 @@ use eframe::egui;
 use rust_i18n::t;
 
 /// The analyzer viewport keeps the native Windows caption; mirror the app
-/// theme onto it via DWM immersive dark mode (same as the dedicated viewers).
+/// theme onto it, including custom palette colors used by dedicated viewers.
 #[cfg(target_os = "windows")]
-fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
+fn sync_native_title_bar(state: &mut DiskAnalysisState, ctx: &egui::Context) {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
@@ -38,7 +38,7 @@ fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
         _ => {
             // Window was destroyed (or never found): force re-lookup.
             state.viewport_hwnd = None;
-            state.viewport_title_bar_dark = None;
+            state.viewport_title_bar_theme = None;
             None
         }
     };
@@ -54,13 +54,17 @@ fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
         if let Some(h) = found {
             state.viewport_hwnd = Some(h.0 as isize);
         }
-        state.viewport_title_bar_dark = None;
+        state.viewport_title_bar_theme = None;
         found
     });
     if let Some(hwnd) = hwnd {
-        if state.viewport_title_bar_dark != Some(dark) {
-            crate::infrastructure::windows::window_corners::apply_dark_title_bar(hwnd, dark);
-            state.viewport_title_bar_dark = Some(dark);
+        let theme = (
+            crate::ui::theme::current_mode(ctx),
+            ctx.global_style().visuals.dark_mode,
+        );
+        if state.viewport_title_bar_theme != Some(theme) {
+            crate::ui::theme::apply_native_title_bar(ctx, hwnd);
+            state.viewport_title_bar_theme = Some(theme);
         }
     }
 }
@@ -123,7 +127,7 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
 
     #[cfg(target_os = "windows")]
-    sync_native_title_bar(state, ctx.global_style().visuals.dark_mode);
+    sync_native_title_bar(state, &ctx);
 
     if state.poll() {
         ctx.request_repaint();

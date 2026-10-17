@@ -56,7 +56,7 @@ fn paint_analyze_button(
     let dark = ui.visuals().dark_mode;
     let bg = if resp.hovered() {
         if dark {
-            egui::Color32::from_rgb(70, 70, 74)
+            crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(70, 70, 74))
         } else {
             egui::Color32::from_rgb(235, 235, 238)
         }

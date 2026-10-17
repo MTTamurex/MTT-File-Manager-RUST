@@ -14,12 +14,12 @@ pub(super) fn render_window_controls(
 ) {
     let is_dark = ui.visuals().dark_mode;
     let text_color = if is_dark {
-        Color32::from_rgb(220, 220, 220)
+        theme::text_color(ui.ctx())
     } else {
         Color32::from_rgb(30, 30, 30)
     };
     let normal_bg = if is_dark {
-        Color32::from_rgb(30, 30, 30)
+        theme::palette::background(ui.ctx(), Color32::from_rgb(30, 30, 30))
     } else {
         Color32::from_rgb(230, 230, 230)
     };

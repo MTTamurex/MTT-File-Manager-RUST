@@ -73,7 +73,7 @@ pub(crate) fn render(ui: &mut egui::Ui, view_mode: ViewMode, thumbnail_size: &mu
                         !matches!(view_mode, ViewMode::List | ViewMode::ColumnList);
                     ui.label(
                         egui::RichText::new(t!("status_bar.thumbnail_size").to_string())
-                            .color(theme::text_color(is_dark)),
+                            .color(theme::text_color(ui.ctx())),
                     );
                     ui.spacing_mut().slider_width = 56.0;
                     ui.spacing_mut().interact_size.y = 14.0;

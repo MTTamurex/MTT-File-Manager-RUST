@@ -196,8 +196,7 @@ impl PdfViewerApp {
 
         egui::Panel::top("pdf_search_bar")
             .frame({
-                let (bar_fill, _) =
-                    crate::ui::theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+                let (bar_fill, _) = crate::ui::theme::viewer_bar_colors(root_ui.ctx());
                 egui::Frame::new()
                     .fill(bar_fill)
                     .inner_margin(egui::Margin::symmetric(10, 6))
@@ -296,7 +295,7 @@ impl PdfViewerApp {
                 });
 
                 let inner = ui.max_rect();
-                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.ctx());
                 ui.painter().hline(
                     inner.x_range(),
                     inner.max.y + 6.0,

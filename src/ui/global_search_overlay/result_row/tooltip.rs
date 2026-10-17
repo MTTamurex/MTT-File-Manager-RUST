@@ -178,7 +178,6 @@ fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
     if tag_ids.is_empty() {
         return;
     }
-    let dark_mode = ui.visuals().dark_mode;
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(
             egui::vec2(110.0, 18.0),
@@ -191,7 +190,7 @@ fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
                         t!("file_info.tags")
                     })
                     .size(12.0)
-                    .color(crate::ui::theme::secondary_text_color(dark_mode)),
+                    .color(crate::ui::theme::secondary_text_color(ui.ctx())),
                 );
             },
         );
@@ -209,7 +208,7 @@ fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
                 ui.label(
                     egui::RichText::new(tag.name.clone())
                         .size(12.0)
-                        .color(crate::ui::theme::text_color(dark_mode)),
+                        .color(crate::ui::theme::text_color(ui.ctx())),
                 );
                 ui.add_space(6.0);
             }

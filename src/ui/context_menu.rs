@@ -74,11 +74,15 @@ const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
 const HOVER_H_MARGIN: f32 = 4.0;
 
 /// Menu surface fill + border, matching the modernized window chrome.
-fn menu_chrome(dark_mode: bool) -> (egui::Color32, egui::Stroke) {
+fn menu_chrome(ctx: &egui::Context) -> (egui::Color32, egui::Stroke) {
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         (
-            egui::Color32::from_rgb(44, 44, 44),
-            egui::Stroke::new(1.0, egui::Color32::from_gray(70)),
+            crate::ui::theme::palette::surface(ctx, egui::Color32::from_rgb(44, 44, 44)),
+            egui::Stroke::new(
+                1.0,
+                crate::ui::theme::palette::border(ctx, egui::Color32::from_gray(70)),
+            ),
         )
     } else {
         (
@@ -206,7 +210,7 @@ pub fn render_context_menu(
         .fixed_pos(menu_pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            let (menu_fill, menu_stroke) = menu_chrome(ui.visuals().dark_mode);
+            let (menu_fill, menu_stroke) = menu_chrome(ui.ctx());
             crate::ui::video_overlay::popup_frame(ui, menu_id)
                 .fill(menu_fill)
                 .stroke(menu_stroke)
@@ -764,7 +768,7 @@ fn render_single_item(
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
                 .show(ui.ctx(), |ui| {
-                    let (menu_fill, menu_stroke) = menu_chrome(ui.visuals().dark_mode);
+                    let (menu_fill, menu_stroke) = menu_chrome(ui.ctx());
                     crate::ui::video_overlay::popup_frame(ui, submenu_id)
                         .fill(menu_fill)
                         .stroke(menu_stroke)

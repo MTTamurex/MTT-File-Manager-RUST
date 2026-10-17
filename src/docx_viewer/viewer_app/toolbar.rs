@@ -172,7 +172,7 @@ impl DocxViewerApp {
     }
 
     pub(super) fn show_toolbar_frame(&mut self, ui: &mut egui::Ui) {
-        let (bar_fill, separator) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+        let (bar_fill, separator) = crate::ui::theme::viewer_bar_colors(ui.ctx());
         egui::Panel::top("docx_toolbar")
             .frame(
                 egui::Frame::new()

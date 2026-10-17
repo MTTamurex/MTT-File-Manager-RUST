@@ -204,7 +204,7 @@ pub(super) fn render_list_item(
         let is_focused = ctx.selected_item == Some(i);
 
         let rounding = 4.0;
-        let accent_color = crate::ui::theme::COLOR_ACCENT;
+        let accent_color = crate::ui::theme::accent_color(ui.ctx());
 
         // ADJUST RECT TO AVOID SCROLLBAR OVERLAP
         let mut visual_rect = rect;
@@ -259,15 +259,15 @@ pub(super) fn render_list_item(
         }
 
         let text_color = if is_selected {
-            crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
+            crate::ui::theme::selection_text_color(ui.ctx())
         } else {
-            crate::ui::theme::text_color(ui.visuals().dark_mode)
+            crate::ui::theme::text_color(ui.ctx())
         }
         .gamma_multiply(hidden_opacity);
         let secondary_color = if is_selected {
-            crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
+            crate::ui::theme::selection_text_color(ui.ctx())
         } else {
-            crate::ui::theme::secondary_text_color(ui.visuals().dark_mode)
+            crate::ui::theme::secondary_text_color(ui.ctx())
         }
         .gamma_multiply(hidden_opacity);
 

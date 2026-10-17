@@ -13,7 +13,7 @@ pub(crate) fn render_tab_bar_layer(
         .exact_size(36.0)
         .frame(egui::Frame {
             fill: if dark_mode {
-                egui::Color32::from_rgb(30, 30, 30)
+                crate::ui::theme::palette::background(root_ui.ctx(), egui::Color32::from_rgb(30, 30, 30))
             } else {
                 egui::Color32::from_rgb(230, 230, 230)
             },

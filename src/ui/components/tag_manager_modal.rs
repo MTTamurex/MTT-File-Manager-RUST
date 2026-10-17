@@ -194,13 +194,12 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         .filter_map(|id| app.tag_definitions.get(id).cloned())
         .collect();
     let mut actions = Vec::new();
-    let dark_mode = ui.visuals().dark_mode;
 
     ui.vertical(|ui| {
         settings_ui::sub_header(ui, &t!("tags.add"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(t!("tags.name")).color(theme::secondary_text_color(dark_mode)));
+            ui.label(RichText::new(t!("tags.name")).color(theme::secondary_text_color(ui.ctx())));
             let edit_width = (ui.available_width() - 170.0).max(120.0);
             settings_ui::text_edit(ui, edit_width, &mut app.tag_manager_new_name);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -221,7 +220,7 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
         if tags.is_empty() {
             ui.label(
-                RichText::new(t!("tags.no_tags")).color(theme::secondary_text_color(dark_mode)),
+                RichText::new(t!("tags.no_tags")).color(theme::secondary_text_color(ui.ctx())),
             );
         }
 

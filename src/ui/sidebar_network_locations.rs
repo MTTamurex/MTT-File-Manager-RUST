@@ -46,13 +46,15 @@ pub(super) fn render_network_locations(
         let arrow_zone = Rect::from_min_size(rect.min, egui::vec2(18.0, rect.height()));
         let label_rect = Rect::from_min_max(Pos2::new(rect.min.x + 48.0, rect.min.y), rect.max);
         if ui.is_rect_visible(rect) {
-            let dark = ui.visuals().dark_mode;
             if selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark));
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(ui.ctx()));
             } else if response.hovered() && !ctx.is_item_dragging {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark));
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    crate::ui::theme::selection_hover_color(ui.ctx()),
+                );
             }
             ui.painter().text(
                 arrow_zone.center(),
@@ -84,7 +86,7 @@ pub(super) fn render_network_locations(
                     &location.label,
                     egui::FontId::proportional(11.5),
                     if selected {
-                        crate::ui::theme::selection_text_color(dark)
+                        crate::ui::theme::selection_text_color(ui.ctx())
                     } else {
                         ui.visuals().text_color()
                     },

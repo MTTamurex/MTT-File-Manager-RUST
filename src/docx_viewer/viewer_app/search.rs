@@ -191,8 +191,7 @@ impl DocxViewerApp {
             return;
         }
 
-        let (bar_fill, separator) =
-            crate::ui::theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        let (bar_fill, separator) = crate::ui::theme::viewer_bar_colors(root_ui.ctx());
         egui::Panel::top("docx_search_bar")
             .frame(
                 egui::Frame::new()

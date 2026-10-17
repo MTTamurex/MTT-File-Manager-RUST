@@ -184,28 +184,28 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                 theme::color_hover()
             };
             let dark_mode = ui.visuals().dark_mode;
-            ui.visuals_mut().selection.bg_fill = theme::selection_color(dark_mode);
+            ui.visuals_mut().selection.bg_fill = theme::selection_color(ui.ctx());
             ui.visuals_mut().selection.stroke =
-                egui::Stroke::new(0.0, theme::selection_text_color(dark_mode));
+                egui::Stroke::new(0.0, theme::selection_text_color(ui.ctx()));
             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
             ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
             ui.visuals_mut().widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.0, theme::COLOR_ACCENT);
+                egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
             ui.visuals_mut().widgets.active.bg_fill = hover_color;
             ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, theme::COLOR_ACCENT);
+            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
 
             egui::Frame::window(ui.style())
                 .fill(if dark_mode {
-                    egui::Color32::from_rgb(43, 43, 43)
+                    theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(43, 43, 43))
                 } else {
                     egui::Color32::from_rgb(246, 246, 246)
                 })
                 .stroke(egui::Stroke::new(
                     1.0,
                     if dark_mode {
-                        egui::Color32::from_gray(70)
+                        theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
                     } else {
                         egui::Color32::from_gray(220)
                     },
@@ -285,7 +285,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     // Draw background and border
                     let input_fill = if dark_mode {
-                        egui::Color32::from_gray(50)
+                        theme::palette::raised(ui.ctx(), egui::Color32::from_gray(50))
                     } else {
                         egui::Color32::WHITE
                     };
@@ -441,7 +441,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app,
                         ctx,
                         modal_max_height,
-                        theme::selection_hover_color(dark_mode),
+                        theme::selection_hover_color(ui.ctx()),
                     );
                     if app.global_search.interaction_target
                         != crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput
@@ -645,9 +645,9 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     let label = category_label(category);
                     let font_id = egui::FontId::proportional(12.0);
                     let text_color = if selected {
-                        theme::COLOR_ACCENT
+                        theme::accent_color(ui.ctx())
                     } else {
-                        theme::text_color(dark_mode)
+                        theme::text_color(ui.ctx())
                     };
                     let galley = ui
                         .painter()
@@ -1075,22 +1075,22 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             // background matches the popup frame.
             let dark_mode = ui.visuals().dark_mode;
             let popup_fill = if dark_mode {
-                egui::Color32::from_rgb(40, 40, 44)
+                theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(40, 40, 44))
             } else {
                 egui::Color32::from_rgb(245, 245, 247)
             };
             ui.visuals_mut().widgets.inactive.bg_fill = popup_fill;
             ui.visuals_mut().widgets.hovered.bg_fill = if dark_mode {
-                egui::Color32::from_rgb(58, 58, 62)
+                theme::palette::hover(ui.ctx(), egui::Color32::from_rgb(58, 58, 62))
             } else {
                 egui::Color32::from_rgb(225, 225, 230)
             };
             ui.visuals_mut().widgets.hovered.weak_bg_fill = ui.visuals().widgets.hovered.bg_fill;
             ui.visuals_mut().widgets.active.bg_fill = ui.visuals().widgets.hovered.bg_fill;
             ui.visuals_mut().widgets.active.weak_bg_fill = ui.visuals().widgets.hovered.bg_fill;
-            ui.visuals_mut().selection.bg_fill = theme::selection_color(dark_mode);
+            ui.visuals_mut().selection.bg_fill = theme::selection_color(ui.ctx());
             ui.visuals_mut().selection.stroke =
-                egui::Stroke::new(1.0, theme::selection_text_color(dark_mode));
+                egui::Stroke::new(1.0, theme::selection_text_color(ui.ctx()));
 
             egui::Frame::popup(ui.style())
                 .inner_margin(egui::Margin::same(4))
@@ -1234,7 +1234,7 @@ fn popup_menu_item(
     // Label.
     let text_x = row_rect.left() + 6.0 + leading_size + 6.0;
     let text_color = if selected {
-        theme::selection_text_color(ui.visuals().dark_mode)
+        theme::selection_text_color(ui.ctx())
     } else {
         ui.visuals().text_color()
     };

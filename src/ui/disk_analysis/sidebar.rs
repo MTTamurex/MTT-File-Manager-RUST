@@ -277,7 +277,7 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         let rect = response.rect;
         // Border-only feedback, matching the main app's GRID mode:
         // solid accent outline when selected, light accent outline on hover.
-        let accent = crate::ui::theme::COLOR_ACCENT;
+        let accent = crate::ui::theme::accent_color(ui.ctx());
         if is_active {
             let stroke_width = if response.hovered() { 2.5 } else { 2.0 };
             ui.painter().rect_stroke(
@@ -317,7 +317,7 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         ui.painter().rect_filled(
             bar_rect,
             2.0,
-            crate::ui::theme::drive_usage_background_color(ui.visuals().dark_mode),
+            crate::ui::theme::drive_usage_background_color(ui.ctx()),
         );
         ui.painter().rect_filled(
             egui::Rect::from_min_size(

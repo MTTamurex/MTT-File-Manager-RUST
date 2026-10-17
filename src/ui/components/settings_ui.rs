@@ -11,16 +11,22 @@ const NAV_ITEM_HEIGHT: f32 = 34.0;
 const SEGMENT_HEIGHT: f32 = 30.0;
 const OPTION_ROW_HEIGHT: f32 = 36.0;
 
-fn accent_tint(dark_mode: bool) -> Color32 {
-    if dark_mode {
+fn accent_tint(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = theme::current_palette(ctx) {
+        return p.selection;
+    }
+    if ctx.global_style().visuals.dark_mode {
         Color32::from_rgba_unmultiplied(0, 120, 215, 55)
     } else {
         Color32::from_rgba_unmultiplied(0, 120, 215, 24)
     }
 }
 
-fn hover_fill(dark_mode: bool) -> Color32 {
-    if dark_mode {
+fn hover_fill(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = theme::current_palette(ctx) {
+        return p.hover;
+    }
+    if ctx.global_style().visuals.dark_mode {
         theme::color_dark_hover()
     } else {
         theme::color_hover()
@@ -31,7 +37,7 @@ fn paint_focus_outline(ui: &egui::Ui, rect: Rect, radius: f32) {
     ui.painter().rect_stroke(
         rect,
         radius,
-        Stroke::new(1.0, theme::COLOR_ACCENT),
+        Stroke::new(1.0, theme::accent_color(ui.ctx())),
         StrokeKind::Inside,
     );
 }
@@ -69,18 +75,17 @@ fn radio_arrow_target(
 
 /// Section title + description with consistent typography.
 pub fn section_header(ui: &mut egui::Ui, title: &str, description: &str) {
-    let dark_mode = ui.visuals().dark_mode;
     ui.label(
         RichText::new(title)
             .size(16.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new(description)
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(16.0);
 }
@@ -88,7 +93,6 @@ pub fn section_header(ui: &mut egui::Ui, title: &str, description: &str) {
 /// Sidebar navigation entry with rounded hover/selection and accent indicator.
 /// Returns true when clicked.
 pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
-    let dark_mode = ui.visuals().dark_mode;
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), NAV_ITEM_HEIGHT),
         Sense::click(),
@@ -98,18 +102,18 @@ pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if selected {
-            painter.rect_filled(rect, 6.0, accent_tint(dark_mode));
+            painter.rect_filled(rect, 6.0, accent_tint(ui.ctx()));
             let indicator = Rect::from_min_size(
                 Pos2::new(rect.min.x, rect.center().y - 8.0),
                 Vec2::new(3.0, 16.0),
             );
-            painter.rect_filled(indicator, 1.5, theme::COLOR_ACCENT);
+            painter.rect_filled(indicator, 1.5, theme::accent_color(ui.ctx()));
         } else if response.hovered() || response.has_focus() {
-            painter.rect_filled(rect, 6.0, hover_fill(dark_mode));
+            painter.rect_filled(rect, 6.0, hover_fill(ui.ctx()));
         }
         let mut text = RichText::new(label)
             .size(13.0)
-            .color(theme::text_color(dark_mode));
+            .color(theme::text_color(ui.ctx()));
         if selected {
             text = text.strong();
         }
@@ -121,7 +125,7 @@ pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
         );
         let text_pos = Pos2::new(rect.min.x + 12.0, rect.center().y - 0.5 * galley.size().y);
         ui.painter()
-            .galley(text_pos, galley, theme::text_color(dark_mode));
+            .galley(text_pos, galley, theme::text_color(ui.ctx()));
         if response.has_focus() {
             paint_focus_outline(ui, rect, 6.0);
         }
@@ -137,7 +141,7 @@ pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
 pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Option<usize> {
     let dark_mode = ui.visuals().dark_mode;
     let font_id = egui::FontId::proportional(13.0);
-    let text_color = theme::text_color(dark_mode);
+    let text_color = theme::text_color(ui.ctx());
 
     let mut max_text_width: f32 = 0.0;
     for label in labels {
@@ -188,7 +192,7 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
             let painter = ui.painter();
             if is_selected {
                 let fill = if dark_mode {
-                    Color32::from_gray(69)
+                    theme::palette::raised(ui.ctx(), Color32::from_gray(69))
                 } else {
                     Color32::WHITE
                 };
@@ -275,15 +279,15 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             if is_selected {
-                painter.rect_filled(rect, 8.0, accent_tint(dark_mode));
+                painter.rect_filled(rect, 8.0, accent_tint(ui.ctx()));
                 painter.rect_stroke(
                     rect,
                     8.0,
-                    Stroke::new(1.0, theme::COLOR_ACCENT),
+                    Stroke::new(1.0, theme::accent_color(ui.ctx())),
                     StrokeKind::Inside,
                 );
             } else if response.hovered() || response.has_focus() {
-                painter.rect_filled(rect, 8.0, hover_fill(dark_mode));
+                painter.rect_filled(rect, 8.0, hover_fill(ui.ctx()));
                 painter.rect_stroke(
                     rect,
                     8.0,
@@ -304,7 +308,7 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
                     Stroke::new(
                         1.0,
                         if dark_mode {
-                            Color32::from_gray(70)
+                            theme::palette::border(ui.ctx(), Color32::from_gray(70))
                         } else {
                             Color32::from_gray(215)
                         },
@@ -315,8 +319,12 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
 
             let radio_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
             if is_selected {
-                painter.circle_stroke(radio_center, 7.0, Stroke::new(1.5, theme::COLOR_ACCENT));
-                painter.circle_filled(radio_center, 3.5, theme::COLOR_ACCENT);
+                painter.circle_stroke(
+                    radio_center,
+                    7.0,
+                    Stroke::new(1.5, theme::accent_color(ui.ctx())),
+                );
+                painter.circle_filled(radio_center, 3.5, theme::accent_color(ui.ctx()));
             } else {
                 painter.circle_stroke(
                     radio_center,
@@ -336,7 +344,7 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
                 egui::Align2::LEFT_CENTER,
                 label,
                 egui::FontId::proportional(13.0),
-                theme::text_color(dark_mode),
+                theme::text_color(ui.ctx()),
             );
             if response.has_focus() {
                 paint_focus_outline(ui, rect, 8.0);
@@ -369,7 +377,6 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
 
 /// Label + switch row (Windows 11 style). Returns true when toggled.
 pub fn toggle_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
-    let dark_mode = ui.visuals().dark_mode;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
     let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -381,7 +388,7 @@ pub fn toggle_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(13.0),
-            theme::text_color(dark_mode),
+            theme::text_color(ui.ctx()),
         );
         let track = Rect::from_min_size(
             Pos2::new(rect.max.x - 40.0, rect.center().y - 10.0),
@@ -440,7 +447,7 @@ fn paint_switch(ui: &mut egui::Ui, track: Rect, on: bool, hovered: bool) {
     let dark_mode = ui.visuals().dark_mode;
     let painter = ui.painter();
     if on {
-        painter.rect_filled(track, 10.0, theme::COLOR_ACCENT);
+        painter.rect_filled(track, 10.0, theme::accent_color(ui.ctx()));
         painter.circle_filled(
             Pos2::new(track.max.x - 10.0, track.center().y),
             6.0,
@@ -448,13 +455,13 @@ fn paint_switch(ui: &mut egui::Ui, track: Rect, on: bool, hovered: bool) {
         );
     } else {
         let border = if hovered {
-            theme::COLOR_ACCENT
+            theme::accent_color(ui.ctx())
         } else if dark_mode {
             Color32::from_gray(130)
         } else {
             Color32::from_gray(140)
         };
-        painter.rect_filled(track, 10.0, theme::input_bg_color(dark_mode));
+        painter.rect_filled(track, 10.0, theme::input_bg_color(ui.ctx()));
         painter.rect_stroke(track, 10.0, Stroke::new(1.0, border), StrokeKind::Inside);
         let knob_color = if dark_mode {
             Color32::from_gray(190)
@@ -473,16 +480,19 @@ fn paint_switch(ui: &mut egui::Ui, track: Rect, on: bool, hovered: bool) {
 pub fn text_edit(ui: &mut egui::Ui, width: f32, text: &mut String) -> egui::Response {
     let dark_mode = ui.visuals().dark_mode;
     ui.scope(|ui| {
+        let input_fill =
+            theme::current_palette(ui.ctx()).map_or(Color32::from_gray(43), |p| p.input);
+        let border = theme::palette::border(ui.ctx(), Color32::from_gray(85));
         let widget = &mut ui.visuals_mut().widgets.inactive;
         widget.bg_fill = if dark_mode {
-            Color32::from_gray(43)
+            input_fill
         } else {
             Color32::from_rgb(247, 247, 247)
         };
         widget.bg_stroke = Stroke::new(
             1.0,
             if dark_mode {
-                Color32::from_gray(85)
+                border
             } else {
                 Color32::from_gray(208)
             },
@@ -494,17 +504,17 @@ pub fn text_edit(ui: &mut egui::Ui, width: f32, text: &mut String) -> egui::Resp
 
 /// 14px strong sub-section title.
 pub fn sub_header(ui: &mut egui::Ui, text: &str) {
-    let dark_mode = ui.visuals().dark_mode;
     ui.label(
         RichText::new(text)
             .size(14.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
 }
 
 /// Compact rounded container for list rows (tags, organizer rules).
-pub fn row_frame(dark_mode: bool) -> egui::Frame {
+pub fn row_frame(ctx: &egui::Context) -> egui::Frame {
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     egui::Frame::new()
         .inner_margin(egui::Margin {
             left: 12,
@@ -514,14 +524,14 @@ pub fn row_frame(dark_mode: bool) -> egui::Frame {
         })
         .corner_radius(8.0)
         .fill(if dark_mode {
-            Color32::from_gray(50)
+            theme::palette::raised(ctx, Color32::from_gray(50))
         } else {
             Color32::WHITE
         })
         .stroke(Stroke::new(
             1.0,
             if dark_mode {
-                Color32::from_gray(65)
+                theme::palette::border(ctx, Color32::from_gray(65))
             } else {
                 Color32::from_gray(228)
             },
@@ -529,19 +539,20 @@ pub fn row_frame(dark_mode: bool) -> egui::Frame {
 }
 
 /// Rounded card container used by settings sections.
-pub fn card_frame(dark_mode: bool) -> egui::Frame {
+pub fn card_frame(ctx: &egui::Context) -> egui::Frame {
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     egui::Frame::new()
         .inner_margin(egui::Margin::same(14))
         .corner_radius(8.0)
         .fill(if dark_mode {
-            Color32::from_gray(50)
+            theme::palette::raised(ctx, Color32::from_gray(50))
         } else {
             Color32::WHITE
         })
         .stroke(Stroke::new(
             1.0,
             if dark_mode {
-                Color32::from_gray(65)
+                theme::palette::border(ctx, Color32::from_gray(65))
             } else {
                 Color32::from_gray(228)
             },

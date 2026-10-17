@@ -1060,7 +1060,9 @@ impl eframe::App for DedicatedImageViewerApp {
 
             // Apply theme on first frame (cc.egui_ctx.set_visuals in creator
             // can be overridden by the platform integration).
-            crate::ui::theme::apply_viewer_visuals(ctx, self.dark_mode);
+            let mode = crate::viewer_runtime::saved_theme_mode();
+            self.dark_mode = mode.resolve_dark();
+            crate::ui::theme::apply_viewer_visuals(ctx, mode);
 
             // Apply dark/light title bar on the native Windows decoration.
             // Keep this aligned with PDF/Text viewers startup behavior.
@@ -1089,10 +1091,7 @@ impl eframe::App for DedicatedImageViewerApp {
                         );
                     }
                     crate::infrastructure::windows::center_window_on_primary_monitor(hwnd);
-                    crate::infrastructure::windows::window_corners::apply_dark_title_bar(
-                        hwnd,
-                        self.dark_mode,
-                    );
+                    crate::ui::theme::apply_native_title_bar(ctx, hwnd);
                 }
             }
         }
@@ -1152,16 +1151,16 @@ impl eframe::App for DedicatedImageViewerApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Follow main-app theme switches while the viewer is open.
-        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
-            self.dark_mode,
-            &mut self.last_theme_poll,
-        ) {
+        if let Some(mode) =
+            crate::viewer_runtime::poll_saved_theme_change(ui.ctx(), &mut self.last_theme_poll)
+        {
+            let dark = mode.resolve_dark();
             self.dark_mode = dark;
             let ctx = ui.ctx().clone();
-            crate::ui::theme::apply_viewer_visuals(&ctx, dark);
+            crate::ui::theme::apply_viewer_visuals(&ctx, mode);
             #[cfg(target_os = "windows")]
             if let Some(hwnd) = self.native_hwnd {
-                crate::infrastructure::windows::window_corners::apply_dark_title_bar(hwnd, dark);
+                crate::ui::theme::apply_native_title_bar(&ctx, hwnd);
             }
         }
         crate::viewer_runtime::schedule_saved_theme_poll(ui.ctx(), self.last_theme_poll);

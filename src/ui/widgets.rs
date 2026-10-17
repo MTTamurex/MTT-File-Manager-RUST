@@ -174,7 +174,7 @@ pub fn toggle_icon_button_sized(
 
     // Fallback
     let text_color = if active {
-        theme::COLOR_ACCENT
+        theme::accent_color(ui.ctx())
     } else {
         ui.visuals().text_color()
     };

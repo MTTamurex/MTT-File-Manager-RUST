@@ -33,7 +33,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
 
         if ui
             .add(egui::Button::new(
-                egui::RichText::new(sort_symbol).color(theme::text_color(ui.visuals().dark_mode)),
+                egui::RichText::new(sort_symbol).color(theme::text_color(ui.ctx())),
             ))
             .on_hover_text(t!("secondary_toolbar.reverse_order"))
             .clicked()
@@ -57,9 +57,8 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             theme::color_hover()
         };
 
-        let is_dark = ui.visuals().dark_mode;
-        let fg_color = theme::text_color(is_dark);
-        let combo_bg = theme::input_bg_color(is_dark);
+        let fg_color = theme::text_color(ui.ctx());
+        let combo_bg = theme::input_bg_color(ui.ctx());
         let fg_stroke = egui::Stroke::new(1.0, fg_color);
 
         ui.visuals_mut().widgets.noninteractive.bg_fill = combo_bg;

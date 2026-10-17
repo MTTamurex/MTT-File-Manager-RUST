@@ -22,12 +22,11 @@ use history::render_history;
 use status::{render_folder_creation_confirmation, status_label};
 
 pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
-    let dark_mode = ui.visuals().dark_mode;
     settings_ui::section_header(ui, &t!("settings.organizer"), &t!("organizer.description"));
 
-    let form_rect = render_rule_form(ui, app, dark_mode);
+    let form_rect = render_rule_form(ui, app);
     ui.add_space(16.0);
-    let edit_clicked = render_rules(ui, app, dark_mode);
+    let edit_clicked = render_rules(ui, app);
     if edit_clicked {
         // Jump straight to the form so the user sees the fields being edited.
         ui.scroll_to_rect_animation(
@@ -37,13 +36,13 @@ pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewe
         );
     }
     render_folder_creation_confirmation(app, ui.ctx());
-    render_conflicts(ui, app, dark_mode);
-    render_history(ui, app, dark_mode);
+    render_conflicts(ui, app);
+    render_history(ui, app);
 }
 
-fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> egui::Rect {
+fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> egui::Rect {
     let editing = app.organizer_state.editing_rule_id.is_some();
-    settings_ui::card_frame(dark_mode)
+    settings_ui::card_frame(ui.ctx())
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             settings_ui::sub_header(
@@ -62,7 +61,7 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new(t!("organizer.source"))
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                     ui.horizontal(|ui| {
                         let edit_width = (ui.available_width() - 130.0).max(120.0);
@@ -83,7 +82,7 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
 
                     ui.label(
                         RichText::new(t!("organizer.destination"))
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                     ui.horizontal(|ui| {
                         let edit_width = (ui.available_width() - 130.0).max(120.0);
@@ -104,7 +103,7 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
 
                     ui.label(
                         RichText::new(t!("organizer.extensions"))
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                     ui.horizontal(|ui| {
                         let edit_width = (ui.available_width() - 240.0).max(80.0);
@@ -117,14 +116,14 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
                         ui.label(
                             RichText::new(t!("organizer.extensions_hint"))
                                 .small()
-                                .color(theme::secondary_text_color(dark_mode)),
+                                .color(theme::secondary_text_color(ui.ctx())),
                         );
                     });
                     ui.end_row();
 
                     ui.label(
                         RichText::new(t!("organizer.presets"))
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
@@ -137,7 +136,7 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
                     });
                     ui.end_row();
 
-                    policies::render_conflict_policy(ui, app, dark_mode);
+                    policies::render_conflict_policy(ui, app);
                 });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -204,10 +203,10 @@ fn preset_label(preset: OrganizerExtensionPreset) -> String {
     }
 }
 
-fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> bool {
+fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
     if app.organizer_state.rules.is_empty() {
         ui.label(
-            RichText::new(t!("organizer.no_rules")).color(theme::secondary_text_color(dark_mode)),
+            RichText::new(t!("organizer.no_rules")).color(theme::secondary_text_color(ui.ctx())),
         );
         return false;
     }
@@ -216,7 +215,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
     let mut edit_clicked = false;
     for mut rule in rules {
         let status = app.organizer_state.rule_status(rule.id);
-        settings_ui::row_frame(dark_mode).show(ui, |ui| {
+        settings_ui::row_frame(ui.ctx()).show(ui, |ui| {
             let extensions_text = rule.extensions.join(", ");
             ui.horizontal(|ui| {
                 // Reserve room for the toggle so long extension lists never overlap it.
@@ -225,7 +224,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                 let label_resp = ui.label(
                     RichText::new(display.clone())
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 if display != extensions_text {
                     label_resp.on_hover_text(extensions_text.clone());
@@ -248,41 +247,41 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(t!("organizer.source").to_string())
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(rule.source_folder.display().to_string())
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
             });
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(t!("organizer.destination").to_string())
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(rule.destination_folder.display().to_string())
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
             });
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(t!("organizer.conflict_policy").to_string())
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(policies::policy_label(&rule.conflict_policy))
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 if let Some(folder) = rule.conflict_policy.conflict_folder() {
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(folder.display().to_string())
                             .small()
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                 }
             });
@@ -373,7 +372,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                     ui.label(
                         RichText::new(status_label(status))
                             .small()
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                 });
             });

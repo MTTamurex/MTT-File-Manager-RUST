@@ -60,7 +60,7 @@ fn right_click(depth: usize, renaming: bool, dragging: bool) -> Option<SidebarTr
             },
         );
         if !pressed && !renaming && !dragging {
-            let color = crate::ui::theme::selection_color(ctx.global_style().visuals.dark_mode);
+            let color = crate::ui::theme::selection_color(&ctx);
             assert!(
                 output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::epaint::Shape::Rect(rect) if rect.fill == color && rect.rect.contains(pos))),
@@ -121,7 +121,7 @@ fn sidebar_context_highlight_follows_the_exact_node_and_restores_navigation_afte
                 render_tree_node(ui, &node, 1, &mut context, &mut None);
             }
         });
-        let color = crate::ui::theme::selection_color(ctx.global_style().visuals.dark_mode);
+        let color = crate::ui::theme::selection_color(&ctx);
         output.shapes.iter().filter_map(|shape| match &shape.shape {
             egui::epaint::Shape::Text(text) if matches!(text.galley.text(), "Current" | "Folder") => {
                 let center = shape.shape.visual_bounding_rect().center();

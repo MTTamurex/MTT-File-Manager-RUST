@@ -87,7 +87,7 @@ pub fn render_settings_window(
 
     let dark_mode = ctx.global_style().visuals.dark_mode;
     let bg_color = if dark_mode {
-        Color32::from_rgb(43, 43, 43)
+        theme::palette::surface(ctx, Color32::from_rgb(43, 43, 43))
     } else {
         Color32::from_rgb(246, 246, 246)
     };
@@ -99,7 +99,7 @@ pub fn render_settings_window(
         .stroke(Stroke::new(
             1.0,
             if dark_mode {
-                Color32::from_gray(70)
+                theme::palette::border(ctx, Color32::from_gray(70))
             } else {
                 Color32::from_gray(220)
             },
@@ -176,7 +176,7 @@ pub fn render_settings_window(
                     sep_rect,
                     0.0,
                     if dark_mode {
-                        Color32::from_gray(65)
+                        theme::palette::border(ui.ctx(), Color32::from_gray(65))
                     } else {
                         Color32::from_gray(225)
                     },
@@ -231,17 +231,17 @@ pub fn render_settings_window(
                                                         t!("settings.diagnostics_privacy_title").to_string(),
                                                     )
                                                     .strong()
-                                                    .color(theme::text_color(dark_mode)),
+                                                    .color(theme::text_color(ui.ctx())),
                                                 );
                                                 ui.add_space(4.0);
-                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_scope")).color(theme::secondary_text_color(dark_mode)));
+                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_scope")).color(theme::secondary_text_color(ui.ctx())));
                                                 ui.add_space(4.0);
-                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_excludes")).color(theme::secondary_text_color(dark_mode)));
+                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_excludes")).color(theme::secondary_text_color(ui.ctx())));
                                                 ui.add_space(4.0);
-                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_transmission")).color(theme::secondary_text_color(dark_mode)));
+                                                ui.label(RichText::new(t!("settings.diagnostics_privacy_transmission")).color(theme::secondary_text_color(ui.ctx())));
                                             });
                                             ui.add_space(6.0);
-                                            ui.label(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
+                                            ui.label(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(ui.ctx())));
                                         }
                                         SettingsSection::Graphics => {
                                             let (backend, interpolation) = crate::ui::components::backend_settings::render_backend_settings_section(
@@ -346,7 +346,7 @@ fn render_settings_title_bar(
         RichText::new(t!("settings.window_title").to_string())
             .size(15.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     )
     .into_galley(
         ui,
@@ -359,7 +359,7 @@ fn render_settings_title_bar(
         header_rect.center().y - 0.5 * title_galley.size().y,
     );
     ui.painter()
-        .galley(title_pos, title_galley, theme::text_color(dark_mode));
+        .galley(title_pos, title_galley, theme::text_color(ui.ctx()));
 
     let close_rect = egui::Rect::from_min_size(
         egui::pos2(header_rect.max.x - 44.0, header_rect.center().y - 14.0),
@@ -388,7 +388,7 @@ fn render_settings_title_bar(
         if hovered {
             Color32::WHITE
         } else {
-            theme::secondary_text_color(dark_mode)
+            theme::secondary_text_color(ui.ctx())
         },
     );
     let close_resp = close_resp.on_hover_cursor(egui::CursorIcon::PointingHand);

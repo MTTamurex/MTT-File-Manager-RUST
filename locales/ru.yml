@@ -412,6 +412,8 @@ settings:
   appearance_description: "Выберите визуальную тему приложения."
   theme_light: "Светлая"
   theme_dark: "Тёмная"
+  theme_dark_deep: "Глубокая тёмная"
+  theme_github_dark: "Полночь"
   theme_system: "Системная"
   theme_apply_immediately: "Изменения темы применяются немедленно."
   interface_scale: "Размер текста и интерфейса"

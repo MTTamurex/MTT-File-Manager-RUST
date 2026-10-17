@@ -297,7 +297,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 egui::Label::new(
                     egui::RichText::new(super::display_name_for_item(item).as_ref())
                         .size(11.0)
-                        .color(crate::ui::theme::text_color(ui.visuals().dark_mode)),
+                        .color(crate::ui::theme::text_color(ui.ctx())),
                 )
                 .selectable(false)
                 .truncate(),

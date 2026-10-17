@@ -195,7 +195,9 @@ impl eframe::App for DiskAnalyzerApp {
 
         if !self.revealed {
             // Apply the saved theme before the first visible frame.
-            crate::ui::theme::apply_viewer_visuals(&ctx, self.dark_mode);
+            let mode = crate::viewer_runtime::saved_theme_mode();
+            self.dark_mode = mode.resolve_dark();
+            crate::ui::theme::apply_viewer_visuals(&ctx, mode);
             crate::ui::theme::apply_scroll_style(&ctx);
             crate::ui::theme::apply_popup_style(&ctx);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -204,12 +206,11 @@ impl eframe::App for DiskAnalyzerApp {
         }
 
         // Follow main-app theme switches while the window is open.
-        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
-            self.dark_mode,
-            &mut self.last_theme_poll,
-        ) {
-            self.dark_mode = dark;
-            crate::ui::theme::apply_viewer_visuals(&ctx, dark);
+        if let Some(mode) =
+            crate::viewer_runtime::poll_saved_theme_change(&ctx, &mut self.last_theme_poll)
+        {
+            self.dark_mode = mode.resolve_dark();
+            crate::ui::theme::apply_viewer_visuals(&ctx, mode);
             crate::ui::theme::apply_scroll_style(&ctx);
             crate::ui::theme::apply_popup_style(&ctx);
         }

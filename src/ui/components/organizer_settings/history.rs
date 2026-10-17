@@ -10,9 +10,9 @@ use rust_i18n::t;
 
 const RECOMMENDED_RETENTION_DAYS: [i64; 4] = [7, 30, 90, 180];
 
-pub(super) fn render_history(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+pub(super) fn render_history(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.add_space(18.0);
-    settings_ui::card_frame(dark_mode).show(ui, |ui| {
+    settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             settings_ui::sub_header(ui, &t!("organizer.history_title"));
@@ -26,23 +26,23 @@ pub(super) fn render_history(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_m
                         .to_string(),
                 )
                 .small()
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
             );
         });
         ui.add_space(4.0);
         ui.label(
             RichText::new(t!("organizer.history_description"))
                 .size(13.0)
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         ui.add_space(10.0);
-        render_retention(ui, app, dark_mode);
+        render_retention(ui, app);
         ui.add_space(12.0);
 
         if let Some(error) = app.organizer_state.history_state.load_error.clone() {
             ui.label(
                 RichText::new(t!("organizer.history_load_failed", reason = error))
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
             if ui.button(t!("organizer.retry_history")).clicked() {
                 if let Err(error) = app.organizer_state.reload_history(&app.app_state_db) {
@@ -55,26 +55,26 @@ pub(super) fn render_history(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_m
         if app.organizer_state.history_state.operations.is_empty() {
             ui.label(
                 RichText::new(t!("organizer.no_history"))
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
             return;
         }
 
         let operations = app.organizer_state.history_state.operations.clone();
         for operation in operations {
-            render_operation_row(ui, app, dark_mode, operation);
+            render_operation_row(ui, app, operation);
             ui.add_space(8.0);
         }
     });
 }
 
-fn render_retention(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+fn render_retention(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let current = app.organizer_state.history_state.retention_days;
     let mut selected = current;
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new(t!("organizer.history_retention"))
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         egui::ComboBox::from_id_salt("organizer_history_retention")
             .selected_text(format_retention_label(current))
@@ -131,7 +131,6 @@ fn render_retention(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
 fn render_operation_row(
     ui: &mut egui::Ui,
     app: &mut ImageViewerApp,
-    dark_mode: bool,
     operation: crate::infrastructure::app_state_db::OrganizerOperationRecord,
 ) {
     let operation_id = operation.operation_id;
@@ -184,28 +183,27 @@ fn render_operation_row(
     let mut retry = false;
     let mut undo = false;
 
-    settings_ui::row_frame(dark_mode).show(ui, |ui| {
+    settings_ui::row_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(t!("organizer.operation_id", id = operation_id.get()))
                     .strong()
-                    .color(theme::text_color(dark_mode)),
+                    .color(theme::text_color(ui.ctx())),
             );
             ui.label(
                 RichText::new(operation_type_label(operation.operation_type))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
             ui.label(
                 RichText::new(operation_status_label(operation.status))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
         });
         path_row(
             ui,
-            dark_mode,
             &t!("organizer.operation_source"),
             operation
                 .effective_source_path
@@ -214,7 +212,6 @@ fn render_operation_row(
         );
         path_row(
             ui,
-            dark_mode,
             &t!("organizer.operation_destination"),
             operation
                 .effective_destination_path
@@ -225,7 +222,7 @@ fn render_operation_row(
             ui.label(
                 RichText::new(t!("organizer.operation_error", reason = error))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
         }
         ui.add_space(6.0);
@@ -259,18 +256,18 @@ fn render_operation_row(
     }
 }
 
-fn path_row(ui: &mut egui::Ui, dark_mode: bool, label: &str, path: &std::path::Path) {
+fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) {
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new(label)
                 .small()
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         ui.label(
             RichText::new(path.display().to_string())
                 .small()
                 .monospace()
-                .color(theme::text_color(dark_mode)),
+                .color(theme::text_color(ui.ctx())),
         );
     });
 }

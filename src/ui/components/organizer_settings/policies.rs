@@ -6,10 +6,9 @@ use eframe::egui::{self, RichText};
 use rust_i18n::t;
 use std::path::PathBuf;
 
-pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.label(
-        RichText::new(t!("organizer.conflict_policy"))
-            .color(theme::secondary_text_color(dark_mode)),
+        RichText::new(t!("organizer.conflict_policy")).color(theme::secondary_text_color(ui.ctx())),
     );
     ui.vertical(|ui| {
         // Keep the selector clear of a wrapped presets row above it.
@@ -75,7 +74,7 @@ pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp
             ui.label(
                 RichText::new(policy_hint(&app.organizer_state.conflict_policy))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
         });
     });
@@ -86,7 +85,7 @@ pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp
     ) {
         ui.label(
             RichText::new(t!("organizer.conflict_folder"))
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -112,7 +111,7 @@ pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp
             ui.label(
                 RichText::new(t!("organizer.conflict_folder_hint"))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
         });
         ui.end_row();

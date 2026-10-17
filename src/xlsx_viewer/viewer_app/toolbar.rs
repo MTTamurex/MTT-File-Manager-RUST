@@ -41,8 +41,7 @@ impl XlsxViewerApp {
     }
 
     pub(super) fn show_toolbar_frames(&mut self, root_ui: &mut egui::Ui) {
-        let (bar_fill, separator) =
-            crate::ui::theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        let (bar_fill, separator) = crate::ui::theme::viewer_bar_colors(root_ui.ctx());
         egui::Panel::top("xlsx_toolbar")
             .frame(
                 egui::Frame::new()

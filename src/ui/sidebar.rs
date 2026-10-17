@@ -157,18 +157,17 @@ pub fn render_sidebar_this_pc(
         let is_selected = ctx.is_computer_view;
 
         // Background
-        let dark_mode = ui.visuals().dark_mode;
         if is_selected {
             ui.painter().rect_filled(
                 header_rect_full,
                 0.0,
-                crate::ui::theme::selection_color(dark_mode),
+                crate::ui::theme::selection_color(ui.ctx()),
             );
         } else if header_response.hovered() && !ctx.is_item_dragging {
             ui.painter().rect_filled(
                 header_rect_full,
                 0.0,
-                crate::ui::theme::selection_hover_color(dark_mode),
+                crate::ui::theme::selection_hover_color(ui.ctx()),
             );
         }
 
@@ -196,7 +195,7 @@ pub fn render_sidebar_this_pc(
             t!("nav.computer"),
             egui::FontId::proportional(12.0),
             if is_selected {
-                crate::ui::theme::selection_text_color(dark_mode)
+                crate::ui::theme::selection_text_color(ui.ctx())
             } else {
                 ui.visuals().text_color()
             },
@@ -298,18 +297,17 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
                     .is_some_and(|position| rect.contains(position));
 
             if ui.is_rect_visible(rect) {
-                let dark_mode = ui.visuals().dark_mode;
                 if is_selected {
                     ui.painter().rect_filled(
                         rect,
                         0.0,
-                        crate::ui::theme::selection_color(dark_mode),
+                        crate::ui::theme::selection_color(ui.ctx()),
                     );
                 } else if response.hovered() && !ctx.is_item_dragging {
                     ui.painter().rect_filled(
                         rect,
                         0.0,
-                        crate::ui::theme::selection_hover_color(dark_mode),
+                        crate::ui::theme::selection_hover_color(ui.ctx()),
                     );
                 }
 
@@ -349,7 +347,7 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
                     t!("nav.recycle_bin"),
                     egui::FontId::proportional(11.5),
                     if is_selected {
-                        crate::ui::theme::selection_text_color(dark_mode)
+                        crate::ui::theme::selection_text_color(ui.ctx())
                     } else {
                         ui.visuals().text_color()
                     },
@@ -535,8 +533,6 @@ pub fn render_sidebar_drives(
             });
 
             if ui.is_rect_visible(rect) {
-                let dark_mode = ui.visuals().dark_mode;
-
                 // Detect pointer hovering this drive row during an external item drag.
                 let drag_hover = ctx.is_item_dragging
                     && ui
@@ -556,13 +552,13 @@ pub fn render_sidebar_drives(
                     ui.painter().rect_filled(
                         rect,
                         0.0,
-                        crate::ui::theme::selection_color(dark_mode),
+                        crate::ui::theme::selection_color(ui.ctx()),
                     );
                 } else if response.hovered() && !ctx.is_item_dragging {
                     ui.painter().rect_filled(
                         rect,
                         0.0,
-                        crate::ui::theme::selection_hover_color(dark_mode),
+                        crate::ui::theme::selection_hover_color(ui.ctx()),
                     );
                 }
 
@@ -634,7 +630,7 @@ pub fn render_sidebar_drives(
                         disk_label,
                         egui::FontId::proportional(11.5),
                         if is_selected {
-                            crate::ui::theme::selection_text_color(dark_mode)
+                            crate::ui::theme::selection_text_color(ui.ctx())
                         } else {
                             ui.visuals().text_color()
                         },
@@ -657,7 +653,7 @@ pub fn render_sidebar_drives(
                             ui.painter().rect_filled(
                                 bar_rect,
                                 1.0,
-                                crate::ui::theme::drive_usage_background_color(dark_mode),
+                                crate::ui::theme::drive_usage_background_color(ui.ctx()),
                             );
 
                             let filled_width = bar_rect.width() * usage_ratio;
@@ -934,7 +930,6 @@ fn render_pinned_folders(
         return;
     }
 
-    let dark_mode = ui.visuals().dark_mode;
     let drag_id = egui::Id::new("qa_reorder_drag");
     let drag_src: Option<usize> = ui.ctx().data(|d| d.get_temp(drag_id));
     let viewport = ui.clip_rect();
@@ -1009,12 +1004,12 @@ fn render_pinned_folders(
                 );
             } else if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(ui.ctx()));
             } else if response.hovered() || response.dragged() {
                 ui.painter().rect_filled(
                     rect,
                     0.0,
-                    crate::ui::theme::selection_hover_color(dark_mode),
+                    crate::ui::theme::selection_hover_color(ui.ctx()),
                 );
             }
 
@@ -1045,7 +1040,7 @@ fn render_pinned_folders(
             }
 
             let text_color = if is_selected {
-                crate::ui::theme::selection_text_color(dark_mode)
+                crate::ui::theme::selection_text_color(ui.ctx())
             } else {
                 ui.visuals().text_color()
             };

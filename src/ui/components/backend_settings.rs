@@ -17,7 +17,6 @@ pub fn render_backend_settings_section(
 ) -> (bool, bool) {
     let mut backend_changed = false;
     let mut interpolation_changed = false;
-    let dark_mode = ui.visuals().dark_mode;
 
     settings_ui::section_header(
         ui,
@@ -29,19 +28,19 @@ pub fn render_backend_settings_section(
         RichText::new(t!("settings.backend_title"))
             .size(14.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new(t!("settings.backend_description"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(10.0);
 
     // Show currently active backend
     ui.horizontal(|ui| {
-        ui.label(RichText::new(t!("settings.backend_active")).color(theme::text_color(dark_mode)));
+        ui.label(RichText::new(t!("settings.backend_active")).color(theme::text_color(ui.ctx())));
         ui.label(
             RichText::new(active_backend)
                 .strong()
@@ -51,7 +50,7 @@ pub fn render_backend_settings_section(
     ui.add_space(12.0);
 
     // Backend selector
-    ui.label(RichText::new(t!("settings.backend_select")).color(theme::text_color(dark_mode)));
+    ui.label(RichText::new(t!("settings.backend_select")).color(theme::text_color(ui.ctx())));
     ui.add_space(6.0);
 
     let selected = BACKENDS
@@ -72,13 +71,13 @@ pub fn render_backend_settings_section(
         RichText::new(t!("settings.graphics_interpolation"))
             .size(14.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new(t!("settings.graphics_interpolation_description"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(6.0);
 

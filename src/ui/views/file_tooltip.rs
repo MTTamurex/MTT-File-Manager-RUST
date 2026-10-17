@@ -8,12 +8,11 @@ use rust_i18n::t;
 
 /// Tooltip title + separator.
 pub fn header(ui: &mut egui::Ui, name: &str) {
-    let dark_mode = ui.visuals().dark_mode;
     ui.label(
         RichText::new(name)
             .size(13.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(2.0);
     ui.separator();
@@ -37,14 +36,14 @@ pub fn media_preview(ui: &mut egui::Ui, tex: &egui::TextureHandle) {
             .inner_margin(egui::Margin::same(6))
             .corner_radius(6.0)
             .fill(if dark_mode {
-                egui::Color32::from_gray(50)
+                theme::palette::raised(ui.ctx(), egui::Color32::from_gray(50))
             } else {
                 egui::Color32::WHITE
             })
             .stroke(egui::Stroke::new(
                 1.0,
                 if dark_mode {
-                    egui::Color32::from_gray(70)
+                    theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
                 } else {
                     egui::Color32::from_gray(224)
                 },
@@ -65,7 +64,6 @@ pub fn media_preview_from_option(ui: &mut egui::Ui, tex: Option<&egui::TextureHa
 
 /// Aligned two-column info row: secondary label, primary value.
 pub fn info_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    let dark_mode = ui.visuals().dark_mode;
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(
             egui::vec2(110.0, 18.0),
@@ -74,14 +72,14 @@ pub fn info_row(ui: &mut egui::Ui, label: &str, value: &str) {
                 ui.label(
                     RichText::new(label)
                         .size(12.0)
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
             },
         );
         ui.label(
             RichText::new(value)
                 .size(12.0)
-                .color(theme::text_color(dark_mode)),
+                .color(theme::text_color(ui.ctx())),
         );
     });
     ui.add_space(1.0);

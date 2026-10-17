@@ -135,7 +135,7 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
             allocated_rect.max.y + ui.spacing().item_spacing.y,
         ),
     );
-    let (_, separator) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+    let (_, separator) = crate::ui::theme::viewer_bar_colors(ui.ctx());
     ui.painter().hline(
         header_rect.x_range(),
         header_rect.bottom(),

@@ -129,13 +129,13 @@ impl super::DedicatedImageViewerApp {
             .exact_size(FILMSTRIP_PANEL_HEIGHT)
             .show(root_ui, |ui| {
                 let panel_bg = if ui.visuals().dark_mode {
-                    egui::Color32::from_gray(30)
+                    theme::palette::surface(ui.ctx(), egui::Color32::from_gray(30))
                 } else {
                     egui::Color32::from_rgb(238, 238, 238)
                 };
                 ui.painter().rect_filled(ui.max_rect(), 0.0, panel_bg);
                 let sep_color = if ui.visuals().dark_mode {
-                    egui::Color32::from_gray(60)
+                    theme::palette::border(ui.ctx(), egui::Color32::from_gray(60))
                 } else {
                     egui::Color32::from_gray(225)
                 };
@@ -257,13 +257,13 @@ impl super::DedicatedImageViewerApp {
         let is_current = idx == self.current_index;
         let bg_color = if is_current {
             if ui.visuals().dark_mode {
-                egui::Color32::from_gray(50)
+                theme::palette::raised(ui.ctx(), egui::Color32::from_gray(50))
             } else {
                 egui::Color32::WHITE
             }
         } else if hovered {
             if ui.visuals().dark_mode {
-                egui::Color32::from_gray(45)
+                theme::palette::hover(ui.ctx(), egui::Color32::from_gray(45))
             } else {
                 egui::Color32::from_gray(228)
             }
@@ -295,7 +295,7 @@ impl super::DedicatedImageViewerApp {
             ui.painter().rect_stroke(
                 rect,
                 4.0,
-                egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+                egui::Stroke::new(2.0, theme::accent_color(ui.ctx())),
                 egui::StrokeKind::Outside,
             );
         }

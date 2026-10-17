@@ -280,12 +280,11 @@ pub fn render_status_bar(
         } else {
             theme::color_hover()
         };
-        let is_dark = ui.visuals().dark_mode;
-        let selection_stroke = egui::Stroke::new(0.0, theme::selection_text_color(is_dark));
+        let selection_stroke = egui::Stroke::new(0.0, theme::selection_text_color(ui.ctx()));
 
-        ui.visuals_mut().selection.bg_fill = theme::selection_color(is_dark);
+        ui.visuals_mut().selection.bg_fill = theme::selection_color(ui.ctx());
         ui.visuals_mut().selection.stroke = selection_stroke;
-        ui.visuals_mut().override_text_color = Some(theme::text_color(is_dark));
+        ui.visuals_mut().override_text_color = Some(theme::text_color(ui.ctx()));
         ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;

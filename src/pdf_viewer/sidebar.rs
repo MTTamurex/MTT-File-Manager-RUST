@@ -11,7 +11,7 @@ const THUMB_MAX_H: f32 = 170.0;
 impl PdfViewerApp {
     pub(super) fn show_sidebar(&mut self, root_ui: &mut egui::Ui) {
         let ctx = root_ui.ctx().clone();
-        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.ctx());
         let panel = egui::Panel::left("pdf_thumbnail_sidebar")
             .resizable(true)
             .default_size(170.0)
@@ -176,7 +176,7 @@ impl PdfViewerApp {
                         }
 
                         let stroke_color = if is_current {
-                            theme::COLOR_ACCENT
+                            theme::accent_color(ui.ctx())
                         } else if ui.visuals().dark_mode {
                             egui::Color32::from_gray(90)
                         } else {
@@ -193,7 +193,7 @@ impl PdfViewerApp {
                     let mut text =
                         egui::RichText::new(t!("pdfviewer.page", page = idx + 1).to_string());
                     if is_current {
-                        text = text.strong().color(theme::COLOR_ACCENT);
+                        text = text.strong().color(theme::accent_color(ui.ctx()));
                     }
                     // Avoid the default blue selection highlight behind the label.
                     ui.visuals_mut().selection.bg_fill = egui::Color32::TRANSPARENT;

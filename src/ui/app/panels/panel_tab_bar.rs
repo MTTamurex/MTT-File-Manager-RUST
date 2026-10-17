@@ -129,27 +129,27 @@ pub(super) fn render_panel_tab_bar(
     }
     let dark = ui.visuals().dark_mode;
     let active_bg = if dark {
-        egui::Color32::from_rgb(45, 45, 45)
+        crate::ui::theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(45, 45, 45))
     } else {
         egui::Color32::WHITE
     };
     let inactive_bg = if dark {
-        egui::Color32::from_rgb(30, 30, 30)
+        crate::ui::theme::palette::background(ui.ctx(), egui::Color32::from_rgb(30, 30, 30))
     } else {
         egui::Color32::from_rgb(230, 230, 230)
     };
     let hover_bg = if dark {
-        egui::Color32::from_rgb(52, 52, 52)
+        crate::ui::theme::palette::hover(ui.ctx(), egui::Color32::from_rgb(52, 52, 52))
     } else {
         egui::Color32::from_rgb(216, 216, 216)
     };
     let active_text = if dark {
-        egui::Color32::from_rgb(220, 220, 220)
+        crate::ui::theme::text_color(ui.ctx())
     } else {
         egui::Color32::from_rgb(30, 30, 30)
     };
     let inactive_text = if dark {
-        egui::Color32::from_rgb(160, 160, 160)
+        crate::ui::theme::secondary_text_color(ui.ctx())
     } else {
         egui::Color32::from_rgb(100, 100, 100)
     };

@@ -61,7 +61,7 @@ pub(super) fn render_preview_panel_layout(
             .resizable(false) // Resize handled manually via drag handles
             .frame(egui::Frame {
                 fill: if dark_mode {
-                    egui::Color32::from_rgb(45, 45, 45)
+                    crate::ui::theme::palette::surface(root_ui.ctx(), egui::Color32::from_rgb(45, 45, 45))
                 } else {
                     egui::Color32::WHITE
                 },
@@ -663,7 +663,10 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, root_ui: &mu
     let dark_mode = root_ui.visuals().dark_mode;
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(if dark_mode {
-            egui::Color32::from_rgb(45, 45, 45)
+            crate::ui::theme::palette::background(
+                root_ui.ctx(),
+                egui::Color32::from_rgb(45, 45, 45),
+            )
         } else {
             egui::Color32::WHITE
         }))
@@ -722,7 +725,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         sep_rect,
         0.0,
         if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(60, 60, 60)
+            crate::ui::theme::palette::border(ui.ctx(), egui::Color32::from_rgb(60, 60, 60))
         } else {
             egui::Color32::from_rgb(200, 200, 200)
         },
@@ -754,7 +757,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let focus_stroke_margin = 1.0;
     let focus_border_reserved = focus_stroke_width + focus_stroke_margin;
     let focus_color = if ui.visuals().dark_mode {
-        egui::Color32::from_rgb(80, 160, 255) // bright blue
+        crate::ui::theme::current_palette(ui.ctx())
+            .map_or(egui::Color32::from_rgb(80, 160, 255), |p| p.accent)
     } else {
         egui::Color32::from_rgb(0, 100, 220)
     };
@@ -768,12 +772,13 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         egui::Rect::from_min_size(left_rect.min, egui::vec2(left_rect.width(), header_height));
     let left_header_bg = if active == ActivePanel::Left {
         if dark {
-            egui::Color32::from_rgb(35, 55, 80)
+            crate::ui::theme::current_palette(ui.ctx())
+                .map_or(egui::Color32::from_rgb(35, 55, 80), |p| p.selection)
         } else {
             egui::Color32::from_rgb(210, 228, 250)
         }
     } else if dark {
-        egui::Color32::from_rgb(50, 50, 50)
+        crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(50, 50, 50))
     } else {
         egui::Color32::from_rgb(240, 240, 240)
     };
@@ -787,12 +792,13 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     );
     let right_header_bg = if active == ActivePanel::Right {
         if dark {
-            egui::Color32::from_rgb(35, 55, 80)
+            crate::ui::theme::current_palette(ui.ctx())
+                .map_or(egui::Color32::from_rgb(35, 55, 80), |p| p.selection)
         } else {
             egui::Color32::from_rgb(210, 228, 250)
         }
     } else if dark {
-        egui::Color32::from_rgb(50, 50, 50)
+        crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(50, 50, 50))
     } else {
         egui::Color32::from_rgb(240, 240, 240)
     };
@@ -852,7 +858,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     };
 
     let header_text_color = if dark {
-        egui::Color32::from_rgb(220, 220, 220)
+        crate::ui::theme::text_color(ui.ctx())
     } else {
         egui::Color32::from_rgb(30, 30, 30)
     };
@@ -933,7 +939,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // The lower strip meets the file area; the tab bar paints its own inactive
     // surface above this so gaps between neighboring tabs stay inactive-colored.
     let tab_strip_bg = if dark {
-        egui::Color32::from_rgb(45, 45, 45)
+        crate::ui::theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(45, 45, 45))
     } else {
         egui::Color32::WHITE
     };

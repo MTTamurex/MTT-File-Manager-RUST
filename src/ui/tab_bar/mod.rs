@@ -59,28 +59,28 @@ pub fn render_tab_bar(
     // Colors based on theme (Windows Explorer style - gray tones)
     let is_dark = ui.visuals().dark_mode;
     let active_bg = if is_dark {
-        Color32::from_rgb(45, 45, 45)
+        crate::ui::theme::palette::surface(ui.ctx(), Color32::from_rgb(45, 45, 45))
     } else {
         Color32::from_rgb(243, 243, 243) // Light gray for active tab (Windows Explorer style)
     };
     let inactive_bg = if is_dark {
-        Color32::from_rgb(30, 30, 30)
+        crate::ui::theme::palette::background(ui.ctx(), Color32::from_rgb(30, 30, 30))
     } else {
         Color32::from_rgb(230, 230, 230) // Darker gray for inactive tabs
     };
     // Use opaque hover colors in tab bar to avoid tone mismatch with rounded-tab dual-pass paint.
     let hover_bg = if is_dark {
-        Color32::from_rgb(52, 52, 52)
+        crate::ui::theme::palette::hover(ui.ctx(), Color32::from_rgb(52, 52, 52))
     } else {
         Color32::from_rgb(216, 216, 216)
     };
     let text_color = if is_dark {
-        Color32::from_rgb(220, 220, 220)
+        crate::ui::theme::text_color(ui.ctx())
     } else {
         Color32::from_rgb(30, 30, 30)
     };
     let inactive_text = if is_dark {
-        Color32::from_rgb(160, 160, 160)
+        crate::ui::theme::secondary_text_color(ui.ctx())
     } else {
         Color32::from_rgb(100, 100, 100)
     };

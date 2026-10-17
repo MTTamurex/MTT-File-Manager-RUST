@@ -108,7 +108,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
         .exact_size(target_width)
         .resizable(false) // Resize handled manually via drag handles
         .frame(egui::Frame::NONE.fill(if dark_mode {
-            egui::Color32::from_rgb(45, 45, 45)
+            crate::ui::theme::palette::surface(root_ui.ctx(), egui::Color32::from_rgb(45, 45, 45))
         } else {
             egui::Color32::WHITE
         }))

@@ -8,23 +8,11 @@ pub(super) type WallpaperOutcome = (u64, Result<(), String>);
 
 impl super::DedicatedImageViewerApp {
     fn reapply_viewer_theme(&self, ctx: &egui::Context) {
-        ctx.set_theme(if self.dark_mode {
-            egui::Theme::Dark
-        } else {
-            egui::Theme::Light
-        });
-        if self.dark_mode {
-            ctx.set_visuals(egui::Visuals::dark());
-        } else {
-            ctx.set_visuals(egui::Visuals::light());
-        }
+        crate::ui::theme::apply_viewer_visuals(ctx, crate::ui::theme::current_mode(ctx));
 
         #[cfg(target_os = "windows")]
         if let Some(hwnd) = self.native_hwnd {
-            crate::infrastructure::windows::window_corners::apply_dark_title_bar(
-                hwnd,
-                self.dark_mode,
-            );
+            crate::ui::theme::apply_native_title_bar(ctx, hwnd);
         }
     }
 

@@ -785,7 +785,7 @@ impl PdfViewerApp {
 
     fn paint_placeholder(painter: &egui::Painter, rect: egui::Rect, idx: u32, dark_mode: bool) {
         let bg = if dark_mode {
-            egui::Color32::from_gray(40)
+            crate::ui::theme::palette::surface(painter.ctx(), egui::Color32::from_gray(40))
         } else {
             egui::Color32::from_gray(220)
         };
@@ -1233,8 +1233,8 @@ impl eframe::App for PdfViewerApp {
 
         // Apply theme on first frame (cc.set_visuals in creator can be
         // overridden by the platform integration).
-        if let Some(dark) = self.dark_mode.take() {
-            crate::ui::theme::apply_viewer_visuals(ctx, dark);
+        if self.dark_mode.take().is_some() {
+            crate::ui::theme::apply_viewer_visuals(ctx, crate::viewer_runtime::saved_theme_mode());
 
             // Apply dark/light title bar on the native Windows decoration.
             use raw_window_handle::HasWindowHandle;
@@ -1243,9 +1243,7 @@ impl eframe::App for PdfViewerApp {
                     let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
                     self.native_hwnd = Some(wh.hwnd.get());
                     crate::infrastructure::windows::center_window_on_primary_monitor(hwnd);
-                    crate::infrastructure::windows::window_corners::apply_dark_title_bar(
-                        hwnd, dark,
-                    );
+                    crate::ui::theme::apply_native_title_bar(ctx, hwnd);
                 }
             }
 
@@ -1265,15 +1263,14 @@ impl eframe::App for PdfViewerApp {
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
         // Follow main-app theme switches while the viewer is open.
-        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
-            ctx.global_style().visuals.dark_mode,
-            &mut self.last_theme_poll,
-        ) {
-            crate::ui::theme::apply_viewer_visuals(ctx, dark);
+        if let Some(mode) =
+            crate::viewer_runtime::poll_saved_theme_change(ctx, &mut self.last_theme_poll)
+        {
+            crate::ui::theme::apply_viewer_visuals(ctx, mode);
             if let Some(raw) = self.native_hwnd {
-                crate::infrastructure::windows::window_corners::apply_dark_title_bar(
+                crate::ui::theme::apply_native_title_bar(
+                    ctx,
                     windows::Win32::Foundation::HWND(raw as *mut _),
-                    dark,
                 );
             }
         }
@@ -1319,7 +1316,7 @@ impl eframe::App for PdfViewerApp {
 
         egui::Panel::top("pdf_toolbar")
             .frame({
-                let (bar_fill, _) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                let (bar_fill, _) = crate::ui::theme::viewer_bar_colors(ui.ctx());
                 egui::Frame::new()
                     .fill(bar_fill)
                     .inner_margin(egui::Margin::symmetric(10, 6))
@@ -1327,7 +1324,7 @@ impl eframe::App for PdfViewerApp {
             .show(ui, |ui| {
                 self.show_toolbar(ui);
                 let inner = ui.max_rect();
-                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.ctx());
                 ui.painter().hline(
                     inner.x_range(),
                     inner.max.y + 6.0,

@@ -140,14 +140,14 @@ fn draw_wheel_picker(
 
     // Background with subtle border
     let bg_color = if dark_mode {
-        egui::Color32::from_rgb(50, 50, 55)
+        crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(50, 50, 55))
     } else {
         egui::Color32::from_rgb(235, 235, 240)
     };
     let border_color = if response.hovered() {
         egui::Color32::from_rgb(100, 150, 200)
     } else if dark_mode {
-        egui::Color32::from_rgb(70, 70, 75)
+        crate::ui::theme::palette::border(ui.ctx(), egui::Color32::from_rgb(70, 70, 75))
     } else {
         egui::Color32::from_rgb(200, 200, 205)
     };
@@ -162,7 +162,7 @@ fn draw_wheel_picker(
 
     // Center text
     let text_color = if dark_mode {
-        egui::Color32::from_gray(220)
+        crate::ui::theme::text_color(ui.ctx())
     } else {
         egui::Color32::from_gray(40)
     };

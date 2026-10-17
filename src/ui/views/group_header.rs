@@ -17,7 +17,7 @@ pub fn render_group_header(
             rect,
             3.0,
             if ui.visuals().dark_mode {
-                Color32::from_gray(48)
+                crate::ui::theme::palette::hover(ui.ctx(), Color32::from_gray(48))
             } else {
                 Color32::from_gray(242)
             },
@@ -25,11 +25,12 @@ pub fn render_group_header(
     }
 
     let text_color = if ui.visuals().dark_mode {
-        Color32::from_gray(195)
+        crate::ui::theme::current_palette(ui.ctx()).map_or(Color32::from_gray(195), |p| p.text)
     } else {
         Color32::from_gray(40)
     };
-    let secondary = Color32::from_gray(125);
+    let secondary = crate::ui::theme::current_palette(ui.ctx())
+        .map_or(Color32::from_gray(125), |p| p.secondary);
     let chevron = if collapsed { ">" } else { "v" };
     let left = rect.left() + 8.0;
     ui.painter().text(

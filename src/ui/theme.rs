@@ -2,6 +2,39 @@ use eframe::egui::{self, Color32};
 
 use crate::app::navigation_state::ThemeMode;
 
+mod native;
+pub mod palette;
+mod viewer;
+pub use native::apply_native_title_bar;
+use viewer::viewer_visuals;
+
+pub fn current_mode(ctx: &egui::Context) -> ThemeMode {
+    ctx.data(|data| data.get_temp(egui::Id::new("applied_theme_mode")))
+        .unwrap_or_else(|| {
+            if ctx.global_style().visuals.dark_mode {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            }
+        })
+}
+
+pub fn current_palette(ctx: &egui::Context) -> Option<palette::Palette> {
+    palette::for_mode(current_mode(ctx))
+}
+
+fn remember_mode(ctx: &egui::Context, mode: ThemeMode) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("applied_theme_mode"), mode));
+}
+
+pub fn accent_color(ctx: &egui::Context) -> Color32 {
+    current_palette(ctx).map_or(COLOR_ACCENT, |p| p.accent)
+}
+
+pub fn accent_text_color(ctx: &egui::Context) -> Color32 {
+    current_palette(ctx).map_or(Color32::WHITE, |p| p.background)
+}
+
 // === SPACING ===
 pub const PADDING_XS: f32 = 2.0;
 pub const PADDING_SM: f32 = 4.0;
@@ -72,7 +105,11 @@ pub fn drive_usage_color(usage_ratio: f32) -> Color32 {
     }
 }
 
-pub fn drive_usage_background_color(dark_mode: bool) -> Color32 {
+pub fn drive_usage_background_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.raised;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         DRIVE_USAGE_DARK_BACKGROUND_COLOR
     } else {
@@ -81,7 +118,11 @@ pub fn drive_usage_background_color(dark_mode: bool) -> Color32 {
 }
 
 // === Dark-mode-aware color access ===
-pub fn text_color(dark_mode: bool) -> Color32 {
+pub fn text_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.text;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         Color32::from_gray(220)
     } else {
@@ -89,7 +130,11 @@ pub fn text_color(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn secondary_text_color(dark_mode: bool) -> Color32 {
+pub fn secondary_text_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.secondary;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         Color32::from_gray(160)
     } else {
@@ -97,7 +142,11 @@ pub fn secondary_text_color(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn input_bg_color(dark_mode: bool) -> Color32 {
+pub fn input_bg_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.input;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         Color32::from_gray(55)
     } else {
@@ -105,7 +154,11 @@ pub fn input_bg_color(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn selection_color(dark_mode: bool) -> Color32 {
+pub fn selection_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.selection;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         COLOR_DARK_SELECTION
     } else {
@@ -113,7 +166,11 @@ pub fn selection_color(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn selection_text_color(dark_mode: bool) -> Color32 {
+pub fn selection_text_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.selection_text;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         COLOR_DARK_SELECTION_TEXT
     } else {
@@ -121,7 +178,11 @@ pub fn selection_text_color(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn header_active_bg(dark_mode: bool) -> Color32 {
+pub fn header_active_bg(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.active;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         Color32::from_gray(60)
     } else {
@@ -129,7 +190,11 @@ pub fn header_active_bg(dark_mode: bool) -> Color32 {
     }
 }
 
-pub fn selection_hover_color(dark_mode: bool) -> Color32 {
+pub fn selection_hover_color(ctx: &egui::Context) -> Color32 {
+    if let Some(p) = current_palette(ctx) {
+        return p.hover;
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         color_dark_selection_hover()
     } else {
@@ -142,56 +207,6 @@ pub const DEBOUNCE_MS: u64 = 50;
 pub const DRIVE_REFRESH_MS: u64 = 350;
 pub const AUTO_RELOAD_MS: u64 = 200;
 
-// === DEDICATED VIEWERS (image/pdf) ===
-
-/// Refined dark/light visuals for dedicated viewer windows: neutral mica-toned
-/// chrome, rounded widgets and subtle strokes (matches the main window style).
-pub fn viewer_visuals(dark_mode: bool) -> eframe::egui::Visuals {
-    let mut visuals = if dark_mode {
-        eframe::egui::Visuals::dark()
-    } else {
-        eframe::egui::Visuals::light()
-    };
-    if dark_mode {
-        visuals.window_fill = Color32::from_gray(32);
-        visuals.panel_fill = Color32::from_gray(28);
-        visuals.extreme_bg_color = Color32::from_gray(24);
-        visuals.window_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(60));
-        visuals.widgets.noninteractive.bg_fill = Color32::from_gray(37);
-        visuals.widgets.noninteractive.bg_stroke =
-            eframe::egui::Stroke::new(1.0, Color32::from_gray(60));
-        visuals.widgets.inactive.bg_fill = Color32::from_gray(45);
-        visuals.widgets.inactive.weak_bg_fill = Color32::from_gray(45);
-        visuals.widgets.inactive.bg_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(64));
-        visuals.widgets.hovered.bg_fill = Color32::from_gray(58);
-        visuals.widgets.hovered.weak_bg_fill = Color32::from_gray(58);
-        visuals.widgets.active.bg_fill = Color32::from_gray(70);
-        visuals.widgets.active.weak_bg_fill = Color32::from_gray(70);
-    } else {
-        visuals.window_fill = Color32::from_rgb(246, 246, 246);
-        visuals.panel_fill = Color32::from_rgb(243, 243, 243);
-        visuals.extreme_bg_color = Color32::WHITE;
-        visuals.window_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(220));
-        visuals.widgets.noninteractive.bg_stroke =
-            eframe::egui::Stroke::new(1.0, Color32::from_gray(225));
-        visuals.widgets.inactive.bg_fill = Color32::WHITE;
-        visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
-        visuals.widgets.inactive.bg_stroke =
-            eframe::egui::Stroke::new(1.0, Color32::from_gray(214));
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(229, 243, 255);
-        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(229, 243, 255);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(204, 228, 247);
-        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(204, 228, 247);
-    }
-    let radius = eframe::egui::CornerRadius::same(6);
-    visuals.window_corner_radius = radius;
-    visuals.menu_corner_radius = radius;
-    visuals.widgets.inactive.corner_radius = radius;
-    visuals.widgets.hovered.corner_radius = radius;
-    visuals.widgets.active.corner_radius = radius;
-    visuals
-}
-
 /// Applies the selected theme mode to the whole context, including the shared
 /// scroll/popup styling. `ThemeMode::System` resolves against the Windows app
 /// mode. Use this instead of calling `ctx.set_visuals()` directly so every
@@ -201,6 +216,7 @@ pub fn viewer_visuals(dark_mode: bool) -> eframe::egui::Visuals {
 /// `ThemePreference::System`, which swaps the active style bucket whenever the
 /// OS theme changes, silently discarding the visuals applied here.
 pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
+    remember_mode(ctx, mode);
     let dark = mode.resolve_dark();
     ctx.set_theme(if dark {
         egui::Theme::Dark
@@ -212,6 +228,9 @@ pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
     } else {
         ctx.set_visuals(egui::Visuals::light());
     }
+    if let Some(p) = palette::for_mode(mode) {
+        ctx.global_style_mut(|style| p.apply(&mut style.visuals));
+    }
     apply_scroll_style(ctx);
     apply_popup_style(ctx);
     crate::ui::fonts::apply_text_contrast(ctx);
@@ -220,13 +239,21 @@ pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
 /// Pins the theme preference and applies the dedicated-viewer visuals. Same
 /// rationale as [`apply_theme_visuals`]: without the pin, an OS theme change
 /// swaps the active style bucket and the viewer visuals are lost.
-pub fn apply_viewer_visuals(ctx: &egui::Context, dark: bool) {
+pub fn apply_viewer_visuals(ctx: &egui::Context, mode: ThemeMode) {
+    remember_mode(ctx, mode);
+    let dark = mode.resolve_dark();
     ctx.set_theme(if dark {
         egui::Theme::Dark
     } else {
         egui::Theme::Light
     });
     ctx.set_visuals(viewer_visuals(dark));
+    if let Some(p) = palette::for_mode(mode) {
+        ctx.global_style_mut(|style| p.apply(&mut style.visuals));
+    }
+    apply_scroll_style(ctx);
+    apply_popup_style(ctx);
+    crate::ui::fonts::apply_text_contrast(ctx);
 }
 
 /// Modern popup/tooltip chrome: rounded corners + soft deep shadow.
@@ -244,7 +271,11 @@ pub fn apply_popup_style(ctx: &egui::Context) {
 }
 
 /// (bar fill, separator stroke) for viewer toolbars/sidebars.
-pub fn viewer_bar_colors(dark_mode: bool) -> (Color32, Color32) {
+pub fn viewer_bar_colors(ctx: &egui::Context) -> (Color32, Color32) {
+    if let Some(p) = current_palette(ctx) {
+        return (p.surface, p.border);
+    }
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     if dark_mode {
         (Color32::from_gray(37), Color32::from_gray(60))
     } else {
@@ -304,42 +335,4 @@ pub const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
 pub const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drive_usage_ratio_handles_capacity_boundaries() {
-        assert_eq!(drive_usage_ratio(0, 0), None);
-        assert_eq!(drive_usage_ratio(100, 100), Some(0.0));
-        assert_eq!(drive_usage_ratio(100, 0), Some(1.0));
-    }
-
-    #[test]
-    fn drive_usage_ratio_handles_free_space_above_total() {
-        assert_eq!(drive_usage_ratio(100, 120), Some(0.0));
-    }
-
-    #[test]
-    fn drive_usage_becomes_critical_only_above_ninety_percent() {
-        let ninety_percent = drive_usage_ratio(100, 10).unwrap();
-        let above_ninety_percent = drive_usage_ratio(100, 9).unwrap();
-
-        assert_eq!(drive_usage_color(ninety_percent), DRIVE_USAGE_NORMAL_COLOR);
-        assert_eq!(
-            drive_usage_color(above_ninety_percent),
-            DRIVE_USAGE_CRITICAL_COLOR
-        );
-    }
-
-    #[test]
-    fn drive_usage_background_adapts_to_theme() {
-        assert_eq!(
-            drive_usage_background_color(false),
-            DRIVE_USAGE_LIGHT_BACKGROUND_COLOR
-        );
-        assert_eq!(
-            drive_usage_background_color(true),
-            DRIVE_USAGE_DARK_BACKGROUND_COLOR
-        );
-    }
-}
+mod tests;

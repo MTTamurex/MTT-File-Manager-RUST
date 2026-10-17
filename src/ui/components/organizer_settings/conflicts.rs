@@ -5,9 +5,9 @@ use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
-pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.add_space(18.0);
-    settings_ui::card_frame(dark_mode).show(ui, |ui| {
+    settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             settings_ui::sub_header(ui, &t!("organizer.conflicts_title"));
@@ -21,21 +21,21 @@ pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark
                         .to_string(),
                 )
                 .small()
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
             );
         });
         ui.add_space(4.0);
         ui.label(
             RichText::new(t!("organizer.conflicts_description"))
                 .size(13.0)
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         ui.add_space(12.0);
 
         if let Some(error) = app.organizer_state.conflict_state.load_error.clone() {
             ui.label(
                 RichText::new(t!("organizer.conflicts_load_failed", reason = error))
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
             if ui.button(t!("organizer.retry_conflicts")).clicked() {
                 if let Err(error) = app.organizer_state.reload_conflicts(&app.app_state_db) {
@@ -48,14 +48,14 @@ pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark
         if app.organizer_state.conflict_state.conflicts.is_empty() {
             ui.label(
                 RichText::new(t!("organizer.no_conflicts"))
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
             return;
         }
 
         let conflicts = app.organizer_state.conflict_state.conflicts.clone();
         for conflict in conflicts {
-            render_conflict_row(ui, app, dark_mode, conflict);
+            render_conflict_row(ui, app, conflict);
             ui.add_space(8.0);
         }
     });
@@ -65,7 +65,6 @@ pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark
 fn render_conflict_row(
     ui: &mut egui::Ui,
     app: &mut ImageViewerApp,
-    dark_mode: bool,
     conflict: crate::infrastructure::app_state_db::OrganizerConflictRecord,
 ) {
     let conflict_id = conflict.conflict_id;
@@ -88,23 +87,17 @@ fn render_conflict_row(
     let mut rename_source = false;
     let mut cancel = false;
 
-    settings_ui::row_frame(dark_mode).show(ui, |ui| {
+    settings_ui::row_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(
             RichText::new(t!("organizer.conflict_id", id = conflict_id.get()))
                 .strong()
-                .color(theme::text_color(dark_mode)),
+                .color(theme::text_color(ui.ctx())),
         );
         ui.add_space(6.0);
+        path_row(ui, &t!("organizer.conflict_source"), &conflict.source_path);
         path_row(
             ui,
-            dark_mode,
-            &t!("organizer.conflict_source"),
-            &conflict.source_path,
-        );
-        path_row(
-            ui,
-            dark_mode,
             &t!("organizer.conflict_destination"),
             &conflict.destination_path,
         );
@@ -115,7 +108,7 @@ fn render_conflict_row(
                 ui.label(
                     RichText::new(t!("organizer.conflict_source_name"))
                         .small()
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
                 settings_ui::text_edit(
                     ui,
@@ -130,7 +123,7 @@ fn render_conflict_row(
                 ui.label(
                     RichText::new(t!("organizer.conflict_destination_name"))
                         .small()
-                        .color(theme::secondary_text_color(dark_mode)),
+                        .color(theme::secondary_text_color(ui.ctx())),
                 );
                 settings_ui::text_edit(
                     ui,
@@ -175,14 +168,14 @@ fn render_conflict_row(
             ui.label(
                 RichText::new(t!("organizer.conflict_identity_unavailable"))
                     .small()
-                    .color(theme::secondary_text_color(dark_mode)),
+                    .color(theme::secondary_text_color(ui.ctx())),
             );
         }
         ui.label(
             RichText::new(t!("organizer.conflict_keep_hint"))
                 .small()
                 .italics()
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
     });
 
@@ -278,18 +271,18 @@ fn render_destination_confirmation(app: &mut ImageViewerApp, ctx: &egui::Context
     }
 }
 
-fn path_row(ui: &mut egui::Ui, dark_mode: bool, label: &str, path: &std::path::Path) {
+fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) {
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new(label)
                 .small()
-                .color(theme::secondary_text_color(dark_mode)),
+                .color(theme::secondary_text_color(ui.ctx())),
         );
         ui.label(
             RichText::new(path.display().to_string())
                 .small()
                 .monospace()
-                .color(theme::text_color(dark_mode)),
+                .color(theme::text_color(ui.ctx())),
         );
     });
 }

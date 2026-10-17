@@ -33,13 +33,13 @@ fn draw_header_resizable(
             ui.painter().rect_filled(
                 header_rect,
                 2.0,
-                crate::ui::theme::header_active_bg(ui.visuals().dark_mode),
+                crate::ui::theme::header_active_bg(ui.ctx()),
             );
         }
         let text_color = if is_active {
-            crate::ui::theme::text_color(ui.visuals().dark_mode)
+            crate::ui::theme::text_color(ui.ctx())
         } else {
-            crate::ui::theme::secondary_text_color(ui.visuals().dark_mode)
+            crate::ui::theme::secondary_text_color(ui.ctx())
         };
 
         // Truncate text to fit within column

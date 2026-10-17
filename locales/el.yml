@@ -412,6 +412,8 @@ settings:
   appearance_description: "Επιλογή του οπτικού θέματος της εφαρμογής."
   theme_light: "Φωτεινό"
   theme_dark: "Σκούρο"
+  theme_dark_deep: "Βαθύ σκοτεινό"
+  theme_github_dark: "Μεσάνυχτα"
   theme_system: "Σύστημα"
   theme_apply_immediately: "Οι αλλαγές θέματος εφαρμόζονται αμέσως."
   interface_scale: "Μέγεθος κειμένου και περιβάλλοντος"

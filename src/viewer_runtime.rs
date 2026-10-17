@@ -17,6 +17,7 @@
 //!   - disable optional GL-only buffers (`depth_buffer`, `stencil_buffer`,
 //!     `multisampling`) which the viewers never use.
 
+use crate::app::navigation_state::ThemeMode;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -66,30 +67,32 @@ pub fn apply_saved_locale() {
     }
 }
 
-/// Returns `true` if the saved theme renders dark right now: `"dark"` always
-/// does, `"system"` follows the Windows app mode, and anything else (including
-/// no stored preference or light) is `false`.
-pub fn is_saved_theme_dark() -> bool {
+pub fn saved_theme_mode() -> ThemeMode {
     read_pref_readonly("theme_mode")
-        .map(|s| match s.as_str() {
-            "dark" => true,
-            "system" => crate::infrastructure::windows::windows_app_is_dark(),
-            _ => false,
-        })
-        .unwrap_or(false)
+        .map(|s| ThemeMode::from_preference(&s))
+        .unwrap_or(ThemeMode::Light)
 }
 
-/// 1 Hz poll of the shared prefs: returns the saved theme's dark flag when it
-/// differs from `current_dark`, so long-lived viewer/analyzer subprocesses
-/// follow main-app theme switches without needing a restart.
-pub fn poll_saved_theme_change(current_dark: bool, last_poll: &mut Instant) -> Option<bool> {
+/// Whether the saved theme currently uses dark native window decorations.
+pub fn is_saved_theme_dark() -> bool {
+    saved_theme_mode().resolve_dark()
+}
+
+/// Detect palette changes as well as Windows light/dark changes at 1 Hz.
+pub fn poll_saved_theme_change(ctx: &egui::Context, last_poll: &mut Instant) -> Option<ThemeMode> {
     let now = Instant::now();
     if now.duration_since(*last_poll) < THEME_POLL_INTERVAL {
         return None;
     }
     *last_poll = now;
-    let saved = is_saved_theme_dark();
-    (saved != current_dark).then_some(saved)
+    let saved = saved_theme_mode();
+    theme_change(ctx, saved)
+}
+
+fn theme_change(ctx: &egui::Context, saved: ThemeMode) -> Option<ThemeMode> {
+    (saved != crate::ui::theme::current_mode(ctx)
+        || saved.resolve_dark() != ctx.global_style().visuals.dark_mode)
+        .then_some(saved)
 }
 
 /// Schedules the frame that makes the next saved-theme poll eligible. This
@@ -206,6 +209,41 @@ pub fn poll_viewer_fonts(ctx: &egui::Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewers_detect_changes_between_every_pair_of_dark_palettes() {
+        let ctx = egui::Context::default();
+        for current in [ThemeMode::Dark, ThemeMode::DarkDeep, ThemeMode::GitHubDark] {
+            crate::ui::theme::apply_viewer_visuals(&ctx, current);
+            for saved in [ThemeMode::Dark, ThemeMode::DarkDeep, ThemeMode::GitHubDark] {
+                assert_eq!(
+                    theme_change(&ctx, saved),
+                    (saved != current).then_some(saved)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn viewers_detect_system_appearance_changes_even_when_mode_is_unchanged() {
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply_viewer_visuals(&ctx, ThemeMode::System);
+        let dark = ctx.global_style().visuals.dark_mode;
+        ctx.global_style_mut(|style| style.visuals.dark_mode = !dark);
+        assert_eq!(
+            theme_change(&ctx, ThemeMode::System),
+            Some(ThemeMode::System)
+        );
+    }
+
+    #[test]
+    fn theme_poll_does_not_read_preferences_before_its_interval() {
+        let ctx = egui::Context::default();
+        let mut last_poll = Instant::now();
+        let previous = last_poll;
+        assert_eq!(poll_saved_theme_change(&ctx, &mut last_poll), None);
+        assert_eq!(last_poll, previous);
+    }
 
     #[test]
     fn theme_poll_remaining_waits_only_until_the_next_interval() {

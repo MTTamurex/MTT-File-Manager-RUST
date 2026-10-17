@@ -19,29 +19,27 @@ struct VirtualDriveInfo {
 }
 
 pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
-    let dark_mode = ui.visuals().dark_mode;
-
     ui.label(
         RichText::new(t!("settings.virtual_drives"))
             .size(16.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new(t!("vdrive_settings.description"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.label(
         RichText::new(t!("vdrive_settings.ssd_desc"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.label(
         RichText::new(t!("vdrive_settings.hdd_desc"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(16.0);
 
@@ -54,13 +52,13 @@ pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
         );
         ui.add_space(8.0);
         ui.label(
-            RichText::new(t!("vdrive_settings.typical_drives")).color(theme::text_color(dark_mode)),
+            RichText::new(t!("vdrive_settings.typical_drives")).color(theme::text_color(ui.ctx())),
         );
         ui.label(
-            RichText::new("• Cryptomator (CryptoFS)").color(theme::secondary_text_color(dark_mode)),
+            RichText::new("• Cryptomator (CryptoFS)").color(theme::secondary_text_color(ui.ctx())),
         );
-        ui.label(RichText::new("• Dokan").color(theme::secondary_text_color(dark_mode)));
-        ui.label(RichText::new("• WinFsp").color(theme::secondary_text_color(dark_mode)));
+        ui.label(RichText::new("• Dokan").color(theme::secondary_text_color(ui.ctx())));
+        ui.label(RichText::new("• WinFsp").color(theme::secondary_text_color(ui.ctx())));
     } else {
         egui::Grid::new("virtual_drives_grid")
             .striped(true)
@@ -69,32 +67,32 @@ pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
                 ui.label(
                     RichText::new(t!("vdrive_settings.col_drive"))
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 ui.label(
                     RichText::new(t!("vdrive_settings.col_label"))
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 ui.label(
                     RichText::new(t!("vdrive_settings.col_system"))
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 ui.label(
                     RichText::new(t!("vdrive_settings.col_optimization"))
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 ui.label(
                     RichText::new(t!("vdrive_settings.col_actions"))
                         .strong()
-                        .color(theme::text_color(dark_mode)),
+                        .color(theme::text_color(ui.ctx())),
                 );
                 ui.end_row();
 
                 for drive_info in &virtual_drives {
-                    render_drive_row(ui, drive_info, dark_mode);
+                    render_drive_row(ui, drive_info);
                 }
             });
     }
@@ -102,7 +100,7 @@ pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
     ui.add_space(16.0);
     ui.separator();
     ui.add_space(8.0);
-    ui.label(RichText::new(t!("vdrive_settings.config_info")).color(theme::text_color(dark_mode)));
+    ui.label(RichText::new(t!("vdrive_settings.config_info")).color(theme::text_color(ui.ctx())));
 }
 
 /// Detect all virtual drives in the system
@@ -123,17 +121,15 @@ fn load_virtual_drives() -> Vec<VirtualDriveInfo> {
 }
 
 /// Render a single drive configuration row
-fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo, dark_mode: bool) {
+fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
     // Drive letter
-    ui.label(
-        RichText::new(format!("{}:\\", drive_info.letter)).color(theme::text_color(dark_mode)),
-    );
+    ui.label(RichText::new(format!("{}:\\", drive_info.letter)).color(theme::text_color(ui.ctx())));
 
     // Label
-    ui.label(RichText::new(&drive_info.label).color(theme::text_color(dark_mode)));
+    ui.label(RichText::new(&drive_info.label).color(theme::text_color(ui.ctx())));
 
     // File system
-    ui.label(RichText::new(&drive_info.file_system).color(theme::text_color(dark_mode)));
+    ui.label(RichText::new(&drive_info.file_system).color(theme::text_color(ui.ctx())));
 
     // Current setting
     let current_type = drive_info.current_override.unwrap_or(DiskTypeOverride::SSD);

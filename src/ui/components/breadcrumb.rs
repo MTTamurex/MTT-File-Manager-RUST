@@ -278,7 +278,7 @@ pub fn render_breadcrumb_trail(ui: &mut egui::Ui, segments: &[(String, String)])
     let layout = compute_trail_layout(ui, segments);
     let mut action: Option<String> = None;
     let total = segments.len();
-    let text_color = theme::text_color(ui.visuals().dark_mode);
+    let text_color = theme::text_color(ui.ctx());
     let chevron_color = ui.visuals().weak_text_color();
 
     ui.horizontal_wrapped(|ui| {
@@ -425,7 +425,7 @@ fn render_overflow_popup(
             ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
             ui.visuals_mut().widgets.active.bg_fill = if ui.visuals().dark_mode {
-                egui::Color32::from_gray(70)
+                theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
             } else {
                 egui::Color32::from_gray(210)
             };
@@ -545,7 +545,7 @@ fn breadcrumb_button_with_label(ui: &mut egui::Ui, label: egui::RichText) -> egu
     ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
     ui.visuals_mut().widgets.active.bg_fill = if ui.visuals().dark_mode {
-        egui::Color32::from_gray(70)
+        theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
     } else {
         egui::Color32::from_gray(210)
     };

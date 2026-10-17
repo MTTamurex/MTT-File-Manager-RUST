@@ -163,7 +163,7 @@ fn click_section_with_feedback(
             },
         );
         if !pressed {
-            let color = crate::ui::theme::selection_color(ctx.global_style().visuals.dark_mode);
+            let color = crate::ui::theme::selection_color(&ctx);
             highlighted = output.shapes.iter().any(|shape| {
                 matches!(&shape.shape,
                 egui::epaint::Shape::Rect(rect) if rect.fill == color && rect.rect.contains(pos))

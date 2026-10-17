@@ -23,7 +23,10 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
         .exact_size(46.0)
         .frame(egui::Frame {
             fill: if dark_mode {
-                egui::Color32::from_rgb(45, 45, 45)
+                crate::ui::theme::palette::surface(
+                    root_ui.ctx(),
+                    egui::Color32::from_rgb(45, 45, 45),
+                )
             } else {
                 egui::Color32::from_rgb(243, 243, 243)
             },

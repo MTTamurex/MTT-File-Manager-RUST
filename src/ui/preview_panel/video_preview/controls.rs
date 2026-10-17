@@ -65,7 +65,7 @@ fn draw_seek_bar(
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().slider_width = full_width;
-        ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+        ui.visuals_mut().selection.bg_fill = crate::ui::theme::accent_color(ui.ctx());
 
         let mut seek_value = current_time;
         if ui
@@ -167,7 +167,7 @@ fn draw_basic_controls(
     let mut vol = volume;
     ui.add_space(4.0);
     ui.spacing_mut().slider_width = 70.0;
-    ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+    ui.visuals_mut().selection.bg_fill = crate::ui::theme::accent_color(ui.ctx());
     if ui
         .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
         .changed()

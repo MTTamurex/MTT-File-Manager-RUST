@@ -92,7 +92,7 @@ pub fn render_miller_column(
 
     // Right separator between columns.
     let sep_color = if dark {
-        Color32::from_gray(60)
+        theme::palette::border(ui.ctx(), Color32::from_gray(60))
     } else {
         Color32::from_gray(210)
     };
@@ -275,7 +275,7 @@ fn render_row(
 
     if is_navigation_child && !is_selected {
         ui.painter()
-            .rect_filled(row_rect, 0.0, theme::selection_hover_color(dark));
+            .rect_filled(row_rect, 0.0, theme::selection_hover_color(ui.ctx()));
     }
 
     let mut visual_rect = row_rect;
@@ -284,14 +284,14 @@ fn render_row(
         ui.painter().rect_stroke(
             visual_rect,
             4.0,
-            egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+            egui::Stroke::new(2.0, theme::accent_color(ui.ctx())),
             egui::StrokeKind::Inside,
         );
     } else if response.hovered() || is_focused {
         ui.painter().rect_stroke(
             visual_rect,
             4.0,
-            egui::Stroke::new(1.0, theme::COLOR_ACCENT.gamma_multiply(0.35)),
+            egui::Stroke::new(1.0, theme::accent_color(ui.ctx()).gamma_multiply(0.35)),
             egui::StrokeKind::Inside,
         );
     }
@@ -300,7 +300,7 @@ fn render_row(
         ui.painter().rect_stroke(
             row_rect.shrink(1.0),
             4.0,
-            egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+            egui::Stroke::new(2.0, theme::accent_color(ui.ctx())),
             egui::StrokeKind::Inside,
         );
     }
@@ -395,7 +395,7 @@ fn render_row(
     }
 
     let text_color = if is_selected {
-        theme::selection_text_color(dark)
+        theme::selection_text_color(ui.ctx())
     } else {
         ui.visuals().text_color()
     }

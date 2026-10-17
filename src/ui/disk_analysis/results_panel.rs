@@ -93,7 +93,7 @@ fn render_panel_chrome(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         egui::vec2(ui.available_width(), PANEL_CHROME_H),
         egui::Sense::hover(),
     );
-    let (fill, separator) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+    let (fill, separator) = crate::ui::theme::viewer_bar_colors(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter().hline(
         rect.x_range(),

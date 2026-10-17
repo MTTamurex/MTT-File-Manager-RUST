@@ -33,32 +33,30 @@ pub fn render_shortcut_settings_section(
         }
     }
 
-    let dark_mode = ui.visuals().dark_mode;
-
     ui.label(
         RichText::new(t!("settings.shortcuts"))
             .size(16.0)
             .strong()
-            .color(theme::text_color(dark_mode)),
+            .color(theme::text_color(ui.ctx())),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new(t!("settings.shortcuts_description"))
             .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(8.0);
     ui.label(
         RichText::new(t!("settings.shortcuts_reserved_note"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(12.0);
 
     ui.label(
         RichText::new(t!("settings.shortcuts_view_mode_scroll_note"))
             .size(12.0)
-            .color(theme::secondary_text_color(dark_mode)),
+            .color(theme::secondary_text_color(ui.ctx())),
     );
 
     if ui
@@ -90,7 +88,7 @@ pub fn render_shortcut_settings_section(
                     shortcuts.label(action)
                 };
 
-                ui.label(RichText::new(action_label(action)).color(theme::text_color(dark_mode)));
+                ui.label(RichText::new(action_label(action)).color(theme::text_color(ui.ctx())));
 
                 let button_text = if is_capturing {
                     RichText::new(button_text).strong()
@@ -130,7 +128,7 @@ pub fn render_shortcut_settings_section(
                     ui.label(
                         RichText::new(t!("settings.shortcuts_press_binding_hint"))
                             .size(12.0)
-                            .color(theme::secondary_text_color(dark_mode)),
+                            .color(theme::secondary_text_color(ui.ctx())),
                     );
                     ui.label("");
                     ui.end_row();
