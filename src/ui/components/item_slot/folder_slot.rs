@@ -38,7 +38,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 ) {
     let item = ctx.item;
     let item_path_text = item.path.to_string_lossy();
-    let is_network_location = ctx.is_computer_view && item_path_text.starts_with(r"\\");
+    let is_network_location = ctx.is_computer_view;
     if ctx.allow_thumbnail_requests && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
         // --- LAZY LOAD TRIGGER ---
         // If no cover AND not yet scanned: Trigger Scan.

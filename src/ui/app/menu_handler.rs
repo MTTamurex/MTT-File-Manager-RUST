@@ -583,6 +583,15 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 },
             );
             if let Some(command) = selected_command.as_deref() {
+                if command == "network_location_expand" {
+                    if let Some(path) = context_menu.target_paths.first() {
+                        let destination = app.resolve_network_location_path(path);
+                        app.sidebar_tree.toggle_expand(&destination);
+                    }
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
                 if command == "add_network_location" {
                     app.start_network_location_wizard();
                     context_menu.close();
@@ -805,6 +814,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 .map(Path::to_path_buf)
                                 .unwrap_or_else(|| path.to_path_buf())
                         };
+                        let target = app.resolve_network_location_path(&target);
 
                         if app.dual_panel_enabled {
                             let origin_panel = context_origin_panel(
@@ -856,7 +866,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             .operation_directory
                             .clone()
                             .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path));
-                        match app.create_shell_shortcut(path, &destination) {
+                        let target = app.resolve_network_location_path(path);
+                        match app.create_shell_shortcut(&target, &destination) {
                             Ok(created) => {
                                 let origin_panel = context_menu.origin_panel_is_left;
                                 run_in_context_panel(app, origin_panel, |app| {
@@ -943,12 +954,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -80 => {
                     if let Some(path) = context_menu.target_paths.first() {
-                        open_terminal_at(path);
+                        open_terminal_at(&app.resolve_network_location_path(path));
                     }
                 }
                 -81 => {
                     if let Some(path) = context_menu.target_paths.first() {
-                        open_terminal_admin_at(path);
+                        open_terminal_admin_at(&app.resolve_network_location_path(path));
                     }
                 }
                 -82 => {

@@ -225,6 +225,7 @@ impl ImageViewerApp {
             self.cancel_item_drag();
             return;
         };
+        let dest_folder = self.resolve_network_location_path(&dest_folder);
 
         if !self.is_valid_drop_target(&dest_folder) {
             self.cancel_item_drag();

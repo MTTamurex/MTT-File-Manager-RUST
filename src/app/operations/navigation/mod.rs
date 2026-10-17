@@ -125,6 +125,9 @@ impl ImageViewerApp {
     }
 
     pub fn navigate_to(&mut self, path: &str) {
+        let destination = self.resolve_network_location_path(Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         // Virtual paths (::computer::, ::recycle_bin::, ::tag::N) must skip
         // the drive-letter normalization below — its heuristic "second char
         // is ':'" misinterprets "::tag::9" as a drive path and rewrites it

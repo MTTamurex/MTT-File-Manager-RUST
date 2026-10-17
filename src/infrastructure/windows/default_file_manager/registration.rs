@@ -2,6 +2,7 @@ use std::path::Path;
 
 pub(super) const VERB: &str = "MTT.FileManager.Default";
 pub(super) const CLASSES: [&str; 2] = ["Directory", "Drive"];
+pub(super) const NETWORK_LOCATION_CLASS: &str = "CLSID\\{0AFACED1-E828-11D1-9187-B532F1E9575D}";
 pub(super) const LEGACY_KEYS: [&str; 2] = [
     "Software\\Classes\\Folder\\shell\\open\\command",
     "Software\\Classes\\Folder\\shell\\explore\\command",
@@ -28,6 +29,26 @@ pub(super) enum RegistryAction {
 
 pub(super) fn folder_command(executable: &Path) -> String {
     format!("\"{}\" --open-folder \"%1\"", executable.to_string_lossy())
+}
+
+pub(super) fn network_location_command(executable: &Path) -> String {
+    format!(
+        "\"{}\" --open-network-location \"%1\"",
+        executable.to_string_lossy()
+    )
+}
+
+pub(super) fn needs_network_location_upgrade(reg: &impl Registry, executable: &Path) -> bool {
+    CLASSES
+        .iter()
+        .all(|class| class_is_active(reg, class, &folder_command(executable)))
+        && matches!(
+            reg.read(
+                &format!("{}\\{VERB}\\command", shell_key(NETWORK_LOCATION_CLASS)),
+                ""
+            ),
+            Ok(None)
+        )
 }
 
 pub(super) fn win_e_command(executable: &Path) -> String {
@@ -59,18 +80,45 @@ pub(super) fn apply(
     action: RegistryAction,
     executable: &Path,
 ) -> Result<(), String> {
+    super::registry_transaction::run(reg, |reg| apply_action(reg, action, executable))
+}
+
+fn apply_action(
+    reg: &mut impl Registry,
+    action: RegistryAction,
+    executable: &Path,
+) -> Result<(), String> {
     let command = folder_command(executable);
     match action {
         RegistryAction::EnableFolders => {
+            // Check every class before changing any existing association.
+            for class in CLASSES {
+                check_class_owner(reg, class, &command)?;
+            }
+            check_class_owner(
+                reg,
+                NETWORK_LOCATION_CLASS,
+                &network_location_command(executable),
+            )?;
             for class in CLASSES {
                 enable_class(reg, class, &command)?;
             }
+            enable_class(
+                reg,
+                NETWORK_LOCATION_CLASS,
+                &network_location_command(executable),
+            )?;
             remove_legacy(reg, &command)?;
         }
         RegistryAction::RestoreFolders => {
             for class in CLASSES {
                 restore_class(reg, class, &command)?;
             }
+            restore_class(
+                reg,
+                NETWORK_LOCATION_CLASS,
+                &network_location_command(executable),
+            )?;
             remove_legacy(reg, &command)?;
         }
         RegistryAction::EnableWinE => {
@@ -96,16 +144,22 @@ fn state_key(class: &str) -> String {
     format!("Software\\MTT-File-Manager\\ShellIntegration\\DefaultFolders\\{class}")
 }
 
-fn enable_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<(), String> {
-    let shell = shell_key(class);
-    let verb = format!("{shell}\\{VERB}");
-    let command_key = format!("{verb}\\command");
+fn check_class_owner(reg: &impl Registry, class: &str, command: &str) -> Result<(), String> {
+    let command_key = format!("{}\\{VERB}\\command", shell_key(class));
     if reg
         .read(&command_key, "")?
         .is_some_and(|value| !value.eq_ignore_ascii_case(command))
     {
         return Err("The MTT folder verb belongs to another installation.".into());
     }
+    Ok(())
+}
+
+fn enable_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<(), String> {
+    check_class_owner(reg, class, command)?;
+    let shell = shell_key(class);
+    let verb = format!("{shell}\\{VERB}");
+    let command_key = format!("{verb}\\command");
     let state = state_key(class);
     let current = reg.read(&shell, "")?;
     if !owns(current.as_deref(), VERB) {

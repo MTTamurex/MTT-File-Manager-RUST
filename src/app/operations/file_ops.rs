@@ -278,6 +278,8 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder_at(&mut self, base_path: &Path) {
+        let destination = self.resolve_network_location_path(base_path);
+        let base_path = destination.as_path();
         if !super::file_operation_policy::path_accepts_file_children(base_path) {
             return;
         }
@@ -433,6 +435,7 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn rename_path_with_shell(&mut self, path: PathBuf, new_name: String) -> bool {
+        let new_name = self.network_location_rename_filename(&path, new_name);
         if self.path_is_network_operation_root(&path) {
             return false;
         }
@@ -531,7 +534,10 @@ impl ImageViewerApp {
                     && !self.path_is_network_operation_root(&row.source)
                     && !crate::domain::file_entry::is_path_inside_existing_archive_file(&row.source)
             })
-            .map(|row| (row.source, row.new_name))
+            .map(|row| {
+                let name = self.network_location_rename_filename(&row.source, row.new_name);
+                (row.source, name)
+            })
             .collect();
 
         if renames.is_empty() {

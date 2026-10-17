@@ -250,6 +250,8 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "将当前文件夹固定到快速访问"
 context_menu:
+  expand: "展开"
+  collapse: "折叠"
   add_network_location: "添加网络位置"
   open_in_mtt: "在 MTT 中打开"
   open: "打开"

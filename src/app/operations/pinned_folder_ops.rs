@@ -6,6 +6,9 @@ use crate::domain::pinned_folder::PinnedFolder;
 impl ImageViewerApp {
     /// Pin a folder to Quick Access. No-op if already pinned.
     pub fn pin_folder(&mut self, path: &str) {
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         // Avoid duplicates
         if self.pinned_folders.iter().any(|pf| pf.path == path) {
             return;
@@ -31,6 +34,9 @@ impl ImageViewerApp {
 
     /// Remove a folder from Quick Access.
     pub fn unpin_folder(&mut self, path: &str) {
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         self.pinned_folders.retain(|pf| pf.path != path);
         self.app_state_db.remove_pinned_folder(path);
 

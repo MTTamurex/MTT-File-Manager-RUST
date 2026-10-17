@@ -4,6 +4,9 @@ impl ImageViewerApp {
     /// Apply the archive preference only to item activation, never to history,
     /// address-bar navigation or explicit requests for an existing tab.
     pub(crate) fn activate_location(&mut self, path: &str) {
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         if self.tab_preferences.archive_activation_candidate(path) {
             self.queue_archive_activation(path);
         } else {
@@ -28,6 +31,9 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn open_location_in_new_tab(&mut self, panel: ActivePanel, path: &str) {
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         if self.tab_navigation_blocked() {
             return;
         }
@@ -39,6 +45,9 @@ impl ImageViewerApp {
     }
 
     fn open_location_in_main_tab(&mut self, path: &str) {
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
         if self.tab_navigation_blocked() {
             return;
         }

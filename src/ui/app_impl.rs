@@ -431,6 +431,14 @@ impl eframe::App for ImageViewerApp {
                     ShellMenuResponse::Invoked { request_id } => {
                         if request_id == self.shell_menu_request_id {
                             self.shell_menu_loading = false;
+                            if self.context_menu.target_paths.iter().any(|path| {
+                                self.drive_state
+                                    .network_locations
+                                    .iter()
+                                    .any(|location| location.matches_shortcut_path(path))
+                            }) {
+                                self.request_network_location_refresh();
+                            }
                         }
                         if self.global_search.shell_refresh_request_id == Some(request_id) {
                             self.global_search.shell_refresh_request_id = None;
@@ -792,8 +800,12 @@ fn resolve_external_drop_destination(app: &ImageViewerApp) -> Option<PathBuf> {
         };
 
     resolve_external_drop_destination_candidates(
-        app.drag_target_folder.clone(),
-        app.external_drop_inactive_folder.clone(),
+        app.drag_target_folder
+            .as_ref()
+            .map(|path| app.resolve_network_location_path(path)),
+        app.external_drop_inactive_folder
+            .as_ref()
+            .map(|path| app.resolve_network_location_path(path)),
         current_folder,
     )
 }

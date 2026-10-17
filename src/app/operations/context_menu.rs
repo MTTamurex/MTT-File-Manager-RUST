@@ -397,6 +397,14 @@ impl ImageViewerApp {
         };
 
         let mut items = Vec::new();
+        let saved_network_locations = !is_empty_area
+            && !paths.is_empty()
+            && paths.iter().all(|path| {
+                self.drive_state
+                    .network_locations
+                    .iter()
+                    .any(|location| location.matches_shortcut_path(path))
+            });
 
         if uses_file_view_location
             && is_empty_area
@@ -577,7 +585,7 @@ impl ImageViewerApp {
         // Archives (.zip, .rar, .7z) have is_dir=true (they're navigable containers)
         // but still support "Open with" as files.
         // PE executables (.exe, .msi, .com, .scr) never show "Open with" in Windows Explorer.
-        let target_is_file = if is_empty_area || is_drive {
+        let target_is_file = if is_empty_area || is_drive || saved_network_locations {
             false
         } else if is_global_search || is_sidebar_tree {
             !self.context_menu.primary_is_directory.unwrap_or(false)
@@ -784,6 +792,21 @@ impl ImageViewerApp {
             );
         } else {
             items.push(ContextMenuItem::separator());
+            if saved_network_locations && is_sidebar_tree {
+                let destination = self.resolve_network_location_path(&paths[0]);
+                let expanded = self.sidebar_tree.is_expanded(&destination);
+                items.push(
+                    ContextMenuItem::new(
+                        -86,
+                        if expanded {
+                            t!("context_menu.collapse")
+                        } else {
+                            t!("context_menu.expand")
+                        },
+                    )
+                    .with_command("network_location_expand"),
+                );
+            }
             items.push(ContextMenuItem::new(-20, t!("context_menu.open")).with_svg_icon("folder"));
             if can_play_optical_disc {
                 items.push(
@@ -839,7 +862,8 @@ impl ImageViewerApp {
                     is_drive,
                     is_global_search,
                     is_computer_view: uses_file_view_location
-                        && self.navigation_state.is_computer_view,
+                        && self.navigation_state.is_computer_view
+                        && !saved_network_locations,
                     is_recycle_bin_view: uses_file_view_location
                         && self.navigation_state.is_recycle_bin_view,
                 },
@@ -854,7 +878,8 @@ impl ImageViewerApp {
             if paths.len() == 1 && !is_drive && !target_is_file {
                 let target_path = &paths[0];
                 if self.context_target_is_directory(_item_index, target_path) {
-                    if let Some(target_path) = target_path.to_str() {
+                    let resolved_target = self.resolve_network_location_path(target_path);
+                    if let Some(target_path) = resolved_target.to_str() {
                         let is_pinned = self.pinned_folders.iter().any(|pf| pf.path == target_path);
                         items.push(ContextMenuItem::separator());
                         if is_pinned {

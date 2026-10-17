@@ -68,6 +68,7 @@ impl ImageViewerApp {
             match result {
                 Some(res) => {
                     processed += 1;
+                    self.refresh_network_locations_after_operation(&res);
                     match res {
                         FileOperationResult::RenameCompleted {
                             path,

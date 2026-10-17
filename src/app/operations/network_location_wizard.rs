@@ -5,6 +5,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 pub(crate) struct NetworkLocationWizardState {
     completion: Option<Receiver<bool>>,
     refresh_requested: bool,
+    refresh_views: bool,
 }
 
 impl NetworkLocationWizardState {
@@ -16,19 +17,58 @@ impl NetworkLocationWizardState {
             Err(TryRecvError::Disconnected) => false,
         };
         self.completion = None;
-        self.refresh_requested |= success;
+        if success {
+            self.request_refresh(false);
+        }
         Some(success)
     }
 
-    fn take_refresh_if_ready(&mut self, drive_scan_pending: bool) -> bool {
+    pub(super) fn take_refresh_if_ready(&mut self, drive_scan_pending: bool) -> bool {
         if drive_scan_pending {
             return false;
         }
         std::mem::take(&mut self.refresh_requested)
     }
+
+    pub(super) fn request_refresh(&mut self, refresh_views: bool) {
+        self.refresh_requested = true;
+        self.refresh_views |= refresh_views;
+    }
+
+    pub(super) fn accept_scan_result(
+        &mut self,
+        interaction_active: bool,
+        snapshot_changed: bool,
+    ) -> Option<bool> {
+        if self.refresh_requested {
+            None
+        } else if interaction_active && (snapshot_changed || self.refresh_views) {
+            self.request_refresh(false);
+            None
+        } else {
+            Some(std::mem::take(&mut self.refresh_views))
+        }
+    }
 }
 
 impl ImageViewerApp {
+    pub(super) fn network_location_interaction_active(&self) -> bool {
+        self.context_menu.is_open
+            || self.renaming_state.is_some()
+            || self.sidebar_renaming.is_some()
+            || self.sidebar_folder_rename.is_some()
+            || self.batch_rename_state.is_some()
+            || self.is_item_dragging
+            || self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|panel| panel.renaming_state.is_some())
+    }
+
+    pub(crate) fn request_network_location_refresh(&mut self) {
+        self.network_location_wizard.request_refresh(false);
+    }
+
     pub(crate) fn network_location_wizard_pending(&self) -> bool {
         self.network_location_wizard.completion.is_some()
     }
@@ -64,9 +104,11 @@ impl ImageViewerApp {
         }
         // A scan started before the wizard closed may not contain the new shortcut.
         // Retain the request until that scan finishes, then perform a fresh one.
+        let refresh_blocked =
+            self.drive_state.drive_scan_pending || self.network_location_interaction_active();
         if self
             .network_location_wizard
-            .take_refresh_if_ready(self.drive_state.drive_scan_pending)
+            .take_refresh_if_ready(refresh_blocked)
         {
             self.reload_drive_list_async();
         }

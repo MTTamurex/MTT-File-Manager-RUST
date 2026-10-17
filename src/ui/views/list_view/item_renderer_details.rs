@@ -221,8 +221,8 @@ pub(crate) fn render_item_icon(
         return;
     }
 
-    if item.is_dir && !item.is_archive() {
-        if ctx.is_computer_view && item.path.to_string_lossy().starts_with(r"\\") {
+    if item.is_dir && (ctx.is_computer_view || !item.is_archive()) {
+        if ctx.is_computer_view {
             let icon = ctx
                 .item_icon_loader
                 .get_or_load_network_location_icon(ui.ctx())

@@ -250,6 +250,8 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Закрепить текущую папку в быстром доступе"
 context_menu:
+  expand: "Развернуть"
+  collapse: "Свернуть"
   add_network_location: "Добавить сетевое расположение"
   open_in_mtt: "Открыть в MTT"
   open: "Открыть"

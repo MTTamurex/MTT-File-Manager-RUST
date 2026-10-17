@@ -127,7 +127,9 @@ impl ImageViewerApp {
 
     pub(crate) fn can_paste_into_path(&self, path: &Path) -> bool {
         self.clipboard.has_content()
-            && super::file_operation_policy::path_accepts_file_children(path)
+            && super::file_operation_policy::path_accepts_file_children(
+                &self.resolve_network_location_path(path),
+            )
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {
@@ -282,6 +284,7 @@ impl ImageViewerApp {
             self.context_menu.target_paths.clear();
             return;
         };
+        let dest_folder = self.resolve_network_location_path(&dest_folder);
 
         if !self.can_paste_into_path(&dest_folder) {
             self.context_menu.target_paths.clear();

@@ -250,6 +250,8 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Pin current folder to quick access"
 context_menu:
+  expand: "Expand"
+  collapse: "Collapse"
   add_network_location: "Add a network location"
   open_in_mtt: "Open in MTT"
   open: "Open"

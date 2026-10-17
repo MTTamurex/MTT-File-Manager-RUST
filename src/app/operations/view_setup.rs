@@ -280,13 +280,12 @@ impl ImageViewerApp {
                 let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
                 let cloud_roots_changed = scan_result.cloud_roots != old_cloud_roots;
                 let network_locations_changed =
-                    scan_result.network_locations != self.drive_state.network_locations;
+                    self.apply_network_location_scan(scan_result.network_locations);
                 let changed = scan_result.disks != old_disks
                     || cloud_roots_changed
                     || network_locations_changed;
                 self.drive_state.disks = scan_result.disks;
                 self.drive_state.cloud_roots = scan_result.cloud_roots;
-                self.drive_state.network_locations = scan_result.network_locations;
                 self.item_icon_loader
                     .set_cloud_root_icon_resources(&self.drive_state.cloud_roots);
                 self.item_icon_loader

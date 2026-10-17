@@ -1,10 +1,12 @@
 //! Registers MTT as the per-user folder handler and context-menu command, with optional Win+E handling.
 //!
 //! Uses current-user registry APIs without elevation. Virtual Shell folders
-//! retain their native handlers; only Directory and Drive select the MTT verb.
+//! retain their native handlers; Directory, Drive and filesystem Folder Shortcuts select the MTT verb.
 
+mod network_location_open;
 mod registration;
 mod registry_access;
+mod registry_transaction;
 
 use registration::{
     class_is_active, folder_command, owns, win_e_command, RegistryAction, LEGACY_KEYS,
@@ -18,6 +20,7 @@ pub struct RegistrationStatus {
     pub folder_open: bool,
     /// Drive default verb, or the legacy Folder explore override.
     pub folder_explore: bool,
+    pub network_locations: bool,
     pub context_menu: bool,
     pub win_e: bool,
 }
@@ -25,20 +28,20 @@ pub struct RegistrationStatus {
 impl RegistrationStatus {
     /// Whether any part of the combined default-folder integration is active.
     pub const fn is_active(self) -> bool {
-        self.folder_open || self.folder_explore || self.context_menu
+        self.folder_open || self.folder_explore || self.network_locations || self.context_menu
     }
 
     pub const fn has_folder_handlers(self) -> bool {
-        self.folder_open || self.folder_explore
+        self.folder_open || self.folder_explore || self.network_locations
     }
 
     /// Whether folder opening and the selected-folder verb are all registered.
     pub const fn is_complete(self) -> bool {
-        self.folder_open && self.folder_explore && self.context_menu
+        self.folders_are_complete() && self.context_menu
     }
 
     pub const fn folders_are_complete(self) -> bool {
-        self.folder_open && self.folder_explore
+        self.folder_open && self.folder_explore && self.network_locations
     }
 }
 
@@ -56,6 +59,11 @@ pub fn registration_status() -> RegistrationStatus {
     let folder_command = folder_command(&executable);
     let win_e_command = win_e_command(&executable);
     RegistrationStatus {
+        network_locations: class_is_active(
+            &UserRegistry,
+            registration::NETWORK_LOCATION_CLASS,
+            &registration::network_location_command(&executable),
+        ),
         folder_open: class_is_active(&UserRegistry, "Directory", &folder_command)
             || owns(
                 read_current_user_string(LEGACY_KEYS[0], "").as_deref(),
@@ -74,13 +82,14 @@ pub fn registration_status() -> RegistrationStatus {
     }
 }
 
-/// Upgrade the former broad Folder overrides before processing Shell launch requests.
+/// Upgrade owned legacy or pre-network-location registrations before Shell launch requests.
 pub fn migrate_legacy_registration() -> Result<(), RegistryActionError> {
     let executable = std::env::current_exe().map_err(|_| RegistryActionError::Failed)?;
     let command = folder_command(&executable);
-    if LEGACY_KEYS
-        .iter()
-        .any(|key| owns(read_current_user_string(key, "").as_deref(), &command))
+    if registration::needs_network_location_upgrade(&UserRegistry, &executable)
+        || LEGACY_KEYS
+            .iter()
+            .any(|key| owns(read_current_user_string(key, "").as_deref(), &command))
     {
         apply_action(RegistryAction::EnableFolders)?;
     }
@@ -92,9 +101,22 @@ pub fn is_supported_folder_target(path: &std::path::Path) -> bool {
     if crate::infrastructure::security::classify_shell_namespace_path(path).is_some() {
         return false;
     }
-    let text = path.to_string_lossy();
-    crate::domain::network_path::unc_server_name(&text).is_some()
+    super::network_locations::is_network_target(path)
+        || super::network_locations::resolve_network_location_target(path).is_some()
         || crate::infrastructure::onedrive::fast_is_dir(path)
+}
+
+/// Preserve native opening for unsupported Folder Shortcut protocols (for example FTP).
+pub fn open_network_location_in_explorer(path: &std::path::Path) -> std::io::Result<()> {
+    network_location_open::open_in_explorer(path)
+}
+
+pub fn resolve_network_location_open_target(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if super::network_locations::is_network_target(path) {
+        Some(path.to_path_buf())
+    } else {
+        super::network_locations::resolve_folder_shortcut_network_target(path)
+    }
 }
 
 /// Register MTT for folder opening and add its folder context-menu command, without changing Win+E.
@@ -121,9 +143,10 @@ pub fn set_as_default(context_menu_label: &str) -> Result<RegistrationStatus, Re
     let status = registration_status();
     if !status.is_complete() {
         log::error!(
-            "[DEFAULT-FILE-MANAGER] Combined registration verification failed: folder_open={} folder_explore={} context_menu={}",
+            "[DEFAULT-FILE-MANAGER] Combined registration verification failed: folder_open={} folder_explore={} network_locations={} context_menu={}",
             status.folder_open,
             status.folder_explore,
+            status.network_locations,
             status.context_menu
         );
         return Err(RegistryActionError::Failed);
@@ -187,9 +210,10 @@ fn apply_action(action: RegistryAction) -> Result<RegistrationStatus, RegistryAc
     match action {
         RegistryAction::EnableFolders if !status.folders_are_complete() => {
             log::error!(
-                "[DEFAULT-FILE-MANAGER] Registry verification failed: folder_open={} folder_explore={}",
+                "[DEFAULT-FILE-MANAGER] Registry verification failed: folder_open={} folder_explore={} network_locations={}",
                 status.folder_open,
-                status.folder_explore
+                status.folder_explore,
+                status.network_locations
             );
             Err(RegistryActionError::Failed)
         }
@@ -218,12 +242,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn complete_registration_includes_saved_network_location_opening() {
+        let mut status = RegistrationStatus {
+            folder_open: true,
+            folder_explore: true,
+            context_menu: true,
+            ..Default::default()
+        };
+        assert!(!status.is_complete());
+        status.network_locations = true;
+        assert!(status.is_complete());
+    }
+
+    #[test]
     fn registration_status_distinguishes_partial_registration() {
         let status = RegistrationStatus {
             folder_open: true,
             folder_explore: false,
             context_menu: false,
             win_e: true,
+            network_locations: false,
         };
 
         assert!(status.is_active());
@@ -237,6 +275,7 @@ mod tests {
             folder_explore: false,
             context_menu: false,
             win_e: true,
+            network_locations: false,
         };
 
         assert!(!status.is_active());

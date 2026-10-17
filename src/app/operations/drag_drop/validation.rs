@@ -47,7 +47,10 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn is_valid_drop_target(&self, target: &Path) -> bool {
-        is_valid_drop_target_for_paths(&self.drag_payload_paths, target)
+        is_valid_drop_target_for_paths(
+            &self.drag_payload_paths,
+            &self.resolve_network_location_path(target),
+        )
     }
 
     pub(super) fn resolve_drag_operation(

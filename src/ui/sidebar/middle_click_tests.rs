@@ -60,6 +60,8 @@ fn click_section_with_feedback(
         None,
     )];
     let network_locations = vec![crate::domain::network_location::NetworkLocation {
+        kind: crate::domain::network_location::NetworkLocationKind::FolderShortcut,
+        shortcut_path: r"C:\Network Shortcuts\Network Folder".into(),
         path: Section::NetworkLocation.destination(),
         label: Section::NetworkLocation.label().into(),
     }];
@@ -198,6 +200,13 @@ fn network_locations_support_navigation_and_middle_click_without_remote_metadata
     );
     assert!(click_section(section, egui::PointerButton::Middle, true, false).is_none());
     assert!(click_section(section, egui::PointerButton::Middle, false, true).is_none());
+}
+
+#[test]
+fn network_location_secondary_click_targets_the_saved_shortcut_without_navigating() {
+    assert!(
+        matches!(click_section(Section::NetworkLocation, egui::PointerButton::Secondary, false, false), Some(SidebarAction::OpenTreeContextMenu(target)) if target.path == std::path::Path::new(r"C:\Network Shortcuts\Network Folder"))
+    );
 }
 
 #[test]

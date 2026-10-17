@@ -565,13 +565,30 @@ fn main() -> eframe::Result<()> {
             let exit_code = write_pending_open_request(&path_arg.to_string_lossy());
             std::process::exit(exit_code);
         }
-        if flag_str.eq_ignore_ascii_case("--open-folder") {
+        if flag_str.eq_ignore_ascii_case("--open-folder")
+            || flag_str.eq_ignore_ascii_case("--open-network-location")
+        {
             let Some(path_arg) = args.next() else {
                 log::error!("[OPEN-FOLDER] missing path argument for --open-folder");
                 std::process::exit(2);
             };
             let path = PathBuf::from(path_arg);
             use mtt_file_manager::infrastructure::windows::default_file_manager;
+            let path = if flag_str.eq_ignore_ascii_case("--open-network-location") {
+                match default_file_manager::resolve_network_location_open_target(&path) {
+                    Some(target) => target,
+                    None => {
+                        if default_file_manager::open_network_location_in_explorer(&path).is_err() {
+                            log::warn!(
+                                "[OPEN-NETWORK-LOCATION] Native fallback could not be launched"
+                            );
+                        }
+                        return Ok(());
+                    }
+                }
+            } else {
+                path
+            };
             if !default_file_manager::is_supported_folder_target(&path) {
                 log::error!("[OPEN-FOLDER] Unsupported folder target");
                 return Ok(());

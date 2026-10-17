@@ -12,7 +12,9 @@ pub(crate) fn is_valid_startup_folder_path(path: &str) -> bool {
         return false;
     }
 
-    if crate::domain::network_path::unc_server_name(path).is_some() {
+    if crate::infrastructure::windows::network_locations::is_network_target(std::path::Path::new(
+        path,
+    )) {
         return true; // Availability is checked by the background share loader.
     }
 
@@ -45,6 +47,11 @@ pub(crate) fn is_valid_saved_tab_path(path: &str) -> bool {
 }
 
 pub(crate) fn validate_requested_folder(folder: PathBuf) -> Result<String, ()> {
+    if let Some(target) =
+        crate::infrastructure::windows::network_locations::resolve_network_location_target(&folder)
+    {
+        return Ok(target.to_string_lossy().into_owned());
+    }
     let path = folder.to_string_lossy().into_owned();
     is_valid_startup_folder_path(&path)
         .then_some(path)

@@ -9,9 +9,7 @@ pub fn build_computer_projection(items: &[FileEntry]) -> GroupProjection {
     for (index, item) in items.iter().enumerate() {
         match item.drive_info.as_ref().map(|drive| drive.drive_type) {
             Some(DriveType::Remote) => network.push(index),
-            None if item.is_dir && item.path.to_string_lossy().starts_with(r"\\") => {
-                locations.push(index)
-            }
+            None if item.is_dir => locations.push(index),
             _ => local.push(index),
         }
     }
@@ -39,6 +37,8 @@ mod tests {
 
     fn drive(path: &str, kind: DriveType) -> FileEntry {
         let mut item = NetworkLocation {
+            kind: crate::domain::network_location::NetworkLocationKind::FolderShortcut,
+            shortcut_path: path.into(),
             path: path.into(),
             label: "Drive".into(),
         }
@@ -60,6 +60,8 @@ mod tests {
     #[test]
     fn network_locations_have_their_own_section_and_follow_filtered_item_indices() {
         let location = NetworkLocation {
+            kind: crate::domain::network_location::NetworkLocationKind::FolderShortcut,
+            shortcut_path: r"C:\Network Shortcuts\Network Folder".into(),
             path: r"\\server\share\folder".into(),
             label: "Network Folder".into(),
         }

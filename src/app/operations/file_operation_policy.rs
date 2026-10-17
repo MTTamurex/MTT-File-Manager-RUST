@@ -1,7 +1,6 @@
 //! Destination policy shared by commands, menus and drag-and-drop.
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::network_location::NetworkLocation;
 use crate::domain::network_path::{is_network_location_root, unc_server_name};
 use crate::domain::special_paths::is_virtual_path;
 use std::path::Path;
@@ -18,27 +17,12 @@ pub(crate) fn path_accepts_file_children(path: &Path) -> bool {
 
 impl ImageViewerApp {
     pub(crate) fn path_is_network_operation_root(&self, path: &Path) -> bool {
-        network_operation_root(
-            path,
-            self.navigation_state.is_computer_view
-                && !self.global_search.active
-                && self.context_menu.origin.uses_file_view_location(),
-            &self.drive_state.network_locations,
-        )
+        is_network_location_root(path)
     }
 
     pub(crate) fn can_create_folder_in_current_location(&self) -> bool {
         path_accepts_file_children(Path::new(&self.navigation_state.current_path))
     }
-}
-
-fn network_operation_root(
-    path: &Path,
-    is_computer_view: bool,
-    locations: &[NetworkLocation],
-) -> bool {
-    is_network_location_root(path)
-        || (is_computer_view && locations.iter().any(|location| location.matches_path(path)))
 }
 
 #[cfg(test)]
@@ -47,23 +31,16 @@ mod tests {
 
     #[test]
     fn saved_network_location_cards_do_not_mutate_their_target_folders() {
-        let locations = vec![NetworkLocation {
+        let location = crate::domain::network_location::NetworkLocation {
+            kind: crate::domain::network_location::NetworkLocationKind::FolderShortcut,
+            shortcut_path: r"C:\Network Shortcuts\Network Folder".into(),
             path: r"\\server\share\folder".into(),
             label: "Network Folder".into(),
-        }];
-        let target = Path::new(r"\\SERVER\share\folder\");
-        assert!(network_operation_root(target, true, &locations));
-        assert!(!network_operation_root(target, false, &locations));
-        assert!(!network_operation_root(
-            Path::new(r"\\server\share\folder\child"),
-            true,
-            &locations
-        ));
-        assert!(network_operation_root(
-            Path::new(r"\\server\share"),
-            false,
-            &locations
-        ));
+        };
+        let item = location.to_file_entry();
+        assert_eq!(item.path, Path::new(&location.shortcut_path));
+        assert_ne!(item.path, Path::new(&location.path));
+        assert!(!is_network_location_root(&item.path));
     }
 
     #[test]
