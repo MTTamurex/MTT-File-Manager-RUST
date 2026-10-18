@@ -16,13 +16,27 @@ const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
+fn next_journal_poll_delay(previous_usn: i64, current_usn: i64) -> std::time::Duration {
+    if current_usn > previous_usn {
+        // A read is limited to one buffer, not the entire pending journal.
+        // Drain subsequent buffers before returning to the idle poll interval.
+        std::time::Duration::ZERO
+    } else {
+        std::time::Duration::from_secs(2)
+    }
+}
+
 fn apply_incremental_records(
     index: &mut crate::file_index::VolumeIndex,
     records: &[u8],
     new_usn: i64,
     current_usn: &mut i64,
 ) -> Result<(), String> {
+    // Set this before parsing: even a partially applied failed batch is not a
+    // complete snapshot. Clear it only after a successful read reaches the tail.
+    index.journal_refresh_in_progress = true;
     crate::usn_journal::parse_usn_records(records, index, &mut 0, true)?;
+    index.journal_refresh_in_progress = new_usn > *current_usn;
     index.last_usn = new_usn;
     *current_usn = new_usn;
     Ok(())
@@ -41,12 +55,14 @@ pub(super) fn run_incremental(
     let mut contention_applied_after_retry = 0u64;
     let mut contention_skipped_cycles = 0u64;
     let mut last_contention_log = std::time::Instant::now();
+    let mut poll_delay = std::time::Duration::from_secs(2);
 
     'incremental: loop {
-        if shutdown.wait_or_stop(std::time::Duration::from_secs(2)) {
+        if shutdown.wait_or_stop(poll_delay) {
             break;
         }
 
+        let previous_usn = current_usn;
         match super::volume_io::with_volume(drive_letter, &shutdown, |volume_handle| {
             crate::usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn)
         }) {
@@ -114,13 +130,19 @@ pub(super) fn run_incremental(
                     }
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if let Some(mut index) = handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                    index.journal_refresh_in_progress = false;
+                }
+            }
             Err(e) => eprintln!(
                 "[USN] {}:\\ Incremental read error: {}",
                 drive_letter,
                 crate::redact_paths(&e)
             ),
         }
+
+        poll_delay = next_journal_poll_delay(previous_usn, current_usn);
 
         if shutdown.is_stopped() {
             break 'incremental;

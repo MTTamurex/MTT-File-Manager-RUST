@@ -130,7 +130,7 @@ fn folder_size_revalidation_expires_once() {
     let mut state = test_state();
     let path = PathBuf::from(r"C:\data");
     let start = Instant::now();
-    let delay = state.schedule_revalidation(path.clone(), Some(17), start);
+    let delay = state.schedule_revalidation(path.clone(), start);
 
     assert_eq!(delay, Duration::from_secs(3));
     assert!(state
@@ -149,15 +149,37 @@ fn folder_size_revalidation_expires_once() {
 }
 
 #[test]
-fn fresh_changed_result_cancels_deferred_revalidation() {
+fn partial_size_updates_keep_revalidation_due_after_navigation() {
     let mut state = test_state();
     let path = PathBuf::from(r"C:\data");
-    state.schedule_revalidation(path.clone(), Some(17), Instant::now());
+    let start = Instant::now();
+    state.schedule_revalidation(path.clone(), start);
 
-    state.cancel_revalidation_if_changed(&path, 0);
+    // A changed value is not proof that every journal buffer has been applied.
+    state.batch_cache.put(path.clone(), 10);
+    state
+        .cache
+        .put(path.clone(), FolderContentSummary::complete(10, 2, 1));
+    state.cancel_batch();
 
-    assert!(!state.pending_revalidation.contains_key(&path));
-    assert!(state.pending_revalidation_next_deadline.is_none());
+    assert_eq!(
+        state.take_expired_revalidations(start + Duration::from_secs(3)),
+        vec![(path, false)]
+    );
+}
+
+#[test]
+fn uncached_ancestor_still_gets_deferred_revalidation() {
+    let mut state = test_state();
+    let path = PathBuf::from(r"C:\Data\Folder");
+    let start = Instant::now();
+    state.schedule_revalidation(path.clone(), start);
+    // First visited before the service catches up: there was no old cache value.
+    state.batch_cache.put(path.clone(), 100);
+    assert_eq!(
+        state.take_expired_revalidations(start + Duration::from_secs(3)),
+        vec![(path, false)]
+    );
 }
 
 #[test]
@@ -166,8 +188,8 @@ fn batch_cancel_leaves_safe_lazy_deadline() {
     let first = PathBuf::from(r"C:\first");
     let second = PathBuf::from(r"C:\second");
     let start = Instant::now();
-    state.schedule_revalidation(first.clone(), Some(10), start);
-    state.schedule_revalidation(second.clone(), Some(20), start + Duration::from_secs(1));
+    state.schedule_revalidation(first.clone(), start);
+    state.schedule_revalidation(second.clone(), start + Duration::from_secs(1));
 
     state.cancel_revalidations(std::slice::from_ref(&first));
 
@@ -196,6 +218,57 @@ fn failed_batch_revalidation_releases_loading_for_retry() {
 
     assert_eq!(
         state.take_expired_revalidations(start + delay),
+        vec![(path, true)]
+    );
+}
+
+#[test]
+fn repeated_invalidations_cannot_postpone_the_first_revalidation() {
+    let mut state = test_state();
+    let path = PathBuf::from(r"C:\Data\Folder");
+    let start = Instant::now();
+    state.schedule_revalidation(path.clone(), start);
+    assert_eq!(
+        state.schedule_revalidation(path.clone(), start + Duration::from_secs(2)),
+        Duration::from_secs(1)
+    );
+    // Even an event received after the deadline must leave the retry due now.
+    assert_eq!(
+        state.schedule_revalidation(path.clone(), start + Duration::from_secs(4)),
+        Duration::ZERO
+    );
+    assert_eq!(
+        state.take_expired_revalidations(start + Duration::from_secs(4)),
+        vec![(path, false)]
+    );
+}
+
+#[test]
+fn invalidation_preserves_the_failed_batch_loading_release_flag() {
+    let mut state = test_state();
+    let path = PathBuf::from(r"C:\Data\Folder");
+    let start = Instant::now();
+    state.batch_loading.insert(path.clone());
+    state.schedule_revalidation_if_absent(path.clone(), start);
+    state.schedule_revalidation(path.clone(), start + Duration::from_secs(1));
+    assert_eq!(
+        state.take_expired_revalidations(start + Duration::from_secs(3)),
+        vec![(path, true)]
+    );
+}
+
+#[test]
+fn failed_batch_after_invalidation_keeps_the_original_deadline() {
+    let mut state = test_state();
+    let path = PathBuf::from(r"C:\Data\Folder");
+    let start = Instant::now();
+    state.schedule_revalidation(path.clone(), start);
+    assert_eq!(
+        state.schedule_revalidation_if_absent(path.clone(), start + Duration::from_secs(2)),
+        Duration::from_secs(1)
+    );
+    assert_eq!(
+        state.take_expired_revalidations(start + Duration::from_secs(3)),
         vec![(path, true)]
     );
 }

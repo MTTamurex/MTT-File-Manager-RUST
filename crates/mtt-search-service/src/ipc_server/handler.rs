@@ -26,6 +26,7 @@ use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::volume_lifecycle::VolumeLifecycle;
 use mtt_search_protocol::*;
 
+use super::folder_size_snapshot::summary as indexed_folder_summary;
 use super::pipe_io::{read_message, send_response};
 use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
 
@@ -177,7 +178,7 @@ fn repair_missing_live_directory_record(
         if !record.is_dir() {
             return Err("Path resolved to non-directory record");
         }
-        return Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)));
+        return indexed_folder_summary(&vol, frn).map(|summary| (frn, summary));
     }
 
     let parent_frn = vol
@@ -187,7 +188,7 @@ fn repair_missing_live_directory_record(
         return Err("Name arena full");
     }
 
-    Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+    indexed_folder_summary(&vol, frn).map(|summary| (frn, summary))
 }
 
 fn repair_suspicious_zero_folder_size(
@@ -645,6 +646,14 @@ pub(super) fn handle_client(
                         send_response(pipe, &SearchResponse::Error("Sizes not loaded".to_string()));
                     return;
                 }
+                if vol.journal_refresh_in_progress {
+                    drop(vol);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Index refresh pending".to_string()),
+                    );
+                    return;
+                }
                 // Capture whether there are pending size refreshes while we hold the
                 // read lock. This is passed to repair_suspicious_zero_folder_size to
                 // decide whether to repair partial-zero subtrees (post-restart race).
@@ -687,7 +696,7 @@ pub(super) fn handle_client(
                         Ok((frn, (0, 0, 0, 0)))
                     } else {
                         let vol = handle.read();
-                        Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+                        indexed_folder_summary(&vol, frn).map(|summary| (frn, summary))
                     }
                 }
                 (Some(_), Err(error)) => {
@@ -712,7 +721,7 @@ pub(super) fn handle_client(
                                     crate::redact_paths(&path),
                                     frn,
                                 );
-                                Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+                                indexed_folder_summary(&vol, frn).map(|summary| (frn, summary))
                             }
                             Some(_) => Err("Path resolved to non-directory record"),
                             None => {

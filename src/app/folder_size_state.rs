@@ -10,16 +10,11 @@ use std::time::{Duration, Instant};
 const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
 const FOLDER_SIZE_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(30);
-const FOLDER_SIZE_REVALIDATION_INITIAL_DELAY: Duration = Duration::from_secs(3);
 const FOLDER_SIZE_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Clone, Copy)]
-pub struct PendingFolderSizeRevalidation {
-    deadline: Instant,
-    stale_total_size: Option<u64>,
-    release_batch_loading: bool,
-}
+mod revalidation;
+pub use revalidation::PendingFolderSizeRevalidation;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ActiveFolderSizeRequest {
@@ -397,102 +392,6 @@ impl FolderSizeState {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
-    }
-
-    pub fn should_prune_pending_revalidations(&self, now: Instant) -> bool {
-        self.pending_revalidation_next_deadline
-            .is_some_and(|deadline| deadline <= now)
-    }
-
-    pub fn schedule_revalidation(
-        &mut self,
-        folder_path: PathBuf,
-        stale_total_size: Option<u64>,
-        now: Instant,
-    ) -> Duration {
-        let deadline = now + FOLDER_SIZE_REVALIDATION_INITIAL_DELAY;
-        self.pending_revalidation.insert(
-            folder_path,
-            PendingFolderSizeRevalidation {
-                deadline,
-                stale_total_size,
-                release_batch_loading: false,
-            },
-        );
-        self.pending_revalidation_next_deadline = Some(
-            self.pending_revalidation_next_deadline
-                .map_or(deadline, |current| current.min(deadline)),
-        );
-        FOLDER_SIZE_REVALIDATION_INITIAL_DELAY
-    }
-
-    pub fn schedule_revalidation_if_absent(
-        &mut self,
-        folder_path: PathBuf,
-        now: Instant,
-    ) -> Duration {
-        let revalidation = self
-            .pending_revalidation
-            .entry(folder_path)
-            .or_insert_with(|| PendingFolderSizeRevalidation {
-                deadline: now + FOLDER_SIZE_REVALIDATION_INITIAL_DELAY,
-                stale_total_size: None,
-                release_batch_loading: true,
-            });
-        revalidation.release_batch_loading = true;
-        let deadline = revalidation.deadline;
-        self.pending_revalidation_next_deadline = Some(
-            self.pending_revalidation_next_deadline
-                .map_or(deadline, |current| current.min(deadline)),
-        );
-        deadline.saturating_duration_since(now)
-    }
-
-    pub fn cancel_revalidation(&mut self, folder_path: &PathBuf) {
-        if self.pending_revalidation.remove(folder_path).is_some()
-            && self.pending_revalidation.is_empty()
-        {
-            self.pending_revalidation_next_deadline = None;
-        }
-    }
-
-    pub fn cancel_revalidations(&mut self, folder_paths: &[PathBuf]) {
-        let mut changed = false;
-        for folder_path in folder_paths {
-            changed |= self.pending_revalidation.remove(folder_path).is_some();
-        }
-        if changed && self.pending_revalidation.is_empty() {
-            self.pending_revalidation_next_deadline = None;
-        }
-    }
-
-    pub fn cancel_revalidation_if_changed(&mut self, folder_path: &PathBuf, total_size: u64) {
-        let changed = self
-            .pending_revalidation
-            .get(folder_path)
-            .and_then(|entry| entry.stale_total_size)
-            .is_some_and(|stale_total_size| stale_total_size != total_size);
-        if changed {
-            self.cancel_revalidation(folder_path);
-        }
-    }
-
-    pub fn take_expired_revalidations(&mut self, now: Instant) -> Vec<(PathBuf, bool)> {
-        let mut expired = Vec::new();
-        self.pending_revalidation.retain(|path, revalidation| {
-            let keep = revalidation.deadline > now;
-            if !keep {
-                expired.push((path.clone(), revalidation.release_batch_loading));
-            }
-            keep
-        });
-        self.pending_revalidation_next_deadline = self
-            .pending_revalidation
-            .values()
-            .map(|entry| entry.deadline)
-            .min();
-
-        expired
     }
 
     pub fn should_prune_invalidation_epochs(&self, now: Instant) -> bool {

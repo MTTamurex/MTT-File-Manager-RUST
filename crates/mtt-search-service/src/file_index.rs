@@ -100,6 +100,9 @@ pub struct VolumeIndex {
     pub last_usn: i64,
     /// USN Journal ID (to detect journal resets).
     pub journal_id: u64,
+    /// A journal buffer was applied but the reader has not reached its tail yet.
+    /// Folder-size queries must retry rather than cache a partial deletion.
+    pub journal_refresh_in_progress: bool,
     /// Indexing state.
     pub state: IndexState,
     /// Whether file sizes have been populated from the MFT.
@@ -154,6 +157,7 @@ impl VolumeIndex {
             names: NameArena::with_capacity(0),
             last_usn: 0,
             journal_id: 0,
+            journal_refresh_in_progress: false,
             state: IndexState::NotStarted,
             sizes_loaded: false,
             binary_dirty: false,
@@ -183,6 +187,7 @@ impl VolumeIndex {
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
             journal_id: 0,
+            journal_refresh_in_progress: false,
             state: IndexState::NotStarted,
             sizes_loaded: false,
             binary_dirty: false,
@@ -212,6 +217,7 @@ impl VolumeIndex {
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
             journal_id: 0,
+            journal_refresh_in_progress: false,
             state: IndexState::NotStarted,
             sizes_loaded: false,
             binary_dirty: false,
@@ -595,6 +601,7 @@ impl VolumeIndex {
         self.dir_modified_at.clear();
         self.pending_size_refresh.clear();
         self.size_refresh_in_progress = false;
+        self.journal_refresh_in_progress = false;
         self.hardlink_parents.clear();
         self.reparse_points.clear();
         self.hardlink_data_complete = false;

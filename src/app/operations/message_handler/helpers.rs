@@ -537,6 +537,7 @@ impl ImageViewerApp {
         // changed. Invalidate folder-size caches here too so callers do not
         // need to remember to clear size separately from cover/listing state.
         self.invalidate_folder_size_cache(path);
+        self.invalidate_content_ancestor_sizes(&[path.to_path_buf()]);
     }
 
     pub(super) fn try_remove_deleted_path_from_ui(&mut self, path: &Path) -> bool {
@@ -890,15 +891,13 @@ impl ImageViewerApp {
             .entry(folder_path.clone())
             .or_insert(0) += 1;
 
-        if schedule_revalidation && stale_total_size.is_some() {
+        if schedule_revalidation {
             // The service validates the live directory identity. This single
             // delayed pass only covers changes still in transit through USN.
-            let delay =
-                self.folder_size_state
-                    .schedule_revalidation(folder_path, stale_total_size, now);
+            let delay = self.folder_size_state.schedule_revalidation(folder_path, now);
             self.ui_ctx
                 .request_repaint_after(delay + std::time::Duration::from_millis(25));
-        } else if !schedule_revalidation {
+        } else {
             self.folder_size_state.cancel_revalidation(&folder_path);
         }
 
@@ -954,6 +953,10 @@ impl ImageViewerApp {
         if folders_with_changed_contents.is_empty() {
             return;
         }
+
+        self.invalidate_content_ancestor_sizes(
+            &folders_with_changed_contents.iter().cloned().collect::<Vec<_>>(),
+        );
 
         log::debug!(
             "[MTIME-SCHED] apply_folder_content_change_invalidations: {} folders changed, current_path={}",

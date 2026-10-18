@@ -1,3 +1,4 @@
+mod folder_size_snapshot;
 mod handler;
 mod pipe_io;
 mod volume_access;

@@ -907,8 +907,6 @@ impl ImageViewerApp {
                 } => {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state
-                        .cancel_revalidation_if_changed(&folder_path, summary.total_size);
-                    self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state
                         .clear_panel_stale_summary(&folder_path);
@@ -1022,9 +1020,6 @@ impl ImageViewerApp {
                     received_any = true;
                     continue;
                 };
-
-                self.folder_size_state
-                    .cancel_revalidation_if_changed(&folder_path, total_size);
 
                 self.folder_size_state
                     .batch_cache

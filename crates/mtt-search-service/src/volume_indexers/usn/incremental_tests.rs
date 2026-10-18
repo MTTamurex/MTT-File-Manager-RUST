@@ -1,4 +1,4 @@
-use super::apply_incremental_records;
+use super::{apply_incremental_records, next_journal_poll_delay};
 use crate::volume_indexers::test_support::{index, usn_record};
 
 fn named(frn: u64, parent: u64, reason: u32, name: &str) -> Vec<u8> {
@@ -8,6 +8,56 @@ fn named(frn: u64, parent: u64, reason: u32, name: &str) -> Vec<u8> {
         reason,
         &name.encode_utf16().collect::<Vec<_>>(),
     )
+}
+
+#[test]
+fn journal_backlog_is_drained_without_sleeping_between_buffers() {
+    use std::time::Duration;
+
+    assert_eq!(next_journal_poll_delay(42, 50), Duration::ZERO);
+    assert_eq!(next_journal_poll_delay(50, 60), Duration::ZERO);
+    assert_eq!(next_journal_poll_delay(60, 60), Duration::from_secs(2));
+    // Failed/contended reads must retain the idle delay rather than busy-loop.
+    assert_eq!(next_journal_poll_delay(42, 42), Duration::from_secs(2));
+}
+
+#[test]
+fn multi_buffer_deletion_updates_every_ancestor_after_the_last_buffer() {
+    let mut index = index();
+    assert!(index.insert_record(10, "Folder", 5, true, false));
+    assert!(index.insert_record(11, "Nested", 10, true, false));
+    for frn in [20, 21] {
+        assert!(index.insert_record(frn, "file.bin", 11, false, false));
+        index.records.get_mut(&frn).unwrap().size = 10;
+    }
+    let mut cursor = index.last_usn;
+    apply_incremental_records(
+        &mut index,
+        &named(20, 11, 0x200, "file.bin"),
+        50,
+        &mut cursor,
+    )
+    .unwrap();
+    for ancestor in [5, 10, 11] {
+        assert_eq!(index.folder_tree_summary(ancestor).0, 10);
+    }
+    // This already-changed total is still partial; the next buffer must not wait.
+    assert!(index.journal_refresh_in_progress);
+    assert!(next_journal_poll_delay(42, cursor).is_zero());
+    apply_incremental_records(
+        &mut index,
+        &named(21, 11, 0x200, "file.bin"),
+        60,
+        &mut cursor,
+    )
+    .unwrap();
+    for ancestor in [5, 10, 11] {
+        assert_eq!(index.folder_tree_summary(ancestor).0, 0);
+    }
+    assert!(index.journal_refresh_in_progress);
+    // A successful empty read with no cursor advance establishes the tail.
+    apply_incremental_records(&mut index, &[], 60, &mut cursor).unwrap();
+    assert!(!index.journal_refresh_in_progress);
 }
 
 #[test]
@@ -64,6 +114,7 @@ fn failed_batch_keeps_checkpoint_and_can_be_replayed_after_partial_apply() {
         &vec![0xd800; u16::MAX as usize / 2],
     ));
     assert!(apply_incremental_records(&mut index, &batch, 100, &mut cursor).is_err());
+    assert!(index.journal_refresh_in_progress);
     assert_eq!((index.last_usn, cursor), (42, 42));
     assert!(index.records.get(&20).is_some());
     assert!(index.records.get(&21).is_none());
