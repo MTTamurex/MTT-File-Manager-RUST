@@ -18,6 +18,7 @@ use std::time::Duration;
 pub(crate) mod actions;
 pub(crate) mod date_filter;
 pub(crate) mod filters;
+mod layout;
 mod result_row;
 mod results_panel;
 mod scrollbar;
@@ -43,17 +44,10 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     // Modal window dimensions
     let modal_width = (screen_rect.width() * 0.40).clamp(360.0, 640.0);
     let modal_max_height = (screen_rect.height() * 0.72).clamp(400.0, 780.0);
-    let modal_x = (screen_rect.width() - modal_width) / 2.0;
-    let modal_y = ((screen_rect.height() - modal_max_height) * 0.5).max(8.0);
-
-    let modal_rect = egui::Rect::from_min_size(
-        egui::pos2(modal_x, modal_y),
-        egui::vec2(modal_width, modal_max_height),
-    );
 
     // Full-screen interaction blocker + lighter backdrop.
     // This prevents click/drag/scroll leakage to the main app while modal is open.
-    let mut close_from_backdrop = false;
+    let mut backdrop_click = None;
     egui::Area::new(egui::Id::from("global_search_backdrop_area"))
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Middle)
@@ -77,18 +71,11 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                 let popup_open = egui::Popup::is_any_open(ctx);
                 if !popup_open && !app.context_menu.is_open {
                     if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
-                        if !modal_rect.contains(click_pos) {
-                            close_from_backdrop = true;
-                        }
+                        backdrop_click = Some(click_pos);
                     }
                 }
             }
         });
-
-    if close_from_backdrop {
-        app.close_global_search();
-        return;
-    }
 
     // Escape cancels an inline rename before closing the overlay.
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -174,9 +161,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     }
 
     // Render modal
-    egui::Area::new(egui::Id::from("global_search_modal"))
-        .fixed_pos(egui::pos2(modal_x, modal_y))
-        .order(egui::Order::Foreground)
+    let modal = layout::centered_modal_area(screen_rect)
         .show(ctx, |ui| {
             let hover_color = if ui.visuals().dark_mode {
                 theme::color_dark_hover()
@@ -451,6 +436,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     }
                 });
         });
+    if backdrop_click.is_some_and(|pos| !modal.response.rect.contains(pos)) {
+        app.close_global_search();
+    }
 }
 
 fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: bool) {

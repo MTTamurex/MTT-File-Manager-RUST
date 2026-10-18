@@ -23,18 +23,26 @@
 ## Key Features
 
 ### Interface & Navigation
-- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, DOCX, XLSX, and text viewers with native title bar support via DWM
+- **Appearance themes** — Choose Light, Dark, Dark Deep, Midnight, or System in Settings > General > Appearance; saved between sessions and shared with image, PDF, DOCX, XLSX, and text viewers, including native title bar styling
 - **Text and interface scaling** — Open **Settings > General > Appearance > Text and interface size** and choose 100–200%; release the slider to apply and save the size. Text and controls grow together on top of Windows display scaling. Use **Reset to 100%** to follow Windows scaling alone. Thumbnail size remains separately adjustable
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation
+- **Session restoration and startup location** — Continue the previous session with saved tabs, pane layouts, and view preferences, or start at This PC, Documents, the user profile, or a custom folder; restored Tag tabs display their names immediately
+- **New-tab preferences** — Choose the current location, This PC, Documents, the user profile, or a custom folder for new tabs, and optionally open archives in a new tab; middle-click supported sidebar locations to open them in a new tab
+- **System tray** — Optionally send the main window to the notification area when closing it; reopen it or exit the app from the tray menu
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
 - **File grouping** — Group items by name, date, type, or size in supported views; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions
+- **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings; Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
+- **Date formats** — Choose DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD for displayed dates and Global Search date filters
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
+- **Sidebar renaming** — Rename folders directly in the sidebar tree
+- **Network browsing** — Enter a UNC server address to list its shares; browse saved Windows Network Locations from the sidebar or This PC, and launch the Windows Add Network Location wizard
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
+- **Drive removal recovery** — Redirect affected panes and stored tabs to This PC when a drive is disconnected
 
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
@@ -50,7 +58,7 @@
 - **Animated GIF playback** — Animated preview on details panel
 
 ### Image, PDF, DOCX, XLSX & Text Viewers
-- **Consistent dedicated windows** — Images, PDF documents, DOCX documents, XLSX workbooks, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
+- **Consistent dedicated windows** — Images, PDF documents, DOCX documents, XLSX workbooks, and text files open in lightweight viewer windows with the selected appearance theme, themed toolbars, and native title bar integration
 - **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, crop with a rotation-aware selection and safe save workflow, or switch to full screen with F11. Crops can replace supported raster images after confirmation or be saved as PNG, JPEG, WebP, BMP, or TIFF; animated GIFs export the displayed frame
 - **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar; supports single-page, two-page, and two-page-with-cover layouts
 - **DOCX viewer** — Uses BetterOffice's native OOXML parsing, pagination, and raster renderer in a read-only window with zoom and page navigation; supports document search and text selection/copying. Double-click continues to open the Windows default application
@@ -78,7 +86,7 @@
 - **Standalone NTFS analysis** — Launch **Analyze disk usage** from a local NTFS drive's context menu to open an independent analyzer window backed by a full-volume snapshot from the `mtt-search-service` index
 - **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
-- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ; Largest Items supports file-count ranking, filter-adjusted values, and multi-column sorting
+- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ; Largest Items supports file-count ranking, filter-adjusted values, and multi-column sorting with Shift-click
 - **Duplicate detection** — Run an on-demand, cancelable two-stage scan that groups candidates by size and confirms matches with full BLAKE3 hashes; configurable size limits, hardlink awareness, and recoverable-space totals keep the report accurate
 
 ### Global Search
@@ -87,6 +95,8 @@
 - **Background service** — Dedicated Windows Service for continuous indexing
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
 - **Paginated results** — Offset/limit pagination with incremental loading
+- **Category filters** — Show all results or narrow them to files, folders, images, videos, audio, documents, or applications; Applications includes executables, installers, application shortcuts, and scripts
+- **Drive, size, and date filters** — Narrow results to a drive, set minimum and maximum file sizes, or specify a creation-date range
 - **Tag filters** — Narrow global search results to any tagged item or to specific tags
 - **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
@@ -96,6 +106,8 @@
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
+- **Selection controls** — Select all, clear selection, or invert selection from the status bar
+- **Folder access assistance** — For access-denied folders, request a permanent access grant for your Windows user through an administrator-authorized helper; the main file manager stays unelevated
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
 - **Archive creation** — Compress selected files and folders to ZIP or 7Z from the context menu, with byte-level progress, cancellation, conflict-free archive naming, and temporary output cleanup after failures
@@ -104,6 +116,7 @@
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
 - **Recycle Bin** — Browse, restore, and permanently delete; drag selected items to the Recycle Bin target in Quick Access to send them there
 - **Cloud Files support** — Sync status badges for cloud-only, locally available, syncing, and pinned files; supports Windows Cloud Files actions such as "Always keep on this device" and "Free up space"
+- **Google Drive integration** — Read Google Drive sync status through its Windows Shell integration and resolve folder shortcuts for navigation
 - **ISO mounting** — Mount ISO files as virtual drives, detect images mounted before the app starts, and eject them from the sidebar
 
 ### Automatic File Organizer
@@ -161,6 +174,8 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 - Fallback when DirectX 12 or Vulkan is unavailable or unstable on your system.
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
 - OpenGL texture uploads can be synchronous on the CPU thread, leading to some stutter.
+
+Dedicated image, PDF, DOCX, XLSX, and text viewer windows start with Glow independently of the main window's backend setting. If OpenGL initialization fails before the viewer is created, they retry with Wgpu (DirectX 12 on Windows).
 
 ## Prerequisites
 
