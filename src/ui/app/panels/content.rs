@@ -342,28 +342,18 @@ pub(super) fn render_preview_panel_layout(
                                         // Prevent CalculateFolderSize for virtual tag view paths (::tag::)
                                         let is_tag_path = crate::domain::special_paths::tag_id_from_view_path(&path.to_string_lossy()).is_some();
                                         if !is_tag_path {
-                                            // The recursive size walk is the only
-                                            // option on non-NTFS drives and can cover
-                                            // hundreds of GB, so it waits for an idle
-                                            // UI instead of competing with the scroll
-                                            // the user is doing right after opening a
-                                             // folder. The panel re-emits this action
-                                             // every frame while the size is unknown,
-                                             // so the size still appears on its own.
-                                            // In dual mode, pending visual uploads from
-                                            // the unfocused pane must not keep this request
-                                            // deferred indefinitely.
-                                            let ui_busy = should_defer_folder_size_walk(
-                                                app.dual_panel_enabled,
-                                                app.is_loading_folder,
-                                                app.thumbnail_scroll_is_settling(),
-                                                app.generation,
-                                                app.pending_thumbnails
-                                                    .iter()
-                                                    .map(|thumbnail| thumbnail.generation),
-                                                !app.cache_manager.pending_upload_set.is_empty(),
-                                            );
-                                            if !ui_busy {
+                                             // Wait for navigation and scrolling, not thumbnail
+                                             // queues: deferred uploads can remain pending
+                                             // indefinitely even when the UI is idle.
+                                             let ui_busy = should_defer_folder_size_walk(
+                                                 app.is_loading_folder,
+                                                 app.thumbnail_scroll_is_settling(),
+                                             );
+                                             if ui_busy {
+                                                 // egui may sleep once scrolling stops; ensure
+                                                 // the deferred action is evaluated again.
+                                                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                                             } else {
                                                 // Cancel any in-progress calculation before starting new one
                                                 app.folder_size_state.cancel
                                                     .store(true, std::sync::atomic::Ordering::Release);
@@ -609,22 +599,10 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
 }
 
 fn should_defer_folder_size_walk(
-    dual_panel_enabled: bool,
     folder_loading: bool,
     thumbnail_scroll_is_settling: bool,
-    active_generation: usize,
-    mut pending_thumbnail_generations: impl Iterator<Item = usize>,
-    has_pending_uploads: bool,
 ) -> bool {
-    if folder_loading || thumbnail_scroll_is_settling {
-        return true;
-    }
-
-    if dual_panel_enabled {
-        pending_thumbnail_generations.any(|generation| generation == active_generation)
-    } else {
-        has_pending_uploads || pending_thumbnail_generations.next().is_some()
-    }
+    folder_loading || thumbnail_scroll_is_settling
 }
 
 fn physical_panel_ui_id(parent_id: egui::Id, panel: ActivePanel) -> egui::Id {
@@ -1367,62 +1345,23 @@ mod tests {
     }
 
     #[test]
-    fn inactive_panel_thumbnail_work_does_not_block_folder_size_in_dual_mode() {
-        assert!(!should_defer_folder_size_walk(
-            true,
-            false,
-            false,
-            10,
-            [11].into_iter(),
-            true,
-        ));
-        assert!(should_defer_folder_size_walk(
-            true,
-            false,
-            false,
-            10,
-            [10].into_iter(),
-            false,
-        ));
+    fn idle_panel_does_not_wait_for_thumbnail_queues() {
+        // Thumbnail queues must not be a prerequisite for details requests,
+        // regardless of panel layout or whether pending uploads can drain.
+        assert!(!should_defer_folder_size_walk(false, false));
     }
 
     #[test]
-    fn dual_panel_folder_size_still_waits_for_loading_or_active_scroll() {
-        assert!(should_defer_folder_size_walk(
-            true,
-            true,
-            false,
-            10,
-            std::iter::empty(),
-            false,
-        ));
-        assert!(should_defer_folder_size_walk(
-            true,
-            false,
-            true,
-            10,
-            std::iter::empty(),
-            false,
-        ));
+    fn folder_size_still_waits_for_loading_or_active_scroll() {
+        assert!(should_defer_folder_size_walk(true, false));
+        assert!(should_defer_folder_size_walk(false, true));
+        assert!(should_defer_folder_size_walk(true, true));
     }
 
     #[test]
-    fn single_panel_folder_size_keeps_waiting_for_pending_visual_work() {
-        assert!(should_defer_folder_size_walk(
-            false,
-            false,
-            false,
-            10,
-            [11].into_iter(),
-            false,
-        ));
-        assert!(should_defer_folder_size_walk(
-            false,
-            false,
-            false,
-            10,
-            std::iter::empty(),
-            true,
-        ));
+    fn folder_size_is_released_after_loading_and_scroll_settle() {
+        assert!(should_defer_folder_size_walk(true, true));
+        assert!(should_defer_folder_size_walk(false, true));
+        assert!(!should_defer_folder_size_walk(false, false));
     }
 }
