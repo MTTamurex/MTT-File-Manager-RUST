@@ -4,22 +4,6 @@
 
 <img width="3839" height="2062" alt="Untitled-1" src="https://github.com/user-attachments/assets/6ae29e6d-9f08-4d07-97bd-3e9e61a1f699" />
 
-## Download & Install (Windows)
-
-**[Download the latest release](../../releases/latest)**
-
-1. On the release page, expand **Assets** and download **`MTT-File-Manager-Setup-<version>.exe`**. The **Source code** ZIP/TAR files are for developers, not installers.
-2. Open the downloaded installer and approve the Windows administrator prompt. Administrator access is needed to install the background search and drive-information service; normal use of the file manager does not require it.
-3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
-4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
-
-### Installation help
-
-- **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
-- **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
-- **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
-- **Updating:** close MTT and run the newer installer. No manual uninstall is needed.
-
 ## Key Features
 
 ### Interface & Navigation
@@ -42,7 +26,10 @@
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
-- **Drive removal recovery** — Redirect affected panes and stored tabs to This PC when a drive is disconnected
+
+### Windows Integration
+- **Default folder handling (experimental)** — In Settings > General, optionally route Windows folder-open requests to MTT, add **Open in MTT** to folder context menus, or route Win+E and Explorer launch requests to MTT. These options modify Windows Registry settings and may prompt for UAC confirmation. Win+E redirection is experimental and can prevent Explorer from opening if MTT cannot start; turning the option off restores Explorer.
+- **Windows 11 compact context menu** — Installer builds configured with a trusted signing certificate can register **Open in MTT** in Explorer's modern context menu through a sparse package. Builds without that package retain the classic context-menu integration.
 
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
