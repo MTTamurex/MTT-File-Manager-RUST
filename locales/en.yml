@@ -417,7 +417,6 @@ settings:
   folder_blue_gray: "Blue gray"
   folder_dark_slate_blue: "Dark slate blue"
   folder_lavender: "Lavender"
-  folder_appearance_description: "Color variants preserve folder shading and cover colors. Applies to any theme."
   theme_dark: "Dark"
   theme_dark_deep: "Dark Deep"
   theme_github_dark: "Midnight"

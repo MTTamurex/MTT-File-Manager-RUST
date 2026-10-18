@@ -121,11 +121,6 @@ fn render_folder_appearance(
     if let Some(index) = settings_ui::choice_list(ui, &labels, selected) {
         *appearance = FolderAppearance::ALL[index];
     }
-    ui.label(
-        RichText::new(t!("settings.folder_appearance_description"))
-            .size(12.0)
-            .color(theme::secondary_text_color(ui.ctx())),
-    );
 }
 
 #[cfg(test)]

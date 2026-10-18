@@ -417,7 +417,6 @@ settings:
   folder_blue_gray: "Azul acinzentado"
   folder_dark_slate_blue: "Azul ardósia escuro"
   folder_lavender: "Lavanda"
-  folder_appearance_description: "As variantes preservam o relevo da pasta e as cores das capas. A escolha vale para qualquer tema."
   theme_dark: "Escuro"
   theme_dark_deep: "Escuro profundo"
   theme_github_dark: "Meia-noite"

@@ -417,7 +417,6 @@ settings:
   folder_blue_gray: "Γκριζογάλαζο"
   folder_dark_slate_blue: "Σκούρο γκριζογάλαζο"
   folder_lavender: "Λεβάντα"
-  folder_appearance_description: "Οι χρωματικές παραλλαγές διατηρούν τις σκιάσεις των φακέλων και τα χρώματα των εξωφύλλων. Ισχύει για κάθε θέμα."
   theme_dark: "Σκούρο"
   theme_dark_deep: "Βαθύ σκοτεινό"
   theme_github_dark: "Μεσάνυχτα"

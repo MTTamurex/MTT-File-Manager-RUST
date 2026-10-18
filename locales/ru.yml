@@ -417,7 +417,6 @@ settings:
   folder_blue_gray: "Серо-голубой"
   folder_dark_slate_blue: "Тёмный серо-синий"
   folder_lavender: "Лавандовый"
-  folder_appearance_description: "Цветовые варианты сохраняют объём папок и цвета обложек. Применяются к любой теме."
   theme_dark: "Тёмная"
   theme_dark_deep: "Глубокая тёмная"
   theme_github_dark: "Полночь"
