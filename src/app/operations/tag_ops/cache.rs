@@ -19,18 +19,28 @@ impl ImageViewerApp {
     }
 
     pub(super) fn refresh_visible_items_after_tag_change(&mut self) {
+        let mut active_reload_started = false;
         // Check if the active panel tag view needs a full reload because a
         // newly tagged file is not in all_items yet.
         if let Some(tag_id) = tag_id_from_view_path(&self.navigation_state.current_path) {
             self.prune_active_tag_view_items_without_tag(tag_id);
-            if self.tag_view_needs_reload(tag_id) {
+            if super::view_reload::tag_change_requires_reload(
+                self.is_loading_folder,
+                self.tag_view_needs_reload(tag_id),
+            ) {
                 self.setup_tag_view(tag_id);
-                self.ui_ctx.request_repaint();
-                return;
+                active_reload_started = true;
             }
         }
 
-        self.filter_items();
+        if !active_reload_started
+            && !super::view_reload::defer_tag_refilter(
+                self.is_loading_folder,
+                self.hold_visible_items_until_load_complete,
+            )
+        {
+            self.filter_items();
+        }
 
         // Re-filter the inactive panel if it's showing a tag view.
         if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
@@ -44,7 +54,10 @@ impl ImageViewerApp {
                         .collect();
                     let view_paths: FxHashSet<&PathBuf> =
                         snapshot.all_items.iter().map(|e| &e.path).collect();
-                    paths_with_tag.iter().any(|p| !view_paths.contains(p))
+                    super::view_reload::tag_change_requires_reload(
+                        snapshot.is_loading_folder,
+                        paths_with_tag.iter().any(|p| !view_paths.contains(p)),
+                    )
                 };
                 if needs_reload {
                     self.with_inactive_panel(|app| {
@@ -176,6 +189,14 @@ impl ImageViewerApp {
                 }
             }
         }
+
+        // Inner tabs have their own stored listings. Invalidate hidden copies
+        // too, while the shared invalidator preserves both currently visible panes.
+        let paths = tag_ids
+            .iter()
+            .map(|id| PathBuf::from(crate::domain::special_paths::tag_view_path(*id)))
+            .collect::<Vec<_>>();
+        self.invalidate_panel_tab_snapshots_for_paths(&paths);
 
         // Active views are reloaded by the caller when required.
     }

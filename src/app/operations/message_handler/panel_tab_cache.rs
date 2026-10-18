@@ -373,4 +373,34 @@ mod tests {
             1,
         ));
     }
+
+    #[test]
+    fn tag_changes_invalidate_hidden_copies_but_preserve_both_visible_panes() {
+        let affected = crate::domain::special_paths::tag_view_path(1);
+        let unrelated = crate::domain::special_paths::tag_view_path(2);
+        let mut matches_tag = |path: &str| panel_path_matches_folder(path, &affected);
+        for physical_panel in [ActivePanel::Left, ActivePanel::Right] {
+            for is_current_workspace in [false, true] {
+                for index in [0, 1] {
+                    let is_live = is_live_panel_tab(
+                        is_current_workspace,
+                        true,
+                        ActivePanel::Left,
+                        physical_panel,
+                        index,
+                        0,
+                    );
+                    assert_eq!(
+                        should_invalidate_panel_tab_listing(&affected, is_live, &mut matches_tag),
+                        !is_current_workspace || index != 0,
+                    );
+                    assert!(!should_invalidate_panel_tab_listing(
+                        &unrelated,
+                        is_live,
+                        &mut matches_tag,
+                    ));
+                }
+            }
+        }
+    }
 }

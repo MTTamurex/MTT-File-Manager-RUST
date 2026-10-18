@@ -130,7 +130,7 @@ impl ImageViewerApp {
         if let IntegratedFolderDestination::Panel(panel) =
             integrated_folder_destination(self.dual_panel_enabled, self.dual_panel_active)
         {
-            return self.dual_panel_add_tab_at_end(panel, path);
+            return self.dual_panel_add_tab_at(panel, path);
         }
 
         if !self.tab_manager.can_add_tab() {

@@ -189,22 +189,33 @@ impl ImageViewerApp {
     }
 
     pub fn dual_panel_add_tab(&mut self, panel: ActivePanel) -> bool {
-        self.dual_panel_add_tab_to_path(panel, None, false)
+        self.dual_panel_add_tab_to_path(panel, None)
+    }
+
+    pub(crate) fn dual_panel_move_tab(&mut self, panel: ActivePanel, from: usize, gap: usize) {
+        if !self.dual_panel_enabled {
+            return;
+        }
+        self.sync_to_tab();
+        let changed = self
+            .tab_manager
+            .active_mut()
+            .dual_panel_tabs
+            .as_mut()
+            .is_some_and(|tabs| tabs.panel_mut(panel).move_tab_to_gap(from, gap));
+        if changed {
+            self.save_preferences();
+        }
     }
 
     pub fn dual_panel_add_tab_at(&mut self, panel: ActivePanel, path: &str) -> bool {
-        self.dual_panel_add_tab_to_path(panel, Some(path), false)
-    }
-
-    pub(crate) fn dual_panel_add_tab_at_end(&mut self, panel: ActivePanel, path: &str) -> bool {
-        self.dual_panel_add_tab_to_path(panel, Some(path), true)
+        self.dual_panel_add_tab_to_path(panel, Some(path))
     }
 
     fn dual_panel_add_tab_to_path(
         &mut self,
         panel: ActivePanel,
         target_path: Option<&str>,
-        append: bool,
     ) -> bool {
         if !self.dual_panel_enabled {
             return false;
@@ -239,11 +250,7 @@ impl ImageViewerApp {
                 .dual_panel_tabs
                 .as_mut()
                 .expect("dual panel tabs are initialized when dual mode is active");
-            if append {
-                tabs.add_tab_to_end(panel, snapshot)
-            } else {
-                tabs.add_tab(panel, snapshot)
-            }
+            tabs.add_tab(panel, snapshot)
         };
         let Some(index) = index else {
             return false;

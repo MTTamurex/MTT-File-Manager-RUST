@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod panel_tabs;
+mod reorder;
 pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};
 mod session;
 mod session_restore;
@@ -638,27 +639,7 @@ impl TabManager {
     }
 
     pub fn move_tab_to_gap(&mut self, from: usize, gap: usize) -> bool {
-        if from >= self.tabs.len() || gap > self.tabs.len() {
-            return false;
-        }
-
-        let insert = if gap > from { gap - 1 } else { gap };
-        if insert == from {
-            return false;
-        }
-
-        let tab = self.tabs.remove(from);
-        self.tabs.insert(insert, tab);
-
-        if self.active_tab == from {
-            self.active_tab = insert;
-        } else if from < self.active_tab && insert >= self.active_tab {
-            self.active_tab -= 1;
-        } else if from > self.active_tab && insert <= self.active_tab {
-            self.active_tab += 1;
-        }
-
-        true
+        reorder::move_to_gap(&mut self.tabs, &mut self.active_tab, from, gap)
     }
 
     pub fn move_tab_left(&mut self) -> bool {

@@ -6,6 +6,8 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::tab_bar::should_activate_tab_on_drag_hover;
 use eframe::egui;
 
+mod reorder;
+
 const TAB_CORNER_RADIUS: u8 = 7;
 const TAB_HEIGHT: f32 = 28.0;
 pub(super) const TAB_STRIP_HEIGHT: f32 = 36.0;
@@ -20,6 +22,11 @@ pub(super) enum PanelTabAction {
     Select(ActivePanel, usize),
     Add(ActivePanel),
     Close(ActivePanel, usize),
+    Move {
+        panel: ActivePanel,
+        from: usize,
+        gap: usize,
+    },
 }
 
 fn layout_tab_title(
@@ -100,6 +107,7 @@ pub(super) fn render_panel_tab_bar(
     icon_loader: &mut IconLoader,
 ) -> Option<PanelTabAction> {
     let mut action = None;
+    let mut drag = reorder::TabDrag::new(ui.ctx(), workspace_id, panel, is_item_dragging);
     let add_rect = egui::Rect::from_min_size(
         egui::pos2(
             rect.right() - ADD_BUTTON_WIDTH,
@@ -114,13 +122,18 @@ pub(super) fn render_panel_tab_bar(
             rect.bottom(),
         ),
     );
-    let active_tab_signature = tabs
-        .active()
-        .map(|tab| (tab.id, tabs.tabs.len(), scroll_rect.width().to_bits()));
+    let active_tab_signature = tabs.active().map(|tab| {
+        (
+            tab.id,
+            tabs.active_tab,
+            tabs.tabs.len(),
+            scroll_rect.width().to_bits(),
+        )
+    });
     let scroll_state_id = egui::Id::new(("panel_tab_active_scroll", workspace_id, panel));
     let previous_active_tab_signature = ui
         .ctx()
-        .data(|data| data.get_temp::<(usize, usize, u32)>(scroll_state_id));
+        .data(|data| data.get_temp::<(usize, usize, usize, u32)>(scroll_state_id));
     let reveal_active_tab = active_tab_signature
         .is_some_and(|signature| previous_active_tab_signature != Some(signature));
     if let Some(signature) = active_tab_signature {
@@ -162,6 +175,10 @@ pub(super) fn render_panel_tab_bar(
             scroll_ui.set_clip_rect(scroll_rect);
             egui::ScrollArea::horizontal()
                 .id_salt(("panel_tab_strip", workspace_id, panel))
+                .scroll_source(
+                    egui::scroll_area::ScrollSource::SCROLL_BAR
+                        | egui::scroll_area::ScrollSource::MOUSE_WHEEL,
+                )
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(scroll_ui, |scroll_ui| {
@@ -190,7 +207,7 @@ pub(super) fn render_panel_tab_bar(
                                 let tab_response = ui.interact(
                                     tab_rect,
                                     ui.id().with("panel_tab_select"),
-                                    egui::Sense::click(),
+                                    egui::Sense::click_and_drag(),
                                 );
                                 let active_panel_tab = selected && panel == active_panel;
                                 let drag_hovering = is_item_dragging
@@ -282,6 +299,11 @@ pub(super) fn render_panel_tab_bar(
                                     ),
                                     egui::Vec2::splat(CLOSE_BUTTON_SIZE),
                                 );
+                                if drag.record_tab(ui, tab.id, &tab_response, close_rect)
+                                    && !active_panel_tab
+                                {
+                                    action = Some(PanelTabAction::Select(panel, index));
+                                }
                                 let close_response = (tabs.tabs.len() > 1).then(|| {
                                     ui.interact(
                                         close_rect,
@@ -348,11 +370,12 @@ pub(super) fn render_panel_tab_bar(
                                 );
                                 ui.painter().galley(title_pos, galley, text_color);
 
-                                if selected && reveal_active_tab {
+                                if selected && reveal_active_tab && !drag.active() {
                                     ui.scroll_to_rect(tab_rect, Some(egui::Align::Center));
                                 }
 
                                 if tab_response.hovered()
+                                    && !drag.active()
                                     && !close_response.as_ref().is_some_and(egui::Response::hovered)
                                 {
                                     tab_response
@@ -360,6 +383,9 @@ pub(super) fn render_panel_tab_bar(
                                         .on_hover_text(tab_tooltip_text(path, title));
                                 }
                             });
+                        }
+                        if let Some((from, gap)) = drag.finish(ui, scroll_rect) {
+                            action = Some(PanelTabAction::Move { panel, from, gap });
                         }
                     });
                 });

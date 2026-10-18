@@ -1181,6 +1181,9 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             PanelTabAction::Close(panel, index) => {
                 app.dual_panel_close_tab(panel, index);
             }
+            PanelTabAction::Move { panel, from, gap } => {
+                app.dual_panel_move_tab(panel, from, gap);
+            }
         }
     }
 

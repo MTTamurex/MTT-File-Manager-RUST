@@ -199,7 +199,11 @@ impl ImageViewerApp {
             || self.navigation_state.is_computer_view != previous_is_computer_view
             || self.navigation_state.is_recycle_bin_view != previous_is_recycle_bin_view
         {
-            self.discard_thumbnail_pipeline_for_navigation("tab-switch", true);
+            if self.dual_panel_enabled {
+                self.prune_thumbnail_pipeline_for_dual_panel_navigation("tab-switch");
+            } else {
+                self.discard_thumbnail_pipeline_for_navigation("tab-switch", true);
+            }
         }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)

@@ -6,7 +6,7 @@ use crate::infrastructure::io_priority::{IOPriority, ThreadPriorityGuard};
 use crate::infrastructure::windows::RootAvailabilityCache;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
@@ -246,41 +246,7 @@ impl ImageViewerApp {
         }
 
         let view_path = tag_view_path(tag_id);
-        self.bump_folder_load_generation();
-        self.invalidate_active_items_rebuild();
-
-        self.navigation_state.current_path = view_path.clone();
-        self.navigation_state.path_input = self.tag_view_display_name(tag_id);
-        self.navigation_state.is_computer_view = false;
-        self.navigation_state.is_recycle_bin_view = false;
-        self.active_tag_filter = Some(tag_id);
-
-        // Tag-view FileEntry cache intentionally does not persist folder_cover.
-        // Reusing stale scan markers would prevent visible folders from
-        // re-discovering covers after focus-restore texture flushes or tag switches.
-        self.scanned_folders.clear();
-
-        if self.uses_conservative_folder_preview_policy() {
-            self.cache_manager.clear_folder_preview_inflight_state();
-            self.pending_folder_preview_replace.clear();
-            self.suppress_next_folder_preview_invalidation.clear();
-        }
-
-        self.apply_folder_lock_if_present();
-
-        self.items = Arc::new(Vec::new());
-        self.group_projection = Arc::new(Default::default());
-        self.all_items_mut().clear();
-        self.total_items = 0;
-        self.is_loading_folder = true;
-        self.folder_load_error = None;
-        self.pending_all_items_clear = false;
-        self.hold_visible_items_until_load_complete = false;
-        self.pending_items_rebuild = false;
-        self.pending_items_count = 0;
-        self.loading_started_at = Instant::now();
-        self.loaded_path = view_path;
-        self.reset_selection_and_search();
+        self.prepare_tag_view_loading(tag_id, view_path);
 
         // The in-memory tag_assignments map is loaded at startup (init.rs)
         // and maintained by all tag mutation paths via sync_tag_assignments_normalized().
