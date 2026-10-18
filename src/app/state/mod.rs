@@ -764,6 +764,7 @@ pub struct ImageViewerApp {
     pub session_volume: f32,
     // User-selected theme (Light / Dark / System)
     pub theme_mode: ThemeMode,
+    pub folder_appearance: crate::domain::folder_appearance::FolderAppearance,
     pub interface_scale: f32,
     // Last resolved dark state for ThemeMode::System, used to detect OS changes.
     pub system_theme_dark: bool,

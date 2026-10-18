@@ -207,8 +207,8 @@ impl ThumbnailDiskCache {
 
         db.execute(
             "INSERT OR REPLACE INTO thumbnails
-             (id, path, data, modified_at, created_at, width, height, requested_size)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, path, data, modified_at, created_at, width, height, requested_size, modified_nanos)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 id,
                 path_str,
@@ -218,6 +218,7 @@ impl ThumbnailDiskCache {
                 final_width as i64,
                 final_height as i64,
                 requested_size as i64
+                , modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()
             ],
         )?;
 

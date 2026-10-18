@@ -2,7 +2,12 @@ use super::{ThumbnailDiskCache, FOLDER_PREVIEW_CACHE_FORMAT_VERSION};
 use image::{imageops, DynamicImage, ImageBuffer, Rgba};
 use rusqlite::params;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+mod freshness;
+mod variants;
+mod writer;
+pub use freshness::FolderPreviewSource;
+pub(super) use variants::initialize_variant_table;
 
 fn resize_rgba_to_width(
     rgba_data: Vec<u8>,
@@ -44,36 +49,89 @@ impl ThumbnailDiskCache {
         folder_path: &Path,
         bucket_size: u32,
     ) -> Option<(Vec<u8>, u32, u32, i64)> {
+        self.get_folder_preview_for_appearance(folder_path, bucket_size, Default::default())
+    }
+
+    pub fn get_folder_preview_for_appearance(
+        &self,
+        folder_path: &Path,
+        bucket_size: u32,
+        appearance: crate::domain::folder_appearance::FolderAppearance,
+    ) -> Option<(Vec<u8>, u32, u32, i64)> {
+        self.get_folder_preview_inner(folder_path, bucket_size, appearance, None)
+    }
+
+    pub fn get_folder_preview_for_source(
+        &self,
+        folder_path: &Path,
+        bucket_size: u32,
+        appearance: crate::domain::folder_appearance::FolderAppearance,
+        source: &FolderPreviewSource,
+    ) -> Option<(Vec<u8>, u32, u32, i64)> {
+        if !source.is_current() {
+            return None;
+        }
+        self.get_folder_preview_inner(
+            folder_path,
+            bucket_size,
+            appearance,
+            Some(source.fingerprint()),
+        )
+    }
+
+    fn get_folder_preview_inner(
+        &self,
+        folder_path: &Path,
+        bucket_size: u32,
+        appearance: crate::domain::folder_appearance::FolderAppearance,
+        source: Option<&str>,
+    ) -> Option<(Vec<u8>, u32, u32, i64)> {
         let db = self.reader.lock();
         let mut stmt = db
             .prepare_cached(
-                "SELECT data, width, height, bucket_size, created_at, format_version FROM folder_previews WHERE folder_path = ?",
+                "SELECT data, width, height, bucket_size, created_at, format_version, source_fingerprint
+                 FROM folder_preview_variants WHERE folder_path = ?1 AND format_version = ?2
+                 UNION ALL
+                 SELECT data, width, height, bucket_size, created_at, format_version, NULL
+                 FROM folder_previews WHERE folder_path = ?1 AND format_version = ?2
+                 LIMIT 1",
             )
             .ok()?;
 
         let folder_path_str = folder_path.to_string_lossy();
-        let (webp_data, db_width, _db_height, cached_bucket, created_at, format_version): (
-            Vec<u8>,
-            u32,
-            u32,
-            u32,
-            i64,
-            i64,
-        ) = match stmt.query_row(params![&*folder_path_str], |row| {
-            Ok((
-                row.get::<_, Vec<u8>>(0)?,
-                row.get::<_, i64>(1)? as u32,
-                row.get::<_, i64>(2)? as u32,
-                row.get::<_, i64>(3)? as u32,
-                row.get::<_, i64>(4)?,
-                row.get::<_, i64>(5)?,
-            ))
-        }) {
+        let (
+            webp_data,
+            db_width,
+            _db_height,
+            cached_bucket,
+            created_at,
+            format_version,
+            fingerprint,
+        ): (Vec<u8>, u32, u32, u32, i64, i64, Option<String>) = match stmt.query_row(
+            params![
+                &*folder_path_str,
+                appearance.cache_version(FOLDER_PREVIEW_CACHE_FORMAT_VERSION)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)? as u32,
+                    row.get::<_, i64>(2)? as u32,
+                    row.get::<_, i64>(3)? as u32,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        ) {
             Ok(row) => row,
             Err(_) => return None,
         };
 
-        if format_version != FOLDER_PREVIEW_CACHE_FORMAT_VERSION {
+        if format_version != appearance.cache_version(FOLDER_PREVIEW_CACHE_FORMAT_VERSION) {
+            return None;
+        }
+        if source.is_some() && source != fingerprint.as_deref() {
             return None;
         }
 
@@ -116,91 +174,16 @@ impl ThumbnailDiskCache {
         Some((rgba_data, w, h, created_at))
     }
 
-    /// Saves a folder preview (Shell sandwich icon) to SQLite as lossless WebP.
-    /// The input must be straight-alpha RGBA; GPU premultiplication happens after retrieval.
-    /// [WRITER]
-    pub fn put_folder_preview_cache(
-        &self,
-        folder_path: &Path,
-        bucket_size: u32,
-        rgba_data: &[u8],
-        width: u32,
-        height: u32,
-    ) {
-        let expected_len = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|n| n.checked_mul(4));
-        if expected_len != Some(rgba_data.len()) {
-            return;
-        }
-
-        let folder_modified_at = std::fs::metadata(folder_path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
-            .map(|dur| dur.as_secs() as i64);
-
-        let db = self.writer.lock();
-        let existing: Option<(u32, u32, i64, i64)> = db
-            .query_row(
-                "SELECT width, bucket_size, created_at, format_version FROM folder_previews WHERE folder_path = ?",
-                [folder_path.to_string_lossy().to_string()],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)? as u32,
-                        row.get::<_, i64>(1)? as u32,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                    ))
-                },
-            )
-            .ok();
-
-        if let Some((existing_width, existing_bucket, existing_created_at, existing_version)) =
-            existing
-        {
-            let existing_capacity = existing_width.max(existing_bucket);
-            let existing_is_stale = folder_modified_at
-                .map(|mtime| mtime > existing_created_at)
-                .unwrap_or(false);
-            if existing_version == FOLDER_PREVIEW_CACHE_FORMAT_VERSION
-                && existing_capacity >= bucket_size
-                && !existing_is_stale
-            {
-                return;
-            }
-        }
-
-        // Encode only after downgrade checks, so zooming down does not spend
-        // CPU compressing a lower-resolution preview that will be ignored.
-        let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
-        let webp_data = encoder.encode_lossless();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-
-        let _ = db.execute(
-            "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, bucket_size, format_version, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            params![
-                folder_path.to_string_lossy().to_string(),
-                webp_data.to_vec(),
-                width as i64,
-                height as i64,
-                bucket_size as i64,
-                FOLDER_PREVIEW_CACHE_FORMAT_VERSION,
-                now
-            ],
-        );
-    }
-
     /// Removes a cached folder preview.
     /// [WRITER]
     pub fn remove_folder_preview_cache(&self, folder_path: &Path) {
         let db = self.writer.lock();
         let _ = db.execute(
             "DELETE FROM folder_previews WHERE folder_path = ?",
+            [folder_path.to_string_lossy()],
+        );
+        let _ = db.execute(
+            "DELETE FROM folder_preview_variants WHERE folder_path = ?",
             [folder_path.to_string_lossy()],
         );
     }

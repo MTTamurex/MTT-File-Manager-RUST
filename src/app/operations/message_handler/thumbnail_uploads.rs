@@ -541,7 +541,7 @@ impl ImageViewerApp {
                         folder_path.clone(),
                         self.effective_folder_preview_request_size_px(),
                         Some(cover_path.clone()),
-                    );
+                    ).with_validity(self.cache_manager.folder_preview_requests.begin(&folder_path));
                     if let Err(err) = self.folder_preview_sender.try_send(request) {
                         let request = err.into_inner();
                         self.cache_manager
@@ -1274,10 +1274,23 @@ impl ImageViewerApp {
             }
             if let Ok(data) = self.folder_preview_receiver.try_recv() {
                 processed_results += 1;
+                if data.appearance != self.folder_appearance || !data.validity.is_current() {
+                    continue;
+                }
                 self.cache_manager.finish_folder_preview_loading(&data.path);
                 let force_replace = self.pending_folder_preview_replace.remove(&data.path);
 
                 if !self.is_folder_preview_result_relevant(&data.path) {
+                    continue;
+                }
+                if data.retry_after_source_change
+                    || self
+                        .folder_preview_cover_for_known_item(&data.path)
+                        .is_some_and(|cover| cover != data.cover_path)
+                {
+                    // Reuse the existing debounced refresh path; a changing media
+                    // file must not cause either a stale texture or a busy retry loop.
+                    self.schedule_folder_cover_refresh(&data.path);
                     continue;
                 }
 

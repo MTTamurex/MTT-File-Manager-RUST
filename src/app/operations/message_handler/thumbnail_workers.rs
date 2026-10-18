@@ -189,10 +189,25 @@ impl ImageViewerApp {
         // When a folder's cover changes, the composed preview is stale —
         // invalidate it so the next frame triggers a fresh composition.
         for folder_path in &covers_changed {
-            if !self
+            let preserve_texture = self
                 .suppress_next_folder_preview_invalidation
                 .remove(folder_path)
-            {
+                && self
+                    .folder_preview_cover_for_known_item(folder_path)
+                    .flatten()
+                    .is_some();
+            self.cache_manager
+                .folder_preview_requests
+                .invalidate(folder_path);
+            self.disk_cache.remove_folder_preview_cache(folder_path);
+            if preserve_texture {
+                // Keep the displayed texture, but restart work with the new cover.
+                self.cache_manager
+                    .finish_folder_preview_loading(folder_path);
+                self.cache_manager
+                    .forget_folder_preview_request_cooldown(folder_path);
+                self.request_folder_preview_refresh_preserving_current(folder_path.clone());
+            } else {
                 self.cache_manager.invalidate_folder_preview(folder_path);
             }
         }
@@ -234,6 +249,11 @@ impl ImageViewerApp {
                 folder_path.clone(),
                 self.effective_folder_preview_request_size_px(),
                 Some(cover_path),
+            )
+            .with_validity(
+                self.cache_manager
+                    .folder_preview_requests
+                    .begin(&folder_path),
             );
             match self.folder_preview_sender.try_send(request) {
                 Ok(()) => self

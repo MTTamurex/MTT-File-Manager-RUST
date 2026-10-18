@@ -23,6 +23,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
+mod appearance;
+
 /// Default output width used for the static folder icon.
 pub const DEFAULT_OUTPUT_W: u32 = 256;
 
@@ -60,6 +62,22 @@ pub struct FolderComposer {
 }
 
 impl FolderComposer {
+    /// Changes only the folder shell; paper and media retain their original colors.
+    pub fn with_appearance(
+        mut self,
+        appearance: crate::domain::folder_appearance::FolderAppearance,
+    ) -> Self {
+        if let Some(color) = appearance.color() {
+            for image in [&mut self.back_img, &mut self.front_img] {
+                let mut rgba = image.to_rgba8();
+                appearance::recolor_shell(&mut rgba, color);
+                *image = DynamicImage::ImageRgba8(rgba);
+            }
+            self.layers.get_mut().clear();
+        }
+        self
+    }
+
     /// Decodes the embedded folder PNG layers. Bucket scaling happens on demand.
     ///
     /// Called ONCE at app startup. Returns `None` if any embedded PNG fails to
@@ -302,5 +320,54 @@ mod tests {
         let (rgba, w, h) = placeholder_folder_icon();
         assert!(w > 0 && h > 0);
         assert_eq!(rgba.len(), (w as usize) * (h as usize) * 4);
+    }
+
+    #[test]
+    fn palette_variants_preserve_alpha_paper_and_media() {
+        use crate::domain::folder_appearance::FolderAppearance;
+        let original = FolderComposer::try_new().unwrap();
+        for appearance in FolderAppearance::ALL.into_iter().skip(1) {
+            let variant = FolderComposer::try_new()
+                .unwrap()
+                .with_appearance(appearance);
+            assert_eq!(original.sheet_img, variant.sheet_img);
+            for (before, after) in [
+                (&original.back_img, &variant.back_img),
+                (&original.front_img, &variant.front_img),
+            ] {
+                let before = before.to_rgba8();
+                let after = after.to_rgba8();
+                assert_ne!(before, after);
+                for (a, b) in before.pixels().zip(after.pixels()) {
+                    assert_eq!(a[3], b[3]);
+                }
+            }
+            let media = [20, 80, 220, 255].repeat(32 * 32);
+            let (before, w, h) = original.compose(&media, 32, 32).unwrap();
+            let (after, sw, sh) = variant.compose(&media, 32, 32).unwrap();
+            assert_eq!((w, h), (sw, sh));
+            assert_ne!(before, after);
+            let mut visible_media = 0;
+            for (a, b) in before.chunks_exact(4).zip(after.chunks_exact(4)) {
+                assert_eq!(a[3], b[3]);
+                if a == [20, 80, 220, 255] {
+                    assert_eq!(a, b);
+                    visible_media += 1;
+                }
+            }
+            assert!(visible_media > 0, "media must remain visible and unchanged");
+            assert_ne!(original.compose_empty().0, variant.compose_empty().0);
+        }
+    }
+
+    #[test]
+    fn original_variant_is_unchanged_and_recoloring_rebuilds_existing_layers() {
+        use crate::domain::folder_appearance::FolderAppearance;
+        let original = FolderComposer::try_new().unwrap();
+        let expected = original.compose_empty();
+        let original = original.with_appearance(FolderAppearance::Original);
+        assert_eq!(expected, original.compose_empty());
+        let pastel = original.with_appearance(FolderAppearance::PastelYellow);
+        assert_ne!(expected.0, pastel.compose_empty().0);
     }
 }

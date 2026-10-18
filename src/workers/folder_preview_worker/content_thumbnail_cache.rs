@@ -2,7 +2,7 @@ use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache}
 use crate::workers::thumbnail::processing::resize_to_bucket;
 use image::ImageFormat;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 pub(super) fn try_cached_content_thumbnail(
     disk_cache: &ThumbnailDiskCache,
@@ -10,24 +10,7 @@ pub(super) fn try_cached_content_thumbnail(
     media_modified: Option<SystemTime>,
     bucket_size: u32,
 ) -> Option<(Vec<u8>, u32, u32)> {
-    let requested_modified = media_modified
-        .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
-        .map(|dur| dur.as_secs())
-        .unwrap_or(0);
-
-    if let Some(modified) = media_modified {
-        if let Some(entry) = disk_cache.get(media_path, modified) {
-            if let Some(decoded) = decode_content_thumbnail_cache_entry(entry, bucket_size) {
-                return Some(decoded);
-            }
-        }
-    }
-
-    let entry = disk_cache.get_latest(media_path)?;
-    if requested_modified > 0 && entry.modified_at > 0 && entry.modified_at != requested_modified {
-        return None;
-    }
-
+    let entry = disk_cache.get_folder_cover_thumbnail(media_path, media_modified?)?;
     decode_content_thumbnail_cache_entry(entry, bucket_size)
 }
 
@@ -54,6 +37,7 @@ fn decode_content_thumbnail_cache_entry(
 mod tests {
     use super::*;
     use std::time::Duration;
+    use std::time::UNIX_EPOCH;
     use tempfile::tempdir;
 
     fn rgba(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
@@ -89,5 +73,20 @@ mod tests {
         assert_eq!(width, 128);
         assert_eq!(height, 128);
         assert_eq!(data.len(), 128 * 128 * 4);
+    }
+
+    #[test]
+    fn folder_cover_thumbnail_rejects_same_second_edits_and_unknown_metadata() {
+        let dir = tempdir().unwrap();
+        let cache = ThumbnailDiskCache::new(dir.path().to_path_buf()).unwrap();
+        let path = dir.path().join("cover.jpg");
+        let old = UNIX_EPOCH + Duration::from_millis(100_100);
+        let changed = UNIX_EPOCH + Duration::from_millis(100_200);
+        cache
+            .put(&path, old, 32, &rgba(32, 32, [100, 120, 140, 255]), 32, 32)
+            .unwrap();
+        assert!(try_cached_content_thumbnail(&cache, &path, Some(old), 32).is_some());
+        assert!(try_cached_content_thumbnail(&cache, &path, Some(changed), 32).is_none());
+        assert!(try_cached_content_thumbnail(&cache, &path, None, 32).is_none());
     }
 }

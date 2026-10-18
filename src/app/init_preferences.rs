@@ -33,6 +33,7 @@ pub(super) struct StartupPreferences {
     pub(super) show_tags: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
+    pub(super) folder_appearance: crate::domain::folder_appearance::FolderAppearance,
     pub(super) interface_scale: f32,
     pub(super) gpu_backend_preference: String,
     pub(super) scroll_interpolation_enabled: bool,
@@ -241,6 +242,11 @@ impl StartupPreferences {
                 .map(String::as_str),
         );
 
+        let folder_appearance = prefs
+            .get(crate::domain::folder_appearance::FolderAppearance::PREFERENCE_KEY)
+            .map(|value| crate::domain::folder_appearance::FolderAppearance::from_preference(value))
+            .unwrap_or_default();
+
         let gpu_backend_preference = prefs
             .get("gpu_backend")
             .map(|backend| match backend.as_str() {
@@ -400,6 +406,7 @@ impl StartupPreferences {
             show_tags,
             language,
             theme_mode,
+            folder_appearance,
             interface_scale,
             gpu_backend_preference,
             scroll_interpolation_enabled,
@@ -423,6 +430,9 @@ impl StartupPreferences {
         }
     }
 }
+
+#[cfg(test)]
+mod folder_appearance_tests;
 
 #[cfg(test)]
 mod tests {

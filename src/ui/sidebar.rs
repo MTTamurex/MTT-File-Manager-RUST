@@ -1015,18 +1015,15 @@ fn render_pinned_folders(
 
             let mut cursor_x = rect.min.x + 12.0;
 
-            // Native folder icon
+            // Share the user's folder artwork while keeping special native icons.
             let folder_icon = ctx
                 .icon_loader
-                .get_or_load_registered_folder_icon(ui.ctx(), &pinned.path)
-                .or_else(|| {
-                    ctx.icon_loader
-                        .get_or_load_folder_path_icon(ui.ctx(), &pinned.path)
-                });
+                .get_or_load_quick_access_folder_icon(ui.ctx(), &pinned.path);
             if let Some(icon) = folder_icon {
+                let size = icon.size_vec2();
                 let icon_rect = Rect::from_center_size(
                     Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::vec2(16.0, 16.0),
+                    size * (16.0 / size.x.max(size.y).max(1.0)),
                 );
                 ui.painter().image(
                     icon.id(),

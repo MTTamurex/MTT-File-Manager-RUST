@@ -111,9 +111,13 @@ impl ThumbnailDiskCache {
 
             sampled_folder_previews = db
                 .prepare(
-                    "SELECT folder_path FROM folder_previews \
-                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_previews),1)) \
-                     LIMIT ?1",
+                    "SELECT folder_path FROM (SELECT folder_path FROM folder_previews
+                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_previews),1))
+                     LIMIT ?1)
+                     UNION
+                     SELECT folder_path FROM (SELECT folder_path FROM folder_preview_variants
+                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_preview_variants),1))
+                     LIMIT ?1)",
                 )
                 .and_then(|mut stmt| {
                     stmt.query_map(params![limit], |row| row.get::<_, String>(0))
@@ -167,6 +171,11 @@ impl ThumbnailDiskCache {
                     CacheTable::FolderPreviews,
                     &orphan_folder_previews,
                 );
+                removed += Self::execute_batch_delete(
+                    &tx,
+                    CacheTable::FolderPreviewVariants,
+                    &orphan_folder_previews,
+                );
             }
             if let Err(e) = tx.commit() {
                 log::error!("[GC] Incremental: transaction commit failed: {:?}", e);
@@ -206,7 +215,7 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
 
             all_folder_previews = db
-                .prepare("SELECT folder_path FROM folder_previews")
+                .prepare("SELECT folder_path FROM folder_previews UNION SELECT folder_path FROM folder_preview_variants")
                 .and_then(|mut stmt| {
                     stmt.query_map([], |row| row.get::<_, String>(0))
                         .map(|rows| rows.flatten().collect())
@@ -253,6 +262,11 @@ impl ThumbnailDiskCache {
                 removed += Self::execute_batch_delete(
                     &tx,
                     CacheTable::FolderPreviews,
+                    &orphan_folder_previews,
+                );
+                removed += Self::execute_batch_delete(
+                    &tx,
+                    CacheTable::FolderPreviewVariants,
                     &orphan_folder_previews,
                 );
             }

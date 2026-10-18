@@ -34,6 +34,14 @@ impl ThumbnailDiskCache {
                 "DELETE FROM folder_previews WHERE folder_path LIKE ?",
                 [&pattern],
             );
+            let _ = tx.execute(
+                "DELETE FROM folder_preview_variants WHERE folder_path = ?",
+                [&path_str],
+            );
+            let _ = tx.execute(
+                "DELETE FROM folder_preview_variants WHERE folder_path LIKE ?",
+                [&pattern],
+            );
 
             let _ = tx.commit();
 

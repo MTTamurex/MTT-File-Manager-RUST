@@ -220,6 +220,7 @@ impl ImageViewerApp {
             show_tags,
             language,
             theme_mode,
+            folder_appearance,
             interface_scale,
             gpu_backend_preference,
             scroll_interpolation_enabled,
@@ -818,6 +819,7 @@ impl ImageViewerApp {
             session_volume,
 
             theme_mode,
+            folder_appearance,
             interface_scale,
             system_theme_dark: theme_mode.resolve_dark(),
             last_system_theme_poll: Instant::now(),
@@ -925,6 +927,10 @@ impl ImageViewerApp {
             let (pixels, width, height) = custom_folder_icon;
             app.cache_manager
                 .set_folder_icon(&ctx, &pixels, width, height);
+        }
+
+        if folder_appearance != crate::domain::folder_appearance::FolderAppearance::Original {
+            app.apply_folder_appearance(&ctx);
         }
 
         // Apply folder lock for the initial folder (if it has one saved)

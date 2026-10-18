@@ -17,7 +17,10 @@ impl ImageViewerApp {
         *epoch
     }
 
-    fn folder_preview_cover_for_known_item(&self, path: &Path) -> Option<Option<PathBuf>> {
+    pub(crate) fn folder_preview_cover_for_known_item(
+        &self,
+        path: &Path,
+    ) -> Option<Option<PathBuf>> {
         self.items
             .iter()
             .find(|item| item.is_dir && !item.is_archive() && item.path.as_path() == path)
@@ -346,7 +349,8 @@ impl ImageViewerApp {
             path.clone(),
             size_px,
             cover_path,
-        );
+        )
+        .with_validity(self.cache_manager.folder_preview_requests.begin(&path));
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
                 // Only NOW the request is committed to the worker pipeline —
@@ -396,7 +400,8 @@ impl ImageViewerApp {
             path.clone(),
             self.effective_folder_preview_request_size_px(),
             cover_path,
-        );
+        )
+        .with_validity(self.cache_manager.folder_preview_requests.begin(&path));
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
                 self.cache_manager.note_folder_preview_request_sent(&path);

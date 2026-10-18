@@ -4,6 +4,19 @@ use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
+pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageViewerApp) -> bool {
+    let changed =
+        render_appearance_settings_section(ui, &mut app.theme_mode, &mut app.interface_scale);
+    let previous = app.folder_appearance;
+    render_folder_appearance(ui, &mut app.folder_appearance);
+    if previous != app.folder_appearance {
+        app.apply_folder_appearance(ui.ctx());
+        app.save_preferences();
+        app.force_save_preferences();
+    }
+    changed
+}
+
 pub fn render_appearance_settings_section(
     ui: &mut egui::Ui,
     theme_mode: &mut ThemeMode,
@@ -84,6 +97,35 @@ fn render_scale_slider(ui: &mut egui::Ui, interface_scale: &mut f32) -> (egui::R
         }
     }
     (response, previous != *interface_scale)
+}
+
+fn render_folder_appearance(
+    ui: &mut egui::Ui,
+    appearance: &mut crate::domain::folder_appearance::FolderAppearance,
+) {
+    use crate::domain::folder_appearance::FolderAppearance;
+    ui.add_space(16.0);
+    ui.label(t!("settings.folder_appearance"));
+    let labels = [
+        t!("settings.folder_original"),
+        t!("settings.folder_pastel_yellow"),
+        t!("settings.folder_blue_gray"),
+        t!("settings.folder_dark_slate_blue"),
+        t!("settings.folder_lavender"),
+    ];
+    let labels: Vec<&str> = labels.iter().map(|label| label.as_ref()).collect();
+    let selected = FolderAppearance::ALL
+        .iter()
+        .position(|value| value == appearance)
+        .unwrap_or(0);
+    if let Some(index) = settings_ui::choice_list(ui, &labels, selected) {
+        *appearance = FolderAppearance::ALL[index];
+    }
+    ui.label(
+        RichText::new(t!("settings.folder_appearance_description"))
+            .size(12.0)
+            .color(theme::secondary_text_color(ui.ctx())),
+    );
 }
 
 #[cfg(test)]

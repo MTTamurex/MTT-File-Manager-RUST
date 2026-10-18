@@ -131,6 +131,10 @@ impl FolderPreviewTraceCounters {
 
 /// Data returned from folder preview worker
 pub struct FolderPreviewData {
+    pub retry_after_source_change: bool,
+    pub cover_path: Option<PathBuf>,
+    pub validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
+    pub appearance: crate::domain::folder_appearance::FolderAppearance,
     pub path: PathBuf,
     pub rgba_data: std::sync::Arc<Vec<u8>>,
     pub width: u32,
@@ -148,6 +152,7 @@ enum FolderPreviewRequestMode {
 
 #[derive(Clone, Debug)]
 pub struct FolderPreviewRequest {
+    validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
     pub path: PathBuf,
     pub size_px: u32,
     pub cover_path: Option<PathBuf>,
@@ -155,8 +160,17 @@ pub struct FolderPreviewRequest {
 }
 
 impl FolderPreviewRequest {
+    pub fn with_validity(
+        mut self,
+        validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
+    ) -> Self {
+        self.validity = validity;
+        self
+    }
+
     pub fn new(path: PathBuf, size_px: u32, cover_path: Option<PathBuf>) -> Self {
         Self {
+            validity: Default::default(),
             path,
             size_px,
             cover_path,
@@ -174,6 +188,7 @@ impl FolderPreviewRequest {
             size_px,
             cover_path,
             mode: FolderPreviewRequestMode::RecomposeIfCacheMiss,
+            validity: Default::default(),
         }
     }
 }
@@ -210,6 +225,9 @@ pub fn spawn_folder_preview_worker(
     composer: Arc<FolderComposer>,
     trace: Arc<FolderPreviewTraceCounters>,
 ) {
+    // Share decoded artwork and bucket layers across all preview workers.
+    static VARIANT_COMPOSERS: [std::sync::OnceLock<Option<FolderComposer>>; 5] =
+        [const { std::sync::OnceLock::new() }; 5];
     // Smaller-than-default stack: this worker only runs Shell/COM calls and a
     // few alpha-blend passes; 512 KB is comfortably enough and saves ~512 KB of
     // committed RAM per worker compared to the 1 MB default commit on Windows.
@@ -233,18 +251,39 @@ pub fn spawn_folder_preview_worker(
 
             while let Ok(request) = rx.recv() {
                 let FolderPreviewRequest {
+                    validity,
                     path,
                     size_px,
                     cover_path,
                     mode,
                 } = request;
+                if !validity.is_current() {
+                    continue;
+                }
                 let bucket_size = get_bucket_size(size_px);
+                let appearance = crate::ui::folder_appearance::current(&ctx);
+                let composer =
+                    if appearance != crate::domain::folder_appearance::FolderAppearance::Original {
+                        VARIANT_COMPOSERS[appearance as usize]
+                            .get_or_init(|| {
+                                FolderComposer::try_new()
+                                    .map(|composer| composer.with_appearance(appearance))
+                            })
+                            .as_ref()
+                            .unwrap_or(composer.as_ref())
+                    } else {
+                        composer.as_ref()
+                    };
 
                 if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
                     let (mut rgba_data, width, height) =
                         composer.compose_empty_for_size(bucket_size);
                     crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                     let _ = tx.send(FolderPreviewData {
+                        retry_after_source_change: false,
+                        cover_path: None,
+                        validity,
+                        appearance,
                         path,
                         rgba_data: std::sync::Arc::new(rgba_data),
                         width,
@@ -271,6 +310,10 @@ pub fn spawn_folder_preview_worker(
                     && !crate::infrastructure::onedrive::is_locally_available(&path)
                 {
                     let _ = tx.send(FolderPreviewData {
+                        retry_after_source_change: false,
+                        cover_path: None,
+                        validity,
+                        appearance,
                         path,
                         rgba_data: std::sync::Arc::new(Vec::new()),
                         width: 0,
@@ -281,19 +324,35 @@ pub fn spawn_folder_preview_worker(
                     continue;
                 }
 
-                // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
-                // Then verify the cache entry is still fresh by comparing
-                // its created_at timestamp against the folder's last-write time.
+                // Cover identity and exact metadata are part of every color's cache key.
+                let cover_path = cover_path
+                    .or_else(|| crate::infrastructure::windows::find_folder_preview_item(&path));
+                let source = crate::infrastructure::disk_cache::FolderPreviewSource::capture(
+                    &path,
+                    cover_path.as_deref(),
+                );
                 let cache_start = Instant::now();
-                if let Some((rgba_data, width, height, created_at)) =
-                    disk_cache.get_folder_preview_cache(&path, bucket_size)
+                if let Some((rgba_data, width, height, _created_at)) =
+                    source.as_ref().and_then(|source| {
+                        disk_cache.get_folder_preview_for_source(
+                            &path,
+                            bucket_size,
+                            appearance,
+                            source,
+                        )
+                    })
                 {
-                    if mode == FolderPreviewRequestMode::RecomposeIfCacheMiss {
+                    let is_stale = source.as_ref().is_none_or(|source| !source.is_current());
+                    if !is_stale && mode == FolderPreviewRequestMode::RecomposeIfCacheMiss {
                         log::debug!(
                             "[FOLDER PREVIEW] DB HIT {:?}; re-compose not needed",
                             path.file_name().unwrap_or_default(),
                         );
                         let _ = tx.send(FolderPreviewData {
+                            retry_after_source_change: false,
+                            cover_path: cover_path.clone(),
+                            validity,
+                            appearance,
                             path,
                             rgba_data: std::sync::Arc::new(Vec::new()),
                             width: 0,
@@ -303,18 +362,6 @@ pub fn spawn_folder_preview_worker(
                         throttle_repaint(&ctx, &mut last_repaint);
                         continue;
                     }
-
-                    // Staleness is re-verified on every request against the
-                    // folder's last-write time: a folder whose contents changed
-                    // must not keep showing an old preview just because it is
-                    // cached. (Recompute cost is bounded by the content-thumbnail
-                    // DB cache, so this does not re-extract media.)
-                    let is_stale = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
-                        .map(|dur| dur.as_secs() as i64 > created_at)
-                        .unwrap_or(false);
 
                     if !is_stale {
                         log::debug!(
@@ -329,6 +376,10 @@ pub fn spawn_folder_preview_worker(
                         let mut rgba_data = rgba_data;
                         crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                         let _ = tx.send(FolderPreviewData {
+                            retry_after_source_change: false,
+                            cover_path: cover_path.clone(),
+                            validity,
+                            appearance,
                             path,
                             rgba_data: std::sync::Arc::new(rgba_data),
                             width,
@@ -368,7 +419,7 @@ pub fn spawn_folder_preview_worker(
                 let compose_result = try_custom_compose(
                     &path,
                     cover_path.as_deref(),
-                    &composer,
+                    composer,
                     &disk_cache,
                     bucket_size,
                     io_priority,
@@ -391,17 +442,31 @@ pub fn spawn_folder_preview_worker(
                 };
 
                 if should_cache {
-                    trace.record_db_write();
-                    disk_cache.put_folder_preview_cache(
-                        &path,
-                        bucket_size,
-                        &rgba_data,
-                        width,
-                        height,
-                    );
+                    if let Some(source) = source.as_ref() {
+                        trace.record_db_write();
+                        disk_cache.put_folder_preview_checked(
+                            &path,
+                            bucket_size,
+                            &rgba_data,
+                            width,
+                            height,
+                            appearance,
+                            source,
+                            &validity,
+                        );
+                    }
+                }
+                let retry_after_source_change =
+                    source.as_ref().is_some_and(|source| !source.is_current());
+                if retry_after_source_change {
+                    rgba_data.clear();
                 }
                 crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                 let _ = tx.send(FolderPreviewData {
+                    retry_after_source_change,
+                    cover_path,
+                    validity,
+                    appearance,
                     path,
                     rgba_data: std::sync::Arc::new(rgba_data),
                     width,

@@ -244,11 +244,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 && app.navigation_state.current_path == *path;
                             let icon = app
                                 .item_icon_loader
-                                .get_or_load_registered_folder_icon(ui.ctx(), path)
-                                .or_else(|| {
-                                    app.item_icon_loader
-                                        .get_or_load_folder_path_icon(ui.ctx(), path)
-                                });
+                                .get_or_load_quick_access_folder_icon(ui.ctx(), path);
                             paint_chip(
                                 ui,
                                 rect,
@@ -462,9 +458,10 @@ fn paint_chip(
 
     let mut text_x = rect.left() + 10.0;
     if let Some(icon) = icon {
+        let size = icon.size_vec2();
         let icon_rect = Rect::from_center_size(
             Pos2::new(text_x + 8.0, rect.center().y),
-            egui::vec2(16.0, 16.0),
+            size * (16.0 / size.x.max(size.y).max(1.0)),
         );
         ui.painter().image(
             icon.id(),

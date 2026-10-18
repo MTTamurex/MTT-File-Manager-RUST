@@ -195,6 +195,7 @@ impl ImageViewerApp {
                     self.cache_manager.texture_cache.pop(cover);
                     self.cache_manager.loading_set.remove(cover);
                     self.cache_manager.invalidate_folder_preview(&folder_path);
+                    self.disk_cache.remove_folder_preview_cache(&folder_path);
                     None
                 } else {
                     // On network/virtual drives, queue for background re-validation

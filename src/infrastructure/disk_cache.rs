@@ -16,7 +16,9 @@ use super::db_utils;
 
 mod cleanup;
 mod folder_previews;
+pub use folder_previews::FolderPreviewSource;
 mod gc;
+mod thumbnail_freshness;
 mod thumbnails_repo;
 
 const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 2;
@@ -31,6 +33,7 @@ const OVERSIZED_CLEANUP_MARKER: &str = ".oversized_cleanup_v1";
 enum CacheTable {
     Thumbnails,
     FolderPreviews,
+    FolderPreviewVariants,
 }
 
 impl CacheTable {
@@ -38,12 +41,13 @@ impl CacheTable {
         match self {
             Self::Thumbnails => "thumbnails",
             Self::FolderPreviews => "folder_previews",
+            Self::FolderPreviewVariants => "folder_preview_variants",
         }
     }
     fn key_col(self) -> &'static str {
         match self {
             Self::Thumbnails => "id",
-            Self::FolderPreviews => "folder_path",
+            Self::FolderPreviews | Self::FolderPreviewVariants => "folder_path",
         }
     }
 }
@@ -346,6 +350,7 @@ impl ThumbnailDiskCache {
             "ALTER TABLE thumbnails ADD COLUMN requested_size INTEGER DEFAULT 0",
             [],
         );
+        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN modified_nanos TEXT", []);
 
         Self::cleanup_oversized_thumbnails_once(conn, cache_dir);
 
@@ -379,6 +384,8 @@ impl ThumbnailDiskCache {
             "ALTER TABLE folder_previews ADD COLUMN format_version INTEGER NOT NULL DEFAULT 0",
             [],
         );
+
+        folder_previews::initialize_variant_table(conn);
 
         // Legacy shell icon cache. Shell namespace, drive, special folder, and
         // shared extension icons must follow the current Windows Shell state;

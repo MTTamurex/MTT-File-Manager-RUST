@@ -51,6 +51,7 @@ impl ThemeMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsSection {
     General,
+    Appearance,
     Diagnostics,
     Graphics,
     Shortcuts,

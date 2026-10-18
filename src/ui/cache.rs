@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 pub use rustc_hash::FxHashSet;
 
 const DEFAULT_TEXTURE_CACHE_ITEMS: usize = 64;
+#[cfg(test)]
+mod folder_preview_validity_tests;
 const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 48;
 const DEFAULT_RGBA_CACHE_ITEMS: usize = 32;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
@@ -205,6 +207,8 @@ pub struct CacheManager {
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
     pub folder_preview_loading: FxHashSet<PathBuf>,
+    pub(crate) folder_preview_requests:
+        crate::domain::folder_preview_validity::FolderPreviewRequests,
     folder_preview_loading_started: LruCache<PathBuf, Instant>,
     /// Per-path debounce so an evicted folder cannot be re-requested every
     /// frame by the renderer when the LRU cap is smaller than the directory's
@@ -276,6 +280,7 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_requests: Default::default(),
             folder_preview_loading_started: LruCache::new(nz_cache_size(
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_loading_started",
@@ -341,6 +346,7 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_requests: Default::default(),
             folder_preview_loading_started: LruCache::new(nz_cache_size(
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_loading_started",
@@ -643,6 +649,7 @@ impl CacheManager {
 
     /// Clears all caches
     pub fn clear_all(&mut self) {
+        self.folder_preview_requests.invalidate_all();
         self.texture_cache.clear();
         self.icon_cache.clear();
         self.loading_set.clear();
@@ -995,6 +1002,7 @@ impl CacheManager {
             .collect();
 
         for path in &stale_paths {
+            self.folder_preview_requests.invalidate(path);
             self.folder_preview_loading.remove(path);
             self.folder_preview_loading_started.pop(path);
             self.forget_folder_preview_request_cooldown(path);
@@ -1006,6 +1014,7 @@ impl CacheManager {
     /// Invalidates a folder preview (removes from cache and loading set)
     /// Called when folder contents change to trigger reload
     pub fn invalidate_folder_preview(&mut self, path: &PathBuf) {
+        self.folder_preview_requests.invalidate(path);
         self.folder_preview_trace.record_invalidation();
         self.folder_preview_cache.pop(path);
         self.folder_preview_loading.remove(path);
