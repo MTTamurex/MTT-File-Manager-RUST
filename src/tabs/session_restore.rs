@@ -2,12 +2,30 @@ use super::session::{
     SessionColumnWidths, SessionDualPanelTabs, SessionPanelTab, SessionPanelTabSet, SessionTab,
     TabManagerSession,
 };
-use super::{DualPanelTabs, PanelTab, PanelTabSet, TabState};
+use super::{DualPanelTabs, PanelTab, PanelTabSet, TabManager, TabState};
 use crate::app::dual_panel::{ActivePanel, PanelListColumnWidths, PanelSnapshot};
 use crate::app::state::ImageViewerApp;
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use crate::domain::file_tag::FileTag;
+use crate::domain::special_paths::{tag_id_from_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use rustc_hash::FxHashMap;
+
+impl TabManager {
+    /// Resolve tag labels before the first frame, including tabs not yet activated.
+    pub(crate) fn restore_tag_titles(&mut self, definitions: &FxHashMap<i64, FileTag>) {
+        for tab in &mut self.tabs {
+            if let Some(tag_id) = tag_id_from_view_path(&tab.path) {
+                let name = definitions
+                    .get(&tag_id)
+                    .map(|tag| tag.name.clone())
+                    .unwrap_or_else(|| tag_id.to_string());
+                tab.title = rust_i18n::t!("tags.filter_active", name = name).to_string();
+                tab.path_input = tab.title.clone();
+            }
+        }
+    }
+}
 
 impl SessionTab {
     pub(crate) fn from_tab(tab: &TabState) -> Self {
@@ -309,5 +327,53 @@ fn parse_active_panel(value: &str) -> ActivePanel {
     match value {
         "right" => ActivePanel::Right,
         _ => ActivePanel::Left,
+    }
+}
+
+#[cfg(test)]
+mod tag_title_tests {
+    use super::*;
+    use crate::domain::file_tag::TagColor;
+    use crate::domain::special_paths::tag_view_path;
+
+    #[test]
+    fn restored_inactive_tag_tabs_have_labels_before_activation() {
+        let mut manager = TabManager::new();
+        manager
+            .tabs
+            .push(TabState::new_at_path(1, &tag_view_path(2)));
+        manager
+            .tabs
+            .push(TabState::new_at_path(2, &tag_view_path(9)));
+        let session = TabManagerSession::from_tab_manager(&manager);
+        let mut restored = session.into_tab_manager();
+        let definitions = [(2, "Work"), (9, "Archive")]
+            .into_iter()
+            .map(|(id, name)| {
+                (
+                    id,
+                    FileTag {
+                        id,
+                        name: name.to_string(),
+                        color: TagColor::Red,
+                        position: id,
+                    },
+                )
+            })
+            .collect();
+        let computer_title = restored.tabs[0].title.clone();
+
+        restored.restore_tag_titles(&definitions);
+
+        assert_eq!(restored.active_tab, 0);
+        assert_eq!(restored.tabs[0].title, computer_title);
+        for (index, id, name) in [(1, 2, "Work"), (2, 9, "Archive")] {
+            let tab = &restored.tabs[index];
+            let expected = rust_i18n::t!("tags.filter_active", name = name).to_string();
+            assert_eq!(tab.title, expected);
+            assert_eq!(tab.path_input, expected);
+            assert_eq!(tab.path, tag_view_path(id));
+            assert!(tab.items.is_empty());
+        }
     }
 }

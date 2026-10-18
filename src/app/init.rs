@@ -377,6 +377,7 @@ impl ImageViewerApp {
                 active.view_mode = saved_dual_panel_active_view_mode;
             }
         }
+        tab_manager.restore_tag_titles(&tag_definitions);
         let initial_tab = tab_manager.active();
         let initial_sort_mode = initial_tab.sort_mode;
         let initial_sort_descending = initial_tab.sort_descending;
