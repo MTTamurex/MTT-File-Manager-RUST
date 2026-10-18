@@ -1,6 +1,69 @@
 use super::*;
 use egui::accesskit::{Action, Role, Toggled};
 
+fn selected_control_rect(output: &egui::FullOutput, height: f32) -> egui::epaint::RectShape {
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if (rect.rect.height() - height).abs() < 0.1
+                    && rect.fill != Color32::TRANSPARENT =>
+            {
+                Some(rect.clone())
+            }
+            _ => None,
+        })
+        .expect("selected control should have a filled rectangle")
+}
+
+#[test]
+fn dark_segmented_selections_match_the_appearance_selector_colors() {
+    use crate::app::navigation_state::ThemeMode;
+    for mode in [ThemeMode::Dark, ThemeMode::DarkDeep, ThemeMode::GitHubDark] {
+        let ctx = egui::Context::default();
+        theme::apply_theme_visuals(&ctx, mode);
+        let segments = ctx.run_ui(egui::RawInput::default(), |ui| {
+            segmented_choice(ui, &["First", "Second"], 1);
+        });
+        let choices = ctx.run_ui(egui::RawInput::default(), |ui| {
+            choice_list(ui, &["First", "Second"], 1);
+        });
+        let segment = selected_control_rect(&segments, SEGMENT_HEIGHT);
+        let choice = selected_control_rect(&choices, OPTION_ROW_HEIGHT);
+        // Choice rows paint their fill and border as separate shapes.
+        let choice_border = choices
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.rect == choice.rect && rect.stroke.width > 0.0 => {
+                    Some(rect.stroke)
+                }
+                _ => None,
+            })
+            .expect("selected appearance option should have a border");
+        assert_eq!(segment.fill, choice.fill, "{mode:?}");
+        assert_eq!(segment.stroke, choice_border, "{mode:?}");
+        assert_eq!(segment.fill, accent_tint(&ctx));
+        assert_eq!(segment.stroke, Stroke::new(1.0, theme::accent_color(&ctx)));
+    }
+}
+
+#[test]
+fn light_segmented_selection_keeps_its_existing_colors() {
+    let ctx = egui::Context::default();
+    theme::apply_theme_visuals(&ctx, crate::app::navigation_state::ThemeMode::Light);
+    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        segmented_choice(ui, &["First", "Second"], 1);
+    });
+    let selected = selected_control_rect(&output, SEGMENT_HEIGHT);
+    assert_eq!(selected.fill, Color32::WHITE);
+    assert_eq!(
+        selected.stroke,
+        Stroke::new(1.0, Color32::from_black_alpha(20))
+    );
+}
+
 fn key_input(key: egui::Key) -> egui::RawInput {
     let mut input = egui::RawInput::default();
     input.events.push(egui::Event::Key {

@@ -192,14 +192,14 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
             let painter = ui.painter();
             if is_selected {
                 let fill = if dark_mode {
-                    theme::palette::raised(ui.ctx(), Color32::from_gray(69))
+                    accent_tint(ui.ctx())
                 } else {
                     Color32::WHITE
                 };
                 let stroke = Stroke::new(
                     1.0,
                     if dark_mode {
-                        Color32::from_white_alpha(18)
+                        theme::accent_color(ui.ctx())
                     } else {
                         Color32::from_black_alpha(20)
                     },
