@@ -646,18 +646,9 @@ impl DiskAnalysisState {
         self.filter_job = job;
         self.weights_generation.store(job, Ordering::Release);
         self.weights_pending = false;
-        let job = self.alloc_job();
-        self.largest_job = job;
-        self.largest_generation.store(job, Ordering::Release);
-        self.largest_pending = false;
-        let job = self.alloc_job();
-        self.efficiency_job = job;
-        self.efficiency_generation.store(job, Ordering::Release);
-        self.efficiency_pending = false;
-        let job = self.alloc_job();
-        self.search_job = job;
-        self.search_generation.store(job, Ordering::Release);
-        self.search_worker_pending = false;
+        // Cancelled queries must also lose their scheduling signatures so an
+        // unchanged filter (Clear / All) can repopulate cleared results.
+        self.invalidate_dependent_query_jobs();
     }
 
     fn invalidate_dependent_query_jobs(&mut self) {
@@ -1046,6 +1037,9 @@ pub fn collect_drive_summaries() -> Vec<AnalyzerDriveSummary> {
     }
     drives
 }
+
+#[cfg(test)]
+mod filter_tests;
 
 #[cfg(test)]
 mod tests {

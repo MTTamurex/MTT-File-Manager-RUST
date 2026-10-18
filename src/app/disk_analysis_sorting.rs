@@ -48,24 +48,25 @@ impl DiskAnalysisState {
         }
     }
 
-    /// Update the largest-items sort from a header click. A shift-click adds
-    /// a secondary criterion, while a normal click replaces the criteria.
+    /// Shift-click makes the clicked column primary and keeps the previous
+    /// primary as a tiebreaker. A normal click replaces all criteria.
     pub fn update_largest_sort(&mut self, column: LargestColumn, additive: bool) {
         self.largest_sort_criteria
             .truncate(MAX_LARGEST_SORT_CRITERIA);
         if additive {
-            if let Some(criterion) = self
+            let ascending = if let Some(position) = self
                 .largest_sort_criteria
-                .iter_mut()
-                .find(|criterion| criterion.column == column)
+                .iter()
+                .position(|criterion| criterion.column == column)
             {
-                criterion.ascending = !criterion.ascending;
-            } else if self.largest_sort_criteria.len() < MAX_LARGEST_SORT_CRITERIA {
-                self.largest_sort_criteria.push(LargestSortCriterion {
-                    column,
-                    ascending: column.default_ascending(),
-                });
-            }
+                !self.largest_sort_criteria.remove(position).ascending
+            } else {
+                column.default_ascending()
+            };
+            self.largest_sort_criteria
+                .insert(0, LargestSortCriterion { column, ascending });
+            self.largest_sort_criteria
+                .truncate(MAX_LARGEST_SORT_CRITERIA);
         } else {
             let ascending = self
                 .largest_sort_criteria
@@ -255,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn largest_sorting_rejects_a_third_criterion() {
+    fn largest_sorting_keeps_previous_primary_when_adding_a_third_column() {
         let mut state = DiskAnalysisState::new();
         let model = sorting_model();
         state.largest_rows = Arc::new(all_sorting_rows(&model));
@@ -263,14 +264,22 @@ mod tests {
 
         state.update_largest_sort(LargestColumn::Type, false);
         state.update_largest_sort(LargestColumn::Allocated, true);
-        let criteria = state.largest_sort_criteria.clone();
-        let rows = state.largest_rows.clone();
-
         state.update_largest_sort(LargestColumn::Logical, true);
 
-        assert_eq!(state.largest_sort_criteria, criteria);
+        assert_eq!(
+            state.largest_sort_criteria,
+            [
+                LargestSortCriterion {
+                    column: LargestColumn::Logical,
+                    ascending: false
+                },
+                LargestSortCriterion {
+                    column: LargestColumn::Allocated,
+                    ascending: false
+                },
+            ]
+        );
         assert_eq!(state.largest_sort_criteria.len(), MAX_LARGEST_SORT_CRITERIA);
-        assert_eq!(state.largest_rows, rows);
     }
 
     #[test]
@@ -286,7 +295,8 @@ mod tests {
             vec!["small", "large", "small.bin", "large.bin", "root.bin"]
         );
 
-        state.update_largest_sort(LargestColumn::Allocated, true);
+        state.update_largest_sort(LargestColumn::Allocated, false);
+        state.update_largest_sort(LargestColumn::Type, true);
         assert_eq!(
             state.largest_sort_criteria,
             [
@@ -307,6 +317,36 @@ mod tests {
     }
 
     #[test]
+    fn shift_click_promotes_secondary_type_and_toggles_its_direction() {
+        let mut state = DiskAnalysisState::new();
+        let model = sorting_model();
+        state.largest_rows = Arc::new(all_sorting_rows(&model));
+        state.model = Some(model);
+
+        state.update_largest_sort(LargestColumn::Type, true);
+        state.update_largest_sort(LargestColumn::Allocated, true);
+        state.update_largest_sort(LargestColumn::Type, true);
+
+        assert_eq!(
+            state.largest_sort_criteria,
+            [
+                LargestSortCriterion {
+                    column: LargestColumn::Type,
+                    ascending: false
+                },
+                LargestSortCriterion {
+                    column: LargestColumn::Allocated,
+                    ascending: true
+                },
+            ]
+        );
+        assert_eq!(
+            sorted_names(&state),
+            vec!["small.bin", "large.bin", "root.bin", "small", "large"]
+        );
+    }
+
+    #[test]
     fn largest_sorting_toggles_type_direction_and_replaces_secondary_criteria() {
         let mut state = DiskAnalysisState::new();
         let model = sorting_model();
@@ -320,18 +360,18 @@ mod tests {
             state.largest_sort_criteria,
             [
                 LargestSortCriterion {
-                    column: LargestColumn::Type,
+                    column: LargestColumn::Allocated,
                     ascending: true,
                 },
                 LargestSortCriterion {
-                    column: LargestColumn::Allocated,
+                    column: LargestColumn::Type,
                     ascending: true,
                 },
             ]
         );
         assert_eq!(
             sorted_names(&state),
-            vec!["small", "large", "small.bin", "large.bin", "root.bin"]
+            vec!["small", "small.bin", "large", "large.bin", "root.bin"]
         );
 
         state.update_largest_sort(LargestColumn::Type, false);
@@ -339,12 +379,12 @@ mod tests {
             state.largest_sort_criteria,
             [LargestSortCriterion {
                 column: LargestColumn::Type,
-                ascending: false,
+                ascending: true,
             }]
         );
         assert_eq!(
             sorted_names(&state),
-            vec!["small.bin", "large.bin", "root.bin", "small", "large"]
+            vec!["small", "large", "small.bin", "large.bin", "root.bin"]
         );
     }
 }

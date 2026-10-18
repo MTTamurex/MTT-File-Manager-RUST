@@ -1176,7 +1176,7 @@ disk_analysis:
   logical_size_short: "Logical"
   type_file: "File"
   type_folder: "Folder"
-  largest_sort_hint: "Click to sort; Shift-click to add one secondary sort (maximum two criteria)."
+  largest_sort_hint: "Click to sort; Shift-click to make this column primary and keep the previous primary as a tiebreaker (maximum two criteria)."
   copy_path: "Copy path"
   # Efficiency
   efficiency_scanning: "Analyzing..."
