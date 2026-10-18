@@ -18,9 +18,14 @@ fn selected_control_rect(output: &egui::FullOutput, height: f32) -> egui::epaint
 }
 
 #[test]
-fn dark_segmented_selections_match_the_appearance_selector_colors() {
+fn segmented_selections_match_the_appearance_selector_colors_in_every_theme() {
     use crate::app::navigation_state::ThemeMode;
-    for mode in [ThemeMode::Dark, ThemeMode::DarkDeep, ThemeMode::GitHubDark] {
+    for mode in [
+        ThemeMode::Light,
+        ThemeMode::Dark,
+        ThemeMode::DarkDeep,
+        ThemeMode::GitHubDark,
+    ] {
         let ctx = egui::Context::default();
         theme::apply_theme_visuals(&ctx, mode);
         let segments = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -50,17 +55,20 @@ fn dark_segmented_selections_match_the_appearance_selector_colors() {
 }
 
 #[test]
-fn light_segmented_selection_keeps_its_existing_colors() {
+fn light_segmented_selection_uses_the_light_appearance_blue() {
     let ctx = egui::Context::default();
     theme::apply_theme_visuals(&ctx, crate::app::navigation_state::ThemeMode::Light);
     let output = ctx.run_ui(egui::RawInput::default(), |ui| {
         segmented_choice(ui, &["First", "Second"], 1);
     });
     let selected = selected_control_rect(&output, SEGMENT_HEIGHT);
-    assert_eq!(selected.fill, Color32::WHITE);
+    assert_eq!(
+        selected.fill,
+        Color32::from_rgba_unmultiplied(0, 120, 215, 24)
+    );
     assert_eq!(
         selected.stroke,
-        Stroke::new(1.0, Color32::from_black_alpha(20))
+        Stroke::new(1.0, Color32::from_rgb(0, 120, 215))
     );
 }
 

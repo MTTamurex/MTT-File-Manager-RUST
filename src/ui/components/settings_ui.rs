@@ -191,19 +191,8 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
         if ui.is_rect_visible(seg_rect) {
             let painter = ui.painter();
             if is_selected {
-                let fill = if dark_mode {
-                    accent_tint(ui.ctx())
-                } else {
-                    Color32::WHITE
-                };
-                let stroke = Stroke::new(
-                    1.0,
-                    if dark_mode {
-                        theme::accent_color(ui.ctx())
-                    } else {
-                        Color32::from_black_alpha(20)
-                    },
-                );
+                let fill = accent_tint(ui.ctx());
+                let stroke = Stroke::new(1.0, theme::accent_color(ui.ctx()));
                 painter.rect(seg_rect, 5.0, fill, stroke, StrokeKind::Inside);
             } else if segment_response.hovered() || segment_response.has_focus() {
                 painter.rect_filled(
