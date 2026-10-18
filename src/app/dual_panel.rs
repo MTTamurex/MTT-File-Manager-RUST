@@ -179,6 +179,8 @@ pub struct PanelSnapshot {
     // Scroll
     pub scroll_offset_y: f32,
     pub scroll_offset_x: f32,
+    pub last_scroll_offset: f32,
+    pub last_scroll_time: Instant,
     pub scroll_to_selected: bool,
     pub visible_index_range: Option<(usize, usize)>,
     pub visible_paths_cache: FxHashSet<PathBuf>,
@@ -343,6 +345,8 @@ impl PanelSnapshot {
             miller_columns: app.miller_columns.clone(),
             scroll_offset_y: app.scroll_offset_y,
             scroll_offset_x: app.scroll_offset_x,
+            last_scroll_offset: app.last_scroll_offset,
+            last_scroll_time: app.last_scroll_time,
             scroll_to_selected: app.scroll_to_selected,
             visible_index_range: app.visible_index_range,
             visible_paths_cache: app.visible_paths_cache.clone(),
@@ -403,6 +407,8 @@ impl PanelSnapshot {
         app.miller_columns = self.miller_columns;
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_offset_x = self.scroll_offset_x;
+        app.last_scroll_offset = self.last_scroll_offset;
+        app.last_scroll_time = self.last_scroll_time;
         app.scroll_to_selected = self.scroll_to_selected;
         app.visible_index_range = self.visible_index_range;
         app.visible_paths_cache = self.visible_paths_cache;
@@ -481,6 +487,8 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.miller_columns, &mut app.miller_columns);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_offset_x, &mut app.scroll_offset_x);
+        std::mem::swap(&mut self.last_scroll_offset, &mut app.last_scroll_offset);
+        std::mem::swap(&mut self.last_scroll_time, &mut app.last_scroll_time);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);
         std::mem::swap(&mut self.visible_index_range, &mut app.visible_index_range);
         std::mem::swap(&mut self.visible_paths_cache, &mut app.visible_paths_cache);

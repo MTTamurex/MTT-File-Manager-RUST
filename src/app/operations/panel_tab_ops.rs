@@ -29,6 +29,9 @@ impl ImageViewerApp {
         snapshot.rectangle_selection_state = None;
         snapshot.scroll_offset_y = 0.0;
         snapshot.scroll_offset_x = 0.0;
+        snapshot.last_scroll_offset = 0.0;
+        snapshot.last_scroll_time = std::time::Instant::now()
+            - crate::app::state::THUMBNAIL_SCROLL_SETTLING_DURATION;
         snapshot.scroll_to_selected = false;
         snapshot.visible_index_range = None;
         snapshot.visible_paths_cache.clear();

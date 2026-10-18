@@ -67,6 +67,8 @@ fn snapshot(path: &str) -> PanelSnapshot {
         miller_columns: Default::default(),
         scroll_offset_y: 12.0,
         scroll_offset_x: 0.0,
+        last_scroll_offset: 12.0,
+        last_scroll_time: Instant::now(),
         scroll_to_selected: true,
         visible_index_range: Some((0, 1)),
         visible_paths_cache: Default::default(),
