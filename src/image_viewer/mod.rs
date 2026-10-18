@@ -327,7 +327,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let native_options = build_viewer_native_options(viewport);
     let dark_mode = is_saved_theme_dark();
 
-    let result = eframe::run_native(
+    let result = crate::viewer_runtime::run_viewer_native(
         &rust_i18n::t!("imageviewer.title"),
         native_options,
         Box::new(move |_cc| {

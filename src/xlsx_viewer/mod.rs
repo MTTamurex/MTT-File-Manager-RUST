@@ -123,7 +123,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
 
     let options = build_viewer_native_options(viewport);
     let dark_mode = is_saved_theme_dark();
-    eframe::run_native(
+    crate::viewer_runtime::run_viewer_native(
         &rust_i18n::t!("xlsxviewer.title"),
         options,
         Box::new(move |creation_context| {
@@ -144,7 +144,7 @@ fn show_error_window(message: &str) -> eframe::Result<()> {
         persist_window: false,
         ..Default::default()
     };
-    eframe::run_native(
+    crate::viewer_runtime::run_viewer_native(
         &rust_i18n::t!("xlsxviewer.app_error"),
         options,
         Box::new(move |_creation_context| Ok(Box::new(viewer_app::ErrorApp { message }))),

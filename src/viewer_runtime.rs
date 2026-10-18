@@ -14,6 +14,7 @@
 //!   - use the lighter `Glow` renderer instead of `Wgpu`; for the standalone
 //!     viewers this avoids the large DX12 / wgpu baseline that dominates RSS
 //!     even for tiny text files;
+//!     automatically retry with WGPU/DX12 if OpenGL initialization fails;
 //!   - disable optional GL-only buffers (`depth_buffer`, `stencil_buffer`,
 //!     `multisampling`) which the viewers never use.
 
@@ -22,6 +23,9 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+mod renderer;
+pub use renderer::run_viewer_native;
 
 const THEME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 

@@ -62,7 +62,7 @@ pub fn run_standalone(drive_letter: char) -> eframe::Result<()> {
     let native_options = viewer_runtime::build_viewer_native_options(viewport);
     let dark_mode = viewer_runtime::is_saved_theme_dark();
 
-    let result = eframe::run_native(
+    let result = viewer_runtime::run_viewer_native(
         &rust_i18n::t!("disk_analysis.title"),
         native_options,
         Box::new(move |_cc| Ok(Box::new(DiskAnalyzerApp::new(drive_letter, dark_mode)))),
