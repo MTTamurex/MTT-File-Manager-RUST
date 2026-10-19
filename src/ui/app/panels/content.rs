@@ -598,10 +598,7 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
         && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
 }
 
-fn should_defer_folder_size_walk(
-    folder_loading: bool,
-    thumbnail_scroll_is_settling: bool,
-) -> bool {
+fn should_defer_folder_size_walk(folder_loading: bool, thumbnail_scroll_is_settling: bool) -> bool {
     folder_loading || thumbnail_scroll_is_settling
 }
 
@@ -741,60 +738,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         egui::Color32::from_rgb(0, 100, 220)
     };
 
-    // ── Path header for each panel ──
-    let header_height = 24.0;
     let dark = ui.visuals().dark_mode;
-
-    // Left panel header
-    let left_header_rect =
-        egui::Rect::from_min_size(left_rect.min, egui::vec2(left_rect.width(), header_height));
-    let left_header_bg = if active == ActivePanel::Left {
-        if dark {
-            crate::ui::theme::current_palette(ui.ctx())
-                .map_or(egui::Color32::from_rgb(35, 55, 80), |p| p.selection)
-        } else {
-            egui::Color32::from_rgb(210, 228, 250)
-        }
-    } else if dark {
-        crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(50, 50, 50))
-    } else {
-        egui::Color32::from_rgb(240, 240, 240)
-    };
-    ui.painter()
-        .rect_filled(left_header_rect, 0.0, left_header_bg);
-
-    // Right panel header
-    let right_header_rect = egui::Rect::from_min_size(
-        right_rect.min,
-        egui::vec2(right_rect.width(), header_height),
-    );
-    let right_header_bg = if active == ActivePanel::Right {
-        if dark {
-            crate::ui::theme::current_palette(ui.ctx())
-                .map_or(egui::Color32::from_rgb(35, 55, 80), |p| p.selection)
-        } else {
-            egui::Color32::from_rgb(210, 228, 250)
-        }
-    } else if dark {
-        crate::ui::theme::palette::raised(ui.ctx(), egui::Color32::from_rgb(50, 50, 50))
-    } else {
-        egui::Color32::from_rgb(240, 240, 240)
-    };
-    ui.painter()
-        .rect_filled(right_header_rect, 0.0, right_header_bg);
-
-    // Render path text in headers
-    let path_display = |path: &str| -> String {
-        if path == COMPUTER_VIEW_ID {
-            t!("nav.computer").to_string()
-        } else if path == RECYCLE_BIN_VIEW_ID {
-            t!("nav.recycle_bin").to_string()
-        } else if let Some(display) = app.tag_view_display_name_for_path(path) {
-            display
-        } else {
-            path.to_string()
-        }
-    };
     let tab_title = |path: &str| -> String {
         if path == COMPUTER_VIEW_ID {
             t!("nav.computer").to_string()
@@ -809,21 +753,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 .unwrap_or_else(|| path.to_string())
         }
     };
-    let active_path = path_display(&app.navigation_state.current_path);
-    let inactive_path = app
-        .dual_panel_inactive_state
-        .as_ref()
-        .map(|s| path_display(&s.path))
-        .unwrap_or_default();
     let inactive_live_path = app
         .dual_panel_inactive_state
         .as_ref()
         .map(|snapshot| snapshot.path.as_str());
 
-    let (left_path, right_path) = match active {
-        ActivePanel::Left => (active_path, inactive_path),
-        ActivePanel::Right => (inactive_path, active_path),
-    };
     let (left_live_path, right_live_path) = match active {
         ActivePanel::Left => (
             Some(app.navigation_state.current_path.as_str()),
@@ -835,84 +769,17 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ),
     };
 
-    let header_text_color = if dark {
-        crate::ui::theme::text_color(ui.ctx())
-    } else {
-        egui::Color32::from_rgb(30, 30, 30)
-    };
-
-    let render_header_contents = |ui: &mut egui::Ui,
-                                  header_rect: egui::Rect,
-                                  path: &str,
-                                  header_text_color: egui::Color32|
-     -> bool {
-        let inner_rect = header_rect.shrink2(egui::vec2(6.0, 2.0));
-        let close_size = egui::vec2(18.0, 18.0);
-        let close_rect = egui::Rect::from_center_size(
-            egui::pos2(
-                inner_rect.right() - close_size.x * 0.5,
-                inner_rect.center().y,
-            ),
-            close_size,
-        );
-        let label_rect = egui::Rect::from_min_max(
-            inner_rect.min,
-            egui::pos2(
-                (close_rect.left() - 4.0).max(inner_rect.left()),
-                inner_rect.max.y,
-            ),
-        );
-
-        ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(path)
-                            .size(11.0)
-                            .color(header_text_color),
-                    )
-                    .truncate(),
-                );
-            });
-        });
-
-        let mut clicked = false;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(close_rect), |ui| {
-            let btn =
-                egui::Button::new(egui::RichText::new("X").size(12.0).color(header_text_color))
-                    .min_size(close_size)
-                    .frame(false);
-            clicked = ui
-                .add(btn)
-                .on_hover_text(t!("panels.close_panel"))
-                .clicked();
-        });
-
-        clicked
-    };
-
-    // ── Close button tracking ──
-    let mut close_panel = None;
-
-    // Left path label + close button
-    if render_header_contents(ui, left_header_rect, &left_path, header_text_color) {
-        close_panel = Some(ActivePanel::Left);
-    }
-
-    // Right path label + close button
-    if render_header_contents(ui, right_header_rect, &right_path, header_text_color) {
-        close_panel = Some(ActivePanel::Right);
-    }
-    let close_clicked = close_panel.is_some();
-
-    let tab_strip_height = super::panel_tab_bar::TAB_STRIP_HEIGHT;
-    let left_tab_strip_rect = egui::Rect::from_min_size(
-        egui::pos2(left_rect.min.x, left_rect.min.y + header_height),
-        egui::vec2(left_rect.width(), tab_strip_height),
+    let tab_strip_height = super::panel_tab_bar::TAB_STRIP_HEIGHT + focus_border_reserved;
+    // Keep tab controls clear of the focus outline and separator's drag margin.
+    let left_tab_strip_rect = super::panel_tab_bar::panel_tab_strip_rect(
+        left_rect,
+        tab_strip_height,
+        focus_border_reserved,
     );
-    let right_tab_strip_rect = egui::Rect::from_min_size(
-        egui::pos2(right_rect.min.x, right_rect.min.y + header_height),
-        egui::vec2(right_rect.width(), tab_strip_height),
+    let right_tab_strip_rect = super::panel_tab_bar::panel_tab_strip_rect(
+        right_rect,
+        tab_strip_height,
+        focus_border_reserved,
     );
     // The lower strip meets the file area; the tab bar paints its own inactive
     // surface above this so gaps between neighboring tabs stay inactive-colored.
@@ -1010,19 +877,13 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Right => right_rect,
     };
 
-    // ── Content areas (below header) ──
+    // ── Content areas (below tabs) ──
     let left_content_rect = egui::Rect::from_min_max(
-        egui::pos2(
-            left_rect.min.x,
-            left_rect.min.y + header_height + tab_strip_height,
-        ),
+        egui::pos2(left_rect.min.x, left_rect.min.y + tab_strip_height),
         left_rect.max,
     );
     let right_content_rect = egui::Rect::from_min_max(
-        egui::pos2(
-            right_rect.min.x,
-            right_rect.min.y + header_height + tab_strip_height,
-        ),
+        egui::pos2(right_rect.min.x, right_rect.min.y + tab_strip_height),
         right_rect.max,
     );
 
@@ -1057,11 +918,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     if app.is_item_dragging && !file_panel_input_blocked {
         let hover_pos = ui.input(|i| i.pointer.hover_pos());
         if let Some(pos) = hover_pos {
-            let inactive_header = match active {
-                ActivePanel::Left => right_header_rect,
-                ActivePanel::Right => left_header_rect,
+            let inactive_tab_strip = match active {
+                ActivePanel::Left => right_tab_strip_rect,
+                ActivePanel::Right => left_tab_strip_rect,
             };
-            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+            if inactive_content_rect.contains(pos) || inactive_tab_strip.contains(pos) {
                 // Mouse is over the inactive panel. Store its path even for
                 // virtual views so the active panel defers drop handling to the
                 // inactive renderer, where hovered real folder items are known.
@@ -1090,11 +951,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             .external_drop_pointer_pos
             .or_else(|| ui.input(|i| i.pointer.hover_pos()));
         if let Some(pos) = external_pointer_pos {
-            let inactive_header = match active {
-                ActivePanel::Left => right_header_rect,
-                ActivePanel::Right => left_header_rect,
+            let inactive_tab_strip = match active {
+                ActivePanel::Left => right_tab_strip_rect,
+                ActivePanel::Right => left_tab_strip_rect,
             };
-            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+            if inactive_content_rect.contains(pos) || inactive_tab_strip.contains(pos) {
                 app.external_drop_inactive_folder = app
                     .dual_panel_inactive_state
                     .as_ref()
@@ -1148,23 +1009,15 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         && !app.global_search.active
         && !app.navigation_state.show_settings_window
         && !file_panel_input_blocked
-        && !close_clicked
         && !app.context_menu.is_open
     {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area.
-            let inactive_header = match active {
-                ActivePanel::Left => right_header_rect,
-                ActivePanel::Right => left_header_rect,
-            };
             let inactive_tab_strip = match active {
                 ActivePanel::Left => right_tab_strip_rect,
                 ActivePanel::Right => left_tab_strip_rect,
             };
-            if inactive_content_rect.contains(pos)
-                || inactive_header.contains(pos)
-                || inactive_tab_strip.contains(pos)
-            {
+            if inactive_content_rect.contains(pos) || inactive_tab_strip.contains(pos) {
                 app.dual_panel_switch_active();
             }
         }
@@ -1185,14 +1038,6 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 app.dual_panel_move_tab(panel, from, gap);
             }
         }
-    }
-
-    // Close the clicked physical panel and let the remaining panel occupy the view.
-    if let Some(panel_to_close) = close_panel {
-        if panel_to_close == app.dual_panel_active {
-            app.dual_panel_switch_active();
-        }
-        app.dual_panel_disable();
     }
 }
 

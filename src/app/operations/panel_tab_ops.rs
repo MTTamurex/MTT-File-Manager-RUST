@@ -30,8 +30,8 @@ impl ImageViewerApp {
         snapshot.scroll_offset_y = 0.0;
         snapshot.scroll_offset_x = 0.0;
         snapshot.last_scroll_offset = 0.0;
-        snapshot.last_scroll_time = std::time::Instant::now()
-            - crate::app::state::THUMBNAIL_SCROLL_SETTLING_DURATION;
+        snapshot.last_scroll_time =
+            std::time::Instant::now() - crate::app::state::THUMBNAIL_SCROLL_SETTLING_DURATION;
         snapshot.scroll_to_selected = false;
         snapshot.visible_index_range = None;
         snapshot.visible_paths_cache.clear();
@@ -277,6 +277,24 @@ impl ImageViewerApp {
     pub fn dual_panel_close_tab(&mut self, panel: ActivePanel, index: usize) -> bool {
         if !self.dual_panel_enabled {
             return false;
+        }
+
+        let Some(panel_tabs) = self
+            .tab_manager
+            .active()
+            .dual_panel_tabs
+            .as_ref()
+            .map(|tabs| tabs.panel(panel))
+        else {
+            return false;
+        };
+        if index >= panel_tabs.tabs.len() {
+            return false;
+        }
+        if panel_tabs.tabs.len() == 1 {
+            self.focus_panel_for_tab_action(panel.other());
+            self.dual_panel_disable();
+            return true;
         }
 
         self.sync_to_tab();

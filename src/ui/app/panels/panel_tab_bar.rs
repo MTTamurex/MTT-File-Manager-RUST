@@ -6,7 +6,12 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::tab_bar::should_activate_tab_on_drag_hover;
 use eframe::egui;
 
+mod appearance;
+mod layout;
 mod reorder;
+
+use appearance::{layout_tab_title, paint_tab_background};
+pub(super) use layout::panel_tab_strip_rect;
 
 const TAB_CORNER_RADIUS: u8 = 7;
 const TAB_HEIGHT: f32 = 28.0;
@@ -27,60 +32,6 @@ pub(super) enum PanelTabAction {
         from: usize,
         gap: usize,
     },
-}
-
-fn layout_tab_title(
-    ui: &egui::Ui,
-    title: &str,
-    font_id: egui::FontId,
-    color: egui::Color32,
-    max_width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let painter = ui.painter();
-    let full_galley = painter.layout_no_wrap(title.to_owned(), font_id.clone(), color);
-    if full_galley.size().x <= max_width {
-        return full_galley;
-    }
-
-    let mut boundaries: Vec<usize> = title.char_indices().map(|(index, _)| index).collect();
-    boundaries.push(title.len());
-    let mut low = 0usize;
-    let mut high = boundaries.len().saturating_sub(1);
-
-    while low < high {
-        let middle = (low + high).div_ceil(2);
-        let mut candidate = title[..boundaries[middle]].to_owned();
-        candidate.push('…');
-        let galley = painter.layout_no_wrap(candidate, font_id.clone(), color);
-        if galley.size().x <= max_width {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-
-    let mut truncated = title[..boundaries[low]].to_owned();
-    truncated.push('…');
-    painter.layout_no_wrap(truncated, font_id, color)
-}
-
-fn paint_tab_background(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
-    ui.painter().rect_filled(
-        rect,
-        egui::CornerRadius {
-            nw: TAB_CORNER_RADIUS,
-            ne: TAB_CORNER_RADIUS,
-            sw: 0,
-            se: 0,
-        },
-        color,
-    );
-
-    if color.a() == u8::MAX {
-        let body_top = (rect.min.y + TAB_CORNER_RADIUS as f32 - 1.0).min(rect.max.y);
-        let body = egui::Rect::from_min_max(egui::pos2(rect.min.x, body_top), rect.max);
-        ui.painter().rect_filled(body, 0.0, color);
-    }
 }
 
 fn tab_tooltip_text<'a>(path: &'a str, title: &'a str) -> &'a str {
@@ -108,19 +59,13 @@ pub(super) fn render_panel_tab_bar(
 ) -> Option<PanelTabAction> {
     let mut action = None;
     let mut drag = reorder::TabDrag::new(ui.ctx(), workspace_id, panel, is_item_dragging);
+    let (scroll_rect, tab_width) = layout::tab_strip_layout(rect, tabs.tabs.len());
     let add_rect = egui::Rect::from_min_size(
         egui::pos2(
-            rect.right() - ADD_BUTTON_WIDTH,
+            scroll_rect.right() + ADD_BUTTON_GAP,
             rect.top() + (TAB_HEIGHT - ADD_BUTTON_HEIGHT).max(0.0) * 0.5,
         ),
         egui::vec2(ADD_BUTTON_WIDTH, ADD_BUTTON_HEIGHT),
-    );
-    let scroll_rect = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(
-            (add_rect.left() - ADD_BUTTON_GAP).max(rect.left()),
-            rect.bottom(),
-        ),
     );
     let active_tab_signature = tabs.active().map(|tab| {
         (
@@ -185,12 +130,6 @@ pub(super) fn render_panel_tab_bar(
                     scroll_ui.set_min_height(TAB_HEIGHT);
                     scroll_ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        let tab_count = tabs.tabs.len().max(1);
-                        let tab_width = (scroll_rect.width()
-                            - ui.spacing().item_spacing.x
-                                * tabs.tabs.len().saturating_sub(1) as f32)
-                            / tab_count as f32;
-                        let tab_width = tab_width.clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
                         for (index, tab) in tabs.tabs.iter().enumerate() {
                             ui.push_id((workspace_id, panel, tab.id), |ui| {
                                 let path = if index == tabs.active_tab {
@@ -304,59 +243,51 @@ pub(super) fn render_panel_tab_bar(
                                 {
                                     action = Some(PanelTabAction::Select(panel, index));
                                 }
-                                let close_response = (tabs.tabs.len() > 1).then(|| {
-                                    ui.interact(
+                                let close_response = ui.interact(
+                                    close_rect,
+                                    ui.id().with("panel_tab_close"),
+                                    egui::Sense::click(),
+                                );
+                                if close_response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    ui.painter().rect_filled(
                                         close_rect,
-                                        ui.id().with("panel_tab_close"),
-                                        egui::Sense::click(),
-                                    )
-                                });
-                                if let Some(response) = close_response.as_ref() {
-                                    if response.hovered() {
-                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                        ui.painter().rect_filled(
-                                            close_rect,
-                                            egui::CornerRadius::same(4),
-                                            hover_bg,
-                                        );
-                                    }
-                                    if response.clicked() {
-                                        action = Some(PanelTabAction::Close(panel, index));
-                                    }
-
-                                    let close_center = close_rect.center();
-                                    let close_radius = CLOSE_BUTTON_SIZE * 0.25;
-                                    let close_stroke = egui::Stroke::new(
-                                        1.5,
-                                        if response.hovered() {
-                                            active_text
-                                        } else {
-                                            inactive_text
-                                        },
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            close_center + egui::vec2(-close_radius, -close_radius),
-                                            close_center + egui::vec2(close_radius, close_radius),
-                                        ],
-                                        close_stroke,
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            close_center + egui::vec2(close_radius, -close_radius),
-                                            close_center + egui::vec2(-close_radius, close_radius),
-                                        ],
-                                        close_stroke,
+                                        egui::CornerRadius::same(4),
+                                        hover_bg,
                                     );
                                 }
+                                if close_response.clicked() {
+                                    action = Some(PanelTabAction::Close(panel, index));
+                                }
+
+                                let close_center = close_rect.center();
+                                let close_radius = CLOSE_BUTTON_SIZE * 0.25;
+                                let close_stroke = egui::Stroke::new(
+                                    1.5,
+                                    if close_response.hovered() {
+                                        active_text
+                                    } else {
+                                        inactive_text
+                                    },
+                                );
+                                ui.painter().line_segment(
+                                    [
+                                        close_center + egui::vec2(-close_radius, -close_radius),
+                                        close_center + egui::vec2(close_radius, close_radius),
+                                    ],
+                                    close_stroke,
+                                );
+                                ui.painter().line_segment(
+                                    [
+                                        close_center + egui::vec2(close_radius, -close_radius),
+                                        close_center + egui::vec2(-close_radius, close_radius),
+                                    ],
+                                    close_stroke,
+                                );
 
                                 let title_x = icon_rect.right() + 6.0;
                                 let title = titles.get(index).map_or(path, String::as_str);
-                                let title_max_width = if close_response.is_some() {
-                                    close_rect.left() - title_x - 4.0
-                                } else {
-                                    content_rect.right() - title_x
-                                };
+                                let title_max_width = close_rect.left() - title_x - 4.0;
                                 let galley = layout_tab_title(
                                     ui,
                                     title,
@@ -376,7 +307,7 @@ pub(super) fn render_panel_tab_bar(
 
                                 if tab_response.hovered()
                                     && !drag.active()
-                                    && !close_response.as_ref().is_some_and(egui::Response::hovered)
+                                    && !close_response.hovered()
                                 {
                                     tab_response
                                         .clone()
