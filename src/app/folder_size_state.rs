@@ -18,6 +18,8 @@ mod revalidation;
 pub use revalidation::PendingFolderSizeRevalidation;
 mod sorting;
 pub use sorting::SizeSortingState;
+mod selection;
+pub use selection::{SelectionSizeState, SelectionSizeSummary};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ActiveFolderSizeRequest {
@@ -110,6 +112,7 @@ pub type BatchSizeRequest = (PathBuf, u64, u64);
 
 pub struct FolderSizeState {
     pub size_sorting: SizeSortingState,
+    pub selection_size: SelectionSizeState,
     pub req_sender: Sender<FolderSizeRequest>,
     pub res_receiver: Receiver<FolderSizeMessage>,
     pub cancel: Arc<AtomicBool>,
@@ -363,6 +366,7 @@ impl FolderSizeState {
     /// slow-path scans from the previous folder.
     pub fn cancel_batch(&mut self) {
         self.size_sorting = SizeSortingState::default();
+        self.selection_size = SelectionSizeState::default();
         // 0. Abort any in-flight single-folder full-tree scan so it
         //    doesn't keep running after the user navigates away.
         self.cancel.store(true, Ordering::Release);

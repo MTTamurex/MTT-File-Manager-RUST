@@ -850,10 +850,12 @@ impl ImageViewerApp {
                 Ok(msg) => msg,
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    received_any |= !self
-                        .folder_size_state
-                        .fail_all_requests(Instant::now())
-                        .is_empty();
+                    for path in self.folder_size_state.fail_all_requests(Instant::now()) {
+                        progress_updates.remove(&path);
+                        self.folder_size_state
+                            .invalidate_calculated_folder_size(&path);
+                        received_any = true;
+                    }
                     break;
                 }
             };
@@ -937,11 +939,7 @@ impl ImageViewerApp {
                         .entry(folder_path.clone())
                         .or_insert(0) += 1;
                     self.folder_size_state
-                        .batch_cache
-                        .put(folder_path.clone(), summary.total_size);
-                    self.folder_size_state
-                        .size_sorting
-                        .complete(&folder_path, summary.total_size);
+                        .cache_completed_folder_size(folder_path.clone(), summary.total_size);
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
@@ -954,8 +952,8 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state.cache.pop(&folder_path);
-                    self.folder_size_state.batch_cache.pop(&folder_path);
-                    self.folder_size_state.size_sorting.invalidate(&folder_path);
+                    self.folder_size_state
+                        .invalidate_calculated_folder_size(&folder_path);
                     self.folder_size_state
                         .reschedule_panel_revalidation_if_stale(&folder_path, Instant::now());
                     received_any = true;
@@ -969,8 +967,8 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state.cache.pop(&folder_path);
-                    self.folder_size_state.batch_cache.pop(&folder_path);
-                    self.folder_size_state.size_sorting.invalidate(&folder_path);
+                    self.folder_size_state
+                        .invalidate_calculated_folder_size(&folder_path);
                     self.folder_size_state
                         .record_failure(folder_path, Instant::now());
                     received_any = true;
@@ -990,8 +988,8 @@ impl ImageViewerApp {
         }
         if !has_more {
             for path in self.folder_size_state.expire_requests(Instant::now()) {
-                self.folder_size_state.batch_cache.pop(&path);
-                self.folder_size_state.size_sorting.invalidate(&path);
+                self.folder_size_state
+                    .invalidate_calculated_folder_size(&path);
                 received_any = true;
             }
         }
@@ -1003,7 +1001,11 @@ impl ImageViewerApp {
             while batch_count < MAX_BATCH_PER_FRAME {
                 let result = match self.folder_size_state.batch_res_receiver.try_recv() {
                     Ok(r) => r,
-                    Err(_) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        received_any |= self.folder_size_state.fail_batch_requests();
+                        break;
+                    }
                 };
                 batch_count += 1;
 
@@ -1019,6 +1021,7 @@ impl ImageViewerApp {
                 } = result;
 
                 let Some(total_size) = total_size else {
+                    self.folder_size_state.selection_size.failed(&folder_path);
                     // Service unavailable — keep in batch_loading and schedule
                     // a deferred retry to prevent per-frame re-requests.
                     self.folder_size_state
@@ -1034,11 +1037,7 @@ impl ImageViewerApp {
                 };
 
                 self.folder_size_state
-                    .batch_cache
-                    .put(folder_path.clone(), total_size);
-                self.folder_size_state
-                    .size_sorting
-                    .complete(&folder_path, total_size);
+                    .cache_completed_folder_size(folder_path.clone(), total_size);
                 // Keep the preview-panel cache in sync so selecting the folder
                 // in the details panel shows the same (fresh) value.
                 upsert_folder_content_summary(
@@ -1088,8 +1087,8 @@ impl ImageViewerApp {
                             );
                         }
                     }
-                    self.folder_size_state.batch_cache.pop(&path);
-                    self.folder_size_state.size_sorting.invalidate(&path);
+                    self.folder_size_state
+                        .invalidate_calculated_folder_size(&path);
                     if release_batch_loading {
                         self.folder_size_state.batch_loading.remove(&path);
                     }

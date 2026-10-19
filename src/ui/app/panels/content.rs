@@ -23,6 +23,12 @@ pub(super) fn render_preview_panel_layout(
     frame: &eframe::Frame,
 ) {
     if app.show_preview_panel {
+        let multi_selection_size = app.selected_size_summary();
+        if multi_selection_size.pending_folders > 0 {
+            root_ui
+                .ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let dark_mode = root_ui.visuals().dark_mode;
         let ctx = root_ui.ctx().clone();
         let defer_preview_work = app.defer_preview_work_after_selection;
@@ -144,13 +150,6 @@ pub(super) fn render_preview_panel_layout(
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
 
-                            let multi_selection_total_size: u64 = app
-                                .items
-                                .iter()
-                                .filter(|item| app.multi_selection.contains(&item.path))
-                                .map(|item| item.size)
-                                .sum();
-
                             let can_hash_file = crate::app::file_hash::can_hash_file(&file);
                             if can_hash_file {
                                 if app.last_file_hash_selection.as_ref() != Some(&file.path) {
@@ -203,7 +202,7 @@ pub(super) fn render_preview_panel_layout(
                                 ui,
                                 &file,
                                 app.multi_selection.len(),
-                                multi_selection_total_size,
+                                multi_selection_size,
                                 app.selected_thumbnail.as_ref(),
                                 app.selected_gif.as_mut(),
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND

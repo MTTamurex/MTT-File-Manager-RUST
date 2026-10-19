@@ -17,6 +17,12 @@ pub struct SizeSortingState {
 }
 
 impl SizeSortingState {
+    pub fn mark_worker_disconnected(&mut self) -> bool {
+        let changed = !self.worker_disconnected;
+        self.worker_disconnected = true;
+        changed
+    }
+
     pub fn has_pending_sizes(&self) -> bool {
         self.sizes.len() < self.tracked.len()
     }

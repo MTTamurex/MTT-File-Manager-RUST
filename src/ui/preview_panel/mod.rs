@@ -24,7 +24,7 @@ pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
     multi_selection_count: usize,
-    multi_selection_total_size: u64,
+    multi_selection_size: crate::app::folder_size_state::SelectionSizeSummary,
     selected_thumbnail: Option<&egui::TextureHandle>,
     selected_gif: Option<&mut crate::ui::components::media_preview::GifPlayer>,
     media_preview: Option<&mut MediaPreview>,
@@ -89,8 +89,21 @@ pub fn render_preview_panel(
                 .size(18.0),
             );
             ui.add_space(6.0);
-            let total_size_text =
-                crate::infrastructure::windows::format_size(multi_selection_total_size);
+            let mut total_size_text =
+                crate::infrastructure::windows::format_size(multi_selection_size.total_size);
+            if multi_selection_size.pending_folders > 0 {
+                total_size_text = format!(
+                    "{total_size_text} ({})",
+                    rust_i18n::t!("file_info.calculating")
+                );
+                ui.spinner();
+            }
+            if multi_selection_size.unavailable_items > 0 {
+                total_size_text = format!(
+                    "{total_size_text} ({})",
+                    rust_i18n::t!("file_info.unavailable")
+                );
+            }
             ui.label(
                 egui::RichText::new(
                     rust_i18n::t!("preview.total_size", size = total_size_text).to_string(),

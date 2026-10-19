@@ -9,6 +9,7 @@ fn test_state() -> FolderSizeState {
 
     FolderSizeState {
         size_sorting: Default::default(),
+        selection_size: Default::default(),
         req_sender,
         res_receiver,
         cancel: Arc::new(AtomicBool::new(false)),
@@ -34,6 +35,7 @@ fn test_state() -> FolderSizeState {
     }
 }
 
+mod selection_size_tests;
 mod size_sorting_tests;
 
 #[test]

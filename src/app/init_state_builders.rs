@@ -143,6 +143,7 @@ pub(in crate::app) fn build_folder_size_state(
 ) -> FolderSizeState {
     FolderSizeState {
         size_sorting: Default::default(),
+        selection_size: Default::default(),
         req_sender,
         res_receiver,
         cancel,

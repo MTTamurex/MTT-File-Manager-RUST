@@ -55,6 +55,7 @@ pub mod preferences;
 pub mod rectangle_selection;
 pub mod recycle_bin_ops;
 pub mod selection;
+mod selection_size;
 pub mod shutdown;
 mod sidebar_tree;
 pub(crate) mod system_tray;

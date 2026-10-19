@@ -1,8 +1,30 @@
 use super::{BatchSizeRequest, BatchSizeResult, FolderSizeState};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 impl FolderSizeState {
+    pub fn fail_batch_requests(&mut self) -> bool {
+        let had_pending = !self.batch_loading.is_empty();
+        self.batch_loading.clear();
+        self.batch_request_epochs.clear();
+        let sorting_changed = self.size_sorting.mark_worker_disconnected();
+        let selection_changed = self.selection_size.mark_worker_disconnected();
+        had_pending || sorting_changed || selection_changed
+    }
+
+    pub fn cache_completed_folder_size(&mut self, path: PathBuf, size: u64) {
+        self.batch_cache.put(path.clone(), size);
+        self.size_sorting.complete(&path, size);
+        self.selection_size.complete(&path, size);
+    }
+
+    pub fn invalidate_calculated_folder_size(&mut self, path: &Path) {
+        self.batch_cache.pop(path);
+        self.size_sorting.invalidate(path);
+        self.selection_size.invalidate(path);
+    }
+
     pub fn enqueue_batch_size(
         &mut self,
         path: PathBuf,

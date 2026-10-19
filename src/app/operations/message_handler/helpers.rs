@@ -880,8 +880,7 @@ impl ImageViewerApp {
         self.folder_size_state.cache.pop(&folder_path);
         self.folder_size_state.clear_failure(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
-        self.folder_size_state.batch_cache.pop(&folder_path);
-        self.folder_size_state.size_sorting.invalidate(&folder_path);
+        self.folder_size_state.invalidate_calculated_folder_size(&folder_path);
 
         // Bump per-path invalidation epoch so that any in-flight batch
         // worker result (carrying its request_epoch) is detected as stale
