@@ -170,13 +170,12 @@ impl ImageViewerApp {
 
         // L-12: .into_owned() converts Cow<[PathBuf]> to Vec<PathBuf> (clone only when borrowed)
         let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
-        if paths.is_empty()
-            || paths.iter().any(|path| {
-                self.path_is_network_operation_root(path)
-                    || self.path_is_same_or_ancestor_of_open_panel(path)
-            })
-        {
-            return;
+        self.delete_permanently_for_paths(&paths);
+    }
+
+    pub fn delete_permanently_for_paths(&mut self, paths: &[PathBuf]) -> bool {
+        if !self.can_delete_with_shell_paths(paths) {
+            return false;
         }
 
         self.file_operation_state.file_ops_in_progress += 1;
@@ -185,7 +184,7 @@ impl ImageViewerApp {
             .file_op_sender
             .send(
                 crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
-                    paths.clone(),
+                    paths.to_vec(),
                     self.shell_op_hwnd(),
                 ),
             )
@@ -196,14 +195,16 @@ impl ImageViewerApp {
                 .file_ops_in_progress
                 .saturating_sub(1);
             log::warn!("[FileOps] H-3: worker channel closed on delete_permanently");
+            return false;
         }
 
-        for path in &paths {
+        for path in paths {
             self.file_operation_state
                 .pending_deletions
                 .insert(path.clone(), ());
         }
-        self.thumbnail_queue.remove_paths(&paths);
+        self.thumbnail_queue.remove_paths(paths);
+        true
     }
 
     pub(crate) fn can_delete_with_shell_paths(&self, paths: &[PathBuf]) -> bool {

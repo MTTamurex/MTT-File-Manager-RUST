@@ -775,7 +775,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -6 | -34 => {
                     if !context_menu.target_paths.is_empty() {
-                        app.delete_with_shell_for_paths(&context_menu.target_paths);
+                        if ctx.input(|input| input.modifiers.shift) {
+                            app.delete_permanently_for_paths(&context_menu.target_paths);
+                        } else {
+                            app.delete_with_shell_for_paths(&context_menu.target_paths);
+                        }
                     }
                 }
                 -20 | crate::application::context_menu::OPEN_IN_MTT_ID => {

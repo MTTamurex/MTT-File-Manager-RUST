@@ -2,6 +2,10 @@ use crate::app::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
+use std::path::PathBuf;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SecAction {
@@ -11,8 +15,19 @@ pub(super) enum SecAction {
     Paste,
     Rename,
     CreateFolder,
-    Delete,
+    Delete { permanently: bool },
     EmptyRecycleBin,
+}
+
+fn delete_targets<'a>(
+    selected_path: Option<&PathBuf>,
+    multi_selection: impl Iterator<Item = &'a PathBuf>,
+) -> Vec<PathBuf> {
+    let mut targets: Vec<PathBuf> = multi_selection.cloned().collect();
+    if targets.is_empty() {
+        targets.extend(selected_path.cloned());
+    }
+    targets
 }
 
 pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> SecAction {
@@ -62,6 +77,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     };
     let disabled_color = [128, 128, 128, 180];
     let mut action = SecAction::None;
+    let shift_down = ui.input(|input| input.modifiers.shift);
 
     {
         let svg_manager = &mut app.svg_icon_manager;
@@ -149,7 +165,9 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             action = SecAction::CreateFolder;
         }
         if render_btn("delete", can_delete, &t!("secondary_toolbar.delete")) {
-            action = SecAction::Delete;
+            action = SecAction::Delete {
+                permanently: shift_down,
+            };
         }
         if is_recycle_bin_view
             && render_btn(
@@ -178,21 +196,17 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
             }
         }
         SecAction::CreateFolder => app.create_new_folder(),
-        SecAction::Delete => {
-            let mut targets = Vec::new();
-            if app.multi_selection.is_empty() {
-                if let Some(idx) = app.selected_item {
-                    if let Some(item) = app.items.get(idx) {
-                        targets.push(item.path.clone());
-                    }
-                }
-            } else {
-                targets.extend(app.multi_selection.iter().cloned());
-            }
+        SecAction::Delete { permanently } => {
+            let targets = delete_targets(
+                app.selected_file.as_ref().map(|item| &item.path),
+                app.multi_selection.iter(),
+            );
 
             if !targets.is_empty() {
                 if app.navigation_state.is_recycle_bin_view {
                     app.delete_permanently(&targets);
+                } else if permanently {
+                    app.delete_permanently_for_paths(&targets);
                 } else {
                     app.delete_with_shell_for_paths(&targets);
                 }
