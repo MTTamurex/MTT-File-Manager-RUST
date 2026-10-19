@@ -1,12 +1,12 @@
 //! Roll back completed registry value changes if a multi-class action fails.
 
-use super::registration::Registry;
+use super::registration::{Registry, RegistryValue};
 
 struct UndoValue {
     path: String,
     name: String,
-    previous: Option<String>,
-    written: Option<String>,
+    previous: Option<RegistryValue>,
+    written: Option<RegistryValue>,
 }
 
 pub(super) struct RegistryTransaction<'a, R: Registry> {
@@ -48,13 +48,14 @@ impl<R: Registry> RegistryTransaction<'_, R> {
         let mut failure = None;
         for value in self.undo.iter().rev() {
             let restored = (|| {
-                if self.registry.read(&value.path, &value.name)? != value.written {
+                if self.registry.read_value(&value.path, &value.name)? != value.written {
                     return Err(
                         "A shell setting changed concurrently; that change was preserved.".into(),
                     );
                 }
                 if let Some(previous) = &value.previous {
-                    self.registry.write(&value.path, &value.name, previous)
+                    self.registry
+                        .write_value(&value.path, &value.name, previous)
                 } else {
                     self.registry.delete(&value.path, &value.name)
                 }
@@ -71,6 +72,13 @@ impl<R: Registry> RegistryTransaction<'_, R> {
             .map(|value| value.path.as_str())
             .filter(|path| {
                 path.contains("\\MTT.FileManager.Default")
+                    || super::registration::CLASSES
+                        .into_iter()
+                        .chain([super::registration::NETWORK_LOCATION_CLASS])
+                        .any(|class| {
+                            let verb = format!("{}\\open", super::registration::shell_key(class));
+                            *path == verb || *path == format!("{verb}\\command")
+                        })
                     || *path == "Software\\MTT-File-Manager\\ShellIntegration\\WinE"
                     || path.starts_with(
                         "Software\\MTT-File-Manager\\ShellIntegration\\DefaultFolders\\",
@@ -94,19 +102,27 @@ impl<R: Registry> Registry for RegistryTransaction<'_, R> {
     }
 
     fn write(&mut self, path: &str, name: &str, value: &str) -> Result<(), String> {
-        let previous = self.registry.read(path, name)?;
-        self.registry.write(path, name, value)?;
+        self.write_value(path, name, &RegistryValue::plain(value))
+    }
+
+    fn read_value(&self, path: &str, name: &str) -> Result<Option<RegistryValue>, String> {
+        self.registry.read_value(path, name)
+    }
+
+    fn write_value(&mut self, path: &str, name: &str, value: &RegistryValue) -> Result<(), String> {
+        let previous = self.registry.read_value(path, name)?;
+        self.registry.write_value(path, name, value)?;
         self.undo.push(UndoValue {
             path: path.into(),
             name: name.into(),
             previous,
-            written: Some(value.into()),
+            written: Some(value.clone()),
         });
         Ok(())
     }
 
     fn delete(&mut self, path: &str, name: &str) -> Result<(), String> {
-        let previous = self.registry.read(path, name)?;
+        let previous = self.registry.read_value(path, name)?;
         self.registry.delete(path, name)?;
         self.undo.push(UndoValue {
             path: path.into(),

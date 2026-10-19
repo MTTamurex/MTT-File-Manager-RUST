@@ -1,8 +1,10 @@
-//! Registers MTT as the per-user folder handler and context-menu command, with optional Win+E handling.
+//! Registers MTT as the per-user canonical folder handler, with optional Win+E handling.
 //!
 //! Uses current-user registry APIs without elevation. Virtual Shell folders
-//! retain their native handlers; Directory, Drive and filesystem Folder Shortcuts select the MTT verb.
+//! retain their native handlers; Directory, Drive and filesystem Folder Shortcuts use native Open.
 
+mod legacy_menu;
+mod native_open;
 mod network_location_open;
 mod registration;
 mod registry_access;
@@ -74,9 +76,8 @@ pub fn registration_status() -> RegistrationStatus {
                 read_current_user_string(LEGACY_KEYS[1], "").as_deref(),
                 &folder_command,
             ),
-        context_menu:
-            crate::infrastructure::windows::shell_context_menu::is_open_in_mtt_context_menu_enabled(
-            ),
+        context_menu: native_open::is_active(&UserRegistry, "Directory", &folder_command)
+            || legacy_menu::has_owned_entries(&UserRegistry, &executable),
         win_e: read_current_user_string(WIN_E_COMMAND_KEY, "")
             .is_some_and(|value| value.eq_ignore_ascii_case(&win_e_command)),
     }
@@ -95,6 +96,9 @@ pub fn migrate_legacy_registration() -> Result<(), RegistryActionError> {
             .any(|key| owns(read_current_user_string(key, "").as_deref(), &command))
     {
         apply_action(RegistryAction::EnableFolders)?;
+    }
+    if legacy_menu::has_owned_entries(&UserRegistry, &executable) {
+        apply_action(RegistryAction::UpgradeContextMenu)?;
     }
     Ok(())
 }
@@ -122,26 +126,9 @@ pub fn resolve_network_location_open_target(path: &std::path::Path) -> Option<st
     }
 }
 
-/// Register MTT for folder opening and add its folder context-menu command, without changing Win+E.
-pub fn set_as_default(context_menu_label: &str) -> Result<RegistrationStatus, RegistryActionError> {
-    let context_menu_was_enabled =
-        crate::infrastructure::windows::shell_context_menu::is_open_in_mtt_context_menu_enabled();
-    if let Err(error) =
-        crate::infrastructure::windows::shell_context_menu::set_open_in_mtt_context_menu_enabled(
-            true,
-            context_menu_label,
-        )
-    {
-        log::error!("[DEFAULT-FILE-MANAGER] Could not add Open in MTT: {error}");
-        return Err(RegistryActionError::Failed);
-    }
-    if let Err(error) = apply_action(RegistryAction::EnableFolders) {
-        if !context_menu_was_enabled {
-            let _ = crate::infrastructure::windows::shell_context_menu::
-                set_open_in_mtt_context_menu_enabled(false, context_menu_label);
-        }
-        return Err(error);
-    }
+/// Register MTT for native Open without adding a second menu command or changing Win+E.
+pub fn set_as_default() -> Result<RegistrationStatus, RegistryActionError> {
+    apply_action(RegistryAction::EnableFolders)?;
 
     let status = registration_status();
     if !status.is_complete() {
@@ -158,19 +145,8 @@ pub fn set_as_default(context_menu_label: &str) -> Result<RegistrationStatus, Re
 }
 
 /// Restore Windows Explorer's folder-open handlers and remove Open in MTT, without changing Win+E.
-pub fn restore_explorer(
-    context_menu_label: &str,
-) -> Result<RegistrationStatus, RegistryActionError> {
+pub fn restore_explorer() -> Result<RegistrationStatus, RegistryActionError> {
     apply_action(RegistryAction::RestoreFolders)?;
-    if let Err(error) =
-        crate::infrastructure::windows::shell_context_menu::set_open_in_mtt_context_menu_enabled(
-            false,
-            context_menu_label,
-        )
-    {
-        log::error!("[DEFAULT-FILE-MANAGER] Could not remove Open in MTT: {error}");
-        return Err(RegistryActionError::Failed);
-    }
 
     let status = registration_status();
     if status.is_active() {

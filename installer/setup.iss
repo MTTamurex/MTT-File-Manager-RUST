@@ -6,7 +6,7 @@
 ; ==========================================================================
 
 #define MyAppName      "MTT File Manager"
-#define MyAppVersion   "0.2.7"
+#define MyAppVersion   "0.2.8"
 #define MyAppPublisher "MTT"
 #define MyAppExeName   "mtt-file-manager.exe"
 #define MySearchSvc    "mtt-search-service.exe"
@@ -118,6 +118,9 @@ Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "{cm:Install
 Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "{cm:StartSearchService}"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
+; Use the app's transactional restoration, including canonical Open backups,
+; while the executable is still present. This does not launch the UI.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--restore-folder-integration"; RunOnceId: "RestoreMttFolderIntegration"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\cleanup_context_menu.ps1"" -ApplicationPath ""{app}\{#MyAppExeName}"""; RunOnceId: "CleanupMttContextMenu"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\unregister_sparse_package.ps1"" -PackageName ""MTT.FileManager"" -AllUsers"; RunOnceId: "UnregisterMttSparsePackage"; Flags: runhidden waituntilterminated
 ; Stop and remove the search service before files are deleted

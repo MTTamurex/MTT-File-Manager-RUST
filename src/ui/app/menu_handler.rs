@@ -778,7 +778,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         app.delete_with_shell_for_paths(&context_menu.target_paths);
                     }
                 }
-                -20 => {
+                -20 | crate::application::context_menu::OPEN_IN_MTT_ID => {
                     if let Some((path, is_directory)) = primary_context_target(&context_menu) {
                         let path = path.to_path_buf();
                         if context_menu.origin

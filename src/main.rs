@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
 
 mod gpu_backend;
+mod shell_maintenance;
 
 const APP_ID: &str = "mtt-file-manager";
 
@@ -334,6 +335,7 @@ fn run_main_app_with_fallback(
 }
 
 fn main() -> eframe::Result<()> {
+    shell_maintenance::run_if_requested();
     let startup_start = Instant::now();
     // SEC: Remove the current working directory from the default DLL search order.
     // Prevents DLL planting attacks (e.g. malicious pdfium.dll or libmpv-2.dll in CWD).

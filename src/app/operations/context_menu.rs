@@ -2,6 +2,7 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
+mod local_open;
 mod new_submenu;
 
 use crate::app::state::ImageViewerApp;
@@ -372,7 +373,7 @@ impl ImageViewerApp {
 
     pub fn populate_context_menu(
         &mut self,
-        _ctx: &egui::Context,
+        ctx: &egui::Context,
         paths: &[PathBuf],
         is_empty_area: bool,
         _item_index: Option<usize>,
@@ -1061,6 +1062,7 @@ impl ImageViewerApp {
         }
 
         self.context_menu.items = items;
+        local_open::ensure_more_options_item(&mut self.context_menu, ctx);
         self.context_menu.partition_items(); // M-5
     }
 
@@ -1134,9 +1136,10 @@ impl ImageViewerApp {
         // Remove all loading placeholders before adding real items.
         // They were inserted in `populate_context_menu` to reserve space.
         self.context_menu.items.retain(|item| {
-            !item.is_loading_placeholder
-                || (uses_direct_open_with
-                    && item.command_string.as_deref() == Some("openwith_placeholder"))
+            item.id != -99
+                && (!item.is_loading_placeholder
+                    || (uses_direct_open_with
+                        && item.command_string.as_deref() == Some("openwith_placeholder")))
         });
         // Remove any trailing separator(s) that preceded the placeholder block.
         while self
@@ -1268,6 +1271,7 @@ impl ImageViewerApp {
             self.context_menu.pending_load_item = Some(id);
         }
 
+        local_open::ensure_more_options_item(&mut self.context_menu, ctx);
         self.context_menu.partition_items(); // M-5: re-partition after shell items are merged
         self.shell_menu_loading = false;
     }

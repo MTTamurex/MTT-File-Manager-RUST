@@ -1,10 +1,11 @@
 use windows::core::PCWSTR;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteKeyValueW, RegDeleteKeyW, RegGetValueW, RegOpenKeyExW, RegQueryInfoKeyW,
-    RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_SZ, RRF_RT_REG_SZ,
+    RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_EXPAND_SZ, REG_SZ, REG_VALUE_TYPE,
+    RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
 };
 
-use super::registration::Registry;
+use super::registration::{Registry, RegistryValue};
 
 pub(super) fn read_current_user_string(key_path: &str, value_name: &str) -> Option<String> {
     UserRegistry.read(key_path, value_name).ok().flatten()
@@ -63,16 +64,22 @@ impl Registry for UserRegistry {
     }
 
     fn read(&self, path: &str, name: &str) -> Result<Option<String>, String> {
+        self.read_value(path, name)
+            .map(|value| value.map(|value| value.text))
+    }
+
+    fn read_value(&self, path: &str, name: &str) -> Result<Option<RegistryValue>, String> {
         let path = wide(path);
         let name = wide(name);
         let mut size = 0;
+        let mut value_type = REG_VALUE_TYPE(0);
         let status = unsafe {
             RegGetValueW(
                 HKEY_CURRENT_USER,
                 PCWSTR(path.as_ptr()),
                 PCWSTR(name.as_ptr()),
-                RRF_RT_REG_SZ,
-                None,
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
+                Some(&mut value_type),
                 None,
                 Some(&mut size),
             )
@@ -89,8 +96,8 @@ impl Registry for UserRegistry {
                 HKEY_CURRENT_USER,
                 PCWSTR(path.as_ptr()),
                 PCWSTR(name.as_ptr()),
-                RRF_RT_REG_SZ,
-                None,
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
+                Some(&mut value_type),
                 Some(buffer.as_mut_ptr().cast()),
                 Some(&mut size),
             )
@@ -101,19 +108,31 @@ impl Registry for UserRegistry {
             .iter()
             .position(|unit| *unit == 0)
             .unwrap_or(buffer.len());
-        Ok(Some(String::from_utf16_lossy(&buffer[..length])))
+        Ok(Some(RegistryValue {
+            text: String::from_utf16_lossy(&buffer[..length]),
+            expandable: value_type == REG_EXPAND_SZ,
+        }))
     }
 
     fn write(&mut self, path: &str, name: &str, value: &str) -> Result<(), String> {
+        self.write_value(path, name, &RegistryValue::plain(value))
+    }
+
+    fn write_value(&mut self, path: &str, name: &str, value: &RegistryValue) -> Result<(), String> {
         let path = wide(path);
         let name = wide(name);
-        let value = wide(value);
+        let value_type = if value.expandable {
+            REG_EXPAND_SZ
+        } else {
+            REG_SZ
+        };
+        let value = wide(&value.text);
         unsafe {
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,
                 PCWSTR(path.as_ptr()),
                 PCWSTR(name.as_ptr()),
-                REG_SZ.0,
+                value_type.0,
                 Some(value.as_ptr().cast()),
                 (value.len() * 2) as u32,
             )

@@ -8,6 +8,7 @@ use eframe::egui;
 
 pub const EXTRACT_ALL_PENDING_ID: i32 = -203;
 pub const EXTRACT_ALL_PENDING_COMMAND: &str = "extract_all_pending";
+pub const OPEN_IN_MTT_ID: i32 = -87;
 
 /// Identifies Windows' generic application-association command, rather than a
 /// third-party command whose label starts with "Open with".

@@ -25,17 +25,16 @@ impl ImageViewerApp {
 
         let (sender, receiver) = mpsc::channel();
         self.default_file_manager_settings.result_receiver = Some(receiver);
-        let context_menu_label = rust_i18n::t!("context_menu.open_in_mtt").to_string();
         let ctx = self.ui_ctx.clone();
         let worker = std::thread::Builder::new()
             .name("default-file-manager-registry".to_string())
             .spawn(move || {
                 let result = match action {
                     RegistryOperation::FolderDefault(true) => {
-                        default_file_manager::set_as_default(&context_menu_label)
+                        default_file_manager::set_as_default()
                     }
                     RegistryOperation::FolderDefault(false) => {
-                        default_file_manager::restore_explorer(&context_menu_label)
+                        default_file_manager::restore_explorer()
                     }
                     RegistryOperation::WinE(enable) => {
                         default_file_manager::set_win_e_enabled(enable)

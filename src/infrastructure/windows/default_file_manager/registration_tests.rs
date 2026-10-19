@@ -29,6 +29,15 @@ mod command_upgrade;
 #[path = "win_e_tests.rs"]
 mod win_e;
 
+#[path = "legacy_menu_tests.rs"]
+mod legacy_menu;
+
+#[path = "native_open_tests.rs"]
+mod native_open;
+
+#[path = "registry_value_tests.rs"]
+mod registry_values;
+
 struct FailOnceRegistry {
     inner: MemoryRegistry,
     fail_at: usize,
@@ -74,7 +83,7 @@ fn failed_registration_and_restore_return_all_completed_values_to_their_prior_st
         RegistryAction::EnableFolders,
         RegistryAction::RestoreFolders,
     ] {
-        for fail_at in 1..=32 {
+        for fail_at in 1..=300 {
             let mut inner = MemoryRegistry::default();
             for class in CLASSES.into_iter().chain([NETWORK_LOCATION_CLASS]) {
                 inner
@@ -176,9 +185,21 @@ fn folder_shortcut_registration_uses_its_own_resolving_command_and_restores_its_
 fn folder_shortcut_upgrade_requires_existing_owned_directory_and_drive_defaults() {
     let mut reg = MemoryRegistry::default();
     assert!(!needs_network_location_upgrade(&reg, Path::new(EXE)));
-    enable_class(&mut reg, "Directory", &folder_command(Path::new(EXE))).unwrap();
+    enable_class(
+        &mut reg,
+        "Directory",
+        &folder_command(Path::new(EXE)),
+        Path::new(EXE),
+    )
+    .unwrap();
     assert!(!needs_network_location_upgrade(&reg, Path::new(EXE)));
-    enable_class(&mut reg, "Drive", &folder_command(Path::new(EXE))).unwrap();
+    enable_class(
+        &mut reg,
+        "Drive",
+        &folder_command(Path::new(EXE)),
+        Path::new(EXE),
+    )
+    .unwrap();
     assert!(needs_network_location_upgrade(&reg, Path::new(EXE)));
     apply(&mut reg, RegistryAction::EnableFolders, Path::new(EXE)).unwrap();
     reg.write(&shell_key(NETWORK_LOCATION_CLASS), "", "OtherManager.Open")

@@ -15,15 +15,41 @@ pub(super) const WIN_E_COMMAND_KEY: &str = concat!(
     "\\shell\\opennewwindow\\command"
 );
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RegistryValue {
+    pub text: String,
+    pub expandable: bool,
+}
+
+impl RegistryValue {
+    pub fn plain(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            expandable: false,
+        }
+    }
+}
+
 pub(super) trait Registry {
     fn read(&self, path: &str, name: &str) -> Result<Option<String>, String>;
     fn write(&mut self, path: &str, name: &str, value: &str) -> Result<(), String>;
     fn delete(&mut self, path: &str, name: &str) -> Result<(), String>;
     fn delete_key_if_empty(&mut self, path: &str) -> Result<(), String>;
+    fn read_value(&self, path: &str, name: &str) -> Result<Option<RegistryValue>, String> {
+        self.read(path, name)
+            .map(|value| value.map(|text| RegistryValue::plain(&text)))
+    }
+    fn write_value(&mut self, path: &str, name: &str, value: &RegistryValue) -> Result<(), String> {
+        if value.expandable {
+            return Err("This registry backend cannot preserve expandable strings.".into());
+        }
+        self.write(path, name, &value.text)
+    }
 }
 
 #[derive(Clone, Copy)]
 pub(super) enum RegistryAction {
+    UpgradeContextMenu,
     UpgradeFolderCommands,
     EnableFolders,
     RestoreFolders,
@@ -87,6 +113,13 @@ pub(super) fn needs_network_location_upgrade(reg: &impl Registry, executable: &P
             ),
             Ok(None)
         )
+        && matches!(
+            reg.read(
+                &format!("{}\\open\\command", shell_key(NETWORK_LOCATION_CLASS)),
+                ""
+            ),
+            Ok(None)
+        )
 }
 
 pub(super) fn win_e_command(executable: &Path) -> String {
@@ -103,14 +136,16 @@ pub(super) fn owns(value: Option<&str>, expected: &str) -> bool {
 
 pub(super) fn class_is_active(reg: &impl Registry, class: &str, command: &str) -> bool {
     let shell = shell_key(class);
-    owns(reg.read(&shell, "").ok().flatten().as_deref(), VERB)
-        && owns(
-            reg.read(&format!("{shell}\\{VERB}\\command"), "")
-                .ok()
-                .flatten()
-                .as_deref(),
-            command,
-        )
+    let selected = reg.read(&shell, "").ok().flatten();
+    (owns(selected.as_deref(), "open") && super::native_open::is_active(reg, class, command))
+        || (owns(selected.as_deref(), VERB)
+            && owns(
+                reg.read(&format!("{shell}\\{VERB}\\command"), "")
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+                command,
+            ))
 }
 
 pub(super) fn apply(
@@ -118,7 +153,18 @@ pub(super) fn apply(
     action: RegistryAction,
     executable: &Path,
 ) -> Result<(), String> {
-    super::registry_transaction::run(reg, |reg| apply_action(reg, action, executable))
+    super::registry_transaction::run(reg, |reg| {
+        apply_action(reg, action, executable)?;
+        if matches!(
+            action,
+            RegistryAction::EnableFolders
+                | RegistryAction::UpgradeContextMenu
+                | RegistryAction::RestoreFolders
+        ) {
+            super::legacy_menu::remove_legacy(reg, executable)?;
+        }
+        Ok(())
+    })
 }
 
 fn apply_action(
@@ -130,6 +176,7 @@ fn apply_action(
     if matches!(
         action,
         RegistryAction::UpgradeFolderCommands
+            | RegistryAction::UpgradeContextMenu
             | RegistryAction::EnableFolders
             | RegistryAction::RestoreFolders
     ) {
@@ -137,6 +184,19 @@ fn apply_action(
     }
     match action {
         RegistryAction::UpgradeFolderCommands => {}
+        RegistryAction::UpgradeContextMenu => {
+            for class in CLASSES.into_iter().chain([NETWORK_LOCATION_CLASS]) {
+                let command = if class == NETWORK_LOCATION_CLASS {
+                    network_location_command(executable)
+                } else {
+                    folder_command(executable)
+                };
+                if class_is_active(reg, class, &command) {
+                    enable_class(reg, class, &command, executable)?;
+                }
+                super::legacy_menu::remove_class(reg, class, &command)?;
+            }
+        }
         RegistryAction::EnableFolders => {
             // Check every class before changing any existing association.
             for class in CLASSES {
@@ -148,23 +208,25 @@ fn apply_action(
                 &network_location_command(executable),
             )?;
             for class in CLASSES {
-                enable_class(reg, class, &command)?;
+                enable_class(reg, class, &command, executable)?;
             }
             enable_class(
                 reg,
                 NETWORK_LOCATION_CLASS,
                 &network_location_command(executable),
+                executable,
             )?;
             remove_legacy(reg, &command)?;
         }
         RegistryAction::RestoreFolders => {
             for class in CLASSES {
-                restore_class(reg, class, &command)?;
+                restore_class(reg, class, &command, executable)?;
             }
             restore_class(
                 reg,
                 NETWORK_LOCATION_CLASS,
                 &network_location_command(executable),
+                executable,
             )?;
             remove_legacy(reg, &command)?;
         }
@@ -174,11 +236,12 @@ fn apply_action(
     Ok(())
 }
 
-fn state_key(class: &str) -> String {
+pub(super) fn state_key(class: &str) -> String {
     format!("Software\\MTT-File-Manager\\ShellIntegration\\DefaultFolders\\{class}")
 }
 
 fn check_class_owner(reg: &impl Registry, class: &str, command: &str) -> Result<(), String> {
+    super::native_open::check_owner(reg, class, command)?;
     let command_key = format!("{}\\{VERB}\\command", shell_key(class));
     if reg
         .read(&command_key, "")?
@@ -189,14 +252,19 @@ fn check_class_owner(reg: &impl Registry, class: &str, command: &str) -> Result<
     Ok(())
 }
 
-fn enable_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<(), String> {
+fn enable_class(
+    reg: &mut impl Registry,
+    class: &str,
+    command: &str,
+    executable: &Path,
+) -> Result<(), String> {
     check_class_owner(reg, class, command)?;
     let shell = shell_key(class);
-    let verb = format!("{shell}\\{VERB}");
-    let command_key = format!("{verb}\\command");
     let state = state_key(class);
     let current = reg.read(&shell, "")?;
-    if !owns(current.as_deref(), VERB) {
+    let already_owned = owns(current.as_deref(), VERB)
+        || (owns(current.as_deref(), "open") && super::native_open::is_active(reg, class, command));
+    if !already_owned {
         // Save before selecting our verb, including whether the value was absent.
         // Re-enabling an already selected verb must not overwrite this backup.
         reg.write(&state, "PreviousDefault", current.as_deref().unwrap_or(""))?;
@@ -206,21 +274,27 @@ fn enable_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<(
             if current.is_some() { "1" } else { "0" },
         )?;
     }
-    reg.write(&verb, "", "Open in MTT")?;
-    reg.write(&verb, "MultiSelectModel", "Document")?;
-    reg.write(&command_key, "", command)?;
-    reg.write(&shell, "", VERB)
+    super::native_open::enable(reg, class, command, executable)?;
+    reg.write(&shell, "", "open")?;
+    super::legacy_menu::remove_class(reg, class, command)
 }
 
-fn restore_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<(), String> {
+fn restore_class(
+    reg: &mut impl Registry,
+    class: &str,
+    command: &str,
+    executable: &Path,
+) -> Result<(), String> {
     let shell = shell_key(class);
     let verb = format!("{shell}\\{VERB}");
     let command_key = format!("{verb}\\command");
-    if !owns(reg.read(&command_key, "")?.as_deref(), command) {
-        return Ok(());
-    }
     let state = state_key(class);
-    if owns(reg.read(&shell, "")?.as_deref(), VERB) {
+    let selected = reg.read(&shell, "")?;
+    let owns_custom = owns(reg.read(&command_key, "")?.as_deref(), command);
+    let owns_native_backup = owns(reg.read(&state, "OpenOwner")?.as_deref(), command);
+    if (owns(selected.as_deref(), VERB) && owns_custom)
+        || (owns(selected.as_deref(), "open") && super::native_open::is_active(reg, class, command))
+    {
         if reg.read(&state, "HadDefault")?.as_deref() == Some("1") {
             let previous = reg
                 .read(&state, "PreviousDefault")?
@@ -230,13 +304,13 @@ fn restore_class(reg: &mut impl Registry, class: &str, command: &str) -> Result<
             reg.delete(&shell, "")?;
         }
     }
-    reg.delete(&command_key, "")?;
-    reg.delete(&verb, "")?;
-    reg.delete(&verb, "MultiSelectModel")?;
+    super::native_open::restore(reg, class, command, executable)?;
+    if !owns_custom && !owns_native_backup {
+        return Ok(());
+    }
+    super::legacy_menu::remove_class(reg, class, command)?;
     reg.delete(&state, "PreviousDefault")?;
     reg.delete(&state, "HadDefault")?;
-    reg.delete_key_if_empty(&command_key)?;
-    reg.delete_key_if_empty(&verb)?;
     reg.delete_key_if_empty(&state)
 }
 
