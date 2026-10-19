@@ -125,6 +125,7 @@ pub struct TabState {
     pub collapse_cloud_drives: bool,
     pub collapse_local_disks: bool,
     pub collapse_network_drives: bool,
+    pub collapse_network_locations: bool,
     /// Active tag filter for this tab.
     pub active_tag_filter: Option<i64>,
     /// Tags section collapse state (per-tab).
@@ -188,6 +189,7 @@ impl TabState {
             collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            collapse_network_locations: false,
             active_tag_filter: None,
             collapse_tags: false,
             dual_panel_enabled: false,
@@ -249,6 +251,7 @@ impl TabState {
             collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            collapse_network_locations: false,
             active_tag_filter: None,
             collapse_tags: false,
             dual_panel_enabled: false,
@@ -418,6 +421,7 @@ impl TabState {
         self.collapse_cloud_drives = false;
         self.collapse_local_disks = false;
         self.collapse_network_drives = false;
+        self.collapse_network_locations = false;
         self.active_tag_filter = None;
         self.collapse_tags = false;
         self.dual_panel_enabled = false;

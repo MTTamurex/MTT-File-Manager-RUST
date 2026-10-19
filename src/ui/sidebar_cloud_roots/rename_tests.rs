@@ -55,6 +55,7 @@ fn frame(
                 collapse_cloud_drives: false,
                 collapse_local_disks: false,
                 collapse_network_drives: false,
+                collapse_network_locations: false,
                 sidebar_renaming: None,
                 sidebar_rename_focus: false,
                 folder_rename: editing.as_ref(),

@@ -46,6 +46,16 @@ fn click_section_with_feedback(
     renaming: bool,
     dragging: bool,
 ) -> (Option<SidebarAction>, bool) {
+    render_section_with_feedback(section, button, renaming, dragging, false)
+}
+
+fn render_section_with_feedback(
+    section: Section,
+    button: egui::PointerButton,
+    renaming: bool,
+    dragging: bool,
+    collapsed_headers: bool,
+) -> (Option<SidebarAction>, bool) {
     let ctx = egui::Context::default();
     let mut fonts = egui::FontDefinitions::default();
     fonts.families.insert(
@@ -102,9 +112,10 @@ fn click_section_with_feedback(
             show_quick_access: false,
             show_tags: true,
             collapse_quick_access: false,
-            collapse_cloud_drives: false,
-            collapse_local_disks: false,
+            collapse_cloud_drives: collapsed_headers,
+            collapse_local_disks: collapsed_headers,
             collapse_network_drives: false,
+            collapse_network_locations: collapsed_headers,
             sidebar_renaming: None,
             sidebar_rename_focus: false,
             folder_rename: None,
@@ -130,6 +141,25 @@ fn click_section_with_feedback(
     let output = ctx.run_ui(egui::RawInput::default(), |ui| {
         let _ = render(ui);
     });
+    if collapsed_headers {
+        let header_y = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        Some(shape.shape.visual_bounding_rect().center().y)
+                    }
+                    _ => None,
+                })
+                .expect("collapsed header is visible")
+        };
+        let cloud = header_y(&t!("sidebar.cloud_drives"));
+        let local = header_y(&t!("sidebar.local_disks"));
+        let network = header_y(&t!("sidebar.network_locations"));
+        assert!((network - local - (local - cloud)).abs() < 0.1);
+        return (None, false);
+    }
     let pos = output
         .shapes
         .iter()
@@ -171,6 +201,17 @@ fn click_section_with_feedback(
         }
     }
     (result, highlighted)
+}
+
+#[test]
+fn collapsed_sidebar_headers_have_consistent_spacing() {
+    render_section_with_feedback(
+        Section::Local,
+        egui::PointerButton::Primary,
+        false,
+        false,
+        true,
+    );
 }
 
 #[test]

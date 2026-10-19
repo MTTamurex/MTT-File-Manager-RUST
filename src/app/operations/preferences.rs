@@ -310,13 +310,24 @@ impl ImageViewerApp {
         prefs.push(("sidebar_right_width", right_to_save.to_string()));
 
         // Sidebar tags section height persistence
-        if let Some(tags_h) = self.layout.sidebar_tags_height {
-            prefs.push(("sidebar_tags_height", tags_h.to_string()));
-        }
+        prefs.push((
+            "sidebar_tags_height",
+            self.layout
+                .sidebar_tags_height
+                .map(|height| height.to_string())
+                .unwrap_or_default(),
+        ));
         prefs.push((
             "sidebar_quick_access_height",
             self.layout
                 .sidebar_quick_access_height
+                .map(|height| height.to_string())
+                .unwrap_or_default(),
+        ));
+        prefs.push((
+            "sidebar_drives_height",
+            self.layout
+                .sidebar_drives_height
                 .map(|height| height.to_string())
                 .unwrap_or_default(),
         ));

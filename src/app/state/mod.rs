@@ -327,6 +327,7 @@ pub struct ImageViewerApp {
     pub collapse_cloud_drives: bool,   // Collapse Cloud Drives section in sidebar
     pub collapse_local_disks: bool,    // Collapse Local Disks section in sidebar
     pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
+    pub collapse_network_locations: bool,
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.

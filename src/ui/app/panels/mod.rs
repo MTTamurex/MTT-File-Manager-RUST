@@ -6,6 +6,7 @@ use eframe::egui;
 mod content;
 mod folder_error;
 mod panel_tab_bar;
+mod sidebar_layout;
 
 // Sidebar width constraints
 const LEFT_SIDEBAR_MIN: f32 = 150.0;
@@ -135,30 +136,17 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 .map(|(p, t)| (p.as_str(), t.as_str()));
 
             // ── Resizable sidebar section sizing ──
-            const QUICK_ACCESS_TOP_PADDING_H: f32 = 8.0;
-            const QUICK_ACCESS_HEADER_H: f32 = 16.0;
-            const QUICK_ACCESS_HEADER_GAP_H: f32 = 4.0;
-            const QUICK_ACCESS_ROW_H: f32 = 30.0;
-            const QUICK_ACCESS_RECYCLE_BIN_ROW_H: f32 = 28.0;
-            const QUICK_ACCESS_BOTTOM_PADDING_H: f32 = 8.0;
-            const QUICK_ACCESS_DIVIDER_H: f32 = 9.0;
-            const TAG_ROW_H: f32 = 26.0;
-            const TAG_HEADER_H: f32 = 22.0;
-            const TAG_HEADER_GAP_H: f32 = 4.0;
-            const TAG_BOTTOM_PADDING_H: f32 = 8.0;
-            const TAG_DIVIDER_H: f32 = 8.0 + 9.0 + 8.0; // space + separator + space
             let tag_count = app.tag_definitions.len();
             let tags_collapsed = app.collapse_tags;
             let tags_visible = app.show_tags && tag_count > 0;
             let tags_content_h = if !tags_visible {
                 0.0
-            } else if tags_collapsed {
-                TAG_HEADER_H + TAG_BOTTOM_PADDING_H
             } else {
-                TAG_HEADER_H
-                    + TAG_HEADER_GAP_H
-                    + (tag_count as f32 * TAG_ROW_H)
-                    + TAG_BOTTOM_PADDING_H
+                sidebar_layout::tags_content_height(
+                    tags_collapsed,
+                    tag_count,
+                    ui.spacing().item_spacing.y,
+                )
             };
 
             // ── Smooth scroll input ──
@@ -200,6 +188,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     collapse_cloud_drives: app.collapse_cloud_drives,
                     collapse_local_disks: app.collapse_local_disks,
                     collapse_network_drives: app.collapse_network_drives,
+                    collapse_network_locations: app.collapse_network_locations,
                     sidebar_renaming: sidebar_renaming_ref,
                     sidebar_rename_focus: app.sidebar_rename_focus,
                     folder_rename: app.sidebar_folder_rename.as_ref(),
@@ -218,36 +207,30 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             let avail_after_this_pc = ui.available_height();
             let quick_access_visible = app.show_quick_access
                 && app.quick_access_placement == QuickAccessPlacement::Sidebar;
-            let quick_access_item_spacing_h = ui.spacing().item_spacing.y;
             let quick_access_content_h = if !quick_access_visible {
                 0.0
-            } else if app.collapse_quick_access {
-                QUICK_ACCESS_TOP_PADDING_H + QUICK_ACCESS_HEADER_H
             } else {
-                QUICK_ACCESS_TOP_PADDING_H
-                    + QUICK_ACCESS_HEADER_H
-                    + QUICK_ACCESS_HEADER_GAP_H
-                    + if app.show_recycle_bin {
-                        QUICK_ACCESS_RECYCLE_BIN_ROW_H
-                    } else {
-                        0.0
-                    }
-                    + (app.pinned_folders.len() as f32 * QUICK_ACCESS_ROW_H)
-                    + QUICK_ACCESS_BOTTOM_PADDING_H
-                    + (1 + usize::from(app.show_recycle_bin) + app.pinned_folders.len()) as f32
-                        * quick_access_item_spacing_h
+                sidebar_layout::quick_access_content_height(
+                    app.collapse_quick_access,
+                    app.pinned_folders.len(),
+                    app.show_recycle_bin,
+                    ui.spacing().item_spacing.y,
+                )
             };
             let quick_access_max_h =
-                ((avail_after_this_pc - QUICK_ACCESS_DIVIDER_H) * 0.75).max(0.0);
+                ((avail_after_this_pc - sidebar_layout::QUICK_ACCESS_DIVIDER_HEIGHT) * 0.75)
+                    .max(0.0);
             let quick_access_min_h =
-                (QUICK_ACCESS_TOP_PADDING_H + QUICK_ACCESS_HEADER_H).min(quick_access_max_h);
+                sidebar_layout::QUICK_ACCESS_MIN_HEIGHT.min(quick_access_max_h);
             let quick_access_scroll_h = if quick_access_visible && app.collapse_quick_access {
                 quick_access_content_h.clamp(quick_access_min_h, quick_access_max_h)
             } else if quick_access_visible {
-                app.layout
-                    .sidebar_quick_access_height
-                    .unwrap_or(quick_access_content_h)
-                    .clamp(quick_access_min_h, quick_access_max_h)
+                sidebar_layout::section_height(
+                    quick_access_content_h,
+                    app.layout.sidebar_quick_access_height,
+                    quick_access_min_h,
+                    quick_access_max_h,
+                )
             } else {
                 0.0
             };
@@ -278,6 +261,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     collapse_cloud_drives: app.collapse_cloud_drives,
                     collapse_local_disks: app.collapse_local_disks,
                     collapse_network_drives: app.collapse_network_drives,
+                    collapse_network_locations: app.collapse_network_locations,
                     sidebar_renaming: sidebar_renaming_ref,
                     sidebar_rename_focus: app.sidebar_rename_focus,
                     folder_rename: app.sidebar_folder_rename.as_ref(),
@@ -296,7 +280,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
                         egui::ScrollArea::vertical()
                             .id_salt("sidebar_quick_access_scroll")
-                            .auto_shrink([false, false])
+                            .auto_shrink([false, true])
                             .max_height(quick_access_scroll_h)
                             .min_scrolled_height(0.0)
                             .scroll_bar_visibility(
@@ -322,7 +306,10 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             let mut quick_access_height_changed = false;
             if quick_access_scroll_h > 0.0 {
                 let (divider_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), QUICK_ACCESS_DIVIDER_H),
+                    egui::vec2(
+                        ui.available_width(),
+                        sidebar_layout::QUICK_ACCESS_DIVIDER_HEIGHT,
+                    ),
                     egui::Sense::hover(),
                 );
                 let mut hit_rect = divider_rect;
@@ -374,50 +361,39 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             // ── Compute actual tags height after the fixed top sections ──
             let avail_after_top = ui.available_height();
             let tags_max_h = (avail_after_top * 0.75).max(0.0);
-            let tags_min_h = (TAG_HEADER_H + TAG_BOTTOM_PADDING_H).min(tags_max_h);
-            let tags_scroll_h = if tag_count == 0 {
+            let tags_min_h = sidebar_layout::TAGS_MIN_HEIGHT.min(tags_max_h);
+            let tags_scroll_h = if !tags_visible {
                 0.0
             } else {
-                match app.layout.sidebar_tags_height {
-                    Some(h) => h.clamp(tags_min_h, tags_max_h),
-                    None => tags_content_h.min(avail_after_top * 0.35),
-                }
+                sidebar_layout::section_height(
+                    tags_content_h,
+                    app.layout
+                        .sidebar_tags_height
+                        .or(Some(avail_after_top * 0.35)),
+                    tags_min_h,
+                    tags_max_h,
+                )
             };
             let tags_block_h = if tags_scroll_h <= 0.0 {
                 0.0
             } else {
-                TAG_DIVIDER_H + tags_scroll_h
+                sidebar_layout::TAGS_DIVIDER_HEIGHT
+                    + 4.0 * ui.spacing().item_spacing.y
+                    + tags_scroll_h
             };
             let drives_avail = (avail_after_top - tags_block_h).max(0.0);
-            let tags_top_y = ui.cursor().top() + drives_avail;
+            let drives_min_h = 24.0_f32.min(drives_avail);
+            let drives_scroll_h = app
+                .layout
+                .sidebar_drives_height
+                .unwrap_or(drives_avail)
+                .clamp(drives_min_h, drives_avail);
             let pointer_over_quick_access = ui.input(|i| {
                 i.pointer
                     .hover_pos()
                     .map(|p| quick_access_interaction_rect.contains(p))
                     .unwrap_or(false)
             });
-            let pointer_over_tags = ui.input(|i| {
-                i.pointer
-                    .hover_pos()
-                    .map(|p| {
-                        p.x >= sidebar_rect.min.x
-                            && p.x <= sidebar_rect.max.x
-                            && p.y >= tags_top_y
-                            && p.y <= sidebar_rect.max.y
-                    })
-                    .unwrap_or(false)
-            });
-
-            if scroll_delta != 0.0
-                && pointer_in_sidebar
-                && !pointer_over_quick_access
-                && !pointer_over_tags
-            {
-                app.sidebar_tree.scroll_target_y += -scroll_delta * SIDEBAR_SCROLL_SPEED;
-                if app.sidebar_tree.scroll_target_y < 0.0 {
-                    app.sidebar_tree.scroll_target_y = 0.0;
-                }
-            }
 
             // Animate visual scroll toward target
             let dt = ui.input(|i| i.predicted_dt).min(0.05);
@@ -461,6 +437,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 collapse_cloud_drives: app.collapse_cloud_drives,
                 collapse_local_disks: app.collapse_local_disks,
                 collapse_network_drives: app.collapse_network_drives,
+                collapse_network_locations: app.collapse_network_locations,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
                 folder_rename: app.sidebar_folder_rename.as_ref(),
@@ -480,8 +457,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
                     egui::ScrollArea::both()
                         .id_salt("sidebar_scroll")
-                        .auto_shrink([false, false])
-                        .max_height(drives_avail)
+                        .auto_shrink([false, true])
+                        .max_height(drives_scroll_h)
                         .min_scrolled_height(0.0)
                         .scroll_bar_visibility(
                             egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
@@ -495,72 +472,39 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 })
                 .inner;
 
-            // ── Fixed bottom: Tags section (own scrollbar for many tags) ──
-            let mut tags_divider_drag_delta: Option<f32> = None;
+            // Tags follow the actual drive content, with their own scrollbar.
+            let drives_rendered_h = output.content_size.y.min(output.inner_rect.height());
+            let mut tags_resized_height: Option<f32> = None;
+            let mut tags_reset_height = false;
+            let mut drives_resized_height = None;
+            let mut drives_reset_height = false;
+            let mut sidebar_height_changed = false;
+            let mut tags_interaction_rect = egui::Rect::NOTHING;
             let tags_action = if tags_scroll_h > 0.0 {
-                // Draggable separator between drives and tags
-                let divider_h = 9.0;
-                let (divider_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), divider_h),
-                    egui::Sense::hover(), // allocate space only
+                let tags_output = sidebar_layout::render_tags_block(
+                    ui,
+                    sidebar_layout::TagsBlockLayout {
+                        height: tags_scroll_h,
+                        min_height: tags_min_h,
+                        max_height: tags_max_h,
+                        collapsed: tags_collapsed,
+                        drives_height: drives_rendered_h,
+                        drives_min_height: drives_min_h,
+                        drives_max_height: drives_avail,
+                    },
+                    |ui| {
+                        let mut act = None;
+                        render_tags_section(ui, &mut sidebar_ctx, &mut act);
+                        act
+                    },
                 );
-                // Widen hit area to full sidebar width
-                let mut hit_rect = divider_rect;
-                hit_rect.min.x = ui.clip_rect().min.x;
-                hit_rect.max.x = ui.clip_rect().max.x;
-
-                let divider_response = ui.interact(
-                    hit_rect,
-                    egui::Id::new("sidebar_tags_divider_drag"),
-                    egui::Sense::click_and_drag(),
-                );
-
-                if divider_response.hovered() || divider_response.dragged() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                }
-
-                if divider_response.dragged() {
-                    tags_divider_drag_delta = Some(divider_response.drag_delta().y);
-                    ui.ctx().request_repaint();
-                }
-
-                // Double-click resets to auto-size
-                if divider_response.double_clicked() {
-                    app.layout.sidebar_tags_height = None;
-                }
-
-                // Paint separator line (visually same as ui.separator())
-                if ui.is_rect_visible(hit_rect) {
-                    let center_y = hit_rect.center().y;
-                    let stroke = if divider_response.hovered() || divider_response.dragged() {
-                        egui::Stroke::new(1.5, ui.visuals().widgets.active.bg_fill)
-                    } else {
-                        ui.visuals().widgets.noninteractive.bg_stroke
-                    };
-                    ui.painter()
-                        .hline(hit_rect.min.x..=hit_rect.max.x, center_y, stroke);
-                }
-
-                ui.scope(|ui| {
-                    ui.spacing_mut().scroll.fade.strength = 0.0;
-
-                    egui::ScrollArea::vertical()
-                        .id_salt("sidebar_tags_scroll")
-                        .auto_shrink([false, false])
-                        .max_height(tags_scroll_h)
-                        .min_scrolled_height(0.0)
-                        .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                        )
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            let mut act = None;
-                            render_tags_section(ui, &mut sidebar_ctx, &mut act);
-                            act
-                        })
-                        .inner
-                })
-                .inner
+                tags_interaction_rect = tags_output.interaction_rect;
+                tags_resized_height = tags_output.resized_height;
+                tags_reset_height = tags_output.reset_height;
+                drives_resized_height = tags_output.resized_drives_height;
+                drives_reset_height = tags_output.reset_drives_height;
+                sidebar_height_changed = tags_output.height_changed;
+                tags_output.inner
             } else {
                 None
             };
@@ -568,14 +512,36 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             // sidebar_ctx no longer used — borrows of app released
             let _ = sidebar_ctx;
 
-            // Apply drag delta to tags height (after sidebar_ctx borrow is released)
-            if let Some(delta_y) = tags_divider_drag_delta {
-                let current_h = app.layout.sidebar_tags_height.unwrap_or(tags_scroll_h);
-                let new_h = (current_h - delta_y).clamp(tags_min_h, tags_max_h);
-                app.layout.sidebar_tags_height = Some(new_h);
+            if tags_reset_height {
+                app.layout.sidebar_tags_height = None;
+            } else if let Some(height) = tags_resized_height {
+                app.layout.sidebar_tags_height = Some(height);
+                // Keep the drives edge stationary while resizing Tags below it.
+                app.layout.sidebar_drives_height = Some(drives_rendered_h);
             }
-            if quick_access_height_changed {
+            if drives_reset_height {
+                app.layout.sidebar_drives_height = None;
+            } else if let Some(height) = drives_resized_height {
+                app.layout.sidebar_drives_height = Some(height);
+            }
+            if quick_access_height_changed || sidebar_height_changed {
                 app.save_preferences();
+            }
+
+            let pointer_over_tags = ui.input(|i| {
+                i.pointer
+                    .hover_pos()
+                    .is_some_and(|p| tags_interaction_rect.contains(p))
+            });
+            if scroll_delta != 0.0
+                && pointer_in_sidebar
+                && !pointer_over_quick_access
+                && !pointer_over_tags
+            {
+                app.sidebar_tree.scroll_target_y = (app.sidebar_tree.scroll_target_y
+                    - scroll_delta * SIDEBAR_SCROLL_SPEED)
+                    .max(0.0);
+                ui.ctx().request_repaint();
             }
 
             // Clamp target to actual content bounds after rendering
@@ -729,6 +695,9 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         }
         SidebarAction::ToggleNetworkDrives => {
             app.collapse_network_drives = !app.collapse_network_drives;
+        }
+        SidebarAction::ToggleNetworkLocations => {
+            app.collapse_network_locations = !app.collapse_network_locations;
         }
         SidebarAction::FilterByTag(tag_id) => {
             app.set_tag_filter(tag_id);

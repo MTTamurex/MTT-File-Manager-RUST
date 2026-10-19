@@ -38,6 +38,8 @@ pub struct LayoutState {
 
     // Quick Access section height (None = content-sized, Some = user-resized)
     pub sidebar_quick_access_height: Option<f32>,
+    // Drives block height cap (None = content-sized up to available space).
+    pub sidebar_drives_height: Option<f32>,
 }
 
 impl Default for LayoutState {
@@ -65,6 +67,7 @@ impl Default for LayoutState {
             dual_panel_split_ratio: 0.5,
             sidebar_tags_height: None,
             sidebar_quick_access_height: None,
+            sidebar_drives_height: None,
         }
     }
 }

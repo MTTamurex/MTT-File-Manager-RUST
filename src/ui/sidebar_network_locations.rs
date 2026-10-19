@@ -14,6 +14,21 @@ pub(super) fn render_network_locations(
         return;
     }
     let (header, _) = allocate_sidebar_viewport_row(ui, width, 16.0, Sense::hover());
+    let toggle_rect = Rect::from_center_size(
+        Pos2::new(header.max.x - 12.0, header.center().y),
+        egui::vec2(18.0, 18.0),
+    );
+    let toggle_response = ui
+        .interact(
+            toggle_rect,
+            egui::Id::new("sidebar_toggle_network_locations"),
+            Sense::click(),
+        )
+        .on_hover_text(if ctx.collapse_network_locations {
+            t!("sidebar.expand_section")
+        } else {
+            t!("sidebar.collapse_section")
+        });
     if ui.is_rect_visible(header) {
         ui.painter().text(
             Pos2::new(header.min.x + 8.0, header.center().y),
@@ -22,6 +37,28 @@ pub(super) fn render_network_locations(
             egui::FontId::proportional(10.0),
             Color32::from_gray(120),
         );
+        ui.painter().text(
+            toggle_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            if ctx.collapse_network_locations {
+                "v"
+            } else {
+                "^"
+            },
+            egui::FontId::proportional(14.0),
+            if toggle_response.hovered() {
+                ui.visuals().text_color()
+            } else {
+                Color32::from_gray(140)
+            },
+        );
+    }
+    if toggle_response.clicked() && action.is_none() {
+        *action = Some(SidebarAction::ToggleNetworkLocations);
+    }
+    if ctx.collapse_network_locations {
+        ui.add_space(6.0);
+        return;
     }
     ui.add_space(4.0);
     for location in ctx.network_locations {
@@ -165,6 +202,121 @@ fn path_is_at_or_under(path: &str, root: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_toggle_hides_rows_and_preserves_tree_expansion() {
+        use crate::app::state::sidebar_tree_state::SidebarTreeState;
+        use crate::infrastructure::directory_cache::DirectoryCache;
+        use std::sync::Arc;
+
+        let ui_ctx = egui::Context::default();
+        let target = tempfile::tempdir().unwrap();
+        let locations = [crate::domain::network_location::NetworkLocation {
+            kind: crate::domain::network_location::NetworkLocationKind::FolderShortcut,
+            shortcut_path: r"C:\Network Shortcuts\Folder".into(),
+            path: target.path().to_string_lossy().into_owned(),
+            label: "Network Folder".into(),
+        }];
+        let mut tree = SidebarTreeState::new(Arc::new(DirectoryCache::new()));
+        // Use a local temporary target, never probe a remote share in this test.
+        tree.toggle_expand(target.path());
+        let drive_info = Default::default();
+        let mounted = Default::default();
+        let tags = Default::default();
+        let counts = Default::default();
+        let mut icons = crate::ui::icon_loader::IconLoader::new();
+        let mut sidebar = SidebarContext {
+            disks: &[],
+            drive_info_cache: &drive_info,
+            cloud_roots: &[],
+            network_locations: &locations,
+            current_path: "C:\\",
+            context_selection: None,
+            is_computer_view: true,
+            is_recycle_bin_view: false,
+            computer_icon: None,
+            is_renaming: false,
+            icon_loader: &mut icons,
+            pinned_folders: &[],
+            is_item_dragging: false,
+            can_drop_items_to_recycle_bin: false,
+            is_folder_dragging: false,
+            dragging_path: None,
+            show_recycle_bin: false,
+            show_quick_access: false,
+            show_tags: false,
+            collapse_quick_access: false,
+            collapse_cloud_drives: false,
+            collapse_local_disks: false,
+            collapse_network_drives: false,
+            collapse_network_locations: false,
+            sidebar_renaming: None,
+            sidebar_rename_focus: false,
+            folder_rename: None,
+            mounted_iso_drives: &mounted,
+            tree_state: &tree,
+            tag_definitions: &tags,
+            sidebar_tag_ids: &[],
+            tag_counts: &counts,
+            active_tag_filter: None,
+            collapse_tags: false,
+        };
+        let mut render = |input, collapsed| {
+            sidebar.collapse_network_locations = collapsed;
+            let mut action = None;
+            let mut top = 0.0;
+            let mut bottom = 0.0;
+            let output = ui_ctx.run_ui(input, |ui| {
+                top = ui.cursor().top();
+                render_network_locations(ui, &mut sidebar, &mut action, 260.0);
+                bottom = ui.cursor().top();
+            });
+            (output, action, bottom - top)
+        };
+        let (expanded, _, expanded_height) = render(egui::RawInput::default(), false);
+        assert!(expanded.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "Network Folder")
+        }));
+        let (collapsed, _, collapsed_height) = render(egui::RawInput::default(), true);
+        assert!(collapsed_height < expanded_height);
+        assert!(!collapsed.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "Network Folder")
+        }));
+        let toggle = collapsed
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == "v" => {
+                    Some(shape.shape.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .expect("collapsed section toggle is visible");
+        for pressed in [true, false] {
+            let (_, action, _) = render(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(toggle),
+                        egui::Event::PointerButton {
+                            pos: toggle,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                true,
+            );
+            if !pressed {
+                assert!(matches!(
+                    action,
+                    Some(SidebarAction::ToggleNetworkLocations)
+                ));
+            }
+        }
+        assert!(tree.is_expanded(Path::new(&locations[0].path)));
+    }
 
     #[test]
     fn network_location_selection_is_case_insensitive_and_respects_path_boundaries() {

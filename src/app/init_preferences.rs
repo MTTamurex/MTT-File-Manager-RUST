@@ -50,6 +50,7 @@ pub(super) struct StartupPreferences {
     pub(super) active_tag_filter: Option<i64>,
     pub(super) sidebar_tags_height: Option<f32>,
     pub(super) sidebar_quick_access_height: Option<f32>,
+    pub(super) sidebar_drives_height: Option<f32>,
     pub(super) sidebar_tag_order: Vec<i64>,
     pub(super) initial_indexing_notice_generation: Option<String>,
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
@@ -347,6 +348,10 @@ impl StartupPreferences {
             .get("sidebar_quick_access_height")
             .and_then(|s| s.parse::<f32>().ok())
             .filter(|height| height.is_finite() && *height > 0.0);
+        let sidebar_drives_height = prefs
+            .get("sidebar_drives_height")
+            .and_then(|s| s.parse::<f32>().ok())
+            .filter(|height| height.is_finite() && *height > 0.0);
         let sidebar_tag_order = prefs
             .get("sidebar_tag_order")
             .map(|value| crate::app::operations::tag_ops::parse_sidebar_tag_order(value))
@@ -423,6 +428,7 @@ impl StartupPreferences {
             active_tag_filter,
             sidebar_tags_height,
             sidebar_quick_access_height,
+            sidebar_drives_height,
             sidebar_tag_order,
             initial_indexing_notice_generation,
             saved_tab_session,
@@ -519,6 +525,25 @@ mod tests {
 
         db.set_preference("minimize_to_tray", "true").unwrap();
         assert!(StartupPreferences::load(&db).minimize_to_tray);
+    }
+
+    #[test]
+    fn sidebar_drives_height_loads_valid_values_and_defaults_to_auto() {
+        let db = test_db();
+        assert!(StartupPreferences::load(&db)
+            .sidebar_drives_height
+            .is_none());
+        db.set_preference("sidebar_drives_height", "180.5").unwrap();
+        assert_eq!(
+            StartupPreferences::load(&db).sidebar_drives_height,
+            Some(180.5)
+        );
+        for value in ["", "invalid", "NaN", "inf", "-10", "0"] {
+            db.set_preference("sidebar_drives_height", value).unwrap();
+            assert!(StartupPreferences::load(&db)
+                .sidebar_drives_height
+                .is_none());
+        }
     }
 
     #[test]

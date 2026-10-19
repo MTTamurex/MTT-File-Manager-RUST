@@ -237,6 +237,7 @@ impl ImageViewerApp {
             active_tag_filter: saved_active_tag_filter,
             sidebar_tags_height,
             sidebar_quick_access_height,
+            sidebar_drives_height,
             sidebar_tag_order,
             initial_indexing_notice_generation,
             mut saved_tab_session,
@@ -501,6 +502,7 @@ impl ImageViewerApp {
             collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            collapse_network_locations: false,
             drive_state: build_drive_state(
                 disks,
                 cloud_roots.clone(),
@@ -704,6 +706,7 @@ impl ImageViewerApp {
                 dual_panel_split_ratio,
                 sidebar_tags_height,
                 sidebar_quick_access_height,
+                sidebar_drives_height,
             ),
 
             // Metadata worker

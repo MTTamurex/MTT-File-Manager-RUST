@@ -71,6 +71,7 @@ pub struct SidebarContext<'a> {
     pub collapse_cloud_drives: bool,
     pub collapse_local_disks: bool,
     pub collapse_network_drives: bool,
+    pub collapse_network_locations: bool,
     /// Inline drive rename: (drive_path, editable_text)
     pub sidebar_renaming: Option<(&'a str, &'a str)>,
     pub sidebar_rename_focus: bool,
@@ -128,6 +129,7 @@ pub enum SidebarAction {
     ToggleLocalDisks,
     /// Toggle collapse of Network Drives section
     ToggleNetworkDrives,
+    ToggleNetworkLocations,
     FilterByTag(Option<i64>),
     ToggleTags,
     /// Items were dropped onto a sidebar folder/drive (move or copy)
@@ -486,6 +488,7 @@ pub fn render_sidebar_drives(
         }
 
         if collapsed {
+            ui.add_space(6.0);
             return;
         }
 

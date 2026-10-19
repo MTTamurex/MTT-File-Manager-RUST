@@ -75,6 +75,7 @@ impl ImageViewerApp {
         active.collapse_cloud_drives = self.collapse_cloud_drives;
         active.collapse_local_disks = self.collapse_local_disks;
         active.collapse_network_drives = self.collapse_network_drives;
+        active.collapse_network_locations = self.collapse_network_locations;
         active.active_tag_filter = self.active_tag_filter;
         active.collapse_tags = self.collapse_tags;
         active.dual_panel_enabled = self.dual_panel_enabled;
