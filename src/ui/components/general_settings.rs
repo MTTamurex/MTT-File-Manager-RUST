@@ -91,6 +91,8 @@ pub fn render_general_settings_section(
     ) {
         output.minimize_to_tray_changed = true;
     }
+    ui.add_space(12.0);
+    super::instance_settings::render(ui, app);
     ui.add_space(20.0);
     let default_file_manager_settings =
         crate::ui::components::default_file_manager_settings::render_default_file_manager_settings_section(

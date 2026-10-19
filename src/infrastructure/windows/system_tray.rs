@@ -109,6 +109,11 @@ pub(crate) fn show_window(hwnd: HWND) {
     }
 }
 
+pub(crate) fn request_open(hwnd: HWND) {
+    show_window(hwnd);
+    PENDING_ACTION.store(ACTION_OPEN, Ordering::Release);
+}
+
 fn notify_icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
     let mut data = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,

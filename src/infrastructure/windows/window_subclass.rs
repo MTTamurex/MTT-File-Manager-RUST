@@ -325,6 +325,11 @@ extern "system" fn borderless_subclass_proc(
         return LRESULT(0);
     }
 
+    if msg == super::app_instances::RESTORE_MESSAGE {
+        super::system_tray::request_open(hwnd);
+        return LRESULT(1);
+    }
+
     if msg == WM_PAINT && redraw_suppression::is_active() {
         unsafe {
             let _ = ValidateRect(Some(hwnd), None);
@@ -369,7 +374,7 @@ extern "system" fn borderless_subclass_proc(
                             // synchronous SendMessage is still in flight:
                             // the input queues are attached at this moment,
                             // so this thread may legally take the foreground.
-                            super::drives::restore_window_foreground(hwnd);
+                            super::system_tray::request_open(hwnd);
                             return LRESULT(1);
                         }
                     }

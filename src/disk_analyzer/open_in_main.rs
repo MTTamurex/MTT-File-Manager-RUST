@@ -5,8 +5,6 @@
 //! helper mode, which persists the request to the shared app-state DB for
 //! the main instance to consume.
 
-/// Must match the main window title constant in `main.rs` (never changes).
-const MAIN_WINDOW_TITLE: &str = "MTT File Manager";
 /// Mirrors the receiver-side payload cap in `window_subclass.rs`.
 const MAX_REQUEST_BYTES: usize = 8192;
 
@@ -54,12 +52,10 @@ pub fn try_send_open_folder_to_main_app(path: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn send_to_main_window(path: &str) -> bool {
-    use windows::core::PCWSTR;
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::System::DataExchange::COPYDATASTRUCT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, IsWindow, SendMessageTimeoutW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT,
-        WM_COPYDATA,
+        IsWindow, SendMessageTimeoutW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, WM_COPYDATA,
     };
 
     let bytes = path.as_bytes();
@@ -68,11 +64,7 @@ fn send_to_main_window(path: &str) -> bool {
     }
 
     unsafe {
-        let title: Vec<u16> = MAIN_WINDOW_TITLE
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        let Ok(hwnd) = FindWindowW(None, PCWSTR(title.as_ptr())) else {
+        let Some(hwnd) = crate::infrastructure::windows::app_instances::find_main_window() else {
             return false;
         };
         if !IsWindow(Some(hwnd)).as_bool() {

@@ -588,11 +588,6 @@ fn main() -> eframe::Result<()> {
                 log::error!("[OPEN-FOLDER] Unsupported folder target");
                 return Ok(());
             }
-            if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_folder_to_main_app(
-                &path.to_string_lossy(),
-            ) {
-                std::process::exit(0);
-            }
             startup_folder = Some(path);
         }
         if flag_str.eq_ignore_ascii_case("--video-player") {
@@ -632,6 +627,40 @@ fn main() -> eframe::Result<()> {
             return Ok(());
         }
     }
+
+    // Serialize main-app startup until its native message receiver is ready.
+    // Standalone viewers and helper modes have already returned above.
+    let startup_lock =
+        mtt_file_manager::infrastructure::windows::app_instances::StartupLock::acquire()
+            .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+    // Reuse Explorer's existing new-tab behavior, but only after any concurrent
+    // startup has published a window with a ready message receiver.
+    if let Some(path) = &startup_folder {
+        if mtt_file_manager::disk_analyzer::open_in_main::try_send_open_folder_to_main_app(
+            &path.to_string_lossy(),
+        ) {
+            return Ok(());
+        }
+    }
+    let instance_prefs = read_early_preferences(&[
+        mtt_file_manager::infrastructure::windows::app_instances::ALLOW_MULTIPLE_INSTANCES_KEY,
+    ]);
+    use mtt_file_manager::infrastructure::windows::app_instances;
+    if !app_instances::allows_multiple_instances(
+        instance_prefs
+            .get(app_instances::ALLOW_MULTIPLE_INSTANCES_KEY)
+            .map(String::as_str),
+    ) {
+        if let Some(hwnd) = app_instances::find_main_window() {
+            if !app_instances::restore_main_window(hwnd) {
+                log::warn!(
+                    "[INSTANCES] Existing instance did not respond; no duplicate was opened"
+                );
+            }
+            return Ok(());
+        }
+    }
+    startup_lock.hold_until_window_ready();
 
     log::info!("MTT File Manager starting");
     start_temporary_startup_priority_boost();

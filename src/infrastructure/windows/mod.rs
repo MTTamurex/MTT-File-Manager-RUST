@@ -1,6 +1,7 @@
 //! Windows API modules
 //! Follows .cursorrules: separation of concerns, < 300 lines per file
 
+pub mod app_instances;
 pub mod app_theme;
 pub mod bitmap_conversion;
 pub mod codec_registry;

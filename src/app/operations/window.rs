@@ -7,9 +7,8 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
-use windows::core::PCWSTR;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 impl ImageViewerApp {
     /// Returns the HWND to use as owner for Shell file-operation dialogs
@@ -24,47 +23,43 @@ impl ImageViewerApp {
             .unwrap_or_default()
     }
 
-    /// Captures and stores the native HWND from the main window title.
+    /// Captures the native HWND belonging to this instance, not another window
+    /// with the same title.
     /// # Borderless Window Support
     /// When HWND is obtained, installs a native subclass to handle WM_NCHITTEST
     /// for resize borders on the borderless window.
-    pub fn ensure_window_handle(&mut self, _frame: &eframe::Frame) {
+    pub fn ensure_window_handle(&mut self, frame: &eframe::Frame) {
         if self.native_hwnd.is_some() {
             return;
         }
 
-        // Try to find the window by title
-        // Note: This is a hack because eframe doesn't yet expose HWND directly in a safe/easy way on Windows
-        // The title must match the one defined in main.rs
-        let window_title = "MTT File Manager\0".encode_utf16().collect::<Vec<u16>>();
+        if let Ok(handle) = frame.window_handle() {
+            if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                let hwnd = HWND(handle.hwnd.get() as *mut _);
+                self.native_hwnd = Some(hwnd);
 
-        unsafe {
-            if let Ok(hwnd) = FindWindowW(None, PCWSTR(window_title.as_ptr())) {
-                if !hwnd.is_invalid() {
-                    self.native_hwnd = Some(hwnd);
-
-                    // Create the invisible proxy window used as owner for Shell
-                    // file-operation dialogs so the Shell cannot disable the app's
-                    // main window during long or cancelled operations.
-                    self.shell_op_proxy_hwnd = create_shell_op_proxy_window();
-                    if self.shell_op_proxy_hwnd.is_none() {
-                        log::warn!(
-                            "Shell op proxy window creation failed; \
+                // Create the invisible proxy window used as owner for Shell
+                // file-operation dialogs so the Shell cannot disable the app's
+                // main window during long or cancelled operations.
+                self.shell_op_proxy_hwnd = create_shell_op_proxy_window();
+                if self.shell_op_proxy_hwnd.is_none() {
+                    log::warn!(
+                        "Shell op proxy window creation failed; \
                              Shell dialogs may disable the app window during file ops"
-                        );
-                    }
-
-                    // Install borderless subclass for resize borders
-                    // This handles WM_NCHITTEST to provide resize zones on window edges
-                    if install_borderless_subclass(hwnd) {
-                        log::info!("Borderless resize subclass installed successfully");
-                    } else {
-                        log::warn!("Failed to install borderless resize subclass");
-                    }
-
-                    // Keep rounded corners in windowed mode (Windows 11 DWM).
-                    apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
+                    );
                 }
+
+                // Install borderless subclass for resize borders
+                // This handles WM_NCHITTEST to provide resize zones on window edges
+                if install_borderless_subclass(hwnd) {
+                    crate::infrastructure::windows::app_instances::register_main_window(hwnd);
+                    log::info!("Borderless resize subclass installed successfully");
+                } else {
+                    log::warn!("Failed to install borderless resize subclass");
+                }
+
+                // Keep rounded corners in windowed mode (Windows 11 DWM).
+                apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
             }
         }
     }
