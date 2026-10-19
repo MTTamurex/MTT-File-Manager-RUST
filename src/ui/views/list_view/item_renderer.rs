@@ -530,6 +530,7 @@ fn list_item_content_contains_pointer(
     let size_str = if item.is_dir && !item.is_archive() {
         ctx.folder_size_cache
             .peek(&item.path)
+            .or_else(|| ctx.folder_sort_sizes.get(&item.path))
             .map(|size| format_size(*size))
             .unwrap_or_default()
     } else {
@@ -699,7 +700,11 @@ fn render_regular_columns(
     // 4. Size
     let size_str = if item.is_dir && !item.is_archive() {
         // Folder: look up cached size from the batch worker.
-        if let Some(&size) = ctx.folder_size_cache.peek(&item.path) {
+        if let Some(&size) = ctx
+            .folder_size_cache
+            .peek(&item.path)
+            .or_else(|| ctx.folder_sort_sizes.get(&item.path))
+        {
             format_size(size)
         } else {
             // Request size if not already loading (collected by caller after render).

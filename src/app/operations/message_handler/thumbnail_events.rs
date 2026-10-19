@@ -185,7 +185,9 @@ impl ImageViewerApp {
         // 6. Folder size updates (lowest priority in critical frames)
         if !should_defer_low_priority {
             received_any |= self.process_folder_size_results();
-        } else if !self.folder_size_state.pending_revalidation.is_empty() {
+        } else if !self.folder_size_state.pending_revalidation.is_empty()
+            || self.folder_size_sorting_needs_update()
+        {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
         let t_sizes = Instant::now();

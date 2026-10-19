@@ -265,6 +265,7 @@ pub struct ListViewContext<'a> {
     pub show_preview_panel: bool,
     pub thumbnail_requests_this_frame: usize,
     pub folder_size_cache: &'a lru::LruCache<PathBuf, u64>,
+    pub folder_sort_sizes: &'a std::collections::HashMap<PathBuf, u64>,
     pub folder_size_batch_loading: &'a FxHashSet<PathBuf>,
     pub folder_size_requests: &'a mut Vec<PathBuf>,
     pub col_name_width: &'a mut f32,

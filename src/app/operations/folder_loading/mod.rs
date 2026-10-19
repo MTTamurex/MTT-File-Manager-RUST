@@ -8,6 +8,7 @@ mod folder_scan;
 mod guards;
 mod load_pipeline;
 mod refresh;
+mod size_sorting;
 mod view_updates;
 
 // EST-02: pool workers run the pipeline body directly.

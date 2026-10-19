@@ -613,6 +613,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                 folder_path: path,
                                 total_size: Some(total_size),
                                 request_epoch: req_epoch,
+                                request_generation: req_gen,
                             });
                             ctx.request_repaint();
                             continue;
@@ -629,6 +630,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                             folder_path: path,
                                             total_size: Some(result.total_size),
                                             request_epoch: req_epoch,
+                                            request_generation: req_gen,
                                         });
                                         ctx.request_repaint();
                                         continue;
@@ -655,6 +657,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                 folder_path: path,
                                 total_size: None,
                                 request_epoch: req_epoch,
+                                request_generation: req_gen,
                             });
                             ctx.request_repaint();
                             continue;
@@ -699,14 +702,13 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 if !cancel_worker.load(Ordering::Acquire)
                     && req_gen == generation_worker.load(Ordering::Acquire)
                 {
-                    if let Some(result) = result {
-                        let _ = res_tx.send(BatchSizeResult {
-                            folder_path: path,
-                            total_size: Some(result.total_size),
-                            request_epoch: req_epoch,
-                        });
-                        ctx.request_repaint();
-                    }
+                    let _ = res_tx.send(BatchSizeResult {
+                        folder_path: path,
+                        total_size: result.map(|result| result.total_size),
+                        request_epoch: req_epoch,
+                        request_generation: req_gen,
+                    });
+                    ctx.request_repaint();
                 }
 
                 crate::infrastructure::io_priority::reset_thread_priority();

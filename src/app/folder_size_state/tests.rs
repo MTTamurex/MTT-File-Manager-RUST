@@ -8,6 +8,7 @@ fn test_state() -> FolderSizeState {
     let (_batch_res_sender, batch_res_receiver) = std::sync::mpsc::channel();
 
     FolderSizeState {
+        size_sorting: Default::default(),
         req_sender,
         res_receiver,
         cancel: Arc::new(AtomicBool::new(false)),
@@ -24,6 +25,7 @@ fn test_state() -> FolderSizeState {
         batch_cancel: Arc::new(AtomicBool::new(false)),
         batch_generation: Arc::new(AtomicU64::new(0)),
         batch_loading: FxHashSet::default(),
+        batch_request_epochs: Default::default(),
         batch_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         pending_revalidation: HashMap::new(),
         pending_revalidation_next_deadline: None,
@@ -31,6 +33,8 @@ fn test_state() -> FolderSizeState {
         batch_invalidation_last_prune: Instant::now(),
     }
 }
+
+mod size_sorting_tests;
 
 #[test]
 fn panel_stale_summary_requires_complete_counts() {

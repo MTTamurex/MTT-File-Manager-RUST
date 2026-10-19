@@ -13,8 +13,11 @@ const FOLDER_SIZE_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(30);
 const FOLDER_SIZE_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
+mod batch;
 mod revalidation;
 pub use revalidation::PendingFolderSizeRevalidation;
+mod sorting;
+pub use sorting::SizeSortingState;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ActiveFolderSizeRequest {
@@ -99,12 +102,14 @@ pub struct BatchSizeResult {
     /// Invalidation epoch copied from the request — compared against the
     /// current `batch_invalidation_epoch` to detect staleness.
     pub request_epoch: u64,
+    pub request_generation: u64,
 }
 
 /// Batch request payload: (path, generation, invalidation_epoch).
 pub type BatchSizeRequest = (PathBuf, u64, u64);
 
 pub struct FolderSizeState {
+    pub size_sorting: SizeSortingState,
     pub req_sender: Sender<FolderSizeRequest>,
     pub res_receiver: Receiver<FolderSizeMessage>,
     pub cancel: Arc<AtomicBool>,
@@ -129,6 +134,7 @@ pub struct FolderSizeState {
     pub batch_generation: Arc<AtomicU64>,
     /// Paths already sent to batch worker, awaiting response.
     pub batch_loading: FxHashSet<PathBuf>,
+    pub batch_request_epochs: HashMap<PathBuf, u64>,
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
     pub batch_cache: LruCache<PathBuf, u64>,
     /// Paths scheduled for one deferred re-invalidation.
@@ -356,6 +362,7 @@ impl FolderSizeState {
     /// Call on every navigation or List→Grid switch to stop orphan
     /// slow-path scans from the previous folder.
     pub fn cancel_batch(&mut self) {
+        self.size_sorting = SizeSortingState::default();
         // 0. Abort any in-flight single-folder full-tree scan so it
         //    doesn't keep running after the user navigates away.
         self.cancel.store(true, Ordering::Release);
@@ -374,6 +381,7 @@ impl FolderSizeState {
         // 4. Clear the dedup set so new requests for the same paths
         //    aren't incorrectly blocked.
         self.batch_loading.clear();
+        self.batch_request_epochs.clear();
 
         // 5. The worker clears the cancel flag only after it receives a request
         //    from the new generation. This makes cancellation observable by an

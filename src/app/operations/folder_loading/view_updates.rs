@@ -8,6 +8,7 @@ impl ImageViewerApp {
     /// PERFORMANCE: Uses filter_items_opt() which avoids cloning when query is empty.
     /// This eliminates unnecessary allocations in 99% of use cases.
     pub fn filter_items(&mut self) {
+        self.prepare_folder_size_sort(true);
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
             || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
@@ -25,34 +26,24 @@ impl ImageViewerApp {
             self.tag_assignments_normalized.as_ref(),
         ) {
             Some(mut filtered) => {
-                sorting::sort_items(
+                sorting::sort_items_with_folder_sizes(
                     &mut filtered,
                     self.sort_mode,
                     self.sort_descending,
                     self.folders_position,
+                    &self.folder_size_state.size_sorting.sizes,
                 );
                 self.items = Arc::new(filtered);
             }
             None => {
-                // Empty query: sort all_items in-place and use directly
-                // This avoids a full clone of the entire vector
-                let sort_mode = self.sort_mode;
-                let sort_descending = self.sort_descending;
-                let folders_position = self.folders_position;
-                sorting::sort_items(
-                    self.all_items_mut(),
-                    sort_mode,
-                    sort_descending,
-                    folders_position,
-                );
-                self.share_visible_items_from_all_items();
+                self.sort_all_items();
             }
         }
-        self.rebuild_computer_view_indices();
         self.total_items = self.items.len();
-        self.rebuild_group_projection();
-
         self.reconcile_visible_selection_index();
+        self.rebuild_computer_view_indices();
+        self.rebuild_group_projection();
+        self.remember_folder_size_sort();
     }
 
     /// Sorts items based on the current mode and folder position preference.
@@ -61,6 +52,11 @@ impl ImageViewerApp {
     /// - Uses par_sort_by for lists >5000 items (rayon)
     /// - Uses case-insensitive comparisons without allocation (natord::compare_ignore_case)
     pub fn sort_items(&mut self) {
+        let anchor_path = self
+            .selection_anchor
+            .and_then(|index| self.items.get(index))
+            .map(|item| item.path.clone());
+        self.prepare_folder_size_sort(true);
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
             || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
@@ -70,30 +66,39 @@ impl ImageViewerApp {
             self.active_tag_filter
         };
         if self.search_query.is_empty() && active_tag_filter.is_none() {
-            let sort_mode = self.sort_mode;
-            let sort_descending = self.sort_descending;
-            let folders_position = self.folders_position;
-            sorting::sort_items(
-                self.all_items_mut(),
-                sort_mode,
-                sort_descending,
-                folders_position,
-            );
-            self.share_visible_items_from_all_items();
+            self.sort_all_items();
         } else {
             // PERFORMANCE: If we have unique ownership of the Arc, we can modify in-place
             // using Arc::make_mut(). Otherwise, we need to clone.
             let items = Arc::make_mut(&mut self.items);
-            sorting::sort_items(
+            sorting::sort_items_with_folder_sizes(
                 items,
                 self.sort_mode,
                 self.sort_descending,
                 self.folders_position,
+                &self.folder_size_state.size_sorting.sizes,
             );
         }
         self.reconcile_visible_selection_index();
+        if self.multi_selection.len() > 1 {
+            self.selection_anchor =
+                anchor_path.and_then(|path| self.items.iter().position(|item| item.path == path));
+        }
         self.rebuild_computer_view_indices();
         self.rebuild_group_projection();
+        self.remember_folder_size_sort();
+    }
+
+    fn sort_all_items(&mut self) {
+        self.items_revision = self.items_revision.wrapping_add(1);
+        sorting::sort_items_with_folder_sizes(
+            Arc::make_mut(&mut self.all_items).as_mut_slice(),
+            self.sort_mode,
+            self.sort_descending,
+            self.folders_position,
+            &self.folder_size_state.size_sorting.sizes,
+        );
+        self.share_visible_items_from_all_items();
     }
 
     pub fn rebuild_group_projection(&mut self) {

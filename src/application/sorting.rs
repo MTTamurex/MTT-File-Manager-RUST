@@ -1,6 +1,9 @@
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
 
 mod filtering;
+#[cfg(test)]
+#[path = "sorting/size_tests.rs"]
+mod size_tests;
 mod sort_impl;
 
 /// Sorts a slice of FileEntry in place based on the given criteria.
@@ -14,6 +17,23 @@ pub fn sort_items(
     folders_position: FoldersPosition,
 ) {
     sort_impl::sort_items(items, mode, descending, folders_position)
+}
+
+/// Sort using calculated directory sizes without changing filesystem metadata.
+pub fn sort_items_with_folder_sizes(
+    items: &mut [FileEntry],
+    mode: SortMode,
+    descending: bool,
+    folders_position: FoldersPosition,
+    folder_sizes: &std::collections::HashMap<std::path::PathBuf, u64>,
+) {
+    sort_impl::sort_items_with_folder_sizes(items, mode, descending, folders_position, |item| {
+        if item.is_recycle_item() || item.drive_info.is_some() {
+            Some(item.size)
+        } else {
+            folder_sizes.get(&item.path).copied()
+        }
+    });
 }
 
 /// Filters items based on a query string.

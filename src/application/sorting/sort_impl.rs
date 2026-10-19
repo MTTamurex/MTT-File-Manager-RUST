@@ -87,6 +87,18 @@ pub(super) fn sort_items(
     descending: bool,
     folders_position: FoldersPosition,
 ) {
+    sort_items_with_folder_sizes(items, mode, descending, folders_position, |item| {
+        Some(item.size)
+    });
+}
+
+pub(super) fn sort_items_with_folder_sizes(
+    items: &mut [FileEntry],
+    mode: SortMode,
+    descending: bool,
+    folders_position: FoldersPosition,
+    folder_size: impl Fn(&FileEntry) -> Option<u64> + Sync,
+) {
     // Helper to check if an item is a "true" directory (not an archive file).
     let is_true_dir =
         |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
@@ -114,7 +126,24 @@ pub(super) fn sort_items(
         let ordering = match mode {
             SortMode::Name => natord::compare_ignore_case(&a.name, &b.name),
             SortMode::Date => get_sort_date_for_comparison(a, b),
-            SortMode::Size => a.size.cmp(&b.size),
+            SortMode::Size => {
+                let size = |item: &FileEntry| {
+                    if is_true_dir(item) {
+                        folder_size(item)
+                    } else {
+                        Some(item.size)
+                    }
+                };
+                match (size(a), size(b)) {
+                    (Some(a_size), Some(b_size)) => a_size
+                        .cmp(&b_size)
+                        .then_with(|| natord::compare_ignore_case(&a.name, &b.name)),
+                    // Unknown sizes stay after known sizes in either direction.
+                    (None, Some(_)) => return Ordering::Greater,
+                    (Some(_), None) => return Ordering::Less,
+                    (None, None) => natord::compare_ignore_case(&a.name, &b.name),
+                }
+            }
             SortMode::Type => {
                 // Extract extension from the cached `name` field (a &str) to avoid
                 // OsString allocation from path.extension().to_ascii_lowercase().

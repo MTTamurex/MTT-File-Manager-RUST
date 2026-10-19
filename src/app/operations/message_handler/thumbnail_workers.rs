@@ -939,6 +939,9 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .batch_cache
                         .put(folder_path.clone(), summary.total_size);
+                    self.folder_size_state
+                        .size_sorting
+                        .complete(&folder_path, summary.total_size);
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
@@ -951,6 +954,8 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state.cache.pop(&folder_path);
+                    self.folder_size_state.batch_cache.pop(&folder_path);
+                    self.folder_size_state.size_sorting.invalidate(&folder_path);
                     self.folder_size_state
                         .reschedule_panel_revalidation_if_stale(&folder_path, Instant::now());
                     received_any = true;
@@ -964,6 +969,8 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state.cache.pop(&folder_path);
+                    self.folder_size_state.batch_cache.pop(&folder_path);
+                    self.folder_size_state.size_sorting.invalidate(&folder_path);
                     self.folder_size_state
                         .record_failure(folder_path, Instant::now());
                     received_any = true;
@@ -981,13 +988,12 @@ impl ImageViewerApp {
         if processed_messages >= MAX_FOLDER_SIZE_MSGS_PER_FRAME {
             has_more = true;
         }
-        if !has_more
-            && !self
-                .folder_size_state
-                .expire_requests(Instant::now())
-                .is_empty()
-        {
-            received_any = true;
+        if !has_more {
+            for path in self.folder_size_state.expire_requests(Instant::now()) {
+                self.folder_size_state.batch_cache.pop(&path);
+                self.folder_size_state.size_sorting.invalidate(&path);
+                received_any = true;
+            }
         }
 
         // ── Drain batch worker results (list-view folder sizes) ──
@@ -1001,30 +1007,16 @@ impl ImageViewerApp {
                 };
                 batch_count += 1;
 
-                let crate::app::folder_size_state::BatchSizeResult {
-                    folder_path,
-                    total_size,
-                    request_epoch,
-                } = result;
-
-                self.folder_size_state.batch_loading.remove(&folder_path);
-
-                // Epoch-based staleness check: the result carries the epoch
-                // that was active when its request was sent.  If a cache
-                // invalidation bumped the epoch AFTER the request was sent,
-                // the scan started with stale data — discard it.  The next
-                // render will re-request a fresh scan.
-                let current_epoch = self
-                    .folder_size_state
-                    .batch_invalidation_epoch
-                    .get(&folder_path)
-                    .copied()
-                    .unwrap_or(0);
-                if request_epoch < current_epoch {
-                    // Stale result — discard.
+                if !self.folder_size_state.finish_batch_result(&result) {
                     received_any = true;
                     continue;
                 }
+
+                let crate::app::folder_size_state::BatchSizeResult {
+                    folder_path,
+                    total_size,
+                    ..
+                } = result;
 
                 let Some(total_size) = total_size else {
                     // Service unavailable — keep in batch_loading and schedule
@@ -1044,6 +1036,9 @@ impl ImageViewerApp {
                 self.folder_size_state
                     .batch_cache
                     .put(folder_path.clone(), total_size);
+                self.folder_size_state
+                    .size_sorting
+                    .complete(&folder_path, total_size);
                 // Keep the preview-panel cache in sync so selecting the folder
                 // in the details panel shows the same (fresh) value.
                 upsert_folder_content_summary(
@@ -1094,6 +1089,7 @@ impl ImageViewerApp {
                         }
                     }
                     self.folder_size_state.batch_cache.pop(&path);
+                    self.folder_size_state.size_sorting.invalidate(&path);
                     if release_batch_loading {
                         self.folder_size_state.batch_loading.remove(&path);
                     }
@@ -1116,6 +1112,8 @@ impl ImageViewerApp {
 
             received_any |= self.process_deferred_panel_folder_size_revalidation(now);
         }
+
+        received_any |= self.update_folder_size_sorting();
 
         received_any || has_more
     }

@@ -523,6 +523,7 @@ impl ImageViewerApp {
             show_preview_panel: self.show_preview_panel,
             thumbnail_requests_this_frame: 0,
             folder_size_cache: &self.folder_size_state.batch_cache,
+            folder_sort_sizes: &self.folder_size_state.size_sorting.sizes,
             folder_size_batch_loading: &self.folder_size_state.batch_loading,
             folder_size_requests: &mut folder_size_requests,
             col_name_width,
@@ -595,25 +596,13 @@ impl ImageViewerApp {
         // ── Send batch folder-size requests (capped per frame) ──
         {
             const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
-            let gen = self
-                .folder_size_state
-                .batch_generation
-                .load(std::sync::atomic::Ordering::Acquire);
             for path in folder_size_requests
                 .into_iter()
                 .take(MAX_BATCH_REQUESTS_PER_FRAME)
             {
-                let epoch = self
-                    .folder_size_state
-                    .batch_invalidation_epoch
-                    .get(&path)
-                    .copied()
-                    .unwrap_or(0);
-                self.folder_size_state.batch_loading.insert(path.clone());
-                let _ = self
-                    .folder_size_state
-                    .batch_req_sender
-                    .send((path, gen, epoch));
+                if !self.folder_size_state.batch_loading.contains(&path) {
+                    let _ = self.folder_size_state.enqueue_batch_size(path);
+                }
             }
         }
 
