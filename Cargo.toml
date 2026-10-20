@@ -17,6 +17,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [package]
 name = "mtt-file-manager"
+default-run = "mtt-file-manager"
 version.workspace = true
 edition = "2021"
 
@@ -82,6 +83,8 @@ bzip2 = "0.5"               # Bzip2 decompression for .tar.bz2 / .tbz2
 xz2 = "0.1"                 # XZ/LZMA decompression for .tar.xz / .txz
 zstd = "0.13"               # Zstandard decompression for .tar.zst / .tzst
 sha2 = "0.10"               # SHA-256 file hash for the details panel (on-demand)
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+semver = "1"
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"

@@ -135,10 +135,12 @@ impl ImageViewerApp {
         self.poll_system_theme(ctx);
 
         let t0 = std::time::Instant::now();
+        let organizer_commands_pending = self.organizer_state.manager.has_pending_commands();
         if upload_textures {
             self.process_incoming_messages(ctx);
         } else {
             self.process_background_messages(ctx);
+            self.poll_updates(ctx, organizer_commands_pending);
             self.retry_completed_clipboard_cleanup();
             self.flush_preferences_if_needed();
             self.run_background_memory_maintenance();
@@ -149,6 +151,7 @@ impl ImageViewerApp {
         }
         self.retry_completed_clipboard_cleanup();
         let t1 = std::time::Instant::now();
+        self.poll_updates(ctx, organizer_commands_pending);
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
         }
@@ -242,6 +245,10 @@ impl eframe::App for ImageViewerApp {
             return;
         }
         let ctx_owned = ui.ctx().clone();
+        if self.updates.exiting {
+            ui.disable();
+            return;
+        }
         let ctx = &ctx_owned;
         // Real gap between painted frames (catches a window that stops painting
         // while the event loop keeps ticking).
@@ -270,6 +277,10 @@ impl eframe::App for ImageViewerApp {
         let is_in_size_move = is_in_size_move();
 
         self.run_background_updates(ctx, true);
+        if self.updates.exiting {
+            ui.disable();
+            return;
+        }
 
         // Apply asynchronously loaded fonts as soon as the worker finishes.
         if let Some(rx) = &self.font_loader_rx {
@@ -763,6 +774,7 @@ impl eframe::App for ImageViewerApp {
         }
 
         let video_overlay_rects = crate::ui::video_overlay::current_rects(ctx);
+        crate::ui::components::update_settings::dialog(ctx, self);
         if let Some(preview) = self.media_preview.as_mut() {
             preview.set_overlay_rects(&video_overlay_rects, ctx.pixels_per_point());
         }

@@ -1,4 +1,5 @@
 pub mod about_settings;
+pub(crate) mod update_settings;
 pub mod appearance_settings;
 pub mod backend_settings;
 pub mod batch_rename_modal;

@@ -277,7 +277,7 @@ pub fn render_settings_window(
                                             crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);
                                         }
                                         SettingsSection::About => {
-                                            crate::ui::components::about_settings::render_about_settings_section(ui);
+                                            crate::ui::components::about_settings::render_about_settings_section(ui, app);
                                         }
                                         }
                                     });

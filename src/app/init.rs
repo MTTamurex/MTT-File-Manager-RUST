@@ -492,6 +492,7 @@ impl ImageViewerApp {
             minimize_to_tray,
             default_file_manager_settings:
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
+            updates: crate::app::update_state::UpdateState::default(),
             startup_location,
             startup_custom_path,
             tab_preferences,

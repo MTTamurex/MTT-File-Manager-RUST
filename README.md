@@ -18,7 +18,7 @@
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
 - **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
-- **Updating:** close MTT and run the newer installer. No manual uninstall is needed.
+- **Updating:** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually, or enable optional startup installation there (off by default). Updates wait for file operations to finish and other MTT windows/viewers to close; pause enabled Organizer rules before proceeding. Windows requests administrator approval, then MTT reopens without elevation. Setup rebuilds the search index as it already does for manual upgrades. You can still close MTT and run the newer installer manually; no uninstall is needed. See the [update release requirements and validation checklist](installer/UPDATES.md).
 
 ## Key Features
 

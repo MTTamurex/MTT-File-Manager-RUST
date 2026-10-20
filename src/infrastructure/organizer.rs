@@ -297,6 +297,14 @@ impl OrganizerManager {
         self.events.try_recv()
     }
 
+    pub(crate) fn has_pending_commands(&self) -> bool {
+        self.pending_commands
+            .state
+            .lock()
+            .map(|state| !state.command_ids.is_empty())
+            .unwrap_or(true)
+    }
+
     #[cfg(test)]
     fn recv_event_timeout(
         &self,

@@ -1,3 +1,18 @@
+updates:
+  title: "Updates"
+  check_startup: "Check for updates at startup"
+  auto_install: "Install updates at startup (requires startup checking)"
+  permission_notice: "Updating closes and reopens MTT. Windows will request administrator approval. File operations must finish first."
+  check: "Check for updates"
+  checking: "Checking for updates…"
+  downloading: "Downloading and verifying the installer…"
+  waiting: "Update ready. Waiting for file operations and other MTT windows/viewers to close."
+  current: "You are up to date."
+  available: "Version %{version} is available"
+  details: "View update details"
+  install: "Update now"
+  later: "Later"
+  save_failed: "Could not save update preferences."
 nav:
   computer: "This PC"
   recycle_bin: "Recycle Bin"

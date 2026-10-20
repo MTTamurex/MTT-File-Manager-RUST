@@ -1,3 +1,18 @@
+updates:
+  title: "更新"
+  check_startup: "启动时检查更新"
+  auto_install: "启动时安装更新（需要启用启动检查）"
+  permission_notice: "更新将关闭并重新打开 MTT。Windows 将请求管理员授权。必须先完成文件操作。"
+  check: "检查更新"
+  checking: "正在检查更新…"
+  downloading: "正在下载安装程序并验证完整性…"
+  waiting: "更新已就绪。正在等待文件操作完成及其他 MTT 窗口和查看器关闭。"
+  current: "已是最新版本。"
+  available: "版本 %{version} 可用"
+  details: "查看更新详情"
+  install: "立即更新"
+  later: "稍后"
+  save_failed: "无法保存更新设置。"
 nav:
   computer: "此电脑"
   recycle_bin: "回收站"

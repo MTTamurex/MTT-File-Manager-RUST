@@ -63,6 +63,7 @@ Type: files; Name: "{app}\mtt-file-manager.identity.msix"
 [Files]
 ; Main executable
 Source: "{#SrcRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\target\release\mtt-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; License and notice files
 Source: "{#SrcRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

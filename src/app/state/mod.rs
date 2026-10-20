@@ -321,6 +321,7 @@ pub struct ImageViewerApp {
     pub startup_custom_path: String,
     pub tab_preferences: crate::app::tab_preferences::TabPreferences,
     pub default_file_manager_settings: DefaultFileManagerSettingsState,
+    pub(crate) updates: crate::app::update_state::UpdateState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar
     pub collapse_quick_access: bool,   // Collapse Quick Access section in sidebar

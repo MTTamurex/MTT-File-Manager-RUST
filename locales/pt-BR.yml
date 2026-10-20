@@ -1,3 +1,18 @@
+updates:
+  title: "Atualizações"
+  check_startup: "Verificar atualizações ao iniciar"
+  auto_install: "Instalar atualizações ao iniciar (requer verificação ao iniciar)"
+  permission_notice: "A atualização fecha e reabre o MTT. O Windows solicitará autorização de administrador. Operações de arquivos precisam terminar primeiro."
+  check: "Verificar atualizações"
+  checking: "Verificando atualizações…"
+  downloading: "Baixando e verificando o instalador…"
+  waiting: "Atualização pronta. Aguardando operações de arquivos e o fechamento de outras janelas e visualizadores do MTT."
+  current: "Você está usando a versão mais recente."
+  available: "A versão %{version} está disponível"
+  details: "Ver detalhes da atualização"
+  install: "Atualizar agora"
+  later: "Depois"
+  save_failed: "Não foi possível salvar as preferências de atualização."
 nav:
   computer: "Este Computador"
   recycle_bin: "Lixeira"

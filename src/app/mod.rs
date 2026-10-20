@@ -44,6 +44,7 @@ mod startup_preferences_tests;
 pub mod state;
 pub mod tab_preferences;
 pub mod ui_state;
+pub(crate) mod update_state;
 
 // Re-export navigation module for easy access
 pub use operations::navigation;
