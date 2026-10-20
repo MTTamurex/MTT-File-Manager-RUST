@@ -96,7 +96,7 @@ pub fn start_event_loop(
         let mut tick_count: u32 = 0;
         let mut active_load: Option<PendingFileLoad> = None;
         let mut use_event_fallback = event_client.is_none();
-        const MEDIUM_TIER_TICKS: u32 = 4; // ~1s for volume/mute/duration
+        const MEDIUM_TIER_TICKS: u32 = 4; // ~1s for volume/mute and known duration
         const SLOW_TIER_TICKS: u32 = 8; // ~2s for fullscreen/aspect
 
         loop {
@@ -197,10 +197,19 @@ pub fn start_event_loop(
             }
             let observed_generation = file_load_gate.generation();
 
-            let mut state_updated = false;
+            // Position must not get ahead of the slider's duration. Bootstrap
+            // duration on every tick; use periodic polling only once known.
+            let duration_updated = super::timeline::refresh_duration(
+                &state,
+                &file_load_gate,
+                observed_generation,
+                tick_count.is_multiple_of(MEDIUM_TIER_TICKS),
+                || mpv.get_property::<f64>("duration").ok(),
+            );
+            let current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
+            let mut state_updated = duration_updated;
             // OPT-1: Track whether a significant state change occurred
-            let mut significant_change = false;
-            let current_duration: f64;
+            let mut significant_change = duration_updated;
 
             // --- Fast tier (every 250ms): time-pos + pause ---
             // Skip time-pos writes while a new file is loading to prevent
@@ -232,6 +241,9 @@ pub fn start_event_loop(
                     if allow_polled_position {
                         if let Ok(mut s) = state.write() {
                             if file_load_gate.result_is_current(observed_generation)
+                                && s.duration > 0.0
+                                && pos.is_finite()
+                                && pos >= 0.0
                                 && (s.current_time - pos).abs() > 0.001
                             {
                                 s.current_time = pos;
@@ -269,7 +281,7 @@ pub fn start_event_loop(
                 }
             }
 
-            // --- Medium tier (~1s): volume, mute, duration ---
+            // --- Medium tier (~1s): volume, mute ---
             if tick_count.is_multiple_of(MEDIUM_TIER_TICKS) {
                 if let Ok(vol) = mpv.get_property::<f64>("volume") {
                     if let Ok(mut s) = state.write() {
@@ -294,24 +306,6 @@ pub fn start_event_loop(
                         }
                     }
                 }
-
-                if let Ok(dur) = mpv.get_property::<f64>("duration") {
-                    current_duration = dur;
-                    if let Ok(mut s) = state.write() {
-                        if file_load_gate.result_is_current(observed_generation)
-                            && (s.duration == 0.0 || (s.duration - dur).abs() > 0.01)
-                        {
-                            s.duration = dur;
-                            state_updated = true;
-                            significant_change = true;
-                        }
-                    }
-                } else {
-                    current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
-                }
-            } else {
-                // Need current_duration for track/interlace checks below
-                current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
             }
 
             // --- Slow tier (~2s): aspect ---

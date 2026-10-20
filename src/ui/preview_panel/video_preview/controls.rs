@@ -4,6 +4,9 @@ use eframe::egui;
 
 mod detached;
 mod pickers;
+mod seek_bar;
+
+use seek_bar::draw_seek_bar;
 
 /// Result from video control interactions.
 pub enum ControlAction {
@@ -53,32 +56,6 @@ pub(super) fn icon_color(dark_mode: bool) -> [u8; 4] {
     } else {
         [60, 60, 60, 255]
     }
-}
-
-/// Draw the seek bar
-fn draw_seek_bar(
-    ui: &mut egui::Ui,
-    preview: &mut MediaPreview,
-    full_width: f32,
-    current_time: f64,
-    duration: f64,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().slider_width = full_width;
-        ui.visuals_mut().selection.bg_fill = crate::ui::theme::accent_color(ui.ctx());
-
-        let mut seek_value = current_time;
-        if ui
-            .add(
-                egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
-                    .show_value(false)
-                    .trailing_fill(true),
-            )
-            .changed()
-        {
-            preview.seek(seek_value);
-        }
-    });
 }
 
 /// Draw basic controls: Play/Pause, Detach, Volume

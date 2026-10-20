@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
+mod column_autofit;
 mod staleness;
 mod sync_to;
 
@@ -20,6 +21,7 @@ impl ImageViewerApp {
         let previous_path = self.navigation_state.current_path.clone();
         let previous_is_computer_view = self.navigation_state.is_computer_view;
         let previous_is_recycle_bin_view = self.navigation_state.is_recycle_bin_view;
+        let previous_dual_panel_enabled = self.dual_panel_enabled;
         let source_tab_id = self.tab_manager.active().id;
         let source_tab_items_len = self.tab_manager.active().visible_items_len();
         let source_tab_all_items_len = self.tab_manager.active().all_items.len();
@@ -144,14 +146,15 @@ impl ImageViewerApp {
             self.dual_panel_enabled = active.dual_panel_enabled;
             self.dual_panel_active = active.dual_panel_active;
             self.layout.dual_panel_split_ratio = active.dual_panel_split_ratio;
-            // Session-restored tabs have no listing yet. Loaded dual-panel tabs
-            // retain the pending request owned by their active pane.
-            self.pending_list_column_autofit = self.items.is_empty()
-                || (active.dual_panel_enabled
-                    && panel_tabs
-                        .as_ref()
-                        .and_then(|tabs| tabs.panel(self.dual_panel_active).active())
-                        .is_some_and(|tab| tab.snapshot.pending_list_column_autofit));
+            self.pending_list_column_autofit = column_autofit::pending_on_restore(
+                previous_dual_panel_enabled,
+                active.dual_panel_enabled,
+                self.items.is_empty(),
+                panel_tabs
+                    .as_ref()
+                    .and_then(|tabs| tabs.panel(self.dual_panel_active).active())
+                    .is_some_and(|tab| tab.snapshot.pending_list_column_autofit),
+            );
             if active.dual_panel_enabled {
                 if let Some(widths) = active.dual_panel_active_list_column_widths {
                     widths.apply_to_layout(&mut self.layout);

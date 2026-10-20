@@ -12,4 +12,5 @@ pub mod event_loop;
 pub mod filters;
 pub mod playback;
 pub mod state;
+mod timeline;
 pub mod utils;
