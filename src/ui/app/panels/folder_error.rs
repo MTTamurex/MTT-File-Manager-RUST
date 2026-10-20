@@ -25,6 +25,16 @@ pub(super) fn render(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             );
             if error.kind == FolderLoadErrorKind::AccessDenied {
                 ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new(rust_i18n::t!("panels.folder_access_warning_title"))
+                        .strong()
+                        .color(ui.visuals().warn_fg_color),
+                );
+                ui.add_sized(
+                    [ui.available_width().min(560.0), 0.0],
+                    egui::Label::new(rust_i18n::t!("panels.folder_access_warning")).wrap(),
+                );
+                ui.add_space(8.0);
                 ui.label(rust_i18n::t!("panels.folder_access_explanation"));
                 proceed = ui
                     .add_enabled(

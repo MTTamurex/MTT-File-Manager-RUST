@@ -613,6 +613,8 @@ panels:
   loading: "正在加载..."
   empty_folder: "此文件夹为空"
   folder_access_denied: "你没有访问该文件夹的权限"
+  folder_access_warning_title: "警告：永久完全控制权限"
+  folder_access_warning: "继续操作将永久授予你的账户对此文件夹的完全控制权限，包括继承该权限的文件和子文件夹。这允许读取、修改和删除内容。以你的账户运行的其他程序也能使用这些权限，无需再次获得管理员授权。更改系统或应用程序文件可能危及 Windows 的安全性和正常运行。"
   folder_access_explanation: "点击“继续”以永久授予你的用户访问权限。Windows 将请求管理员授权。"
   folder_access_continue: "继续"
   folder_access_pending: "正在等待授权并授予访问权限…"

@@ -613,6 +613,8 @@ panels:
   loading: "Carregando..."
   empty_folder: "Pasta vazia"
   folder_access_denied: "Sem permissão para acessar esta pasta"
+  folder_access_warning_title: "Aviso: controle total permanente"
+  folder_access_warning: "Continuar concederá controle total permanente à sua conta nesta pasta, incluindo arquivos e subpastas que herdarem a permissão. Isso permite ler, alterar e excluir conteúdo. Outros programas executados pela sua conta também poderão usar essas permissões sem nova autorização de administrador. Alterar arquivos do sistema ou de aplicativos pode comprometer a segurança e o funcionamento do Windows."
   folder_access_explanation: "Clique em Continuar para conceder acesso permanente ao seu usuário. O Windows solicitará autorização de administrador."
   folder_access_continue: "Continuar"
   folder_access_pending: "Aguardando autorização e concessão de acesso…"

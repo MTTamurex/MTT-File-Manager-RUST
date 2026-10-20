@@ -613,6 +613,8 @@ panels:
   loading: "Loading..."
   empty_folder: "Empty folder"
   folder_access_denied: "You don't have permission to access this folder"
+  folder_access_warning_title: "Warning: permanent full control"
+  folder_access_warning: "Continuing will permanently grant your account full control of this folder, including files and subfolders that inherit the permission. This allows reading, modifying, and deleting content. Other programs running under your account can also use these permissions without further administrator authorization. Changing system or application files may compromise Windows security and operation."
   folder_access_explanation: "Click Continue to permanently grant your user access. Windows will request administrator authorization."
   folder_access_continue: "Continue"
   folder_access_pending: "Waiting for authorization and access grant…"
