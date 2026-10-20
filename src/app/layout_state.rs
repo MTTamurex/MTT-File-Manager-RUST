@@ -33,9 +33,6 @@ pub struct LayoutState {
     // Dual panel split ratio (default 0.5 for equal split)
     pub dual_panel_split_ratio: f32,
 
-    // Sidebar tags section height (None = auto 35%-cap, Some = user-resized)
-    pub sidebar_tags_height: Option<f32>,
-
     // Quick Access section height (None = content-sized, Some = user-resized)
     pub sidebar_quick_access_height: Option<f32>,
     // Drives block height cap (None = content-sized up to available space).
@@ -65,7 +62,6 @@ impl Default for LayoutState {
             list_col_computer_total_width: 120.0,
             list_col_computer_free_width: 120.0,
             dual_panel_split_ratio: 0.5,
-            sidebar_tags_height: None,
             sidebar_quick_access_height: None,
             sidebar_drives_height: None,
         }

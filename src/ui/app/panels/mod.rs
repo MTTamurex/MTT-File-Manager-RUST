@@ -358,28 +358,20 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 }
                 quick_access_interaction_rect = quick_access_interaction_rect.union(hit_rect);
             }
-            // ── Compute actual tags height after the fixed top sections ──
+            // Reserve room for Tags when drives overflow. Tags itself fills all
+            // space left after the content-sized drives, down to the status bar.
             let avail_after_top = ui.available_height();
-            let tags_max_h = (avail_after_top * 0.75).max(0.0);
-            let tags_min_h = sidebar_layout::TAGS_MIN_HEIGHT.min(tags_max_h);
-            let tags_scroll_h = if !tags_visible {
+            let tags_reserved_h = if !tags_visible {
                 0.0
             } else {
-                sidebar_layout::section_height(
-                    tags_content_h,
-                    app.layout
-                        .sidebar_tags_height
-                        .or(Some(avail_after_top * 0.35)),
-                    tags_min_h,
-                    tags_max_h,
-                )
+                tags_content_h.min(avail_after_top * 0.35)
             };
-            let tags_block_h = if tags_scroll_h <= 0.0 {
+            let tags_block_h = if !tags_visible {
                 0.0
             } else {
                 sidebar_layout::TAGS_DIVIDER_HEIGHT
-                    + 4.0 * ui.spacing().item_spacing.y
-                    + tags_scroll_h
+                    + 2.0 * ui.spacing().item_spacing.y
+                    + tags_reserved_h
             };
             let drives_avail = (avail_after_top - tags_block_h).max(0.0);
             let drives_min_h = 24.0_f32.min(drives_avail);
@@ -474,19 +466,14 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
             // Tags follow the actual drive content, with their own scrollbar.
             let drives_rendered_h = output.content_size.y.min(output.inner_rect.height());
-            let mut tags_resized_height: Option<f32> = None;
-            let mut tags_reset_height = false;
             let mut drives_resized_height = None;
             let mut drives_reset_height = false;
             let mut sidebar_height_changed = false;
             let mut tags_interaction_rect = egui::Rect::NOTHING;
-            let tags_action = if tags_scroll_h > 0.0 {
+            let tags_action = if tags_visible {
                 let tags_output = sidebar_layout::render_tags_block(
                     ui,
                     sidebar_layout::TagsBlockLayout {
-                        height: tags_scroll_h,
-                        min_height: tags_min_h,
-                        max_height: tags_max_h,
                         collapsed: tags_collapsed,
                         drives_height: drives_rendered_h,
                         drives_min_height: drives_min_h,
@@ -499,8 +486,6 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     },
                 );
                 tags_interaction_rect = tags_output.interaction_rect;
-                tags_resized_height = tags_output.resized_height;
-                tags_reset_height = tags_output.reset_height;
                 drives_resized_height = tags_output.resized_drives_height;
                 drives_reset_height = tags_output.reset_drives_height;
                 sidebar_height_changed = tags_output.height_changed;
@@ -512,13 +497,6 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             // sidebar_ctx no longer used — borrows of app released
             let _ = sidebar_ctx;
 
-            if tags_reset_height {
-                app.layout.sidebar_tags_height = None;
-            } else if let Some(height) = tags_resized_height {
-                app.layout.sidebar_tags_height = Some(height);
-                // Keep the drives edge stationary while resizing Tags below it.
-                app.layout.sidebar_drives_height = Some(drives_rendered_h);
-            }
             if drives_reset_height {
                 app.layout.sidebar_drives_height = None;
             } else if let Some(height) = drives_resized_height {

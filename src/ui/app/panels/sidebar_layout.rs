@@ -6,7 +6,7 @@ pub(super) use tags::{render_tags_block, TagsBlockLayout};
 pub(super) const QUICK_ACCESS_MIN_HEIGHT: f32 = 8.0 + 16.0;
 pub(super) const QUICK_ACCESS_DIVIDER_HEIGHT: f32 = 9.0;
 pub(super) const TAGS_MIN_HEIGHT: f32 = 22.0 + 8.0;
-pub(super) const TAGS_DIVIDER_HEIGHT: f32 = 2.0 * 9.0;
+pub(super) const TAGS_DIVIDER_HEIGHT: f32 = 9.0;
 
 pub(super) fn quick_access_content_height(
     collapsed: bool,
