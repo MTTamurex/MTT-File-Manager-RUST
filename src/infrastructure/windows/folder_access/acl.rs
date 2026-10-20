@@ -13,11 +13,17 @@ use windows::Win32::Storage::FileSystem::{
 };
 
 use super::super::owned_handle::OwnedHandle;
+use super::diagnostics::HelperStage as Stage;
 use super::{os_error_code, LocalAllocation};
+
+#[cfg(test)]
+pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
+    grant_access_detailed(path, sid_text).map_err(|code| super::diagnostics::decode(code).1)
+}
 
 /// Internal only: the helper obtains this SID from its authenticated pipe client.
 /// Keep the directory pinned through the ACL read/merge/write operation.
-pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
+pub(super) fn grant_access_detailed(path: &Path, sid_text: &str) -> Result<(), u32> {
     if !path.is_absolute()
         || path.as_os_str().encode_wide().any(|unit| unit == 0)
         || sid_text.contains('\0')
@@ -36,12 +42,13 @@ pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
             FILE_FLAG_BACKUP_SEMANTICS,
             None,
         )
-        .map_err(os_error_code)?;
-        let directory = OwnedHandle::new(handle).ok_or(6u32)?;
+        .map_err(|error| Stage::OpenDirectory.encode(os_error_code(error)))?;
+        let directory = OwnedHandle::new(handle).ok_or_else(|| Stage::OpenDirectory.encode(6))?;
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
-        GetFileInformationByHandle(directory.as_raw(), &mut information).map_err(os_error_code)?;
+        GetFileInformationByHandle(directory.as_raw(), &mut information)
+            .map_err(|error| Stage::InspectDirectory.encode(os_error_code(error)))?;
         if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-            return Err(267);
+            return Err(Stage::InspectDirectory.encode(267));
         }
         let mut sid = PSID::default();
         ConvertStringSidToSidW(PCWSTR(sid_text.as_ptr()), &mut sid).map_err(|_| 87u32)?;
@@ -60,7 +67,7 @@ pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
         );
         let _descriptor_allocation = LocalAllocation(descriptor.0);
         if status.0 != 0 {
-            return Err(status.0);
+            return Err(Stage::ReadAcl.encode(status.0));
         }
         // Preserve NULL DACLs, explicit denies, owners and inheritance protection.
         if old_acl.is_null() {
@@ -81,7 +88,7 @@ pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
         let status = SetEntriesInAclW(Some(&[entry]), Some(old_acl), &mut new_acl);
         let _acl_allocation = LocalAllocation(new_acl.cast());
         if status.0 != 0 {
-            return Err(status.0);
+            return Err(Stage::MergeAcl.encode(status.0));
         }
         let status = SetSecurityInfo(
             directory.as_raw(),
@@ -95,7 +102,7 @@ pub(super) fn grant_access(path: &Path, sid_text: &str) -> Result<(), u32> {
         if status.0 == 0 {
             Ok(())
         } else {
-            Err(status.0)
+            Err(Stage::WriteAcl.encode(status.0))
         }
     }
 }

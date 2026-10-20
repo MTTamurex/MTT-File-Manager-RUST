@@ -111,8 +111,17 @@ fn helper_reports_native_errors_for_missing_directories_and_files() {
     let sid = current_user_sid().unwrap();
     assert_eq!(grant_access(&file, &sid), Err(267));
     assert_eq!(
+        acl::grant_access_detailed(&file, &sid).map_err(diagnostics::decode),
+        Err(("inspect_directory", 267))
+    );
+    assert_eq!(
         grant_access(&directory.path().join("missing"), &sid),
         Err(2)
+    );
+    assert_eq!(
+        acl::grant_access_detailed(&directory.path().join("missing"), &sid)
+            .map_err(diagnostics::decode),
+        Err(("open_directory", 2))
     );
 }
 

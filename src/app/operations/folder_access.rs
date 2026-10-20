@@ -7,11 +7,10 @@ use crate::infrastructure::windows::folder_access::{self, AccessError};
 #[derive(Default)]
 pub struct FolderAccessState {
     pending: Option<PendingGrant>,
-    outcome: Option<(usize, PathBuf, AccessError)>,
+    outcome: Option<(PathBuf, AccessError)>,
 }
 
 struct PendingGrant {
-    generation: usize,
     path: PathBuf,
     receiver: Receiver<Result<(), AccessError>>,
 }
@@ -25,14 +24,9 @@ impl ImageViewerApp {
         self.folder_access
             .outcome
             .as_ref()
-            .and_then(|(generation, path, error)| {
-                matches_origin(
-                    *generation,
-                    path,
-                    self.generation,
-                    Path::new(&self.navigation_state.current_path),
-                )
-                .then_some(*error)
+            .and_then(|(path, error)| {
+                matches_origin(path, Path::new(&self.navigation_state.current_path))
+                    .then_some(*error)
             })
     }
 
@@ -49,7 +43,6 @@ impl ImageViewerApp {
         };
         let path = error.path.clone();
         let worker_path = path.clone();
-        let generation = self.generation;
         let owner_window = self.native_hwnd.map(|hwnd| hwnd.0 as isize);
         let ctx = self.ui_ctx.clone();
         let (sender, receiver) = mpsc::channel();
@@ -62,13 +55,9 @@ impl ImageViewerApp {
                 ctx.request_repaint();
             });
         if worker.is_ok() {
-            self.folder_access.pending = Some(PendingGrant {
-                generation,
-                path,
-                receiver,
-            });
+            self.folder_access.pending = Some(PendingGrant { path, receiver });
         } else {
-            self.folder_access.outcome = Some((generation, path, AccessError::Failed(1)));
+            self.folder_access.outcome = Some((path, AccessError::Failed(1)));
         }
     }
 
@@ -87,7 +76,9 @@ impl ImageViewerApp {
             .take()
             .expect("pending grant exists");
         if let Err(error) = result {
-            self.folder_access.outcome = Some((pending.generation, pending.path, error));
+            // Like a successful grant, a failure belongs to the path, not a
+            // navigation generation that may change while UAC owns focus.
+            self.folder_access.outcome = Some((pending.path, error));
             return;
         }
 
@@ -130,15 +121,8 @@ fn should_reload_granted_folder(
             == ImageViewerApp::normalize_for_match(current_path)
 }
 
-fn matches_origin(
-    generation: usize,
-    path: &Path,
-    current_generation: usize,
-    current_path: &Path,
-) -> bool {
-    generation == current_generation
-        && ImageViewerApp::normalize_for_match(path)
-            == ImageViewerApp::normalize_for_match(current_path)
+fn matches_origin(path: &Path, current_path: &Path) -> bool {
+    ImageViewerApp::normalize_for_match(path) == ImageViewerApp::normalize_for_match(current_path)
 }
 
 #[cfg(test)]
@@ -146,11 +130,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn result_requires_same_location_and_panel_generation() {
+    fn result_matches_location_independently_of_navigation_generation() {
         let path = Path::new(r"C:\Folder");
-        assert!(matches_origin(10, path, 10, Path::new(r"c:\folder")));
-        assert!(!matches_origin(10, path, 11, path));
-        assert!(!matches_origin(10, path, 10, Path::new(r"C:\Other")));
+        assert!(matches_origin(path, Path::new(r"c:\folder")));
+        assert!(matches_origin(path, path));
+        assert!(!matches_origin(path, Path::new(r"C:\Other")));
     }
 
     #[test]
