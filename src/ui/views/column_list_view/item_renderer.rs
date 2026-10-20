@@ -272,6 +272,7 @@ fn render_column_item(
             render_item_tooltip(ui, &response, item, ctx, ctx.is_recycle_bin_view);
         }
 
+        crate::ui::clipboard_feedback::paint(ui, visual_rect, &item.path);
         let opacity = if item.is_hidden { 0.5 } else { 1.0 };
         render_item_icon(
             ui,
@@ -279,7 +280,9 @@ fn render_column_item(
             ctx,
             ops,
             rect,
-            Color32::WHITE.gamma_multiply(opacity),
+            Color32::WHITE.gamma_multiply(
+                opacity * crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+            ),
         );
         render_column_item_name(ui, index, item, rect, is_selected, opacity, ctx, ops);
     });

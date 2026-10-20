@@ -584,6 +584,11 @@ impl eframe::App for ImageViewerApp {
         // 8b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
         app::layers::render_secondary_toolbar_layer(self, ui);
 
+        // Include copy/cut shortcuts and toolbar actions in this frame's feedback.
+        if !is_in_size_move {
+            crate::ui::clipboard_feedback::update(ctx, &self.clipboard);
+        }
+
         // 8c. Settings backdrop (rendered BEFORE panels to block their input)
         let settings_close_from_backdrop = if self.navigation_state.show_settings_window {
             crate::ui::components::settings_window::render_settings_backdrop(ctx)
@@ -603,6 +608,10 @@ impl eframe::App for ImageViewerApp {
         // 10. Operations: Context Menu (Rendering & Actions)
         if !self.global_search.active {
             app::menu_handler::handle_context_menu(self, ctx);
+        }
+        // Menu actions happen after the panels; publish them and repaint promptly.
+        if !is_in_size_move {
+            crate::ui::clipboard_feedback::update(ctx, &self.clipboard);
         }
 
         // 11. Operations: Resize borders (on top) - REMOVED, handled by native subclass

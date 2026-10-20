@@ -10,6 +10,9 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
+    let icon_tint = egui::Color32::WHITE.gamma_multiply(
+        crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+    );
 
     // PERFORMANCE: Use is_media() method to avoid registry lookups per frame
     let is_media_file = item.is_media();
@@ -157,7 +160,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 texture.id(),
                 draw_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                icon_tint,
             );
             drew_something = true;
         }
@@ -182,7 +185,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 icon_texture.id(),
                 icon_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                icon_tint,
             );
         }
         // If icon not yet loaded: space stays empty — no placeholder

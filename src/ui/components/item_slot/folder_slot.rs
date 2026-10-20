@@ -7,6 +7,7 @@ fn paint_texture_centered(
     tex_id: egui::TextureId,
     tex_size: egui::Vec2,
     container: egui::Rect,
+    tint: egui::Color32,
 ) {
     let aspect = tex_size.x / tex_size.y;
     let container_aspect = container.width() / container.height();
@@ -25,7 +26,7 @@ fn paint_texture_centered(
         tex_id,
         draw_rect,
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-        egui::Color32::WHITE,
+        tint,
     );
 }
 
@@ -37,6 +38,9 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
+    let icon_tint = egui::Color32::WHITE.gamma_multiply(
+        crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+    );
     let item_path_text = item.path.to_string_lossy();
     let is_network_location = ctx.is_computer_view;
     if ctx.allow_thumbnail_requests && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
@@ -132,7 +136,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             })
         };
         if let Some(icon) = icon {
-            paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
+            paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect, icon_tint);
         }
     } else {
         // Normal folders use composed previews only when a media cover was discovered.
@@ -165,7 +169,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
         if let Some(tex) = native_preview {
             // If we have the native preview, draw maintaining aspect ratio and centering
-            paint_texture_centered(ui, tex.id(), tex.size_vec2(), visual_folder_rect);
+            paint_texture_centered(ui, tex.id(), tex.size_vec2(), visual_folder_rect, icon_tint);
         } else {
             // If no native preview
             let is_virtual_path = ctx.is_recycle_bin_view
@@ -183,6 +187,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                         sys_icon.id(),
                         sys_icon.size_vec2(),
                         visual_folder_rect,
+                        icon_tint,
                     );
                 } else if is_virtual_path {
                     // Extra fallback for virtual paths: try item-specific icon
@@ -200,7 +205,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                             icon.id(),
                             icon_rect,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
+                            icon_tint,
                         );
                     }
                 }
@@ -227,6 +232,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                         sys_icon.id(),
                         sys_icon.size_vec2(),
                         visual_folder_rect,
+                        icon_tint,
                     );
                 }
             }

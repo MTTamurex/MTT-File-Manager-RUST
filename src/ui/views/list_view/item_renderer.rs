@@ -230,6 +230,8 @@ pub(super) fn render_list_item(
             );
         }
 
+        crate::ui::clipboard_feedback::paint(ui, visual_rect, &item.path);
+
         let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
         let is_active_drop_target = ctx.is_item_dragging
             && item.is_dir
@@ -272,7 +274,9 @@ pub(super) fn render_list_item(
         .gamma_multiply(hidden_opacity);
 
         // 1. Icon + Name
-        let icon_tint = Color32::WHITE.gamma_multiply(hidden_opacity);
+        let icon_tint = Color32::WHITE.gamma_multiply(
+            hidden_opacity * crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+        );
         render_item_icon(ui, item, ctx, ops, rect, icon_tint);
         let tag_color = first_tag_color(item, ctx);
         let tag_name_offset = if tag_color.is_some() { 12.0 } else { 0.0 };

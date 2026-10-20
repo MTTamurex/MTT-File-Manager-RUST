@@ -26,6 +26,10 @@ pub struct ClipboardManager {
     /// Internal clipboard state (fallback/cache)
     internal_files: Vec<PathBuf>,
     internal_op: Option<ClipboardOp>,
+    /// Distinguishes local updates even if a native clipboard write fails.
+    visual_revision: u64,
+    /// Whether the last local operation published native files or its text fallback.
+    visual_write_succeeded: bool,
     /// Clipboard sequence when internal file state was last synced to system clipboard.
     internal_sync_sequence: Option<u32>,
     /// Cached answer for whether the current clipboard sequence contains file payloads.
@@ -41,6 +45,21 @@ impl ClipboardManager {
     /// Helper to get internal state (read-only)
     pub fn internal_state(&self) -> (&[PathBuf], Option<ClipboardOp>) {
         (&self.internal_files, self.internal_op)
+    }
+
+    pub(crate) fn visual_state(
+        &self,
+        sequence: Option<u32>,
+    ) -> Option<(&[PathBuf], ClipboardOp, u64)> {
+        if sequence.is_none()
+            || sequence != self.internal_sync_sequence
+            || self.internal_files.is_empty()
+            || !self.visual_write_succeeded
+        {
+            return None;
+        }
+        self.internal_op
+            .map(|op| (self.internal_files.as_slice(), op, self.visual_revision))
     }
 
     /// Checks if there is content to paste (System or Internal)
@@ -63,6 +82,8 @@ impl ClipboardManager {
 
     /// Clears the internal clipboard state
     pub fn clear(&mut self) {
+        self.visual_revision = self.visual_revision.wrapping_add(1);
+        self.visual_write_succeeded = false;
         self.internal_files.clear();
         self.internal_op = None;
         self.internal_sync_sequence = None;
@@ -104,11 +125,10 @@ impl ClipboardManager {
                 false
             }
         };
-        if !system_file_payload_written {
-            if let Some(first) = paths.first() {
-                let _ = file_operations::copy_path_to_clipboard(first);
-            }
-        }
+        self.visual_write_succeeded = system_file_payload_written
+            || paths
+                .first()
+                .is_some_and(|first| file_operations::copy_path_to_clipboard(first).is_ok());
 
         self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
         self.update_system_files_cache(self.internal_sync_sequence, system_file_payload_written);
@@ -116,6 +136,7 @@ impl ClipboardManager {
         // 2. Internal State
         self.internal_files = paths.to_vec();
         self.internal_op = Some(ClipboardOp::Copy);
+        self.visual_revision = self.visual_revision.wrapping_add(1);
     }
 
     /// Cut files (System + Internal)
@@ -143,11 +164,10 @@ impl ClipboardManager {
                     (false, ClipboardOp::Move)
                 }
             };
-        if !system_file_payload_written {
-            if let Some(first) = paths.first() {
-                let _ = file_operations::copy_path_to_clipboard(first);
-            }
-        }
+        self.visual_write_succeeded = system_file_payload_written
+            || paths
+                .first()
+                .is_some_and(|first| file_operations::copy_path_to_clipboard(first).is_ok());
 
         self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
         self.update_system_files_cache(self.internal_sync_sequence, system_file_payload_written);
@@ -155,6 +175,7 @@ impl ClipboardManager {
         // 2. Internal State
         self.internal_files = paths.to_vec();
         self.internal_op = Some(internal_op);
+        self.visual_revision = self.visual_revision.wrapping_add(1);
     }
 
     /// Returns files, operation type (is_move), and the clipboard sequence for pasting.
@@ -295,5 +316,40 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert!(!is_move);
+    }
+
+    #[test]
+    fn visual_state_requires_a_current_known_sequence() {
+        let mut manager = ClipboardManager {
+            internal_files: vec![PathBuf::from(r"C:\Folder\file.txt")],
+            internal_op: Some(ClipboardOp::Copy),
+            internal_sync_sequence: Some(30),
+            visual_write_succeeded: true,
+            ..ClipboardManager::default()
+        };
+        assert_eq!(manager.visual_state(Some(30)).unwrap().1, ClipboardOp::Copy);
+        assert!(manager.visual_state(Some(31)).is_none());
+        assert!(manager.visual_state(None).is_none());
+        manager.clear();
+        assert!(manager.visual_state(Some(30)).is_none());
+    }
+
+    #[test]
+    fn failed_clipboard_write_does_not_claim_visual_ownership() {
+        let manager = ClipboardManager {
+            internal_files: vec![PathBuf::from(r"C:\Folder\file.txt")],
+            internal_op: Some(ClipboardOp::Move),
+            internal_sync_sequence: Some(30),
+            visual_write_succeeded: false,
+            ..ClipboardManager::default()
+        };
+        assert!(manager.visual_state(Some(30)).is_none());
+        // Feedback must not change existing internal paste fallback behavior.
+        assert!(
+            manager
+                .internal_files_to_paste_for_sequence(Some(30))
+                .unwrap()
+                .1
+        );
     }
 }

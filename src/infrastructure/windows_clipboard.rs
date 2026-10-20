@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
 
 mod image;
+pub(crate) mod snapshot;
 
 pub use image::{copy_image_file_and_bitmap_to_clipboard, ImageClipboardWriteResult};
 

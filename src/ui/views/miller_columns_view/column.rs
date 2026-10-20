@@ -296,6 +296,8 @@ fn render_row(
         );
     }
 
+    crate::ui::clipboard_feedback::paint(ui, visual_rect, &item.path);
+
     if is_drop_candidate {
         ui.painter().rect_stroke(
             row_rect.shrink(1.0),
@@ -335,7 +337,9 @@ fn render_row(
             tex.id(),
             icon_rect,
             Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            Color32::WHITE.gamma_multiply(dim),
+            Color32::WHITE.gamma_multiply(
+                dim * crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+            ),
         );
     }
 
