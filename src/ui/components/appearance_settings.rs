@@ -5,8 +5,12 @@ use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageViewerApp) -> bool {
-    let changed =
-        render_appearance_settings_section(ui, &mut app.theme_mode, &mut app.interface_scale);
+    settings_ui::section_header(
+        ui,
+        &t!("settings.appearance"),
+        &t!("settings.appearance_description"),
+    );
+    let mut changed = render_theme_settings(ui, &mut app.theme_mode);
     let previous = app.folder_appearance;
     render_folder_appearance(ui, &mut app.folder_appearance);
     if previous != app.folder_appearance {
@@ -14,21 +18,14 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         app.save_preferences();
         app.force_save_preferences();
     }
+    changed |= render_interface_scale_settings(ui, &mut app.interface_scale);
     changed
 }
 
-pub fn render_appearance_settings_section(
-    ui: &mut egui::Ui,
-    theme_mode: &mut ThemeMode,
-    interface_scale: &mut f32,
-) -> bool {
+fn render_theme_settings(ui: &mut egui::Ui, theme_mode: &mut ThemeMode) -> bool {
     let mut changed = false;
 
-    settings_ui::section_header(
-        ui,
-        &t!("settings.appearance"),
-        &t!("settings.appearance_description"),
-    );
+    settings_ui::subsection_header(ui, &t!("settings.themes"), "");
 
     let modes: [(ThemeMode, &str); 5] = [
         (ThemeMode::Light, &t!("settings.theme_light")),
@@ -54,8 +51,12 @@ pub fn render_appearance_settings_section(
             .color(theme::secondary_text_color(ui.ctx())),
     );
 
-    ui.add_space(16.0);
-    ui.label(t!("settings.interface_scale"));
+    changed
+}
+
+fn render_interface_scale_settings(ui: &mut egui::Ui, interface_scale: &mut f32) -> bool {
+    let mut changed = false;
+    settings_ui::subsection_header(ui, &t!("settings.interface_scale"), "");
     ui.horizontal_wrapped(|ui| {
         changed |= render_scale_slider(ui, interface_scale).1;
         if ui.button(t!("settings.interface_scale_reset")).clicked() {
@@ -104,8 +105,7 @@ fn render_folder_appearance(
     appearance: &mut crate::domain::folder_appearance::FolderAppearance,
 ) {
     use crate::domain::folder_appearance::FolderAppearance;
-    ui.add_space(16.0);
-    ui.label(t!("settings.folder_appearance"));
+    settings_ui::subsection_header(ui, &t!("settings.folder_colors"), "");
     let labels = [
         t!("settings.folder_original"),
         t!("settings.folder_pastel_yellow"),

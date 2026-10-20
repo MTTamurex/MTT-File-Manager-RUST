@@ -19,17 +19,10 @@ struct VirtualDriveInfo {
 }
 
 pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
-    ui.label(
-        RichText::new(t!("settings.virtual_drives"))
-            .size(16.0)
-            .strong()
-            .color(theme::text_color(ui.ctx())),
-    );
-    ui.add_space(4.0);
-    ui.label(
-        RichText::new(t!("vdrive_settings.description"))
-            .size(13.0)
-            .color(theme::secondary_text_color(ui.ctx())),
+    super::settings_ui::section_header(
+        ui,
+        &t!("settings.virtual_drives"),
+        &t!("vdrive_settings.description"),
     );
     ui.label(
         RichText::new(t!("vdrive_settings.ssd_desc"))

@@ -7,7 +7,7 @@ use rust_i18n::t;
 
 pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
     let mut changed = false;
-    settings_ui::section_header(
+    settings_ui::subsection_header(
         ui,
         &t!("settings.startup_location"),
         &t!("settings.startup_location_description"),
@@ -53,7 +53,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
         }
     }
     ui.add_space(20.0);
-    settings_ui::section_header(
+    settings_ui::subsection_header(
         ui,
         &t!("settings.date_format"),
         &t!("settings.date_format_description"),

@@ -17,13 +17,7 @@ const LANGUAGES: &[(&str, &str)] = &[
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;
 
-    settings_ui::section_header(
-        ui,
-        &t!("settings.general"),
-        &t!("settings.general_description"),
-    );
-
-    settings_ui::section_header(
+    settings_ui::subsection_header(
         ui,
         &t!("settings.language"),
         &t!("settings.language_description"),

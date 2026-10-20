@@ -4,7 +4,7 @@ use eframe::egui;
 use rust_i18n::t;
 
 pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
-    settings_ui::section_header(ui, &t!("settings.tabs"), &t!("settings.new_tab_location"));
+    settings_ui::subsection_header(ui, &t!("settings.tabs"), &t!("settings.new_tab_location"));
     let choices = [
         (NewTabLocation::Current, t!("settings.new_tab_current")),
         (NewTabLocation::Computer, t!("settings.startup_computer")),

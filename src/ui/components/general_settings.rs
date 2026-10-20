@@ -29,6 +29,11 @@ pub fn render_general_settings_section(
         win_e_action: None,
     };
 
+    settings_ui::section_header(
+        ui,
+        &t!("settings.general"),
+        &t!("settings.general_description"),
+    );
     output.language_changed |=
         crate::ui::components::language_settings::render_language_settings_section(ui);
     ui.add_space(20.0);
@@ -36,13 +41,7 @@ pub fn render_general_settings_section(
     ui.add_space(20.0);
     output.startup_date_changed |= crate::ui::components::tab_settings::render(ui, app);
     ui.add_space(20.0);
-    ui.label(
-        RichText::new(t!("settings.miscellaneous"))
-            .size(16.0)
-            .strong()
-            .color(theme::text_color(ui.ctx())),
-    );
-    ui.add_space(8.0);
+    settings_ui::subsection_header(ui, &t!("settings.miscellaneous"), "");
     if settings_ui::toggle_row(
         ui,
         &t!("settings.show_quick_access_sidebar"),

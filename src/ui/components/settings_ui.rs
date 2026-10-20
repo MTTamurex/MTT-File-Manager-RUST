@@ -11,6 +11,9 @@ const NAV_ITEM_HEIGHT: f32 = 34.0;
 const SEGMENT_HEIGHT: f32 = 30.0;
 const OPTION_ROW_HEIGHT: f32 = 36.0;
 
+mod headers;
+pub use headers::subsection_header;
+
 fn accent_tint(ctx: &egui::Context) -> Color32 {
     if let Some(p) = theme::current_palette(ctx) {
         return p.selection;
@@ -77,7 +80,7 @@ fn radio_arrow_target(
 pub fn section_header(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.label(
         RichText::new(title)
-            .size(16.0)
+            .size(22.0)
             .strong()
             .color(theme::text_color(ui.ctx())),
     );

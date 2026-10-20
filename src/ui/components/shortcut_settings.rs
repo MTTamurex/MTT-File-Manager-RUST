@@ -33,17 +33,10 @@ pub fn render_shortcut_settings_section(
         }
     }
 
-    ui.label(
-        RichText::new(t!("settings.shortcuts"))
-            .size(16.0)
-            .strong()
-            .color(theme::text_color(ui.ctx())),
-    );
-    ui.add_space(4.0);
-    ui.label(
-        RichText::new(t!("settings.shortcuts_description"))
-            .size(13.0)
-            .color(theme::secondary_text_color(ui.ctx())),
+    super::settings_ui::section_header(
+        ui,
+        &t!("settings.shortcuts"),
+        &t!("settings.shortcuts_description"),
     );
     ui.add_space(8.0);
     ui.label(
