@@ -139,15 +139,6 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             let tag_count = app.tag_definitions.len();
             let tags_collapsed = app.collapse_tags;
             let tags_visible = app.show_tags && tag_count > 0;
-            let tags_content_h = if !tags_visible {
-                0.0
-            } else {
-                sidebar_layout::tags_content_height(
-                    tags_collapsed,
-                    tag_count,
-                    ui.spacing().item_spacing.y,
-                )
-            };
 
             // ── Smooth scroll input ──
             const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
@@ -358,22 +349,14 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 }
                 quick_access_interaction_rect = quick_access_interaction_rect.union(hit_rect);
             }
-            // Reserve room for Tags when drives overflow. Tags itself fills all
-            // space left after the content-sized drives, down to the status bar.
+            // Reserve only the Tags header, not its rows. Tags scrolls within
+            // whatever space remains down to the status bar.
             let avail_after_top = ui.available_height();
-            let tags_reserved_h = if !tags_visible {
-                0.0
-            } else {
-                tags_content_h.min(avail_after_top * 0.35)
-            };
-            let tags_block_h = if !tags_visible {
-                0.0
-            } else {
-                sidebar_layout::TAGS_DIVIDER_HEIGHT
-                    + 2.0 * ui.spacing().item_spacing.y
-                    + tags_reserved_h
-            };
-            let drives_avail = (avail_after_top - tags_block_h).max(0.0);
+            let drives_avail = sidebar_layout::drives_available_height(
+                avail_after_top,
+                tags_visible,
+                ui.spacing().item_spacing.y,
+            );
             let drives_min_h = 24.0_f32.min(drives_avail);
             let drives_scroll_h = app
                 .layout
@@ -587,6 +570,14 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 /// Handle sidebar actions separately from sidebar rendering to avoid
 /// attributing navigate_to I/O to sidebar render time.
 fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
+    let sections_before = matches!(
+        &action,
+        SidebarAction::ToggleCloudDrives
+            | SidebarAction::ToggleLocalDisks
+            | SidebarAction::ToggleNetworkDrives
+            | SidebarAction::ToggleNetworkLocations
+    )
+    .then(|| sidebar_drives_sections(app));
     match action {
         SidebarAction::OpenInNewTab(path) => {
             app.open_location_in_new_tab(app.dual_panel_active, &path);
@@ -708,6 +699,24 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
             }
         }
     }
+    if let Some(previous) = sections_before {
+        let current = sidebar_drives_sections(app);
+        sidebar_layout::restore_drives_height(
+            previous,
+            current,
+            &mut app.layout.sidebar_drives_height,
+            &mut app.layout.sidebar_drives_heights,
+        );
+    }
+}
+
+fn sidebar_drives_sections(app: &ImageViewerApp) -> [bool; 4] {
+    [
+        app.collapse_cloud_drives,
+        app.collapse_local_disks,
+        app.collapse_network_drives,
+        app.collapse_network_locations,
+    ]
 }
 
 fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {

@@ -25,11 +25,26 @@ pub(super) fn quick_access_content_height(
         + (1 + usize::from(show_recycle_bin) + pinned_count) as f32 * spacing
 }
 
-pub(super) fn tags_content_height(collapsed: bool, tag_count: usize, spacing: f32) -> f32 {
-    if collapsed {
-        TAGS_MIN_HEIGHT + spacing
+pub(super) fn drives_available_height(available: f32, tags_visible: bool, spacing: f32) -> f32 {
+    let tags_header = if tags_visible {
+        TAGS_MIN_HEIGHT + TAGS_DIVIDER_HEIGHT + 3.0 * spacing
     } else {
-        TAGS_MIN_HEIGHT + 4.0 + tag_count as f32 * 26.0 + (1 + tag_count) as f32 * spacing
+        0.0
+    };
+    (available - tags_header).max(0.0)
+}
+
+/// Remember separate divider limits so resizing a collapsed layout does not
+/// overwrite the size used when those sections are expanded again.
+pub(super) fn restore_drives_height(
+    previous: [bool; 4],
+    current: [bool; 4],
+    height_limit: &mut Option<f32>,
+    remembered: &mut std::collections::HashMap<[bool; 4], Option<f32>>,
+) {
+    if previous != current {
+        remembered.insert(previous, *height_limit);
+        *height_limit = remembered.get(&current).copied().flatten();
     }
 }
 
@@ -45,17 +60,56 @@ pub(super) fn section_height(content: f32, saved: Option<f32>, min: f32, max: f3
 
 #[cfg(test)]
 mod tests {
-    use super::{quick_access_content_height, section_height, tags_content_height};
+    use super::{
+        drives_available_height, quick_access_content_height, restore_drives_height, section_height,
+    };
     use eframe::egui::{self, pos2, vec2, Context, Rect, Sense};
 
     #[test]
     fn collapsed_headers_do_not_depend_on_item_count() {
         assert_eq!(quick_access_content_height(true, 0, false, 3.0), 24.0);
         assert_eq!(quick_access_content_height(true, 20, true, 3.0), 24.0);
-        assert_eq!(tags_content_height(true, 1, 3.0), 33.0);
-        assert_eq!(tags_content_height(true, 20, 3.0), 33.0);
         assert!(quick_access_content_height(false, 20, true, 3.0) > 24.0);
-        assert!(tags_content_height(false, 20, 3.0) > 33.0);
+    }
+
+    #[test]
+    fn expanding_a_section_restores_its_previous_height() {
+        let expanded = [false; 4];
+        let collapsed = [true; 4];
+        let mut limit = Some(180.0);
+        let mut remembered = Default::default();
+        restore_drives_height(expanded, collapsed, &mut limit, &mut remembered);
+        assert_eq!(limit, None);
+        limit = Some(60.0);
+        restore_drives_height(collapsed, expanded, &mut limit, &mut remembered);
+        assert_eq!(limit, Some(180.0));
+        assert_eq!(section_height(300.0, limit, 24.0, 400.0), 180.0);
+        restore_drives_height(expanded, collapsed, &mut limit, &mut remembered);
+        assert_eq!(limit, Some(60.0));
+    }
+
+    #[test]
+    fn reopening_sections_also_remembers_automatic_sizing() {
+        let mut remembered = Default::default();
+        let mut limit = None;
+        let expanded = [false; 4];
+        let partial = [true, false, false, false];
+        let collapsed = [true; 4];
+        restore_drives_height(expanded, partial, &mut limit, &mut remembered);
+        limit = Some(140.0);
+        restore_drives_height(partial, collapsed, &mut limit, &mut remembered);
+        limit = Some(60.0);
+        restore_drives_height(collapsed, partial, &mut limit, &mut remembered);
+        assert_eq!(limit, Some(140.0));
+        restore_drives_height(partial, expanded, &mut limit, &mut remembered);
+        assert_eq!(limit, None);
+    }
+
+    #[test]
+    fn drives_reserve_only_the_tags_header() {
+        assert_eq!(drives_available_height(500.0, true, 3.0), 452.0);
+        assert_eq!(drives_available_height(500.0, false, 3.0), 500.0);
+        assert_eq!(drives_available_height(10.0, true, 3.0), 0.0);
     }
 
     #[test]

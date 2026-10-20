@@ -80,9 +80,8 @@ mod tests {
     fn sidebar_dividers_track_drag_with_and_without_quick_access() {
         for quick_access in [false, true] {
             for drives_height in [120.0_f32, 200.0, 800.0] {
-                for delta in [-30.0, 30.0] {
+                for delta in [-30.0, 30.0, 200.0] {
                     let ctx = egui::Context::default();
-                    let height = 160.0;
                     let mut drives_limit = Some(160.0);
                     let mut frame = |events| {
                         let mut handle = Rect::NOTHING;
@@ -98,11 +97,11 @@ mod tests {
                                 if quick_access {
                                     ui.allocate_exact_size(egui::vec2(240.0, 48.0), Sense::hover());
                                 }
-                                let drives_available = (ui.available_height()
-                                    - height
-                                    - super::super::TAGS_DIVIDER_HEIGHT
-                                    - 2.0 * ui.spacing().item_spacing.y)
-                                    .max(0.0);
+                                let drives_available = super::super::drives_available_height(
+                                    ui.available_height(),
+                                    true,
+                                    ui.spacing().item_spacing.y,
+                                );
                                 let drives = egui::ScrollArea::vertical()
                                     .id_salt("test_drives")
                                     .auto_shrink([false, true])
@@ -157,11 +156,8 @@ mod tests {
                     let destination = origin + egui::vec2(0.0, delta);
                     frame(vec![egui::Event::PointerMoved(destination)]);
                     let moved = frame(vec![]);
-                    let expected_delta = if drives_height < 160.0 {
-                        delta.min(0.0)
-                    } else {
-                        delta
-                    };
+                    let expected = (drives_height.min(160.0) + delta).min(drives_height);
+                    let expected_delta = expected - drives_height.min(160.0);
                     assert!((moved.y - origin.y - expected_delta).abs() < 1.0, "handle must follow pointer up to content bounds for drives_height={drives_height}, delta={delta}: {moved:?} vs {destination:?}");
                     frame(vec![egui::Event::PointerButton {
                         pos: destination,
@@ -169,7 +165,6 @@ mod tests {
                         pressed: false,
                         modifiers: egui::Modifiers::NONE,
                     }]);
-                    let expected = (drives_height.min(160.0) + delta).min(drives_height);
                     assert!((drives_limit.unwrap() - expected).abs() < 1.0);
                 }
             }
@@ -211,18 +206,21 @@ mod tests {
             );
             (rect, content_top)
         };
-        for content_height in [50.0, 1000.0] {
+        for content_height in [50.0, 200.0, 1000.0] {
             let expanded = render(220.0, content_height, vec![]);
             let collapsed = render(60.0, content_height, vec![]);
             assert!((expanded.0.bottom() - 500.0).abs() < 0.1);
             assert!((collapsed.0.bottom() - 500.0).abs() < 0.1);
             assert!((expanded.0.top() - collapsed.0.top() - 160.0).abs() < 0.1);
-            if content_height > collapsed.0.height() {
+            let compact = render(420.0, content_height, vec![]);
+            assert!((compact.0.bottom() - 500.0).abs() < 0.1);
+            assert!(compact.0.height() < collapsed.0.height());
+            if content_height > compact.0.height() {
                 render(
-                    60.0,
+                    420.0,
                     content_height,
                     vec![
-                        egui::Event::PointerMoved(collapsed.0.center()),
+                        egui::Event::PointerMoved(compact.0.center()),
                         egui::Event::MouseWheel {
                             unit: egui::MouseWheelUnit::Point,
                             phase: egui::TouchPhase::Move,
@@ -231,8 +229,8 @@ mod tests {
                         },
                     ],
                 );
-                let scrolled = render(60.0, content_height, vec![]);
-                assert!(scrolled.1 < collapsed.1);
+                let scrolled = render(420.0, content_height, vec![]);
+                assert!(scrolled.1 < compact.1);
             }
         }
     }

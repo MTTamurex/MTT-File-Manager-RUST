@@ -37,6 +37,8 @@ pub struct LayoutState {
     pub sidebar_quick_access_height: Option<f32>,
     // Drives block height cap (None = content-sized up to available space).
     pub sidebar_drives_height: Option<f32>,
+    // Runtime limits for each combination of collapsed cloud/local/network sections.
+    pub sidebar_drives_heights: std::collections::HashMap<[bool; 4], Option<f32>>,
 }
 
 impl Default for LayoutState {
@@ -64,6 +66,7 @@ impl Default for LayoutState {
             dual_panel_split_ratio: 0.5,
             sidebar_quick_access_height: None,
             sidebar_drives_height: None,
+            sidebar_drives_heights: Default::default(),
         }
     }
 }

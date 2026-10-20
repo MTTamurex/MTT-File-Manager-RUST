@@ -316,10 +316,24 @@ impl ImageViewerApp {
                 .map(|height| height.to_string())
                 .unwrap_or_default(),
         ));
+        // Section collapse flags restart expanded. Do not persist a temporary
+        // collapsed layout's limit as the next session's expanded height.
+        let drives_height = if self.collapse_cloud_drives
+            || self.collapse_local_disks
+            || self.collapse_network_drives
+            || self.collapse_network_locations
+        {
+            self.layout
+                .sidebar_drives_heights
+                .get(&[false; 4])
+                .copied()
+                .unwrap_or(self.layout.sidebar_drives_height)
+        } else {
+            self.layout.sidebar_drives_height
+        };
         prefs.push((
             "sidebar_drives_height",
-            self.layout
-                .sidebar_drives_height
+            drives_height
                 .map(|height| height.to_string())
                 .unwrap_or_default(),
         ));

@@ -87,6 +87,7 @@ pub(in crate::app) fn build_layout_state(
         dual_panel_split_ratio,
         sidebar_quick_access_height,
         sidebar_drives_height,
+        sidebar_drives_heights: Default::default(),
     }
 }
 
