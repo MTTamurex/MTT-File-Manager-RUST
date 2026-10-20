@@ -46,7 +46,10 @@ pub(super) fn render_virtualized_content(
     } else {
         total_rows as f32 * row_height
     };
-    let viewport_rect = ui.available_rect_before_wrap();
+    let viewport_rect = super::horizontal::viewport(ui, ctx);
+    let content_width = super::horizontal::content_width(ctx, available_w);
+    let scroll_x = *ctx.mut_scroll_offset_x;
+    let max_scroll_x = (content_width - viewport_rect.width()).max(0.0);
     let viewport_h = viewport_rect.height();
     let max_scroll = (total_content_height - viewport_h).max(0.0);
 
@@ -121,13 +124,13 @@ pub(super) fn render_virtualized_content(
         None
     } else if grouped && rectangle_geometry_needed {
         Some(RectangleSelectionMetrics::Grouped(
-            grouped_list_rectangle_metrics(ctx, row_height, available_w, total_content_height),
+            grouped_list_rectangle_metrics(ctx, row_height, content_width, total_content_height),
         ))
     } else if !grouped {
         Some(RectangleSelectionMetrics::List(ListRectangleMetrics {
             count: total_rows,
             row_height,
-            content_width: available_w,
+            content_width,
             content_height: total_content_height,
         }))
     } else {
@@ -135,9 +138,9 @@ pub(super) fn render_virtualized_content(
     };
     ctx.rectangle_selection_frame.begin(
         viewport_rect,
-        0.0,
+        scroll_x,
         current_scroll,
-        0.0,
+        max_scroll_x,
         max_scroll,
         rectangle_metrics,
     );
@@ -163,7 +166,7 @@ pub(super) fn render_virtualized_content(
     // extends beyond the central panel bounds into the right sidebar.
     child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
 
-    let content_min = viewport_rect.min;
+    let content_min = viewport_rect.min - egui::vec2(scroll_x, 0.0);
 
     let mut toggled_group = None;
     if grouped {
@@ -173,7 +176,7 @@ pub(super) fn render_virtualized_content(
             ops,
             content_min,
             current_scroll,
-            available_w,
+            content_width,
             row_height,
             col_widths,
             viewport_h,
@@ -192,7 +195,7 @@ pub(super) fn render_virtualized_content(
             current_scroll,
             viewport_h,
             total_rows,
-            available_w,
+            content_width,
             row_height,
             col_widths,
             is_scrolling,
@@ -207,7 +210,7 @@ pub(super) fn render_virtualized_content(
         && ctx.rectangle_selection_frame.start_screen_pos.is_some()
     {
         ctx.rectangle_selection_frame.metrics = Some(RectangleSelectionMetrics::Grouped(
-            grouped_list_rectangle_metrics(ctx, row_height, available_w, total_content_height),
+            grouped_list_rectangle_metrics(ctx, row_height, content_width, total_content_height),
         ));
     }
 
@@ -218,7 +221,7 @@ pub(super) fn render_virtualized_content(
             ui,
             state,
             viewport_rect,
-            0.0,
+            scroll_x,
             current_scroll,
         );
     }

@@ -22,7 +22,7 @@ pub(super) fn render(
     enabled: bool,
 ) {
     let hover_id = egui::Id::new("global_search_hover_start").with(full_path);
-    if !response.hovered() || !enabled {
+    if !response.hovered() || !enabled || !app.explorer_preferences.hover_preview {
         ui.ctx().data_mut(|data| data.remove::<f64>(hover_id));
         return;
     }

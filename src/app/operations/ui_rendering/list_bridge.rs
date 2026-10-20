@@ -404,6 +404,8 @@ impl ImageViewerApp {
         });
 
         let scroll_interpolation_enabled = self.uses_scroll_interpolation();
+        let widths_before_render =
+            crate::app::dual_panel::PanelListColumnWidths::from_layout(&self.layout);
 
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
@@ -443,6 +445,7 @@ impl ImageViewerApp {
         // Refit each physical pane if its available width subsequently changes.
         // Keep the request pending until both content and a valid width exist.
         let needs_save_after_autofit = !column_list
+            && self.explorer_preferences.auto_resize_columns
             && !compact
             && list_view::autofit_layout::needs_refit(ui, self.pending_list_column_autofit)
             && list_view::auto_fit_columns(
@@ -486,6 +489,8 @@ impl ImageViewerApp {
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             is_onedrive_folder,
             global_search_active: self.global_search.active,
+            auto_resize_columns: self.explorer_preferences.auto_resize_columns,
+            hover_preview: self.explorer_preferences.hover_preview,
             texture_cache: &mut self.cache_manager.texture_cache,
             attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
             loading_set: &mut self.cache_manager.loading_set,
@@ -566,8 +571,11 @@ impl ImageViewerApp {
         // Always consume focus_rename after one frame (cursor selection applied once)
         self.focus_rename = false;
 
-        // Persist auto-fitted column widths (deferred from before ctx creation).
-        if needs_save_after_autofit {
+        // Persist automatic fits and manual resizing after releasing the context borrows.
+        if needs_save_after_autofit
+            || crate::app::dual_panel::PanelListColumnWidths::from_layout(&self.layout)
+                != widths_before_render
+        {
             self.save_preferences();
         }
 

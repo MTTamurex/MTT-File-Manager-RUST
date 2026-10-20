@@ -330,6 +330,7 @@ impl ImageViewerApp {
             is_computer_view: self.navigation_state.is_computer_view,
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             global_search_active: self.global_search.active,
+            hover_preview: self.explorer_preferences.hover_preview,
             texture_cache: &mut self.cache_manager.texture_cache,
             attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
             loading_set: &mut self.cache_manager.loading_set,

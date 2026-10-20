@@ -4,6 +4,7 @@
 pub(crate) mod autofit_layout;
 mod header;
 mod helpers;
+mod horizontal;
 pub(crate) mod item_renderer;
 pub(crate) mod item_renderer_details;
 mod scroll;
@@ -214,6 +215,8 @@ pub struct ListViewContext<'a> {
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
     pub global_search_active: bool,
+    pub auto_resize_columns: bool,
+    pub hover_preview: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub attempted_thumbnail_bucket: &'a lru::LruCache<PathBuf, u32>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
@@ -333,16 +336,8 @@ pub fn render_list_view(
     let row_height = 24.0;
     let available_w = ui.available_width();
 
-    // In compact (Miller focused column) mode: a single name column spanning
-    // the full width, with no header — matching the ancestor columns' look.
-    let col_widths = if ctx.compact {
-        ColumnWidths {
-            name: (available_w - 8.0).max(50.0),
-            date: 0.0,
-            type_col: 0.0,
-            size: 0.0,
-        }
-    } else {
+    // Compact Miller columns do not resize the stored detail-view columns.
+    if !ctx.compact {
         // Snapshot column widths BEFORE scaling (used as scaling input)
         let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view {
             *ctx.col_status_width
@@ -355,25 +350,38 @@ pub fn render_list_view(
         let w_size = *ctx.col_size_width;
 
         // Scale column widths if they exceed available space
-        scale_column_widths(ctx, available_w, w_status, w_name, w_date, w_type, w_size);
-
-        // Snapshot for item rendering (uses post-scaling values to match header)
-        ColumnWidths {
-            name: *ctx.col_name_width,
-            date: *ctx.col_date_width,
-            type_col: *ctx.col_type_width,
-            size: *ctx.col_size_width,
+        if ctx.auto_resize_columns {
+            scale_column_widths(ctx, available_w, w_status, w_name, w_date, w_type, w_size);
         }
-    };
+    }
+
+    horizontal::prepare(ui, ctx);
 
     // Render header (uses ctx.col_*_width directly for resize interaction).
     // Skipped in compact mode.
     let sort_action = if ctx.compact {
         None
     } else {
-        let action = header::render_list_header(ui, ctx, available_w);
+        let action = horizontal::render_header(ui, ctx, available_w);
         ui.separator();
         action
+    };
+
+    // Snapshot after the header has applied this frame's resize interaction.
+    let col_widths = if ctx.compact {
+        ColumnWidths {
+            name: (available_w - 8.0).max(50.0),
+            date: 0.0,
+            type_col: 0.0,
+            size: 0.0,
+        }
+    } else {
+        ColumnWidths {
+            name: *ctx.col_name_width,
+            date: *ctx.col_date_width,
+            type_col: *ctx.col_type_width,
+            size: *ctx.col_size_width,
+        }
     };
 
     // Render virtualized content

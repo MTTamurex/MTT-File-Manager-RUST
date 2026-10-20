@@ -150,6 +150,7 @@ pub struct GridViewContext<'a> {
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub global_search_active: bool,
+    pub hover_preview: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub attempted_thumbnail_bucket: &'a lru::LruCache<PathBuf, u32>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,

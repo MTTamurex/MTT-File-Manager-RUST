@@ -212,6 +212,7 @@ impl ImageViewerApp {
             }
             .to_string(),
         ));
+        prefs.extend(self.explorer_preferences.preferences());
         prefs.push((
             "quick_access_placement",
             match self.quick_access_placement {

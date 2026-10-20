@@ -194,7 +194,7 @@ pub(super) fn render_grid_item(
 
     if response.hovered() && !ctx.is_item_dragging && !rectangle_select_active {
         // Suppress tooltips while the context menu is open
-        if crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+        if !ctx.hover_preview || crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
             let hover_id = response.id.with("grid_hover_start").with(&item.path);
             ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
         } else {

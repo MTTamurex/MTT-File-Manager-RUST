@@ -54,6 +54,7 @@ pub(super) struct StartupPreferences {
     pub(super) initial_indexing_notice_generation: Option<String>,
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
     pub(super) minimize_to_tray: bool,
+    pub(super) explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences,
     pub(super) startup_location: crate::app::startup_location::StartupLocation,
     pub(super) startup_custom_path: String,
     pub(super) tab_preferences: crate::app::tab_preferences::TabPreferences,
@@ -428,6 +429,7 @@ impl StartupPreferences {
             initial_indexing_notice_generation,
             saved_tab_session,
             minimize_to_tray,
+            explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences::load(&prefs),
         }
     }
 }

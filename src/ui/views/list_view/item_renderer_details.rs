@@ -70,7 +70,9 @@ pub(crate) fn render_item_tooltip(
     is_recycle_bin: bool,
 ) {
     // Suppress tooltips while the context menu is open
-    if crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+    if !ctx.hover_preview || crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+        let hover_id = response.id.with("list_hover_start").with(&item.path);
+        ui.ctx().data_mut(|data| data.remove::<f64>(hover_id));
         return;
     }
     if response.hovered() {

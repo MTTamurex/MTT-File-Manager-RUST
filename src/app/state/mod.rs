@@ -317,6 +317,7 @@ pub struct ImageViewerApp {
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
     pub show_quick_access: bool, // Show Quick Access
     pub minimize_to_tray: bool,
+    pub explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences,
     pub startup_location: crate::app::startup_location::StartupLocation,
     pub startup_custom_path: String,
     pub tab_preferences: crate::app::tab_preferences::TabPreferences,

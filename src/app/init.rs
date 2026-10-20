@@ -241,6 +241,7 @@ impl ImageViewerApp {
             initial_indexing_notice_generation,
             mut saved_tab_session,
             minimize_to_tray,
+            explorer_preferences,
             startup_location,
             startup_custom_path,
             date_format,
@@ -490,6 +491,7 @@ impl ImageViewerApp {
             show_recycle_bin,  // Loaded from SQLite
             show_quick_access, // Loaded from SQLite
             minimize_to_tray,
+            explorer_preferences,
             default_file_manager_settings:
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
             updates: crate::app::update_state::UpdateState::default(),

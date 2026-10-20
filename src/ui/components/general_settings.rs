@@ -41,6 +41,8 @@ pub fn render_general_settings_section(
     ui.add_space(20.0);
     output.startup_date_changed |= crate::ui::components::tab_settings::render(ui, app);
     ui.add_space(20.0);
+    super::explorer_settings::render(ui, app);
+    ui.add_space(20.0);
     settings_ui::subsection_header(ui, &t!("settings.miscellaneous"), "");
     if settings_ui::toggle_row(
         ui,

@@ -27,16 +27,20 @@ fn draw_header_resizable(
     let header_response = ui.interact(header_rect, header_id, Sense::click());
 
     let is_active = sort_mode == mode;
+    let is_hovered = header_response.hovered()
+        && ui.input(|input| {
+            input.pointer.hover_pos().is_some_and(|pos| header_rect.contains(pos))
+        });
 
     if ui.is_rect_visible(header_rect) {
-        if is_active {
+        if is_hovered {
             ui.painter().rect_filled(
                 header_rect,
                 2.0,
                 crate::ui::theme::header_active_bg(ui.ctx()),
             );
         }
-        let text_color = if is_active {
+        let text_color = if is_hovered {
             crate::ui::theme::text_color(ui.ctx())
         } else {
             crate::ui::theme::secondary_text_color(ui.ctx())
@@ -133,7 +137,11 @@ pub(super) fn render_list_header(
             ui.style_mut().spacing.item_spacing.x = 0.0;
 
             // Calculate available space for columns (total - scrollbar - status column)
-            let available_for_columns = available_w - 8.0 - w_status;
+            let available_for_columns = if ctx.auto_resize_columns {
+                available_w - 8.0 - w_status
+            } else {
+                f32::INFINITY
+            };
 
             // Calculate current widths for constraint checks
             let current_date = *ctx.col_date_width;
@@ -310,7 +318,11 @@ fn render_status_header(ui: &mut Ui, ctx: &mut ListViewContext, available_w: f32
 
     if handle_response.dragged() {
         let delta = handle_response.drag_delta().x;
-        let available_for_columns = available_w - 8.0;
+        let available_for_columns = if ctx.auto_resize_columns {
+            available_w - 8.0
+        } else {
+            f32::INFINITY
+        };
         let other_widths = current_name + current_date + current_type + current_size;
         let max_width = available_for_columns - other_widths;
         let min_width = 80.0;
@@ -332,3 +344,7 @@ fn render_status_header(ui: &mut Ui, ctx: &mut ListViewContext, available_w: f32
 
     ui.allocate_exact_size(egui::vec2(*ctx.col_status_width, 22.0), Sense::hover());
 }
+
+#[cfg(test)]
+#[path = "header_tests.rs"]
+mod tests;

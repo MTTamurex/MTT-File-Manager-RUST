@@ -5,6 +5,7 @@ pub mod batch_rename_modal;
 pub mod breadcrumb;
 pub mod default_file_manager_settings;
 pub mod drag_move_confirmation_modal;
+mod explorer_settings;
 pub mod general_settings;
 pub mod gif_manager;
 pub mod gif_player;

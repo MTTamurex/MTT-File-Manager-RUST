@@ -39,7 +39,7 @@ impl ActivePanel {
 /// `ImageViewerApp::layout` stores the active panel widths. Dual-panel snapshots
 /// keep a copy for the inactive panel so resizing a list column in one panel
 /// does not mutate the other panel.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct PanelListColumnWidths {
     pub name: f32,
     pub date: f32,
