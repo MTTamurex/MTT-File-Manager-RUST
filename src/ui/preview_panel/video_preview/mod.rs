@@ -137,7 +137,7 @@ pub fn render_video_preview(
     // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
     let paths_match = preview.path() == Some(&file.path);
 
-    if paths_match && is_owner {
+    if paths_match && is_owner && preview.is_player_visible() {
         // === ACTIVE PLAYER (OWNER) ===
         let vol_action = if preview.is_maximized() {
             render_fullscreen_video(
@@ -186,4 +186,43 @@ pub fn render_video_preview(
         }
     }
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::components::MpvPreview;
+    use std::path::PathBuf;
+
+    #[test]
+    fn inactive_owner_preview_renders_thumbnail_instead_of_empty_controls() {
+        let ctx = egui::Context::default();
+        let path = PathBuf::from("video.mp4");
+        let file = FileEntry::from_path(path.clone(), false);
+        let mut preview = MediaPreview::Video(Box::new(MpvPreview::new(path)));
+        let mut icons = SvgIconManager::new();
+        let thumbnail = ctx.load_texture(
+            "test_thumbnail",
+            egui::ColorImage::filled([160, 90], egui::Color32::BLACK),
+            egui::TextureOptions::default(),
+        );
+
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let top = ui.cursor().top();
+            assert!(render_video_preview(
+                ui,
+                &file,
+                &mut preview,
+                &mut icons,
+                None,
+                true,
+                Some(&thumbnail),
+            )
+            .is_none());
+            // A stopped player allocates no video surface; the thumbnail
+            // must still occupy its full height rather than just a toolbar.
+            assert!(ui.cursor().top() - top >= 90.0);
+        });
+        assert!(!preview.is_player_visible());
+    }
 }

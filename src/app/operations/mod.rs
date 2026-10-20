@@ -52,6 +52,7 @@ mod new_tab;
 pub mod panel_tab_ops;
 pub mod pinned_folder_ops;
 pub mod preferences;
+mod preview_lifecycle;
 pub mod rectangle_selection;
 pub mod recycle_bin_ops;
 pub mod selection;

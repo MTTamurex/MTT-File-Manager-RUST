@@ -222,6 +222,10 @@ impl ImageViewerApp {
         // would reset them to global "normal" defaults, discarding tab state).
         self.apply_folder_lock_on_tab_restore();
 
+        // Restoration may have cleared a missing selection even when there is
+        // no thumbnail work to prepare. Reconcile the owner's preview as well.
+        self.close_embedded_preview_for_selection_change();
+
         if self.show_preview_panel && self.needs_selected_preview_preparation() {
             self.update_selected_thumbnail();
         }

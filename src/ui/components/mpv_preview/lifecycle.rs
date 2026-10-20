@@ -78,54 +78,6 @@ impl MpvPreview {
         self.file_load_gate.cancel_waiting_transition();
     }
 
-    /// Stops the selected file while retaining the MPV core, event loop and HWND.
-    pub fn park_for_selection_change(&mut self) {
-        let _ = self.file_load_gate.park();
-
-        self.tracks_need_query.store(0, Ordering::Release);
-        self.reset_file_state();
-
-        if let Some(mpv) = &self.mpv {
-            let _ = mpv.set_property("pause", true);
-            let empty: [&str; 0] = [];
-            let _ = mpv.command("stop", &empty);
-        }
-
-        self.loaded_path = None;
-        self.play_on_init = false;
-        self.show_player = false;
-        self.file_load_gate.finish_park();
-    }
-
-    /// Points the retained preview at a new file. Loading remains lazy in `update`.
-    pub fn retarget_for_playback(&mut self, path: PathBuf) {
-        let already_loaded = self.path == path
-            && self.loaded_path.as_ref() == Some(&path)
-            && !self.file_load_gate.is_parked();
-
-        self.show_player = true;
-        if already_loaded {
-            self.play_on_init = false;
-            self.play();
-            if let Ok(mut state) = self.state.write() {
-                state.is_playing = true;
-            }
-            return;
-        }
-
-        if self.path != path && !self.file_load_gate.is_parked() {
-            self.park_for_selection_change();
-        }
-
-        self.file_load_gate.prepare_retarget();
-        self.path = path;
-        self.loaded_path = None;
-        self.play_on_init = true;
-        self.tracks_need_query.store(0, Ordering::Release);
-        self.reset_file_state();
-        self.file_load_gate.finish_retarget();
-    }
-
     /// Performs explicit MPV teardown to release decode buffers and caches immediately.
     /// This is used when closing preview/tab to avoid waiting for eventual allocator cleanup.
     pub fn shutdown(&mut self) {
@@ -210,7 +162,8 @@ fn spawn_mpv_reaper(handle: Option<thread::JoinHandle<()>>, mpv: Option<Arc<mpv:
 
 #[cfg(test)]
 mod tests {
-    use super::join_then_drop;
+    use super::{join_then_drop, MpvPreview};
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
@@ -244,5 +197,37 @@ mod tests {
         join_then_drop(Some(handle), Some(probe));
 
         assert!(dropped_after_join.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn shutdown_stops_the_old_event_loop_and_rejects_its_pending_results() {
+        let mut preview = MpvPreview::new(PathBuf::from("video.mp4"));
+        preview.show_player = true;
+        preview.is_visible = true;
+        let generation = preview.begin_file_load();
+        preview.finish_file_load(generation, true);
+        preview.event_thread_running.store(true, Ordering::Release);
+        let running = preview.event_thread_running.clone();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        preview.event_thread_handle = Some(std::thread::spawn(move || {
+            while running.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            let _ = finished_tx.send(());
+        }));
+
+        preview.shutdown();
+
+        assert!(!preview.show_player);
+        assert!(!preview.is_visible);
+        assert!(!preview.event_thread_running.load(Ordering::Acquire));
+        assert!(preview.event_thread_handle.is_none());
+        assert!(!preview.file_load_gate.result_is_current(generation));
+        assert!(!preview.file_load_gate.note_file_loaded(generation));
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("old event loop must stop after shutdown");
+        // Dropping the removed preview invokes shutdown again.
+        preview.shutdown();
     }
 }

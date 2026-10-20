@@ -181,38 +181,6 @@ impl FileLoadGate {
             .clone()
     }
 
-    pub fn park(&self) -> bool {
-        let mut state = self.state.lock().expect("file load gate lock");
-        let was_parked = self.parked.swap(true, Ordering::AcqRel);
-        let should_invalidate = !was_parked || self.loading_generation() != 0;
-        self.command_pending.store(true, Ordering::Release);
-        if should_invalidate {
-            self.next_generation();
-        }
-        self.loading_generation.store(0, Ordering::Release);
-        state.pending = None;
-        state.loaded_generation = None;
-        should_invalidate
-    }
-
-    pub fn finish_park(&self) {
-        self.command_pending.store(false, Ordering::Release);
-    }
-
-    pub fn prepare_retarget(&self) {
-        let mut state = self.state.lock().expect("file load gate lock");
-        self.command_pending.store(true, Ordering::Release);
-        let generation = self.next_generation();
-        self.loading_generation.store(generation, Ordering::Release);
-        self.parked.store(true, Ordering::Release);
-        state.pending = None;
-        state.loaded_generation = None;
-    }
-
-    pub fn finish_retarget(&self) {
-        self.command_pending.store(false, Ordering::Release);
-    }
-
     pub fn shutdown(&self) {
         let mut state = self.state.lock().expect("file load gate lock");
         self.command_pending.store(true, Ordering::Release);
@@ -295,8 +263,6 @@ mod file_load_gate_tests {
         let gate = FileLoadGate::default();
         let old_generation = gate.begin_load("A.mp4".into());
         gate.finish_load_command(old_generation, true);
-        gate.prepare_retarget();
-        gate.finish_retarget();
         let new_generation = gate.begin_load("B.mp4".into());
         gate.finish_load_command(new_generation, true);
 
@@ -316,10 +282,10 @@ mod file_load_gate_tests {
     }
 
     #[test]
-    fn unsafe_path_cancellation_unblocks_a_waiting_retarget() {
+    fn unsafe_path_cancellation_unblocks_a_waiting_load() {
         let gate = FileLoadGate::default();
-        gate.prepare_retarget();
-        gate.finish_retarget();
+        let generation = gate.begin_load("video.mp4".into());
+        gate.finish_load_command(generation, true);
         assert!(gate.is_parked());
 
         gate.cancel_waiting_transition();
@@ -341,12 +307,12 @@ mod file_load_gate_tests {
     }
 
     #[test]
-    fn parking_an_already_parked_load_still_invalidates_it() {
+    fn shutdown_invalidates_a_pending_load() {
         let gate = FileLoadGate::default();
         let loading_generation = gate.begin_load("B.mp4".into());
         assert!(gate.is_parked());
 
-        assert!(gate.park());
+        gate.shutdown();
 
         assert!(gate.generation() > loading_generation);
         assert_eq!(gate.loading_generation(), 0);
@@ -354,13 +320,7 @@ mod file_load_gate_tests {
         assert!(gate.is_command_pending());
         assert!(!gate.note_file_loaded(loading_generation));
 
-        gate.finish_park();
         assert!(gate.is_parked());
-        assert!(!gate.is_command_pending());
-
-        let parked_generation = gate.generation();
-        assert!(!gate.park());
-        assert_eq!(gate.generation(), parked_generation);
-        gate.finish_park();
+        assert!(gate.take_start_file_registration().is_none());
     }
 }

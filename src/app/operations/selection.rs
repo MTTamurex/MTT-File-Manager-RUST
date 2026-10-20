@@ -2,8 +2,8 @@
 //!
 //! This module handles updates to the selected item, including thumbnail syncing and clearing selection state.
 //!
-//! IMPORTANT: Media preview has owner-based protection. Only the owner tab can modify playback state.
-//! Non-owner tabs can change their own selection without affecting the global media player.
+//! Selection changes affect only the owner tab's embedded preview. Starting
+//! playback in another tab replaces the preview and transfers ownership.
 
 use crate::app::state::{ImageViewerApp, PendingVideoPlayerAction};
 use crate::domain::file_entry::FileEntry;
@@ -39,7 +39,7 @@ fn normalize_selection_path(path: &Path) -> String {
         .to_string()
 }
 
-fn selected_paths_match(left: &Path, right: &Path) -> bool {
+pub(super) fn selected_paths_match(left: &Path, right: &Path) -> bool {
     left == right || normalize_selection_path(left) == normalize_selection_path(right)
 }
 
@@ -396,9 +396,6 @@ impl ImageViewerApp {
                 }
             }
             PendingVideoPlayerAction::Preview { path, tab_id } => {
-                use crate::ui::components::media_preview::MediaPreview;
-                use crate::ui::components::MpvPreview;
-
                 let request_is_current = self.tab_manager.active().id == tab_id
                     && self
                         .selected_file
@@ -408,17 +405,14 @@ impl ImageViewerApp {
                     return false;
                 }
 
-                if let Some(MediaPreview::Video(player)) = self.media_preview.as_mut() {
-                    player.retarget_for_playback(path);
-                } else {
-                    let mut player = MpvPreview::new(path);
-                    player.play_on_init = true;
-                    player.show_player = true;
-                    player.initial_volume = self.session_volume;
-                    self.media_preview = Some(MediaPreview::Video(Box::new(player)));
-                }
+                super::preview_lifecycle::replace_video_preview(
+                    &mut self.media_preview,
+                    &mut self.media_preview_owner_tab_id,
+                    path,
+                    tab_id,
+                    self.session_volume,
+                );
 
-                self.media_preview_owner_tab_id = Some(self.tab_manager.active().id);
                 self.update_video_visibility();
                 true
             }
@@ -715,9 +709,8 @@ impl ImageViewerApp {
     }
 
     pub fn update_selected_thumbnail(&mut self) {
-        // Selection change only updates the persistent thumbnail and metadata.
-        // It NO LONGER clears or sets the global media_preview automatically.
-        // This allows playback to continue in the background while the user browses.
+        // Only the owner tab's selection can close its embedded player.
+        self.close_embedded_preview_for_selection_change();
 
         self.selected_thumbnail = None;
         self.selected_gif = None;
@@ -731,13 +724,7 @@ impl ImageViewerApp {
 
         self.defer_preview_work_after_selection = false;
 
-        // No selection -> if owner, clear media.
         self.gif_manager.unload_all();
-
-        let active_tab_id = self.tab_manager.active().id;
-        if self.media_preview_owner_tab_id == Some(active_tab_id) {
-            self.destroy_media_preview();
-        }
 
         // CRITICAL: Sync visibility whenever selection changes
         self.update_video_visibility();
@@ -767,17 +754,6 @@ impl ImageViewerApp {
             file.is_media(),
             thumbnail_size,
         );
-
-        let active_tab_id = self.tab_manager.active().id;
-        let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
-        if is_owner {
-            use crate::ui::components::media_preview::MediaPreview;
-            if let Some(MediaPreview::Video(player)) = &mut self.media_preview {
-                if player.path != path {
-                    player.park_for_selection_change();
-                }
-            }
-        }
 
         if crate::domain::thumbnail::detail_preview_size(&path)
             == crate::domain::thumbnail::DETAIL_PREVIEW_GIF_SIZE
@@ -906,11 +882,8 @@ impl ImageViewerApp {
 
     /// Clears the current selection, persistent thumbnail, metadata and search.
     /// Useful during navigation between folders.
-    /// NOTE: Only clears media_preview if current tab is the owner.
+    /// Only closes embedded playback owned by the current tab.
     pub fn reset_selection_and_search(&mut self) {
-        // Selection change only updates the persistent thumbnail and metadata.
-        // It NO LONGER clears the global media_preview.
-
         self.selected_item = None;
         self.selected_file = None;
         self.selected_thumbnail = None;
@@ -927,11 +900,7 @@ impl ImageViewerApp {
         // Reset also drops all active GIF previews
         self.gif_manager.unload_all();
 
-        // CLEANUP LOGIC: If owner resets selection, clear media
-        let active_tab_id = self.tab_manager.active().id;
-        if self.media_preview_owner_tab_id == Some(active_tab_id) {
-            self.destroy_media_preview();
-        }
+        self.close_embedded_preview_for_selection_change();
 
         // CRITICAL: Sync visibility whenever selection is reset
         self.update_video_visibility();
