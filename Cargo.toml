@@ -85,6 +85,7 @@ zstd = "0.13"               # Zstandard decompression for .tar.zst / .tzst
 sha2 = "0.10"               # SHA-256 file hash for the details panel (on-demand)
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 semver = "1"
+egui_commonmark = { version = "0.24", default-features = false, features = ["pulldown_cmark"] }
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"

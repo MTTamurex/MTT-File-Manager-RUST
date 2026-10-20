@@ -1,7 +1,9 @@
 updates:
   title: "Updates"
-  check_startup: "Check for updates at startup"
-  auto_install: "Install updates at startup (requires startup checking)"
+  description: "Choose how MTT checks for and installs new versions."
+  check_startup: "Check for updates when opening MTT"
+  auto_install: "Install updates when opening MTT"
+  auto_install_hint: "Automatic installation requires checking for updates when opening MTT."
   permission_notice: "Updating closes and reopens MTT. Windows will request administrator approval. File operations must finish first."
   check: "Check for updates"
   checking: "Checking for updates…"

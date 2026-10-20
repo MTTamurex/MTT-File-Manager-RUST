@@ -1,7 +1,9 @@
 updates:
   title: "Atualizações"
-  check_startup: "Verificar atualizações ao iniciar"
-  auto_install: "Instalar atualizações ao iniciar (requer verificação ao iniciar)"
+  description: "Escolha como o MTT verifica e instala novas versões."
+  check_startup: "Verificar atualizações ao abrir o MTT"
+  auto_install: "Instalar atualizações ao abrir o MTT"
+  auto_install_hint: "A instalação automática requer a verificação de atualizações ao abrir o MTT."
   permission_notice: "A atualização fecha e reabre o MTT. O Windows solicitará autorização de administrador. Operações de arquivos precisam terminar primeiro."
   check: "Verificar atualizações"
   checking: "Verificando atualizações…"

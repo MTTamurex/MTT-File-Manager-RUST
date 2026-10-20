@@ -22,7 +22,9 @@ Downloads are bounded by the expected size and verified against GitHub's SHA-256
 digest twice: after download and immediately before executing setup. This trusts
 the official GitHub repository; a digest is not an independent publisher signature.
 Redirects are limited to GitHub and GitHub's asset infrastructure. Notes are
-displayed as text, not executable HTML.
+rendered as Markdown with headings, lists, emphasis, and code. HTML is not
+executed, image/file/network loaders are disabled, and note links can only open
+HTTPS URLs without embedded credentials.
 
 Installation waits for file operations to finish and other MTT processes (including
 viewers) to exit. Enabled Organizer rules must be paused so their watcher cannot
@@ -71,3 +73,19 @@ Use disposable test installations, not a working file-management session.
 
 The updater cannot bootstrap versions released before this feature: upgrade those
 once using the full installer manually.
+
+## Uninstall after a VM downgrade test
+
+Inno Setup accumulates uninstall actions across installations. A test build with
+the maintenance flag followed by an older official executable can otherwise
+leave an action that starts the older application's UI during uninstall.
+
+The folder-restoration action now invokes a guarded script with the SHA-256 of
+the executable packaged by that installer. It runs the maintenance flag only if
+the installed executable still matches, keeping it protected against replacement
+until the maintenance process exits. On mismatch it skips that call; the native
+installer restoration still applies. The existing RunOnceId is preserved so the
+guarded action supersedes earlier, unguarded entries.
+
+An already-installed test build with an unguarded uninstall action needs to be
+reinstalled using a corrected installer once to replace that logged action.

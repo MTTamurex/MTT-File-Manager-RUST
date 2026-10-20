@@ -116,6 +116,7 @@ $requiredFiles = @(
     "$RepoRoot\installer\register_sparse_package.ps1",
     "$RepoRoot\installer\unregister_sparse_package.ps1",
     "$RepoRoot\installer\cleanup_context_menu.ps1",
+    "$RepoRoot\installer\restore_folder_integration.ps1",
     "$RepoRoot\installer\sparse\AppxManifest.xml",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",
     "$RepoRoot\mpv_ui\portable_config\input.conf",

@@ -1,5 +1,4 @@
 pub mod about_settings;
-pub(crate) mod update_settings;
 pub mod appearance_settings;
 pub mod backend_settings;
 pub mod batch_rename_modal;
@@ -17,6 +16,7 @@ pub mod media_preview;
 pub mod mpv;
 pub mod mpv_preview;
 pub mod organizer_settings;
+pub(crate) mod release_notes;
 pub(crate) mod selection_controls;
 pub mod settings_ui;
 pub mod settings_window;
@@ -26,6 +26,7 @@ pub(crate) mod status_bar_thumbnail_controls;
 pub mod tab_settings;
 pub mod tag_manager_modal;
 pub mod tag_settings;
+pub(crate) mod update_settings;
 pub mod video_controls_state;
 pub mod virtual_drive_settings;
 

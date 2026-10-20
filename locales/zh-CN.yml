@@ -1,7 +1,9 @@
 updates:
   title: "更新"
-  check_startup: "启动时检查更新"
-  auto_install: "启动时安装更新（需要启用启动检查）"
+  description: "选择 MTT 检查和安装新版本的方式。"
+  check_startup: "打开 MTT 时检查更新"
+  auto_install: "打开 MTT 时安装更新"
+  auto_install_hint: "自动安装需要启用打开 MTT 时检查更新。"
   permission_notice: "更新将关闭并重新打开 MTT。Windows 将请求管理员授权。必须先完成文件操作。"
   check: "检查更新"
   checking: "正在检查更新…"

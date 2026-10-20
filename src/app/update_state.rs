@@ -25,6 +25,7 @@ pub(crate) struct UpdateState {
     pub error: Option<String>,
     pub release: Option<Release>,
     pub progress: Arc<AtomicU64>,
+    pub notes_cache: egui_commonmark::CommonMarkCache,
     receiver: Option<mpsc::Receiver<UpdateEvent>>,
     helper: Option<updater::HelperProcess>,
     ready: Option<DownloadedUpdate>,
@@ -120,6 +121,7 @@ impl UpdateState {
                     UpdateEvent::Checked(Ok(release)) => {
                         self.up_to_date = release.is_none();
                         self.release = release;
+                        self.notes_cache = egui_commonmark::CommonMarkCache::default();
                         self.show_dialog = self.release.is_some();
                         if self.release.is_some() {
                             if self.automatic_check

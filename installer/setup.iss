@@ -15,6 +15,7 @@
 
 ; Source root is the repository root (one level above this .iss file)
 #define SrcRoot        ".."
+#define MyAppExeHash   GetSHA256OfFile(AddBackslash(SourcePath) + SrcRoot + "\target\release\" + MyAppExeName)
 
 [Setup]
 AppId={{E3A9F1B2-7C4D-4E5F-8A1B-2C3D4E5F6A7B}
@@ -82,6 +83,7 @@ Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ign
 
 ; Per-user context-menu cleanup and sparse-package unregistration
 Source: "{#SrcRoot}\installer\cleanup_context_menu.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\installer\restore_folder_integration.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 #ifdef ModernMenuPackageEnabled
@@ -120,8 +122,9 @@ Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "{cm:S
 
 [UninstallRun]
 ; Use the app's transactional restoration, including canonical Open backups,
-; while the executable is still present. This does not launch the UI.
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--restore-folder-integration"; RunOnceId: "RestoreMttFolderIntegration"; Flags: runhidden waituntilterminated
+; while the executable is still present. The guard prevents an accumulated entry
+; from opening an older application's UI after an upgrade/downgrade.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\restore_folder_integration.ps1"" -ApplicationPath ""{app}\{#MyAppExeName}"" -ExpectedSha256 ""{#MyAppExeHash}"""; RunOnceId: "RestoreMttFolderIntegration"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\cleanup_context_menu.ps1"" -ApplicationPath ""{app}\{#MyAppExeName}"""; RunOnceId: "CleanupMttContextMenu"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\unregister_sparse_package.ps1"" -PackageName ""MTT.FileManager"" -AllUsers"; RunOnceId: "UnregisterMttSparsePackage"; Flags: runhidden waituntilterminated
 ; Stop and remove the search service before files are deleted
