@@ -35,7 +35,7 @@ pub struct LayoutState {
 
     // Quick Access section height (None = content-sized, Some = user-resized)
     pub sidebar_quick_access_height: Option<f32>,
-    // Drives block height cap (None = content-sized up to available space).
+    // Drives viewport height (None = automatic content-sized layout).
     pub sidebar_drives_height: Option<f32>,
     // Runtime limits for each combination of collapsed cloud/local/network sections.
     pub sidebar_drives_heights: std::collections::HashMap<[bool; 4], Option<f32>>,

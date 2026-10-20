@@ -426,29 +426,21 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             };
 
             // ── Scrollable middle: Cloud drives + Local disks + Network + folder trees ──
-            let output = ui
-                .scope(|ui| {
-                    ui.spacing_mut().scroll.fade.strength = 0.0;
-
-                    egui::ScrollArea::both()
-                        .id_salt("sidebar_scroll")
-                        .auto_shrink([false, true])
-                        .max_height(drives_scroll_h)
-                        .min_scrolled_height(0.0)
-                        .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                        )
-                        .vertical_scroll_offset(scroll_offset)
-                        .show(ui, |ui| {
-                            let sidebar_viewport_width = ui.available_width();
-                            ui.set_min_width(sidebar_viewport_width);
-                            render_sidebar_drives(ui, &mut sidebar_ctx, sidebar_viewport_width)
-                        })
-                })
-                .inner;
+            let drives_scope = sidebar_layout::render_drives_block(
+                ui,
+                drives_scroll_h,
+                app.layout.sidebar_drives_height.is_some(),
+                scroll_offset,
+                |ui| {
+                    let sidebar_viewport_width = ui.available_width();
+                    ui.set_min_width(sidebar_viewport_width);
+                    render_sidebar_drives(ui, &mut sidebar_ctx, sidebar_viewport_width)
+                },
+            );
+            let drives_rendered_h = drives_scope.response.rect.height();
+            let output = drives_scope.inner;
 
             // Tags follow the actual drive content, with their own scrollbar.
-            let drives_rendered_h = output.content_size.y.min(output.inner_rect.height());
             let mut drives_resized_height = None;
             let mut drives_reset_height = false;
             let mut sidebar_height_changed = false;

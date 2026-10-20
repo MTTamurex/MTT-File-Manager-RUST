@@ -80,9 +80,11 @@ mod tests {
     fn sidebar_dividers_track_drag_with_and_without_quick_access() {
         for quick_access in [false, true] {
             for drives_height in [120.0_f32, 200.0, 800.0] {
-                for delta in [-30.0, 30.0, 200.0] {
+                for delta in [-30.0, 30.0, 200.0, 1000.0] {
                     let ctx = egui::Context::default();
                     let mut drives_limit = Some(160.0);
+                    let mut maximum_height = 0.0;
+                    let mut tags_height = 0.0;
                     let mut frame = |events| {
                         let mut handle = Rect::NOTHING;
                         let mut resized_drives = None;
@@ -102,23 +104,22 @@ mod tests {
                                     true,
                                     ui.spacing().item_spacing.y,
                                 );
-                                let drives = egui::ScrollArea::vertical()
-                                    .id_salt("test_drives")
-                                    .auto_shrink([false, true])
-                                    .max_height(
-                                        drives_limit
-                                            .unwrap_or(drives_available)
-                                            .min(drives_available),
-                                    )
-                                    .min_scrolled_height(0.0)
-                                    .show(ui, |ui| {
+                                maximum_height = drives_available;
+                                let drives = super::super::render_drives_block(
+                                    ui,
+                                    drives_limit
+                                        .unwrap_or(drives_available)
+                                        .min(drives_available),
+                                    drives_limit.is_some(),
+                                    0.0,
+                                    |ui| {
                                         ui.allocate_exact_size(
                                             egui::vec2(240.0, drives_height),
                                             Sense::hover(),
                                         );
-                                    });
-                                let drives_rendered_height =
-                                    drives.content_size.y.min(drives.inner_rect.height());
+                                    },
+                                );
+                                let drives_rendered_height = drives.response.rect.height();
                                 let output = render_tags_block(
                                     ui,
                                     TagsBlockLayout {
@@ -135,6 +136,7 @@ mod tests {
                                     },
                                 );
                                 handle = output.interaction_rect;
+                                tags_height = handle.height();
                                 resized_drives = output.resized_drives_height;
                             },
                         );
@@ -156,19 +158,77 @@ mod tests {
                     let destination = origin + egui::vec2(0.0, delta);
                     frame(vec![egui::Event::PointerMoved(destination)]);
                     let moved = frame(vec![]);
-                    let expected = (drives_height.min(160.0) + delta).min(drives_height);
-                    let expected_delta = expected - drives_height.min(160.0);
-                    assert!((moved.y - origin.y - expected_delta).abs() < 1.0, "handle must follow pointer up to content bounds for drives_height={drives_height}, delta={delta}: {moved:?} vs {destination:?}");
                     frame(vec![egui::Event::PointerButton {
                         pos: destination,
                         button: egui::PointerButton::Primary,
                         pressed: false,
                         modifiers: egui::Modifiers::NONE,
                     }]);
+                    let expected = (160.0 + delta).clamp(24.0, maximum_height);
+                    let expected_delta = expected - 160.0;
+                    assert!((moved.y - origin.y - expected_delta).abs() < 1.0, "manual handle must move independently of drive content for quick_access={quick_access}, drives_height={drives_height}, delta={delta}: {moved:?} vs {destination:?}");
                     assert!((drives_limit.unwrap() - expected).abs() < 1.0);
+                    if delta == 1000.0 {
+                        // Same 33px Tags header plus 12px divider in either
+                        // placement, even when the drive content is very short.
+                        assert!((tags_height - 45.0).abs() < 0.1);
+                    }
                 }
             }
         }
+    }
+
+    #[test]
+    fn automatic_collapse_closes_the_gap_and_expansion_restores_manual_size() {
+        let ctx = egui::Context::default();
+        let render = |content_height: f32, saved_height: Option<f32>| {
+            let mut rect = Rect::NOTHING;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_max_size(egui::vec2(260.0, 500.0));
+                ui.set_clip_rect(ui.max_rect());
+                let available = super::super::drives_available_height(
+                    ui.available_height(),
+                    true,
+                    ui.spacing().item_spacing.y,
+                );
+                let drives = super::super::render_drives_block(
+                    ui,
+                    saved_height.unwrap_or(available),
+                    saved_height.is_some(),
+                    0.0,
+                    |ui| {
+                        ui.allocate_exact_size(egui::vec2(240.0, content_height), Sense::hover());
+                    },
+                );
+                let output = render_tags_block(
+                    ui,
+                    TagsBlockLayout {
+                        collapsed: false,
+                        drives_height: drives.response.rect.height(),
+                        drives_min_height: 24.0,
+                        drives_max_height: available,
+                    },
+                    |ui| {
+                        ui.allocate_exact_size(egui::vec2(240.0, 200.0), Sense::hover());
+                    },
+                );
+                rect = output.interaction_rect;
+            });
+            rect
+        };
+        let mut limit = Some(300.0);
+        let mut remembered = Default::default();
+        let expanded = [false; 4];
+        let collapsed = [true; 4];
+        let before = render(200.0, limit);
+        super::super::restore_drives_height(expanded, collapsed, &mut limit, &mut remembered);
+        let folded = render(60.0, limit);
+        assert!((before.top() - folded.top() - 240.0).abs() < 0.1);
+        limit = Some(80.0);
+        render(60.0, limit);
+        super::super::restore_drives_height(collapsed, expanded, &mut limit, &mut remembered);
+        let restored = render(200.0, limit);
+        assert_eq!(before, restored);
     }
 
     #[test]

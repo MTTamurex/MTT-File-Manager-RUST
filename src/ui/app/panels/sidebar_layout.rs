@@ -1,5 +1,7 @@
 //! Content-sized sidebar sections retain independent scrolling and resize limits.
 
+use eframe::egui;
+
 mod tags;
 pub(super) use tags::{render_tags_block, TagsBlockLayout};
 
@@ -7,6 +9,28 @@ pub(super) const QUICK_ACCESS_MIN_HEIGHT: f32 = 8.0 + 16.0;
 pub(super) const QUICK_ACCESS_DIVIDER_HEIGHT: f32 = 9.0;
 pub(super) const TAGS_MIN_HEIGHT: f32 = 22.0 + 8.0;
 pub(super) const TAGS_DIVIDER_HEIGHT: f32 = 9.0;
+
+/// Automatic layouts follow content, but an explicitly dragged divider must be
+/// allowed to move beyond it so Tags can shrink independently of drive count.
+pub(super) fn render_drives_block<R>(
+    ui: &mut egui::Ui,
+    height: f32,
+    manually_sized: bool,
+    scroll_offset: f32,
+    render: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<egui::scroll_area::ScrollAreaOutput<R>> {
+    ui.scope(|ui| {
+        ui.spacing_mut().scroll.fade.strength = 0.0;
+        egui::ScrollArea::both()
+            .id_salt("sidebar_scroll")
+            .auto_shrink([false, !manually_sized])
+            .max_height(height)
+            .min_scrolled_height(0.0)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .vertical_scroll_offset(scroll_offset)
+            .show(ui, render)
+    })
+}
 
 pub(super) fn quick_access_content_height(
     collapsed: bool,
