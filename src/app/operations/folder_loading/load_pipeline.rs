@@ -29,6 +29,10 @@ impl ImageViewerApp {
         force_refresh: bool,
         is_active_panel_load: bool,
     ) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "folder_job_prepare",
+            );
         let my_gen = self.generation;
         let gen_clone = self.folder_load_generation.clone();
         let current_path = self.navigation_state.current_path.clone();
@@ -54,12 +58,15 @@ impl ImageViewerApp {
             dirty_version: self.directory_dirty_registry.version(&dirty_path),
             directory_index_opt: self.directory_index.clone(),
             show_hidden: self.show_hidden_files,
+            diagnostic_trace:
+                crate::infrastructure::diagnostic_logger::navigation_trace::Worker::queued(my_gen),
         };
 
         // EST-02: submit to the bounded persistent pool instead of spawning a
         // detached thread per navigation. Stale jobs exit instantly via the
         // generation guard; workers blocked in kernel I/O cap thread growth
         // at the pool size instead of accumulating one thread per navigation.
+        diagnostic_stage.lap("folder_job_submit");
         self.folder_load_pool.submit(job);
     }
 }
@@ -69,6 +76,7 @@ pub(crate) fn run_folder_load_pipeline(
     job: crate::app::init_workers::folder_load_pool::FolderLoadJob,
 ) {
     let crate::app::init_workers::folder_load_pool::FolderLoadJob {
+        mut diagnostic_trace,
         lane: _,
         my_gen,
         gen_clone,
@@ -86,6 +94,10 @@ pub(crate) fn run_folder_load_pipeline(
         show_hidden,
     } = job;
 
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.start();
+    }
+
     // Immediate generation check: if a newer load was already started
     // before this job was picked up, exit instantly without doing
     // any I/O. This prevents stale work from rapid navigation.
@@ -94,6 +106,9 @@ pub(crate) fn run_folder_load_pipeline(
     }
 
     let scan_start = std::time::Instant::now();
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("network_server_check");
+    }
 
     if network_server::try_load_network_server(
         &current_path,
@@ -107,6 +122,9 @@ pub(crate) fn run_folder_load_pipeline(
         return;
     }
 
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("drive_policy_and_directory_index");
+    }
     let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
         format!("{}\\", current_path)
     } else {
@@ -130,6 +148,9 @@ pub(crate) fn run_folder_load_pipeline(
     // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
     // indefinitely on cloud-only provider folders
     let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("filesystem_policy");
+    }
     let mut prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
         || (!is_onedrive_base
             && !crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
@@ -137,6 +158,9 @@ pub(crate) fn run_folder_load_pipeline(
     let mut batch = Vec::with_capacity(batch_size);
     let mut all_entries_disk: Vec<FileEntry> = Vec::new();
     let mut batch_start = std::time::Instant::now();
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("cached_fast_paths");
+    }
     if fast_paths::try_handle_fast_paths(
         my_gen,
         &gen_clone,
@@ -163,6 +187,9 @@ pub(crate) fn run_folder_load_pipeline(
         return;
     }
 
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("optimized_enumeration");
+    }
     if optimized_tiers::try_handle_optimized_tiers(
         my_gen,
         &gen_clone,
@@ -189,6 +216,9 @@ pub(crate) fn run_folder_load_pipeline(
         return;
     }
 
+    if let Some(trace) = &mut diagnostic_trace {
+        trace.lap("fallback_enumeration");
+    }
     tier3_fallback::run_tier3_fallback(
         my_gen,
         &gen_clone,

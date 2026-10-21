@@ -792,6 +792,7 @@ pub fn render_sidebar_drives(
                     if clicked_arrow {
                         action = Some(SidebarAction::TreeToggleExpand(root_path.to_path_buf()));
                     } else {
+                        crate::infrastructure::diagnostic_logger::navigation_trace::begin_sidebar_drive();
                         action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
                     }
                 }

@@ -25,6 +25,10 @@ impl ImageViewerApp {
     }
 
     fn load_folder_with_icon_trim(&mut self, force_refresh: bool, trim_icons: bool) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "folder_load_guards",
+            );
         if let Some(tag_id) =
             crate::domain::special_paths::tag_id_from_view_path(&self.navigation_state.current_path)
         {
@@ -37,8 +41,10 @@ impl ImageViewerApp {
         self.mark_folder_load_started(force_refresh);
         self.bump_folder_load_generation();
 
+        diagnostic_stage.lap("folder_load_reset_caches");
         self.reset_folder_loading_state(force_refresh, trim_icons);
 
+        diagnostic_stage.lap("folder_load_submit");
         self.start_folder_load_pipeline(force_refresh, true);
     }
 

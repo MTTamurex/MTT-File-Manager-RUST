@@ -32,16 +32,23 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     // Handle sidebar action OUTSIDE the sidebar timing to avoid attributing
     // navigate_to I/O (watch_current_folder, etc.) to sidebar render time.
     if let Some(action) = sidebar_action {
+        let _diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "sidebar_action",
+            );
         handle_sidebar_action(app, action);
     }
 
     // 3. Right Preview Panel (forced width from app state)
     let t_preview = std::time::Instant::now();
+    let mut diagnostic_stage =
+        crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new("panel_preview");
     content::render_preview_panel_layout(app, root_ui, frame);
     let preview_ms = t_preview.elapsed().as_millis();
 
     // 4. Central Panel
     let t_central = std::time::Instant::now();
+    diagnostic_stage.lap("panel_central");
     content::render_central_panel_layout(app, root_ui);
     if let Some(request) = crate::ui::new_tab_request::take(&ctx) {
         app.open_location_in_new_tab(request.panel, &request.path);
@@ -49,6 +56,7 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     app.process_pending_pinned_navigation();
     app.process_pending_archive_activations();
     let central_ms = t_central.elapsed().as_millis();
+    diagnostic_stage.lap("panel_focus_release");
 
     // 5. Focus release: When user clicks anywhere outside the video player,
     // release focus back to the main window (MPV no-op, kept for parity)

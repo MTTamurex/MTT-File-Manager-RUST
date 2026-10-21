@@ -127,6 +127,10 @@ impl ImageViewerApp {
     }
 
     fn run_background_updates(&mut self, ctx: &egui::Context, upload_textures: bool) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "background_setup",
+            );
         if is_in_size_move() {
             self.refresh_working_set_trim_blocker(true);
             return;
@@ -136,6 +140,7 @@ impl ImageViewerApp {
 
         let t0 = std::time::Instant::now();
         let organizer_commands_pending = self.organizer_state.manager.has_pending_commands();
+        diagnostic_stage.lap("background_messages");
         if upload_textures {
             self.process_incoming_messages(ctx);
         } else {
@@ -151,6 +156,7 @@ impl ImageViewerApp {
         }
         self.retry_completed_clipboard_cleanup();
         let t1 = std::time::Instant::now();
+        diagnostic_stage.lap("background_drive_requests");
         self.poll_updates(ctx, organizer_commands_pending);
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
@@ -158,6 +164,7 @@ impl ImageViewerApp {
         self.request_drive_health_for_panel();
 
         let t2 = std::time::Instant::now();
+        diagnostic_stage.lap("background_poll_results");
         self.poll_drive_scan();
         self.poll_drive_info();
         self.poll_drive_health();
@@ -173,13 +180,16 @@ impl ImageViewerApp {
         }
 
         let t3 = std::time::Instant::now();
+        diagnostic_stage.lap("background_preferences");
         self.flush_preferences_if_needed();
         let t4 = std::time::Instant::now();
+        diagnostic_stage.lap("background_memory_maintenance");
         self.run_memory_maintenance();
         self.maybe_log_memory_snapshot("frame");
         self.reap_video_player_process();
         crate::viewer_processes::reap_exited();
         let t5 = std::time::Instant::now();
+        diagnostic_stage.lap("background_repaint");
 
         // Keep logic polling alive while idle or while eframe suppresses UI for
         // an occluded viewport, without forcing a fixed repaint cadence.
@@ -256,6 +266,10 @@ impl eframe::App for ImageViewerApp {
         crate::ui::video_overlay::begin_frame(ctx);
         ui.set_style(ctx.global_style());
         let t_frame_start = std::time::Instant::now();
+        let mut diagnostic_frame =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Frame::new(
+                self.last_ui_exit,
+            );
 
         crate::ui::interface_scale::apply(ctx, self.interface_scale);
 
@@ -276,7 +290,9 @@ impl eframe::App for ImageViewerApp {
         // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
         let is_in_size_move = is_in_size_move();
 
+        diagnostic_frame.checkpoint("frame_input_setup");
         self.run_background_updates(ctx, true);
+        diagnostic_frame.checkpoint("frame_background_updates");
         if self.updates.exiting {
             ui.disable();
             return;
@@ -565,6 +581,7 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
+        diagnostic_frame.checkpoint("frame_async_results");
         // 5. Input: Keyboard shortcuts (resize borders handled by native subclass)
         if !is_in_size_move {
             app::input::handle_input(self, ctx);
@@ -596,10 +613,12 @@ impl eframe::App for ImageViewerApp {
             false
         };
 
+        diagnostic_frame.checkpoint("frame_toolbars_and_input");
         // 9. Layout: Main Panels (Sidebar, Preview, Central)
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
         app::panels::render_panels(self, ui, frame);
+        diagnostic_frame.checkpoint("frame_panels");
         let panels_ms = t_panels.elapsed().as_secs_f32() * 1000.0;
         if panels_ms > 50.0 {
             log::warn!("[PERF] Slow render_panels: {:.0}ms", panels_ms);
@@ -789,6 +808,7 @@ impl eframe::App for ImageViewerApp {
         }
         crate::ui::video_overlay::finish_frame(ctx);
 
+        diagnostic_frame.checkpoint("frame_overlays_and_actions");
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
         self.last_actual_frame_ms = frame_total_ms;
@@ -800,6 +820,7 @@ impl eframe::App for ImageViewerApp {
                 frame_ms
             );
         }
+        diagnostic_frame.finish(self.is_loading_folder, self.items.len(), self.generation);
         self.last_ui_exit = Some(std::time::Instant::now());
     }
 

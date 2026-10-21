@@ -1,3 +1,4 @@
+pub(crate) mod navigation_trace;
 mod privacy;
 mod storage;
 
@@ -6,6 +7,7 @@ use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use parking_lot::Mutex;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage::DiagnosticFile;
@@ -40,6 +42,8 @@ pub struct DiagnosticLogger {
     diagnostic_filter: Logger,
     base_level: LevelFilter,
     state: Mutex<DiagnosticState>,
+    // Odd values identify an enabled session; reads never wait for file I/O.
+    capture_session: AtomicU64,
 }
 
 impl DiagnosticLogger {
@@ -49,6 +53,7 @@ impl DiagnosticLogger {
             console,
             diagnostic_filter,
             state: Mutex::new(DiagnosticState::default()),
+            capture_session: AtomicU64::new(0),
         }
     }
 
@@ -67,6 +72,11 @@ impl DiagnosticLogger {
             let mut state = self.state.lock();
             state.file = Some(diagnostic_file);
             state.enabled_since = Some(enabled_since);
+            self.capture_session
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                    Some(value.wrapping_add(2) | 1)
+                })
+                .ok();
         }
 
         Ok(path)
@@ -74,6 +84,7 @@ impl DiagnosticLogger {
 
     fn disable_file_logging(&self) {
         let mut state = self.state.lock();
+        self.capture_session.fetch_and(!1, Ordering::Release);
         if let Some(mut file) = state.file.take() {
             let _ = file.write_session_footer();
             let _ = file.flush();
@@ -83,6 +94,11 @@ impl DiagnosticLogger {
 
     fn is_enabled(&self) -> bool {
         self.state.lock().file.is_some()
+    }
+
+    fn capture_session(&self) -> Option<u64> {
+        let value = self.capture_session.load(Ordering::Acquire);
+        (value & 1 != 0).then_some(value)
     }
 
     fn enabled_since(&self) -> Option<SystemTime> {
@@ -193,6 +209,11 @@ pub fn is_enabled() -> bool {
         .get()
         .map(|logger| logger.is_enabled())
         .unwrap_or(false)
+}
+
+/// Non-blocking session token for performance instrumentation only.
+pub(crate) fn capture_session() -> Option<u64> {
+    LOGGER.get()?.capture_session()
 }
 
 pub fn enabled_since() -> Option<SystemTime> {

@@ -26,6 +26,21 @@ fn open_diagnostic_file(path: &Path) -> DiagnosticFile {
 }
 
 #[test]
+fn capture_status_never_waits_for_file_lock() {
+    let logger = DiagnosticLogger::new(
+        make_console_logger(),
+        make_diagnostic_filter(LevelFilter::Info),
+    );
+    let guard = logger.state.lock();
+    assert_eq!(logger.capture_session(), None);
+    logger.capture_session.store(1, Ordering::Release);
+    assert_eq!(logger.capture_session(), Some(1));
+    drop(guard);
+    logger.disable_file_logging();
+    assert_eq!(logger.capture_session(), None);
+}
+
+#[test]
 fn regular_logs_do_not_mirror_into_diagnostic_file() {
     let dir = tempdir().unwrap();
     let path = dir.path().join(LOG_FILE_NAME);

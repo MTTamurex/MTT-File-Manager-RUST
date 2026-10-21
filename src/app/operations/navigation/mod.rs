@@ -129,6 +129,10 @@ impl ImageViewerApp {
     }
 
     fn navigate_to_impl(&mut self, path: &str, protect_pin: bool) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "navigation_resolve",
+            );
         let destination = self.resolve_network_location_path(Path::new(path));
         let path = destination.to_string_lossy();
         let path = path.as_ref();
@@ -172,6 +176,7 @@ impl ImageViewerApp {
             self.save_preferences();
         }
 
+        diagnostic_stage.lap("navigation_timestamp_hints");
         self.remember_current_folder_timestamp_hints();
 
         // Keep the folder "Data modificada" visible in preview panel after entering a folder.
@@ -191,6 +196,7 @@ impl ImageViewerApp {
         // Spawn a background thread to read metadata without blocking the UI thread.
         // On a sleeping HDD this avoids a 500-2000ms stall (spin-up).
         self.spawn_folder_meta_resolve_if_needed(&destination_path, &normalized_path);
+        diagnostic_stage.lap("navigation_history");
 
         // Clear loaded_path to allow reload if navigating to same path (for consistency)
         self.loaded_path.clear();
@@ -208,16 +214,20 @@ impl ImageViewerApp {
         // Restore normal folder sort mode
         self.sort_mode = self.sort_mode_normal;
 
+        diagnostic_stage.lap("navigation_reset_selection");
         self.reset_selection_and_search();
 
         // Apply folder lock if this folder has locked preferences
+        diagnostic_stage.lap("navigation_folder_lock");
         self.apply_folder_lock_if_present();
         self.request_list_column_autofit();
 
         // The app has one watcher owned by the active panel.
         if !self.in_inactive_panel_context {
+            diagnostic_stage.lap("navigation_watcher");
             self.watch_current_folder();
         }
+        diagnostic_stage.lap("navigation_clear_old_items");
 
         // Clear old items immediately for path-change navigation.
         // Prevents stale items from the previous folder flashing on screen
@@ -236,10 +246,13 @@ impl ImageViewerApp {
         self.pending_folder_mtime_recheck.clear();
 
         if self.in_inactive_panel_context {
+            diagnostic_stage.lap("navigation_load_inactive");
             self.load_folder_for_inactive();
         } else {
             // Sync after clearing stale lists to avoid heavy cloning on navigation.
+            diagnostic_stage.lap("navigation_sync_tab");
             self.sync_to_tab();
+            diagnostic_stage.lap("navigation_load_folder");
             self.load_folder(false);
         }
     }

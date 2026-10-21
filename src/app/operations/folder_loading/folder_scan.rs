@@ -29,6 +29,10 @@ impl ImageViewerApp {
     /// Batch version of request_folder_scan: resolves covers for multiple folders
     /// in a single SQLite query and calls filter_items() only once at the end.
     pub fn request_folder_scans_batch(&mut self, folder_paths: Vec<PathBuf>) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "folder_covers_prepare",
+            );
         if folder_paths.is_empty() {
             return;
         }
@@ -137,6 +141,7 @@ impl ImageViewerApp {
 
         // 1. Single batched SQLite query for all folder covers
         let db_start = Instant::now();
+        diagnostic_stage.lap("folder_covers_database");
         let db_covers = match self.app_state_db.try_get_folder_covers(&unique_paths) {
             FolderCoverReadOutcome::Completed(covers) => covers,
             FolderCoverReadOutcome::Busy | FolderCoverReadOutcome::Failed => {
@@ -147,6 +152,7 @@ impl ImageViewerApp {
             }
         };
         let db_ms = db_start.elapsed().as_millis();
+        diagnostic_stage.lap("folder_covers_resolve");
 
         // 2. Resolve covers: DB hit → DirectoryIndex fallback → worker fallback
         let mut resolved: Vec<(PathBuf, PathBuf)> = Vec::new();

@@ -37,6 +37,8 @@ pub(crate) enum FolderLoadLane {
 /// Everything a folder-load pipeline run needs. Sent through the mailbox;
 /// all fields are cheap clones/Arcs.
 pub(crate) struct FolderLoadJob {
+    pub diagnostic_trace:
+        Option<crate::infrastructure::diagnostic_logger::navigation_trace::Worker>,
     pub lane: FolderLoadLane,
     pub my_gen: usize,
     pub gen_clone: Arc<AtomicUsize>,
@@ -114,7 +116,12 @@ impl FolderLoadPool {
             return;
         }
 
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "folder_pool_submit_lock_wait",
+            );
         let _submit_guard = self.submit_lock.lock();
+        diagnostic_stage.lap("folder_pool_submit_locked");
         let mut retained = Vec::new();
         while let Ok(queued) = self.rx.try_recv() {
             if queued.lane != job.lane {
