@@ -443,8 +443,6 @@ settings:
   theme_system: "跟随系统"
   theme_apply_immediately: "主题更改立即生效。"
   interface_scale: "文本和界面大小"
-  interface_scale_reset: "重置为 100%"
-  interface_scale_description: "松开滑块即可在 Windows 显示缩放的基础上应用文本和控件大小。100% 时，界面跟随 Windows 缩放。缩略图大小仍可单独调整。"
   miscellaneous: "杂项"
   file_browsing: "文件浏览"
   auto_resize_columns: "自动调整列宽"

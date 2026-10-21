@@ -3,7 +3,30 @@ use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
 
-pub(crate) fn render(ui: &mut egui::Ui, view_mode: ViewMode, thumbnail_size: &mut f32) {
+pub(crate) fn compact_width(ui: &egui::Ui) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let labels_width: f32 = [
+        t!("status_bar.thumbnail_size"),
+        t!("settings.interface_scale"),
+    ]
+    .into_iter()
+    .map(|text| {
+        ui.painter()
+            .layout_no_wrap(text.to_string(), font.clone(), theme::text_color(ui.ctx()))
+            .size()
+            .x
+    })
+    .sum();
+    // Reserve both sliders, spacing, and half the centered selection group on each side.
+    (2.0 * (labels_width + 112.0 + 32.0 + 46.0 + 16.0)).max(720.0)
+}
+
+pub(crate) fn render(
+    ui: &mut egui::Ui,
+    view_mode: ViewMode,
+    thumbnail_size: &mut f32,
+    interface_scale: &mut f32,
+) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         egui::Frame::NONE
             .inner_margin(egui::Margin {
@@ -83,7 +106,41 @@ pub(crate) fn render(ui: &mut egui::Ui, view_mode: ViewMode, thumbnail_size: &mu
                             .show_value(false)
                             .trailing_fill(true),
                     );
+                    ui.add_space(12.0);
+                    ui.label(
+                        egui::RichText::new(t!("settings.interface_scale").to_string())
+                            .color(theme::text_color(ui.ctx())),
+                    );
+                    render_scale_slider(ui, interface_scale);
                 });
             });
     });
 }
+
+fn render_scale_slider(ui: &mut egui::Ui, interface_scale: &mut f32) -> egui::Response {
+    let draft_id = ui.make_persistent_id("interface_scale_percent");
+    let draft = ui.data(|data| data.get_temp::<f32>(draft_id));
+    let mut percent = draft.unwrap_or(*interface_scale * 100.0);
+    let response = ui.add(
+        egui::Slider::new(
+            &mut percent,
+            100.0..=crate::ui::interface_scale::MAX * 100.0,
+        )
+        .step_by(5.0)
+        .show_value(false)
+        .trailing_fill(true),
+    );
+    if response.is_pointer_button_down_on() {
+        // Changing scale while dragging would move the status bar under the pointer.
+        ui.data_mut(|data| data.insert_temp(draft_id, percent));
+    } else {
+        ui.data_mut(|data| data.remove::<f32>(draft_id));
+        if response.changed() || draft.is_some() {
+            *interface_scale = percent / 100.0;
+        }
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests;

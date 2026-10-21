@@ -66,8 +66,8 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
         ctx.request_repaint(); // Keep UI refreshing while processing
     }
 
-    let compact_status_layout =
-        root_ui.available_width() < crate::ui::status_bar::STATUS_BAR_COMPACT_WIDTH;
+    let compact_status_layout = root_ui.available_width()
+        < crate::ui::components::status_bar_size_controls::compact_width(root_ui);
     egui::Panel::bottom("status_bar")
         .exact_size(if compact_status_layout { 48.0 } else { 24.0 })
         .frame(
@@ -91,6 +91,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                         && !app.navigation_state.is_recycle_bin_view
                 })
                 .and_then(|id| app.tag_definitions.get(&id).map(|tag| tag.name.clone()));
+            let previous_scale = app.interface_scale;
             let action = render_status_bar(
                 ui,
                 &mut app.svg_icon_manager,
@@ -106,10 +107,15 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                 &mut app.show_hidden_files,
                 app.view_mode,
                 &mut app.thumbnail_size,
+                &mut app.interface_scale,
                 video_preview_active,
                 active_tag_filter_name.as_deref(),
                 compact_status_layout,
             );
+            if app.interface_scale != previous_scale {
+                crate::ui::interface_scale::apply(&ctx, app.interface_scale);
+                app.save_preferences();
+            }
             match action {
                 StatusBarAction::OpenSettings => {
                     app.navigation_state.show_settings_window = true;

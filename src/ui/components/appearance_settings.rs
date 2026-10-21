@@ -10,7 +10,7 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         &t!("settings.appearance"),
         &t!("settings.appearance_description"),
     );
-    let mut changed = render_theme_settings(ui, &mut app.theme_mode);
+    let changed = render_theme_settings(ui, &mut app.theme_mode);
     let previous = app.folder_appearance;
     render_folder_appearance(ui, &mut app.folder_appearance);
     if previous != app.folder_appearance {
@@ -18,7 +18,6 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         app.save_preferences();
         app.force_save_preferences();
     }
-    changed |= render_interface_scale_settings(ui, &mut app.interface_scale);
     changed
 }
 
@@ -54,52 +53,6 @@ fn render_theme_settings(ui: &mut egui::Ui, theme_mode: &mut ThemeMode) -> bool 
     changed
 }
 
-fn render_interface_scale_settings(ui: &mut egui::Ui, interface_scale: &mut f32) -> bool {
-    let mut changed = false;
-    settings_ui::subsection_header(ui, &t!("settings.interface_scale"), "");
-    ui.horizontal_wrapped(|ui| {
-        changed |= render_scale_slider(ui, interface_scale).1;
-        if ui.button(t!("settings.interface_scale_reset")).clicked() {
-            *interface_scale = crate::ui::interface_scale::DEFAULT;
-            changed = true;
-        }
-    });
-    ui.label(
-        RichText::new(t!("settings.interface_scale_description"))
-            .size(12.0)
-            .color(theme::secondary_text_color(ui.ctx())),
-    );
-
-    changed
-}
-
-fn render_scale_slider(ui: &mut egui::Ui, interface_scale: &mut f32) -> (egui::Response, bool) {
-    let draft_id = ui.make_persistent_id("interface_scale_percent");
-    let draft = ui.data(|data| data.get_temp::<f32>(draft_id));
-    let mut percent = draft.unwrap_or(*interface_scale * 100.0);
-    let previous = *interface_scale;
-    let response = ui.add(
-        egui::Slider::new(
-            &mut percent,
-            100.0..=crate::ui::interface_scale::MAX * 100.0,
-        )
-        .step_by(5.0)
-        .suffix("%")
-        .update_while_editing(false),
-    );
-    if response.is_pointer_button_down_on() {
-        // Applying zoom here moves the centered settings window and its slider
-        // under the held pointer, feeding the new position back into the value.
-        ui.data_mut(|data| data.insert_temp(draft_id, percent));
-    } else {
-        ui.data_mut(|data| data.remove::<f32>(draft_id));
-        if response.changed() || draft.is_some() {
-            *interface_scale = percent / 100.0;
-        }
-    }
-    (response, previous != *interface_scale)
-}
-
 fn render_folder_appearance(
     ui: &mut egui::Ui,
     appearance: &mut crate::domain::folder_appearance::FolderAppearance,
@@ -122,6 +75,3 @@ fn render_folder_appearance(
         *appearance = FolderAppearance::ALL[index];
     }
 }
-
-#[cfg(test)]
-mod tests;

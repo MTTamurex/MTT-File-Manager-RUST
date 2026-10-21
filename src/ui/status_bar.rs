@@ -6,15 +6,13 @@
 
 use crate::domain::file_entry::ViewMode;
 use crate::ui::components::selection_controls::{self, SelectionControlAction};
-use crate::ui::components::status_bar_thumbnail_controls;
+use crate::ui::components::status_bar_size_controls;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use rust_i18n::t;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-pub(crate) const STATUS_BAR_COMPACT_WIDTH: f32 = 720.0;
 
 // --- Kernel resource monitoring (GDI Objects, USER Objects, Handle Count) ---
 // These metrics make resource leaks visible at runtime.
@@ -268,6 +266,7 @@ pub fn render_status_bar(
     show_hidden_files: &mut bool,
     view_mode: ViewMode,
     thumbnail_size: &mut f32,
+    interface_scale: &mut f32,
     video_preview_active: bool,
     active_tag_filter_name: Option<&str>,
     compact_layout: bool,
@@ -415,7 +414,7 @@ pub fn render_status_bar(
                 }
             }); // end Frame
 
-            status_bar_thumbnail_controls::render(ui, view_mode, thumbnail_size);
+            status_bar_size_controls::render(ui, view_mode, thumbnail_size, interface_scale);
         });
 
         let selection_row_rect = if compact_layout {

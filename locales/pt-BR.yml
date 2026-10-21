@@ -443,8 +443,6 @@ settings:
   theme_system: "Sistema"
   theme_apply_immediately: "As alterações de tema são aplicadas imediatamente."
   interface_scale: "Tamanho do texto e da interface"
-  interface_scale_reset: "Restaurar para 100%"
-  interface_scale_description: "Solte o controle deslizante para aplicar o tamanho dos textos e controles, além da escala de exibição do Windows. Em 100%, a interface acompanha a escala do Windows. O tamanho das miniaturas continua com ajuste separado."
   miscellaneous: "Diversos"
   file_browsing: "Navegação de arquivos"
   auto_resize_columns: "Redimensionar colunas automaticamente"

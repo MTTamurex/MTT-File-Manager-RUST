@@ -11,12 +11,14 @@ fn frame(ctx: &egui::Context, scale: &mut f32, events: Vec<egui::Event>) -> egui
             events,
             ..Default::default()
         },
-        |_| {
-            egui::Window::new("Appearance")
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .fixed_size(egui::vec2(700.0, 420.0))
-                .show(ctx, |ui| {
-                    slider_rect = render_scale_slider(ui, scale).0.rect;
+        |ui| {
+            egui::Panel::bottom("status_bar")
+                .exact_size(24.0)
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().slider_width = 56.0;
+                        slider_rect = render_scale_slider(ui, scale).rect;
+                    });
                 });
             crate::ui::interface_scale::apply(ctx, *scale);
         },
@@ -35,19 +37,40 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
 
 #[test]
 fn dragging_scale_keeps_the_interface_stable_and_commits_an_intermediate_value_on_release() {
-    check_drag(1.0, 8.0);
-    check_drag(2.0, 92.0);
+    check_drag(1.0, 0.1);
+    check_drag(2.0, 0.9);
 }
 
-fn check_drag(initial: f32, start_offset: f32) {
+#[test]
+fn slider_reaches_both_limits_without_a_reset_button() {
+    for (fraction, expected) in [(0.0, 1.0), (1.0, 2.0)] {
+        let ctx = egui::Context::default();
+        let mut scale = 1.5;
+        crate::ui::interface_scale::apply(&ctx, scale);
+        frame(&ctx, &mut scale, vec![]);
+        let rect = frame(&ctx, &mut scale, vec![]);
+        let pos = egui::pos2(
+            rect.left() + 1.0 + fraction * (rect.width() - 2.0),
+            rect.center().y,
+        );
+        frame(
+            &ctx,
+            &mut scale,
+            vec![egui::Event::PointerMoved(pos), button(pos, true)],
+        );
+        frame(&ctx, &mut scale, vec![button(pos, false)]);
+        assert_eq!(scale, expected);
+    }
+}
+
+fn check_drag(initial: f32, start_fraction: f32) {
     let ctx = egui::Context::default();
     let mut scale = initial;
     crate::ui::interface_scale::apply(&ctx, initial);
     frame(&ctx, &mut scale, vec![]);
     let rect = frame(&ctx, &mut scale, vec![]);
-    // The track is slider_width wide; the response also contains the value editor.
-    let start = egui::pos2(rect.left() + start_offset, rect.center().y);
-    let middle = egui::pos2(rect.left() + 50.0, rect.center().y);
+    let start = egui::pos2(rect.left() + rect.width() * start_fraction, rect.center().y);
+    let middle = rect.center();
     frame(
         &ctx,
         &mut scale,
