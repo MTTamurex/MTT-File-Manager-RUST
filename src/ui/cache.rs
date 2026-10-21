@@ -55,7 +55,7 @@ const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
 // maximum), while still allowing stuck items to recover quickly: items dropped from
 // the pending queue (because it was full) or evicted from the texture cache can be
 // re-requested within 300 ms rather than the previous 2000 ms.
-const THUMBNAIL_REQUEST_COOLDOWN: Duration = Duration::from_millis(300);
+pub(crate) const THUMBNAIL_REQUEST_COOLDOWN: Duration = Duration::from_millis(300);
 /// Bounded LRU for the thumbnail cooldown map; ~96B/entry → ~400KB ceiling.
 const THUMBNAIL_DEBOUNCE_CAPACITY: usize = 4096;
 
