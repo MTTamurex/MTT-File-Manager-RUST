@@ -502,6 +502,9 @@ settings:
   shortcut_select_all: "Выделить всё"
   shortcut_next_view_mode: "Следующий режим просмотра"
   shortcut_previous_view_mode: "Предыдущий режим просмотра"
+  shortcut_go_back: "Назад"
+  shortcut_go_forward: "Вперёд"
+  shortcut_go_up: "На один уровень вверх"
   shortcuts_view_mode_scroll_note: "По умолчанию: Ctrl + прокрутка переключает режимы просмотра. Ctrl + Shift + прокрутка изменяет размер миниатюр в сетке."
 preview:
   select_item: "Выберите один элемент, чтобы увидеть подробности"

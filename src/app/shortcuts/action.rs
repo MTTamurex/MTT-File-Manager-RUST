@@ -25,10 +25,13 @@ pub enum ShortcutAction {
     SelectAll,
     NextViewMode,
     PreviousViewMode,
+    GoBack,
+    GoForward,
+    GoUp,
 }
 
 impl ShortcutAction {
-    pub const COUNT: usize = 21;
+    pub const COUNT: usize = 24;
     pub const ALL: [Self; Self::COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -51,8 +54,11 @@ impl ShortcutAction {
         Self::SelectAll,
         Self::NextViewMode,
         Self::PreviousViewMode,
+        Self::GoBack,
+        Self::GoForward,
+        Self::GoUp,
     ];
-    pub const CONFIGURABLE_COUNT: usize = 12;
+    pub const CONFIGURABLE_COUNT: usize = 15;
     pub const CONFIGURABLE: [Self; Self::CONFIGURABLE_COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -66,6 +72,9 @@ impl ShortcutAction {
         Self::PreviewSelected,
         Self::NextViewMode,
         Self::PreviousViewMode,
+        Self::GoBack,
+        Self::GoForward,
+        Self::GoUp,
     ];
 
     pub const fn index(self) -> usize {
@@ -95,6 +104,9 @@ impl ShortcutAction {
             Self::SelectAll => "shortcut_select_all",
             Self::NextViewMode => "shortcut_next_view_mode",
             Self::PreviousViewMode => "shortcut_previous_view_mode",
+            Self::GoBack => "shortcut_go_back",
+            Self::GoForward => "shortcut_go_forward",
+            Self::GoUp => "shortcut_go_up",
         }
     }
 
@@ -121,6 +133,9 @@ impl ShortcutAction {
             Self::SelectAll => "settings.shortcut_select_all",
             Self::NextViewMode => "settings.shortcut_next_view_mode",
             Self::PreviousViewMode => "settings.shortcut_previous_view_mode",
+            Self::GoBack => "settings.shortcut_go_back",
+            Self::GoForward => "settings.shortcut_go_forward",
+            Self::GoUp => "settings.shortcut_go_up",
         }
     }
 
@@ -151,4 +166,7 @@ pub(super) const DEFAULT_BINDINGS: [ShortcutBinding; ShortcutAction::COUNT] = [
     ShortcutBinding::ctrl(Key::A),
     ShortcutBinding::scroll(true, false, false, false),
     ShortcutBinding::scroll(true, false, false, true),
+    ShortcutBinding::alt(Key::ArrowLeft),
+    ShortcutBinding::alt(Key::ArrowRight),
+    ShortcutBinding::alt(Key::ArrowUp),
 ];

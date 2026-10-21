@@ -9,6 +9,132 @@ fn parses_and_serializes_default_bindings() {
 }
 
 #[test]
+fn navigation_bindings_validate_and_restore_from_preferences() {
+    let mut bindings = ShortcutBindings::from_preferences(&HashMap::new());
+    for action in [
+        ShortcutAction::GoBack,
+        ShortcutAction::GoForward,
+        ShortcutAction::GoUp,
+    ] {
+        assert_eq!(bindings.get(action), action.default_binding());
+        assert!(bindings
+            .validate_candidate(action, action.default_binding())
+            .is_ok());
+    }
+    let backspace = ShortcutBinding::plain(egui::Key::Backspace);
+    assert_eq!(
+        bindings.validate_candidate(ShortcutAction::NewTab, backspace),
+        Err(ShortcutValidationError::Unsupported)
+    );
+    assert!(bindings
+        .validate_candidate(ShortcutAction::GoBack, backspace)
+        .is_ok());
+    bindings.set(ShortcutAction::GoBack, backspace);
+    assert_eq!(
+        bindings.validate_candidate(ShortcutAction::GoUp, backspace),
+        Err(ShortcutValidationError::Conflict(ShortcutAction::GoBack))
+    );
+    assert_eq!(
+        bindings.validate_candidate(
+            ShortcutAction::GoUp,
+            ShortcutBinding::plain(egui::Key::ArrowUp)
+        ),
+        Err(ShortcutValidationError::Unsupported)
+    );
+    assert_eq!(
+        bindings.validate_candidate(
+            ShortcutAction::GoUp,
+            ShortcutBinding::scroll(true, false, false, true)
+        ),
+        Err(ShortcutValidationError::Unsupported)
+    );
+    let mut prefs = Vec::new();
+    bindings.append_preferences(&mut prefs);
+    let prefs = prefs
+        .into_iter()
+        .map(|(key, value)| (key.into(), value))
+        .collect();
+    let mut restored = ShortcutBindings::from_preferences(&prefs);
+    assert_eq!(restored.get(ShortcutAction::GoBack), backspace);
+    assert!(restored.reset(ShortcutAction::GoBack).is_ok());
+    assert!(!restored.any_customized());
+}
+
+#[test]
+fn captures_backspace_and_navigation_arrows() {
+    for binding in [
+        ShortcutBinding::plain(egui::Key::Backspace),
+        ShortcutAction::GoBack.default_binding(),
+        ShortcutAction::GoForward.default_binding(),
+        ShortcutAction::GoUp.default_binding(),
+    ] {
+        let ShortcutTrigger::Key(key) = binding.trigger else {
+            unreachable!()
+        };
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: binding.ctrl,
+                        alt: binding.alt,
+                        shift: binding.shift,
+                        ..Default::default()
+                    },
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(
+                    capture_shortcut(ui.ctx()),
+                    Some(ShortcutCapture::Binding(binding))
+                );
+            },
+        );
+    }
+}
+
+#[test]
+fn navigation_preferences_keep_swaps_and_reset_all() {
+    let prefs = HashMap::from([
+        (
+            "shortcut_go_back".into(),
+            ShortcutAction::GoForward.default_binding().serialize(),
+        ),
+        (
+            "shortcut_go_forward".into(),
+            ShortcutAction::GoBack.default_binding().serialize(),
+        ),
+        ("shortcut_go_up".into(), "Backspace".into()),
+    ]);
+    let mut bindings = ShortcutBindings::from_preferences(&prefs);
+    assert_eq!(
+        bindings.get(ShortcutAction::GoBack),
+        ShortcutBinding::alt(egui::Key::ArrowRight)
+    );
+    assert_eq!(
+        bindings.get(ShortcutAction::GoForward),
+        ShortcutBinding::alt(egui::Key::ArrowLeft)
+    );
+    assert_eq!(
+        bindings.get(ShortcutAction::GoUp),
+        ShortcutBinding::plain(egui::Key::Backspace)
+    );
+    assert_eq!(
+        bindings.reset(ShortcutAction::GoBack),
+        Err(ShortcutValidationError::Conflict(ShortcutAction::GoForward))
+    );
+    bindings.reset_all();
+    for action in ShortcutAction::ALL {
+        assert_eq!(bindings.get(action), action.default_binding());
+    }
+}
+
+#[test]
 fn rejects_reserved_windows_shortcuts() {
     assert_eq!(
         validate_binding_policy(ShortcutBinding::alt(egui::Key::F4)),

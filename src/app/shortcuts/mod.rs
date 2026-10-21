@@ -192,6 +192,15 @@ fn validate_action_binding(
     action: ShortcutAction,
     binding: ShortcutBinding,
 ) -> Result<(), ShortcutValidationError> {
+    // Only navigation actions explicitly guard Backspace while editing text.
+    if matches!(binding.trigger, ShortcutTrigger::Key(egui::Key::Backspace))
+        && !matches!(
+            action,
+            ShortcutAction::GoBack | ShortcutAction::GoForward | ShortcutAction::GoUp
+        )
+    {
+        return Err(ShortcutValidationError::Unsupported);
+    }
     if binding.is_scroll()
         && !matches!(
             action,

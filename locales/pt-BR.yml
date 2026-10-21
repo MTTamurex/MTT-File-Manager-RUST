@@ -502,6 +502,9 @@ settings:
   shortcut_select_all: "Selecionar tudo"
   shortcut_next_view_mode: "Próximo modo de visualização"
   shortcut_previous_view_mode: "Modo de visualização anterior"
+  shortcut_go_back: "Voltar"
+  shortcut_go_forward: "Avançar"
+  shortcut_go_up: "Subir um nível"
   shortcuts_view_mode_scroll_note: "Padrão: Ctrl + scroll alterna os modos de visualização. Ctrl + Shift + scroll ajusta o tamanho das miniaturas no grid."
 preview:
   select_item: "Selecione um único item para ver detalhes"

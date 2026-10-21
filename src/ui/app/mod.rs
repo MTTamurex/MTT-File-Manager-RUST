@@ -2,6 +2,7 @@ pub mod input;
 pub mod layers;
 pub mod lifecycle;
 pub mod menu_handler;
+mod navigation_input;
 pub mod notifications;
 pub mod panels;
 mod view_mode_input;

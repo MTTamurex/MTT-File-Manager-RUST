@@ -502,6 +502,9 @@ settings:
   shortcut_select_all: "全选"
   shortcut_next_view_mode: "下一个视图模式"
   shortcut_previous_view_mode: "上一个视图模式"
+  shortcut_go_back: "后退"
+  shortcut_go_forward: "前进"
+  shortcut_go_up: "向上一级"
   shortcuts_view_mode_scroll_note: "默认：Ctrl + 滚轮切换视图模式。Ctrl + Shift + 滚轮调整网格缩略图大小。"
 preview:
   select_item: "请选择单个项目查看详情"

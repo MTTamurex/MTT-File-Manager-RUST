@@ -164,6 +164,9 @@ fn action_label(action: ShortcutAction) -> String {
         ShortcutAction::SelectAll => t!("settings.shortcut_select_all").to_string(),
         ShortcutAction::NextViewMode => t!("settings.shortcut_next_view_mode").to_string(),
         ShortcutAction::PreviousViewMode => t!("settings.shortcut_previous_view_mode").to_string(),
+        ShortcutAction::GoBack => t!("settings.shortcut_go_back").to_string(),
+        ShortcutAction::GoForward => t!("settings.shortcut_go_forward").to_string(),
+        ShortcutAction::GoUp => t!("settings.shortcut_go_up").to_string(),
     }
 }
 

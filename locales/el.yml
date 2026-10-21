@@ -502,6 +502,9 @@ settings:
   shortcut_select_all: "Επιλογή όλων"
   shortcut_next_view_mode: "Επόμενη λειτουργία προβολής"
   shortcut_previous_view_mode: "Προηγούμενη λειτουργία προβολής"
+  shortcut_go_back: "Πίσω"
+  shortcut_go_forward: "Εμπρός"
+  shortcut_go_up: "Ένα επίπεδο επάνω"
   shortcuts_view_mode_scroll_note: "Προεπιλογή: Ctrl + κύλιση αλλάζει τη λειτουργία προβολής. Ctrl + Shift + κύλιση προσαρμόζει το μέγεθος μικρογραφιών στο πλέγμα."
 preview:
   select_item: "Επιλέξτε ένα στοιχείο για να δείτε λεπτομέρειες"

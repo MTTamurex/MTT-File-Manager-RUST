@@ -202,6 +202,7 @@ fn is_allowed_unmodified_key(key: egui::Key) -> bool {
             | egui::Key::F12
             | egui::Key::Delete
             | egui::Key::Space
+            | egui::Key::Backspace
     )
 }
 
@@ -248,5 +249,9 @@ fn is_supported_key(key: egui::Key) -> bool {
             | egui::Key::Enter
             | egui::Key::PageUp
             | egui::Key::PageDown
+            | egui::Key::ArrowLeft
+            | egui::Key::ArrowRight
+            | egui::Key::ArrowUp
+            | egui::Key::ArrowDown
     ) || is_allowed_unmodified_key(key)
 }

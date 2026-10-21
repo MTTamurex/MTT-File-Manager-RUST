@@ -502,6 +502,9 @@ settings:
   shortcut_select_all: "Select all"
   shortcut_next_view_mode: "Next view mode"
   shortcut_previous_view_mode: "Previous view mode"
+  shortcut_go_back: "Go back"
+  shortcut_go_forward: "Go forward"
+  shortcut_go_up: "Go up one level"
   shortcuts_view_mode_scroll_note: "Default: Ctrl + scroll cycles view modes. Ctrl + Shift + scroll adjusts grid thumbnail size."
 preview:
   select_item: "Select a single item to see details"
