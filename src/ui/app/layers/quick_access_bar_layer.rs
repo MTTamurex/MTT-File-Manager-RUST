@@ -4,6 +4,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use rust_i18n::t;
 
 pub(crate) const QUICK_ACCESS_BAR_HEIGHT: f32 = 34.0;
+const CHIP_WIDTH: f32 = 160.0;
 
 pub(crate) fn quick_access_bar_visible(app: &ImageViewerApp) -> bool {
     app.show_quick_access && app.quick_access_placement == QuickAccessPlacement::Horizontal
@@ -129,9 +130,10 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                         let mut recycle_bin_rect = None;
                         if app.show_recycle_bin {
                             let label = t!("nav.recycle_bin").to_string();
-                            let width = chip_width(ui, &label);
-                            let (rect, response) =
-                                ui.allocate_exact_size(egui::vec2(width, 26.0), Sense::click());
+                            let visible_label = chip_label(ui, &label);
+                            let (rect, response) = ui
+                                .allocate_exact_size(egui::vec2(CHIP_WIDTH, 26.0), Sense::click());
+                            let response = response.on_hover_text(&label);
                             recycle_bin_rect = Some(rect);
                             let pointer_over_recycle_bin =
                                 pointer.is_some_and(|position| rect.contains(position));
@@ -141,7 +143,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             paint_chip(
                                 ui,
                                 rect,
-                                &label,
+                                &visible_label,
                                 icon.as_ref(),
                                 app.navigation_state.is_recycle_bin_view,
                                 response.hovered() || can_drop_here,
@@ -188,17 +190,9 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                     std::path::Path::new(path),
                                 )
                                 .unwrap_or_else(|| display_name.clone());
-                            let width = chip_width(ui, &label);
-                            let label_font = egui::FontId::proportional(12.0);
-                            let visible_label =
-                                crate::ui::preview_panel::utils::truncate_text_to_fit(
-                                    &label,
-                                    (width - 56.0).max(1.0),
-                                    &label_font,
-                                    ui,
-                                );
-                            let (rect, response) =
-                                ui.allocate_exact_size(egui::vec2(width, 26.0), Sense::hover());
+                            let visible_label = chip_label(ui, &label);
+                            let (rect, response) = ui
+                                .allocate_exact_size(egui::vec2(CHIP_WIDTH, 26.0), Sense::hover());
                             let pin_size = 22.0;
                             let pin_rect = Rect::from_center_size(
                                 Pos2::new(rect.right() - pin_size / 2.0 - 2.0, rect.center().y),
@@ -426,13 +420,13 @@ fn reorder_destination(source: usize, insertion_index: usize, item_count: usize)
     insertion_index.saturating_sub(if insertion_index > source { 1 } else { 0 })
 }
 
-fn chip_width(ui: &egui::Ui, label: &str) -> f32 {
-    let galley = ui.painter().layout_no_wrap(
-        label.to_string(),
-        egui::FontId::proportional(12.0),
-        ui.visuals().text_color(),
-    );
-    (galley.size().x + 56.0).clamp(96.0, 240.0)
+fn chip_label(ui: &egui::Ui, label: &str) -> String {
+    crate::ui::preview_panel::utils::truncate_text_to_fit(
+        label,
+        CHIP_WIDTH - 56.0,
+        &egui::FontId::proportional(12.0),
+        ui,
+    )
 }
 
 fn paint_chip(
@@ -488,7 +482,33 @@ fn paint_chip(
 
 #[cfg(test)]
 mod tests {
-    use super::reorder_destination;
+    use super::{chip_label, reorder_destination, CHIP_WIDTH};
+
+    #[test]
+    fn fixed_width_labels_fit_without_overlapping_the_pin() {
+        let ctx = eframe::egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            assert_eq!(CHIP_WIDTH, 160.0);
+            for label in ["Documents", "Recycle Bin", "A", ""] {
+                assert_eq!(chip_label(ui, label), label);
+            }
+            for label in [
+                "A very long folder display name that needs truncation",
+                "A very long translated recycle bin display name",
+                "日本語のとても長いフォルダー表示名のテスト",
+            ] {
+                let visible_label = chip_label(ui, label);
+                assert_ne!(visible_label, label);
+                assert!(visible_label.ends_with("..."));
+                let galley = ui.painter().layout_no_wrap(
+                    visible_label,
+                    eframe::egui::FontId::proportional(12.0),
+                    eframe::egui::Color32::WHITE,
+                );
+                assert!(galley.rect.width() <= CHIP_WIDTH - 56.0);
+            }
+        });
+    }
 
     #[test]
     fn reorder_destination_maps_horizontal_gaps_to_final_indices() {
@@ -551,8 +571,11 @@ mod tests {
                                     let (add_rect, _) = row_ui
                                         .allocate_exact_size(vec2(26.0, 26.0), Sense::click());
                                     add_range.set((add_rect.top(), add_rect.bottom()));
-                                    let (chip_rect, _) = row_ui
-                                        .allocate_exact_size(vec2(120.0, 26.0), Sense::hover());
+                                    let (chip_rect, _) = row_ui.allocate_exact_size(
+                                        vec2(CHIP_WIDTH, 26.0),
+                                        Sense::hover(),
+                                    );
+                                    assert_eq!(chip_rect.width(), CHIP_WIDTH);
                                     chip_range.set((chip_rect.top(), chip_rect.bottom()));
                                 });
                             });
