@@ -131,7 +131,7 @@ pub fn render_settings_window(
         .collapsible(false)
         .resizable(true)
         .default_width(912.0)
-        .default_height(480.0)
+        .default_height(740.0)
         .min_size(min_size)
         .max_size(available)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
