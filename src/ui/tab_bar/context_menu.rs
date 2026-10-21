@@ -9,6 +9,7 @@ pub(crate) fn tab_context_menu(
     can_duplicate: bool,
     can_close_left: bool,
     can_close_right: bool,
+    quick_access_action: Option<TabAction>,
 ) -> Option<TabAction> {
     let mut action = None;
     response.context_menu(|ui| {
@@ -32,6 +33,20 @@ pub(crate) fn tab_context_menu(
             ),
         ] {
             if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                action = Some(command);
+                ui.close();
+            }
+        }
+        if let Some(command @ (TabAction::PinQuickAccess | TabAction::UnpinQuickAccess)) =
+            quick_access_action
+        {
+            ui.separator();
+            let label = if command == TabAction::UnpinQuickAccess {
+                t!("context_menu.unpin_quick_access")
+            } else {
+                t!("context_menu.pin_quick_access")
+            };
+            if ui.button(label).clicked() {
                 action = Some(command);
                 ui.close();
             }

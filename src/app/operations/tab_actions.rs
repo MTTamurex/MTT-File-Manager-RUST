@@ -32,6 +32,15 @@ impl ImageViewerApp {
             return;
         }
         match action {
+            TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
+                let path = if index == self.tab_manager.active_tab {
+                    &self.navigation_state.current_path
+                } else {
+                    &self.tab_manager.tabs[index].path
+                }
+                .clone();
+                self.apply_tab_quick_access_action(&path, action);
+            }
             TabAction::Close => self.close_main_tab(index),
             TabAction::Duplicate => {
                 if !self.tab_manager.can_add_tab() {
@@ -83,6 +92,10 @@ impl ImageViewerApp {
             return;
         }
         match action {
+            TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
+                let path = set.tabs[index].snapshot.path.clone();
+                self.apply_tab_quick_access_action(&path, action);
+            }
             TabAction::Close => {
                 self.dual_panel_close_tab(panel, index);
             }
@@ -138,5 +151,30 @@ impl ImageViewerApp {
                 }
             }
         }
+    }
+
+    fn apply_tab_quick_access_action(&mut self, path: &str, action: TabAction) {
+        use crate::tabs::quick_access::{pinned_folder_for_path, tab_quick_access_action};
+        let destination = self.resolve_network_location_path(std::path::Path::new(path));
+        let path = destination.to_string_lossy();
+        let path = path.as_ref();
+        if tab_quick_access_action(path, &self.pinned_folders).is_none() {
+            return;
+        }
+        match action {
+            TabAction::PinQuickAccess => {
+                if pinned_folder_for_path(path, &self.pinned_folders).is_none() {
+                    self.pin_folder(path);
+                }
+            }
+            TabAction::UnpinQuickAccess => {
+                if let Some(folder) = pinned_folder_for_path(path, &self.pinned_folders) {
+                    let saved_path = folder.path.clone();
+                    self.unpin_folder(&saved_path);
+                }
+            }
+            _ => return,
+        }
+        self.ui_ctx.request_repaint();
     }
 }

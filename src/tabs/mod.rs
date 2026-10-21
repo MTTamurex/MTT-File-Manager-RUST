@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub(crate) mod actions;
 mod panel_tabs;
+pub(crate) mod quick_access;
 mod reorder;
 pub use actions::TabAction;
 pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};

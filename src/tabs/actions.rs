@@ -8,6 +8,8 @@ pub enum TabAction {
     CloseLeft,
     CloseRight,
     TogglePin,
+    PinQuickAccess,
+    UnpinQuickAccess,
 }
 
 pub(crate) fn close_candidates<T>(

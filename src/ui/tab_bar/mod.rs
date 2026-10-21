@@ -17,11 +17,13 @@ pub(crate) mod context_menu;
 #[cfg(test)]
 mod context_menu_tests;
 mod drag_dwell;
+mod icon_style;
 mod new_tab_area;
 mod tabs_renderer;
 mod window_controls;
 
 pub(crate) use drag_dwell::should_activate_tab_on_drag_hover;
+pub(crate) use icon_style::tab_icon_style;
 
 /// Result of tab bar interaction
 pub enum TabBarAction {
@@ -42,6 +44,9 @@ pub enum TabBarAction {
 pub fn render_tab_bar(
     ui: &mut egui::Ui,
     tab_manager: &TabManager,
+    tag_definitions: &rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
+    pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
+    live_path: &str,
     svg_icons: &mut SvgIconManager,
     _frame: &mut eframe::Frame,
     computer_icon: Option<&egui::TextureHandle>,
@@ -107,6 +112,9 @@ pub fn render_tab_bar(
         let tabs_action = tabs_renderer::render_tabs(
             ui,
             tab_manager,
+            tag_definitions,
+            pinned_folders,
+            live_path,
             svg_icons,
             computer_icon,
             icon_loader,

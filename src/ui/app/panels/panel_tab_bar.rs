@@ -3,7 +3,7 @@ use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::tabs::PanelTabSet;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
-use crate::ui::tab_bar::should_activate_tab_on_drag_hover;
+use crate::ui::tab_bar::{should_activate_tab_on_drag_hover, tab_icon_style};
 use eframe::egui;
 
 mod appearance;
@@ -52,6 +52,8 @@ pub(super) fn render_panel_tab_bar(
     active_panel: ActivePanel,
     tabs: &PanelTabSet,
     titles: &[String],
+    tag_definitions: &rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
+    pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
     live_path: Option<&str>,
     is_item_dragging: bool,
     can_add_tab: bool,
@@ -174,6 +176,10 @@ pub(super) fn render_panel_tab_bar(
                                                 |t| t.pinned,
                                             )
                                             .is_empty(),
+                                            crate::tabs::quick_access::tab_quick_access_action(
+                                                path,
+                                                pinned_folders,
+                                            ),
                                         )
                                     {
                                         action =
@@ -220,27 +226,23 @@ pub(super) fn render_panel_tab_bar(
                                     ),
                                     egui::Vec2::splat(icon_size),
                                 );
-                                let icon_name = if path == COMPUTER_VIEW_ID {
-                                    "home"
-                                } else {
-                                    "folder"
-                                };
-                                let icon_color = if selected {
-                                    [30, 90, 180, 255]
-                                } else {
-                                    [80, 80, 80, 255]
-                                };
-                                let native_icon = if path == COMPUTER_VIEW_ID {
-                                    computer_icon.cloned()
-                                } else if path == RECYCLE_BIN_VIEW_ID {
-                                    icon_loader.ensure_recycle_bin_icon(ui.ctx())
-                                } else {
-                                    icon_loader
-                                        .get_or_load_registered_folder_icon(ui.ctx(), path)
-                                        .or_else(|| {
-                                            icon_loader.get_or_load_folder_path_icon(ui.ctx(), path)
-                                        })
-                                };
+                                let (icon_name, icon_color) =
+                                    tab_icon_style(path, selected, tag_definitions);
+                                let native_icon =
+                                    if crate::domain::special_paths::is_tag_view_path(path) {
+                                        None
+                                    } else if path == COMPUTER_VIEW_ID {
+                                        computer_icon.cloned()
+                                    } else if path == RECYCLE_BIN_VIEW_ID {
+                                        icon_loader.ensure_recycle_bin_icon(ui.ctx())
+                                    } else {
+                                        icon_loader
+                                            .get_or_load_registered_folder_icon(ui.ctx(), path)
+                                            .or_else(|| {
+                                                icon_loader
+                                                    .get_or_load_folder_path_icon(ui.ctx(), path)
+                                            })
+                                    };
                                 if let Some(texture) = native_icon {
                                     ui.painter().image(
                                         texture.id(),

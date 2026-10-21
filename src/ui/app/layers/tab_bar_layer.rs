@@ -36,6 +36,9 @@ pub(crate) fn render_tab_bar_layer(
             let action = render_tab_bar(
                 ui,
                 &app.tab_manager,
+                &app.tag_definitions,
+                &app.pinned_folders,
+                &app.navigation_state.current_path,
                 &mut app.svg_icon_manager,
                 frame,
                 app.cache_manager.computer_icon.as_ref(),

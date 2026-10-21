@@ -26,6 +26,7 @@ pub const ICON_EXTERNAL_LINK: &[u8] = include_bytes!("../assets/icons/external-l
 pub const ICON_EYE: &[u8] = include_bytes!("../assets/icons/eye.svg");
 pub const ICON_EXTRACT_ALL: &[u8] = include_bytes!("../assets/icons/extract_all.svg");
 pub const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
+pub const ICON_FOLDER_FILLED: &[u8] = include_bytes!("../assets/icons/folder_filled.svg");
 pub const ICON_FOLDER_NEW: &[u8] =
     include_bytes!("../assets/icons/folder_new_duotone_black_blue_lighter2.svg");
 pub const ICON_HEADPHONES: &[u8] = include_bytes!("../assets/icons/headphones.svg");
@@ -82,6 +83,7 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "extract_all" => Some(ICON_EXTRACT_ALL),
         "external-link" => Some(ICON_EXTERNAL_LINK),
         "folder" => Some(ICON_FOLDER),
+        "folder_filled" => Some(ICON_FOLDER_FILLED),
         "folder_new" => Some(ICON_FOLDER_NEW),
         "headphones" => Some(ICON_HEADPHONES),
         "home" => Some(ICON_HOME),

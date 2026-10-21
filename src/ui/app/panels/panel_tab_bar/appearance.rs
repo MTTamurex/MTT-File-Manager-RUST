@@ -55,3 +55,66 @@ pub(super) fn paint_tab_background(ui: &egui::Ui, rect: egui::Rect, color: egui:
         ui.painter().rect_filled(body, 0.0, color);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::file_tag::{FileTag, TagColor};
+    use crate::domain::special_paths::{tag_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+    use crate::ui::tab_bar::tab_icon_style;
+    use rustc_hash::FxHashMap;
+
+    #[test]
+    fn tag_tabs_use_filled_icons_in_the_current_tag_color() {
+        let mut tags = FxHashMap::default();
+        let path = tag_view_path(1);
+        for color in TagColor::expanded_palette() {
+            tags.insert(
+                1,
+                FileTag {
+                    id: 1,
+                    name: "Example".into(),
+                    color,
+                    position: 0,
+                },
+            );
+            for selected in [false, true] {
+                assert_eq!(
+                    tab_icon_style(&path, selected, &tags),
+                    ("folder_filled", color.to_color32().to_array())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn other_tabs_and_missing_tags_keep_the_existing_style() {
+        let tags = FxHashMap::default();
+        for selected in [false, true] {
+            let color = if selected {
+                [30, 90, 180, 255]
+            } else {
+                [80, 80, 80, 255]
+            };
+            for path in ["folder", RECYCLE_BIN_VIEW_ID, &tag_view_path(1)] {
+                assert_eq!(tab_icon_style(path, selected, &tags), ("folder", color));
+            }
+            assert_eq!(
+                tab_icon_style(COMPUTER_VIEW_ID, selected, &tags),
+                ("home", color)
+            );
+        }
+    }
+
+    #[test]
+    fn filled_folder_asset_has_an_opaque_center() {
+        let svg = crate::embedded_assets::get_icon("folder_filled").unwrap();
+        let tree = usvg::Tree::from_data(svg, &usvg::Options::default()).unwrap();
+        let mut pixmap = tiny_skia::Pixmap::new(24, 24).unwrap();
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut pixmap.as_mut(),
+        );
+        assert_eq!(pixmap.pixel(12, 12).unwrap().alpha(), 255);
+    }
+}

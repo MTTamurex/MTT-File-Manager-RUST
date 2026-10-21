@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 use rust_i18n::t;
 use std::path::Path;
 
-use super::{drag_dwell, TabBarAction};
+use super::{drag_dwell, tab_icon_style, TabBarAction};
 
 const TAB_CORNER_RADIUS: u8 = 8;
 
@@ -47,6 +47,9 @@ fn paint_tab_background(ui: &mut egui::Ui, rect: egui::Rect, color: Color32) {
 pub(super) fn render_tabs(
     ui: &mut egui::Ui,
     tab_manager: &TabManager,
+    tag_definitions: &rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
+    pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
+    live_path: &str,
     svg_icons: &mut SvgIconManager,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
@@ -129,6 +132,10 @@ pub(super) fn render_tabs(
                     |t| t.pinned,
                 )
                 .is_empty(),
+                crate::tabs::quick_access::tab_quick_access_action(
+                    if is_active { live_path } else { &tab.path },
+                    pinned_folders,
+                ),
             ) {
                 action = TabBarAction::Context(idx, command);
             }
@@ -170,18 +177,11 @@ pub(super) fn render_tabs(
         let icon_rect = egui::Rect::from_min_size(icon_pos, Vec2::splat(icon_size));
 
         let render_size = 32;
-        let icon_name = if tab.is_computer_view {
-            "home"
-        } else {
-            "folder"
-        };
-        let icon_color = if is_active {
-            [30, 90, 180, 255]
-        } else {
-            [80, 80, 80, 255]
-        };
+        let (icon_name, icon_color) = tab_icon_style(&tab.path, is_active, tag_definitions);
 
-        let native_icon = if tab.is_computer_view {
+        let native_icon = if crate::domain::special_paths::is_tag_view_path(&tab.path) {
+            None
+        } else if tab.is_computer_view {
             computer_icon.cloned()
         } else if tab.path == RECYCLE_BIN_VIEW_ID {
             icon_loader.ensure_recycle_bin_icon(ui.ctx())

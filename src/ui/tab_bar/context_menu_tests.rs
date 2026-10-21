@@ -19,13 +19,35 @@ fn pointer_input(pos: egui::Pos2, button: PointerButton, pressed: bool) -> RawIn
 
 #[test]
 fn tab_context_menu_duplicates_the_clicked_tab_without_selecting_it_first() {
+    click_command_without_selecting_tab(None, TabAction::Duplicate, "tabs.duplicate");
+}
+
+#[test]
+fn quick_access_commands_do_not_select_or_pin_the_tab() {
+    for (command, label) in [
+        (TabAction::PinQuickAccess, "context_menu.pin_quick_access"),
+        (
+            TabAction::UnpinQuickAccess,
+            "context_menu.unpin_quick_access",
+        ),
+    ] {
+        click_command_without_selecting_tab(Some(command), command, label);
+    }
+}
+
+fn click_command_without_selecting_tab(
+    quick_access: Option<TabAction>,
+    expected: TabAction,
+    label: &str,
+) {
     let ctx = Context::default();
     let mut action = None;
     let mut selected = false;
     let mut render = |ui: &mut egui::Ui| {
         let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
         selected |= response.clicked();
-        if let Some(command) = tab_context_menu(&response, false, true, false, false) {
+        if let Some(command) = tab_context_menu(&response, false, true, false, false, quick_access)
+        {
             action = Some(command);
         }
     };
@@ -41,25 +63,32 @@ fn tab_context_menu_duplicates_the_clicked_tab_without_selecting_it_first() {
     );
     // Popups use an initial sizing pass before exposing their painted rows.
     let output = ctx.run_ui(RawInput::default(), &mut render);
-    let duplicate = output
+    let command_position = output
         .shapes
         .iter()
         .find_map(|shape| match &shape.shape {
-            egui::epaint::Shape::Text(text)
-                if text.galley.text() == rust_i18n::t!("tabs.duplicate") =>
-            {
+            egui::epaint::Shape::Text(text) if text.galley.text() == rust_i18n::t!(label) => {
                 Some(shape.shape.visual_bounding_rect().center())
             }
             _ => None,
         })
-        .expect("duplicate command is visible");
+        .expect("requested command is visible");
+    if quick_access.is_none() {
+        assert!(!output.shapes.iter().any(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) => {
+                text.galley.text() == rust_i18n::t!("context_menu.pin_quick_access")
+                    || text.galley.text() == rust_i18n::t!("context_menu.unpin_quick_access")
+            }
+            _ => false,
+        }));
+    }
     for pressed in [true, false] {
         let _ = ctx.run_ui(
-            pointer_input(duplicate, PointerButton::Primary, pressed),
+            pointer_input(command_position, PointerButton::Primary, pressed),
             &mut render,
         );
     }
-    assert_eq!(action, Some(TabAction::Duplicate));
+    assert_eq!(action, Some(expected));
     assert!(!selected);
 }
 
