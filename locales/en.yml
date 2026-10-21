@@ -405,7 +405,7 @@ settings:
   shortcuts_reset_all: "Reset all to defaults"
   shortcuts_reset: "Reset to default"
   shortcuts_press_binding: "Press the shortcut..."
-  shortcuts_press_binding_hint: "Press the new shortcut. View modes also accept modifiers + scroll. Esc cancels capture."
+  shortcuts_press_binding_hint: "Esc cancels"
   shortcuts_error_conflict: "This combination is already used by %{action}."
   shortcuts_error_reserved: "This combination is reserved by Windows and cannot be used."
   shortcuts_error_unsupported: "Use Ctrl, Alt or Shift with a supported key, or a single key like F2, F5, Delete or Space."

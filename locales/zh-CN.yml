@@ -405,7 +405,7 @@ settings:
   shortcuts_reset_all: "全部恢复默认"
   shortcuts_reset: "恢复默认"
   shortcuts_press_binding: "请按下快捷键..."
-  shortcuts_press_binding_hint: "按下新快捷键。视图模式也支持修饰键 + 滚轮。Esc 取消录制。"
+  shortcuts_press_binding_hint: "Esc 取消"
   shortcuts_error_conflict: "该组合键已被%{action}占用。"
   shortcuts_error_reserved: "该组合键由Windows保留，不可使用。"
   shortcuts_error_unsupported: "请使用Ctrl、Alt、Shift配合其他按键，或使用F2、F5、Delete、Space等单键。"

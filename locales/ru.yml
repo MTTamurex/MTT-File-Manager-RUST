@@ -405,7 +405,7 @@ settings:
   shortcuts_reset_all: "Сбросить все настройки по умолчанию"
   shortcuts_reset: "Сбросить по умолчанию"
   shortcuts_press_binding: "Нажмите сочетание клавиш..."
-  shortcuts_press_binding_hint: "Нажмите новое сочетание. Для режимов просмотра также доступны модификаторы + прокрутка. Esc отменяет ввод."
+  shortcuts_press_binding_hint: "Esc отменяет ввод"
   shortcuts_error_conflict: "Это сочетание уже используется действием «%{action}»."
   shortcuts_error_reserved: "Это сочетание зарезервировано Windows и не может быть использовано."
   shortcuts_error_unsupported: "Используйте Ctrl, Alt или Shift с поддерживаемой клавишей либо одну клавишу, например F2, F5, Delete или пробел."

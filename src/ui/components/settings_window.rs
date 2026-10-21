@@ -8,7 +8,9 @@ use rust_i18n::t;
 const BACKDROP_ALPHA: u8 = 72;
 const SIDEBAR_WIDTH: f32 = 200.0;
 
+mod keyboard;
 mod title_bar;
+use keyboard::settings_escape_closes_window;
 use title_bar::render_settings_title_bar;
 #[cfg(test)]
 mod tests;
@@ -84,8 +86,7 @@ pub fn render_settings_window(
         keep_open = false;
     }
 
-    // ESC closes
-    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    if settings_escape_closes_window(ctx, &mut app.shortcut_editor) {
         keep_open = false;
     }
 

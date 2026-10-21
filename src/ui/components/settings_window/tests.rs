@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::shortcuts::ShortcutEditorState;
 
 fn frame(
     ctx: &egui::Context,
@@ -58,4 +59,57 @@ fn appearance_has_its_own_settings_navigation_entry() {
     assert_eq!(section, SettingsSection::Appearance);
     click_label(&ctx, &mut section, &t!("settings.general"));
     assert_eq!(section, SettingsSection::General);
+}
+
+#[test]
+fn escape_cancels_capture_before_closing_settings_and_ignores_repeats() {
+    let ctx = egui::Context::default();
+    let mut editor = ShortcutEditorState::default();
+    editor.begin_capture(crate::app::shortcuts::ShortcutAction::GoBack);
+    editor.message = Some(crate::app::shortcuts::ShortcutValidationError::Reserved);
+
+    for (pressed, close, capturing) in [
+        (true, false, false),
+        (true, false, false), // Holding Esc must not close the window.
+        (false, false, false),
+        (true, true, false), // A second independent press closes it.
+    ] {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(settings_escape_closes_window(ui.ctx(), &mut editor), close);
+                assert_eq!(editor.is_capturing(), capturing);
+                assert!(editor.message.is_none());
+                assert!(!ui.input(|input| input.key_pressed(egui::Key::Escape)));
+            },
+        );
+    }
+}
+
+#[test]
+fn escape_without_capture_closes_settings() {
+    let ctx = egui::Context::default();
+    let mut editor = ShortcutEditorState::default();
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ui| assert!(settings_escape_closes_window(ui.ctx(), &mut editor)),
+    );
 }

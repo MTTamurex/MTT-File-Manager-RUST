@@ -128,7 +128,14 @@ pub fn render_shortcut_settings_section(
 
                     if let Some(message) = editor_state.message {
                         ui.label("");
-                        ui.colored_label(ui.visuals().error_fg_color, validation_message(message));
+                        ui.add_sized(
+                            [220.0, 0.0],
+                            egui::Label::new(
+                                RichText::new(validation_message(message))
+                                    .color(ui.visuals().error_fg_color),
+                            )
+                            .wrap(),
+                        );
                         ui.label("");
                         ui.end_row();
                     }
@@ -183,3 +190,6 @@ fn validation_message(message: ShortcutValidationError) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
