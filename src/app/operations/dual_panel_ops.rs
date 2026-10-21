@@ -23,6 +23,7 @@ impl ImageViewerApp {
                 .dual_panel_tabs
                 .clone()
                 .expect("checked above");
+            let pinned_snapshot = tabs.panel(current_panel).pinned_snapshot_for_resume();
             let Some(mut inactive_snapshot) = tabs
                 .panel(current_panel.other())
                 .active()
@@ -40,8 +41,16 @@ impl ImageViewerApp {
             );
             self.dual_panel_inactive_state = Some(inactive_snapshot);
             self.dual_panel_enabled = true;
-            self.sync_thumbnail_generation_gate();
-            self.watch_current_folder();
+            if let Some(snapshot) = pinned_snapshot {
+                // Restore before any dual-panel sync can store the single-pane
+                // path into the pinned tab. Reuse tab restoration so cancelled
+                // loads, cached listings and preview ownership are reconciled.
+                self.restore_panel_tab_snapshot(snapshot);
+                self.update_video_visibility();
+            } else {
+                self.sync_thumbnail_generation_gate();
+                self.watch_current_folder();
+            }
 
             let inactive_needs_reload =
                 self.dual_panel_inactive_state

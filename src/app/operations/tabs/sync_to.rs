@@ -105,13 +105,9 @@ impl ImageViewerApp {
                 ActivePanel::Left => (&mut tabs.left, &mut tabs.right),
                 ActivePanel::Right => (&mut tabs.right, &mut tabs.left),
             };
-            if let Some(tab) = current_tabs.active_mut() {
-                tab.snapshot = current;
-            }
+            current_tabs.sync_active_snapshot(current, self.dual_panel_enabled);
             if let Some(inactive) = inactive {
-                if let Some(tab) = other_tabs.active_mut() {
-                    tab.snapshot = inactive;
-                }
+                other_tabs.sync_active_snapshot(inactive, self.dual_panel_enabled);
             }
         }
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();

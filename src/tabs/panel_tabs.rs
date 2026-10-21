@@ -51,6 +51,26 @@ impl PanelTabSet {
         self.tabs.get_mut(self.active_tab)
     }
 
+    /// A dormant pinned tab must not inherit navigation from single-panel mode.
+    pub(crate) fn sync_active_snapshot(
+        &mut self,
+        snapshot: PanelSnapshot,
+        dual_panel_enabled: bool,
+    ) {
+        if let Some(tab) = self
+            .active_mut()
+            .filter(|tab| dual_panel_enabled || !tab.pinned)
+        {
+            tab.snapshot = snapshot;
+        }
+    }
+
+    pub(crate) fn pinned_snapshot_for_resume(&self) -> Option<PanelSnapshot> {
+        self.active()
+            .filter(|tab| tab.pinned)
+            .map(|tab| tab.snapshot.clone())
+    }
+
     pub fn select(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() || index == self.active_tab {
             return false;
@@ -85,6 +105,9 @@ impl PanelTabSet {
         }
     }
 }
+
+#[cfg(test)]
+mod snapshot_sync_tests;
 
 #[derive(Clone, Default)]
 pub struct DualPanelTabs {
