@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use rust_i18n::t;
 
 pub(crate) const QUICK_ACCESS_BAR_HEIGHT: f32 = 34.0;
-const CHIP_WIDTH: f32 = 160.0;
+const CHIP_WIDTH: f32 = 124.0;
 
 pub(crate) fn quick_access_bar_visible(app: &ImageViewerApp) -> bool {
     app.show_quick_access && app.quick_access_placement == QuickAccessPlacement::Horizontal
@@ -488,7 +488,7 @@ mod tests {
     fn fixed_width_labels_fit_without_overlapping_the_pin() {
         let ctx = eframe::egui::Context::default();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            assert_eq!(CHIP_WIDTH, 160.0);
+            assert_eq!(CHIP_WIDTH, 124.0);
             for label in ["Documents", "Recycle Bin", "A", ""] {
                 assert_eq!(chip_label(ui, label), label);
             }
