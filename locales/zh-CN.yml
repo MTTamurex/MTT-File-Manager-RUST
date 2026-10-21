@@ -20,6 +20,8 @@ nav:
   recycle_bin: "回收站"
   tag: "标签"
 sidebar:
+  collapse_all: "折叠所有分区"
+  expand_all: "展开所有分区"
   quick_access: "快速访问"
   remove_from_quick_access: "从快速访问中移除"
   cloud_drives: "云盘"
@@ -1138,6 +1140,12 @@ notifications:
   initial_indexing_progress: "初始索引建立中，已处理%{count}个项目。"
   initial_indexing_completed: "初始索引完成。全局搜索及相关功能现已可用。"
 tabs:
+  close: "关闭标签页"
+  duplicate: "复制标签页"
+  close_left: "关闭左侧标签页"
+  close_right: "关闭右侧标签页"
+  pin: "固定标签页"
+  unpin: "取消固定标签页"
   max_reached: "已达到标签上限（最多%{max}个），请关闭一个标签再打开新页面。"
   panel_new: "新建面板标签页"
   panel_close: "关闭面板标签页"

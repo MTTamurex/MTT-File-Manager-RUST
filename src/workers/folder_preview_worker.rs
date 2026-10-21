@@ -12,7 +12,7 @@
 
 mod content_thumbnail_cache;
 
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::disk_cache::{FolderPreviewPixels, ThumbnailDiskCache};
 use crate::infrastructure::folder_compose::FolderComposer;
 use crate::workers::thumbnail::processing::{get_bucket_size, resize_to_bucket};
 use content_thumbnail_cache::try_cached_content_thumbnail;
@@ -447,9 +447,11 @@ pub fn spawn_folder_preview_worker(
                         disk_cache.put_folder_preview_checked(
                             &path,
                             bucket_size,
-                            &rgba_data,
-                            width,
-                            height,
+                            FolderPreviewPixels {
+                                rgba: &rgba_data,
+                                width,
+                                height,
+                            },
                             appearance,
                             source,
                             &validity,

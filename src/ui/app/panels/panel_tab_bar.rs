@@ -27,6 +27,7 @@ pub(super) enum PanelTabAction {
     Select(ActivePanel, usize),
     Add(ActivePanel),
     Close(ActivePanel, usize),
+    Context(ActivePanel, usize, crate::tabs::actions::TabAction),
     Move {
         panel: ActivePanel,
         from: usize,
@@ -53,6 +54,7 @@ pub(super) fn render_panel_tab_bar(
     titles: &[String],
     live_path: Option<&str>,
     is_item_dragging: bool,
+    can_add_tab: bool,
     computer_icon: Option<&egui::TextureHandle>,
     svg_icons: &mut SvgIconManager,
     icon_loader: &mut IconLoader,
@@ -149,6 +151,38 @@ pub(super) fn render_panel_tab_bar(
                                     egui::Sense::click_and_drag(),
                                 );
                                 let active_panel_tab = selected && panel == active_panel;
+                                if !is_item_dragging {
+                                    use crate::tabs::actions::{close_candidates, TabAction};
+                                    if let Some(command) =
+                                        crate::ui::tab_bar::context_menu::tab_context_menu(
+                                            &tab_response,
+                                            tab.pinned,
+                                            can_add_tab,
+                                            !close_candidates(
+                                                &tabs.tabs,
+                                                index,
+                                                tabs.active_tab,
+                                                TabAction::CloseLeft,
+                                                |t| t.pinned,
+                                            )
+                                            .is_empty(),
+                                            !close_candidates(
+                                                &tabs.tabs,
+                                                index,
+                                                tabs.active_tab,
+                                                TabAction::CloseRight,
+                                                |t| t.pinned,
+                                            )
+                                            .is_empty(),
+                                        )
+                                    {
+                                        action =
+                                            Some(PanelTabAction::Context(panel, index, command));
+                                    }
+                                }
+                                if tab_response.middle_clicked() && !tab.pinned {
+                                    action = Some(PanelTabAction::Close(panel, index));
+                                }
                                 let drag_hovering = is_item_dragging
                                     && !active_panel_tab
                                     && tab_response.contains_pointer();
@@ -243,47 +277,22 @@ pub(super) fn render_panel_tab_bar(
                                 {
                                     action = Some(PanelTabAction::Select(panel, index));
                                 }
-                                let close_response = ui.interact(
-                                    close_rect,
-                                    ui.id().with("panel_tab_close"),
-                                    egui::Sense::click(),
-                                );
-                                if close_response.hovered() {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                    ui.painter().rect_filled(
+                                let close_response =
+                                    crate::ui::tab_bar::context_menu::close_control(
+                                        ui,
                                         close_rect,
-                                        egui::CornerRadius::same(4),
+                                        ui.id().with("panel_tab_close"),
+                                        tab.pinned,
                                         hover_bg,
+                                        active_text,
+                                        inactive_text,
                                     );
+                                if close_response.hovered() && !tab.pinned {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
-                                if close_response.clicked() {
+                                if close_response.clicked() && !tab.pinned {
                                     action = Some(PanelTabAction::Close(panel, index));
                                 }
-
-                                let close_center = close_rect.center();
-                                let close_radius = CLOSE_BUTTON_SIZE * 0.25;
-                                let close_stroke = egui::Stroke::new(
-                                    1.5,
-                                    if close_response.hovered() {
-                                        active_text
-                                    } else {
-                                        inactive_text
-                                    },
-                                );
-                                ui.painter().line_segment(
-                                    [
-                                        close_center + egui::vec2(-close_radius, -close_radius),
-                                        close_center + egui::vec2(close_radius, close_radius),
-                                    ],
-                                    close_stroke,
-                                );
-                                ui.painter().line_segment(
-                                    [
-                                        close_center + egui::vec2(close_radius, -close_radius),
-                                        close_center + egui::vec2(-close_radius, close_radius),
-                                    ],
-                                    close_stroke,
-                                );
 
                                 let title_x = icon_rect.right() + 6.0;
                                 let title = titles.get(index).map_or(path, String::as_str);

@@ -18,6 +18,14 @@ pub(crate) fn set_render_panel(ctx: &egui::Context, panel: ActivePanel, enabled:
     });
 }
 
+pub(crate) fn is_rendering_panel(ctx: &egui::Context) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<Option<ActivePanel>>(egui::Id::new("new_tab_render_panel"))
+            .flatten()
+            .is_some()
+    })
+}
+
 pub(crate) fn item_middle_click(response: &egui::Response, item: &FileEntry, recycle_bin: bool) {
     if recycle_bin || item.is_recycle_item() || !item.is_dir || !response.middle_clicked() {
         return;

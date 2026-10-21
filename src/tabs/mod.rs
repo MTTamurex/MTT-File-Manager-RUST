@@ -15,10 +15,14 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub(crate) mod actions;
 mod panel_tabs;
 mod reorder;
+pub use actions::TabAction;
 pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};
 mod session;
+#[cfg(test)]
+mod session_pin_tests;
 mod session_restore;
 pub use session::TabManagerSession;
 
@@ -43,6 +47,7 @@ pub const MAX_TABS: usize = 20;
 pub struct TabState {
     /// Unique identifier for this tab
     pub id: usize,
+    pub pinned: bool,
     /// Current directory path
     pub path: String,
     /// Display title (folder name or "Este Computador")
@@ -145,6 +150,7 @@ impl TabState {
     pub fn new_at_computer(id: usize) -> Self {
         Self {
             id,
+            pinned: false,
             path: COMPUTER_VIEW_ID.to_string(),
             title: COMPUTER_VIEW_ID.to_string(),
             navigation: NavigationHistory::new(COMPUTER_VIEW_ID.to_string()),
@@ -207,6 +213,7 @@ impl TabState {
 
         Self {
             id,
+            pinned: false,
             path: path.to_string(),
             title,
             navigation: NavigationHistory::new(path.to_string()),
@@ -540,58 +547,15 @@ impl TabManager {
 
     /// Duplicate the current tab
     pub fn duplicate_tab(&mut self) {
-        // PERF-05: respect the tab cap (currently no callers; guard keeps the
-        // cap safe if this becomes reachable in the future).
-        if !self.can_add_tab() {
-            return;
-        }
-        let current = self.active().clone();
-        let mut new_tab = TabState::new_at_path(self.next_id, &current.path);
-        new_tab.navigation = current.navigation.clone();
-        new_tab.is_computer_view = current.is_computer_view;
-        new_tab.items = if current.items_snapshot_compact {
-            Arc::new(Vec::new())
-        } else {
-            current.items.clone()
-        };
-        new_tab.all_items = current.all_items.clone();
-        new_tab.items_revision = current.items_revision;
-        new_tab.items_snapshot_compact = current.items_snapshot_compact;
-        new_tab.is_loading_folder = current.is_loading_folder;
-        new_tab.selected_item = current.selected_item;
-        new_tab.selected_file = current.selected_file.clone();
-        new_tab.selected_thumbnail = None;
-        new_tab.selected_metadata = current.selected_metadata.clone();
-        new_tab.selected_gif = None;
-        new_tab.search_query = current.search_query.clone();
-        new_tab.total_items = current.total_items;
-        new_tab.view_mode = current.view_mode;
-        new_tab.multi_selection = current.multi_selection.clone();
-        new_tab.sort_mode = current.sort_mode;
-        new_tab.sort_descending = current.sort_descending;
-        new_tab.folders_position = current.folders_position;
-        new_tab.group_mode = current.group_mode;
-        new_tab.group_descending = current.group_descending;
-        new_tab.group_projection = current.group_projection.clone();
-        new_tab.collapsed_groups_by_context = current.collapsed_groups_by_context.clone();
-        new_tab.show_left_sidebar = current.show_left_sidebar;
-        new_tab.show_preview_panel = current.show_preview_panel;
-        new_tab.sidebar_expanded = current.sidebar_expanded.clone();
-        new_tab.sidebar_scroll_y = current.sidebar_scroll_y;
-        new_tab.active_tag_filter = current.active_tag_filter;
-        new_tab.collapse_tags = current.collapse_tags;
-
-        self.next_id += 1;
-
-        // Insert after current tab
-        let insert_pos = self.active_tab + 1;
-        self.tabs.insert(insert_pos, new_tab);
-        self.active_tab = insert_pos;
+        self.duplicate_at(self.active_tab);
     }
 
     /// Close the tab at the given index
     /// Returns true if the app should close (no tabs left)
     pub fn close_tab(&mut self, index: usize) -> bool {
+        if self.tabs.get(index).is_none_or(|tab| tab.pinned) {
+            return false;
+        }
         if self.tabs.len() <= 1 {
             // Last tab - signal app should close
             return true;
@@ -643,6 +607,9 @@ impl TabManager {
     }
 
     pub fn move_tab_to_gap(&mut self, from: usize, gap: usize) -> bool {
+        if !actions::valid_move(&self.tabs, from, gap, |tab| tab.pinned) {
+            return false;
+        }
         reorder::move_to_gap(&mut self.tabs, &mut self.active_tab, from, gap)
     }
 
@@ -651,9 +618,7 @@ impl TabManager {
             return false;
         }
 
-        self.tabs.swap(self.active_tab, self.active_tab - 1);
-        self.active_tab -= 1;
-        true
+        self.move_tab_to_gap(self.active_tab, self.active_tab - 1)
     }
 
     pub fn move_tab_right(&mut self) -> bool {
@@ -661,9 +626,7 @@ impl TabManager {
             return false;
         }
 
-        self.tabs.swap(self.active_tab, self.active_tab + 1);
-        self.active_tab += 1;
-        true
+        self.move_tab_to_gap(self.active_tab, self.active_tab + 2)
     }
 
     /// Reopen the most recently closed tab
@@ -707,7 +670,8 @@ impl TabManager {
             self.next_id += 1;
 
             // Insert after active tab
-            let insert_pos = self.active_tab + 1;
+            let boundary = self.tabs.iter().take_while(|tab| tab.pinned).count();
+            let insert_pos = (self.active_tab + 1).max(boundary);
             self.tabs.insert(insert_pos, reopened);
             self.active_tab = insert_pos;
             true

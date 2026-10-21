@@ -16,6 +16,8 @@ pub struct TabManagerSession {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SessionTab {
+    #[serde(default)]
+    pub(crate) pinned: bool,
     pub(crate) path: String,
     pub(crate) view_mode: String,
     pub(crate) sort_mode: String,
@@ -53,6 +55,8 @@ pub(crate) struct SessionPanelTabSet {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SessionPanelTab {
+    #[serde(default)]
+    pub(crate) pinned: bool,
     pub(crate) id: usize,
     pub(crate) path: String,
     pub(crate) view_mode: String,
@@ -228,6 +232,7 @@ mod tests {
         let mut session = TabManagerSession::from_tab_manager(&manager);
         let panel_tab = |id, path: &str| SessionPanelTab {
             id,
+            pinned: false,
             path: path.to_owned(),
             view_mode: "grid".to_owned(),
             sort_mode: "name".to_owned(),
@@ -260,6 +265,7 @@ mod tests {
                 tabs: vec![panel_tab(1, r"E:\Media\Library")],
             },
         });
+        workspace.dual_panel_tabs.as_mut().unwrap().left.tabs[0].pinned = true;
 
         let restored = TabManagerSession::from_json(&session.to_json().unwrap()).unwrap();
         let workspace = &restored.tabs[0];
@@ -272,6 +278,8 @@ mod tests {
             135.0
         );
         assert_eq!(tabs.left.active_tab, 1);
+        assert!(tabs.left.tabs[0].pinned);
+        assert!(!tabs.left.tabs[1].pinned);
         assert_eq!(tabs.left.tabs[1].path, r"D:\Work\Archive");
         assert_eq!(tabs.left.tabs[1].column_widths.values[0], 120.0);
         assert_eq!(tabs.right.active_tab, 0);

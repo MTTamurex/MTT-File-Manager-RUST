@@ -83,7 +83,7 @@ fn reuses_valid_cached_sizes_without_queueing_work() {
     state.batch_req_sender = sender;
     let item = folder(0);
     state.batch_cache.put(item.path.clone(), 0);
-    assert!(state.prepare_size_sort(&[item.clone()], Instant::now(), true));
+    assert!(state.prepare_size_sort(std::slice::from_ref(&item), Instant::now(), true));
     assert_eq!(state.size_sorting.sizes.get(&item.path), Some(&0));
     assert!(!state.size_sorting.has_pending_sizes());
     assert_eq!(receiver.try_iter().count(), 0);
@@ -94,11 +94,15 @@ fn final_completion_keeps_a_repaint_pending_until_the_batched_sort() {
     let mut state = test_state();
     let item = folder(0);
     let now = Instant::now();
-    state.prepare_size_sort(&[item.clone()], now, true);
+    state.prepare_size_sort(std::slice::from_ref(&item), now, true);
     state.size_sorting.complete(&item.path, 10);
     assert!(!state.size_sorting.has_pending_sizes());
     assert!(state.size_sorting.needs_update());
-    assert!(!state.prepare_size_sort(&[item.clone()], now + Duration::from_millis(10), false));
+    assert!(!state.prepare_size_sort(
+        std::slice::from_ref(&item),
+        now + Duration::from_millis(10),
+        false
+    ));
     assert!(state.size_sorting.needs_update());
     assert!(state.prepare_size_sort(&[item], now + Duration::from_millis(100), false));
     assert!(!state.size_sorting.needs_update());
@@ -108,7 +112,7 @@ fn final_completion_keeps_a_repaint_pending_until_the_batched_sort() {
 fn navigation_clears_pinned_sizes_and_ignores_untracked_completions() {
     let mut state = test_state();
     let item = folder(0);
-    state.prepare_size_sort(&[item.clone()], Instant::now(), true);
+    state.prepare_size_sort(std::slice::from_ref(&item), Instant::now(), true);
     state.size_sorting.complete(&item.path, 10);
     state.cancel_batch();
     state.size_sorting.complete(&item.path, 20);
@@ -121,7 +125,7 @@ fn preview_progress_is_not_used_as_a_completed_size() {
     let item = folder(0);
     state.loading.insert(item.path.clone());
     state.batch_cache.put(item.path.clone(), 10);
-    state.prepare_size_sort(&[item.clone()], Instant::now(), true);
+    state.prepare_size_sort(std::slice::from_ref(&item), Instant::now(), true);
     assert!(!state.size_sorting.sizes.contains_key(&item.path));
 }
 

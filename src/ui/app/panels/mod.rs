@@ -46,6 +46,7 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     if let Some(request) = crate::ui::new_tab_request::take(&ctx) {
         app.open_location_in_new_tab(request.panel, &request.path);
     }
+    app.process_pending_pinned_navigation();
     app.process_pending_archive_activations();
     let central_ms = t_central.elapsed().as_millis();
 
@@ -144,6 +145,12 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta().y);
             let sidebar_rect = ui.max_rect();
+            // Registered before rows so existing item menus retain priority.
+            let background_response = ui.interact(
+                sidebar_rect,
+                ui.id().with("sidebar_background_menu"),
+                egui::Sense::click(),
+            );
             let pointer_in_sidebar = ui.input(|i| {
                 i.pointer
                     .hover_pos()
@@ -530,6 +537,13 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 .or(quick_access_action)
                 .or(output.inner)
                 .or(tags_action)
+                .or(crate::ui::sidebar::section_menu::menu(
+                    &background_response,
+                    app.is_item_dragging
+                        || app.renaming_state.is_some()
+                        || app.sidebar_renaming.is_some()
+                        || app.sidebar_folder_rename.is_some(),
+                ))
         });
 
     // Consume focus flag after rendering so it only fires once
@@ -571,6 +585,9 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
     )
     .then(|| sidebar_drives_sections(app));
     match action {
+        SidebarAction::SetAllSectionsCollapsed(collapsed) => {
+            crate::ui::sidebar::section_menu::apply(app, collapsed);
+        }
         SidebarAction::OpenInNewTab(path) => {
             app.open_location_in_new_tab(app.dual_panel_active, &path);
         }

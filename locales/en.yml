@@ -20,6 +20,8 @@ nav:
   recycle_bin: "Recycle Bin"
   tag: "Tag"
 sidebar:
+  collapse_all: "Collapse all sections"
+  expand_all: "Expand all sections"
   quick_access: "Quick Access"
   remove_from_quick_access: "Remove from Quick Access"
   cloud_drives: "Cloud Drives"
@@ -1142,6 +1144,12 @@ notifications:
   initial_indexing_completed: "Initial indexing completed. Global Search and related features are now available."
 
 tabs:
+  close: "Close tab"
+  duplicate: "Duplicate tab"
+  close_left: "Close tabs to the left"
+  close_right: "Close tabs to the right"
+  pin: "Pin tab"
+  unpin: "Unpin tab"
   max_reached: "Tab limit (%{max}) reached. Close a tab to open another."
   panel_new: "New panel tab"
   panel_close: "Close panel tab"

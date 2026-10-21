@@ -1,7 +1,7 @@
 use super::*;
 use crate::domain::folder_appearance::FolderAppearance;
 use crate::domain::folder_preview_validity::{FolderPreviewRequests, FolderPreviewValidity};
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::disk_cache::{FolderPreviewPixels, ThumbnailDiskCache};
 use std::fs::{File, FileTimes};
 use std::time::Duration;
 
@@ -28,7 +28,18 @@ fn folder_preview_editing_cover_in_same_second_invalidates_every_color() {
     let validity = FolderPreviewValidity::default();
     let pixels = [230, 210, 140, 255].repeat(32 * 32);
     for appearance in FolderAppearance::ALL {
-        cache.put_folder_preview_checked(&folder, 32, &pixels, 32, 32, appearance, &old, &validity);
+        cache.put_folder_preview_checked(
+            &folder,
+            32,
+            FolderPreviewPixels {
+                rgba: &pixels,
+                width: 32,
+                height: 32,
+            },
+            appearance,
+            &old,
+            &validity,
+        );
         assert!(cache
             .get_folder_preview_for_source(&folder, 32, appearance, &old)
             .is_some());
@@ -55,9 +66,11 @@ fn folder_preview_editing_cover_in_same_second_invalidates_every_color() {
     cache.put_folder_preview_checked(
         &folder,
         16,
-        &replacement,
-        16,
-        16,
+        FolderPreviewPixels {
+            rgba: &replacement,
+            width: 16,
+            height: 16,
+        },
         FolderAppearance::Original,
         &current,
         &validity,
@@ -85,9 +98,11 @@ fn folder_preview_cover_selection_is_part_of_cache_validity() {
         cache.put_folder_preview_checked(
             &folder,
             16,
-            &pixels,
-            16,
-            16,
+            FolderPreviewPixels {
+                rgba: &pixels,
+                width: 16,
+                height: 16,
+            },
             appearance,
             &source,
             &FolderPreviewValidity::default(),
@@ -112,7 +127,16 @@ fn folder_preview_obsolete_jobs_cannot_repopulate_invalidated_variants() {
     let pixels = [230, 210, 140, 255].repeat(16 * 16);
     for appearance in FolderAppearance::ALL {
         cache.put_folder_preview_checked(
-            &folder, 16, &pixels, 16, 16, appearance, &source, &old_job,
+            &folder,
+            16,
+            FolderPreviewPixels {
+                rgba: &pixels,
+                width: 16,
+                height: 16,
+            },
+            appearance,
+            &source,
+            &old_job,
         );
         assert!(cache
             .get_folder_preview_for_source(&folder, 16, appearance, &source)
@@ -122,9 +146,11 @@ fn folder_preview_obsolete_jobs_cannot_repopulate_invalidated_variants() {
     cache.put_folder_preview_checked(
         &folder,
         16,
-        &pixels,
-        16,
-        16,
+        FolderPreviewPixels {
+            rgba: &pixels,
+            width: 16,
+            height: 16,
+        },
         FolderAppearance::Original,
         &source,
         &new_job,
@@ -150,9 +176,11 @@ fn folder_preview_source_changes_during_composition_prevent_commit() {
     cache.put_folder_preview_checked(
         &folder,
         16,
-        &pixels,
-        16,
-        16,
+        FolderPreviewPixels {
+            rgba: &pixels,
+            width: 16,
+            height: 16,
+        },
         FolderAppearance::Original,
         &old,
         &FolderPreviewValidity::default(),
@@ -180,9 +208,11 @@ fn folder_preview_invalidation_while_writer_is_busy_prevents_late_commit() {
         worker_cache.put_folder_preview_checked(
             &worker_folder,
             16,
-            &pixels,
-            16,
-            16,
+            FolderPreviewPixels {
+                rgba: &pixels,
+                width: 16,
+                height: 16,
+            },
             FolderAppearance::Original,
             &worker_source,
             &old,

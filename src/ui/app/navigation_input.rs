@@ -21,7 +21,7 @@ pub(super) fn handle_navigation_input(
         app.cancel_rectangle_selection();
         app.go_forward();
     }
-    if input.up {
+    if input.up && app.can_go_up() {
         app.cancel_rectangle_selection();
         app.go_up_one_level();
     }

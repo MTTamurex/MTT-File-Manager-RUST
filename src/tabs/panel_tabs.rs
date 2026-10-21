@@ -32,6 +32,7 @@ fn active_index_after_close(
 #[derive(Clone)]
 pub struct PanelTab {
     pub id: usize,
+    pub pinned: bool,
     pub snapshot: PanelSnapshot,
 }
 
@@ -59,6 +60,9 @@ impl PanelTabSet {
     }
 
     pub fn close(&mut self, index: usize) -> Option<bool> {
+        if self.tabs.get(index)?.pinned {
+            return None;
+        }
         let (active_tab, was_active) =
             active_index_after_close(self.active_tab, index, self.tabs.len())?;
         self.tabs.remove(index);
@@ -67,6 +71,9 @@ impl PanelTabSet {
     }
 
     pub fn move_tab_to_gap(&mut self, from: usize, gap: usize) -> bool {
+        if !super::actions::valid_move(&self.tabs, from, gap, |tab| tab.pinned) {
+            return false;
+        }
         super::reorder::move_to_gap(&mut self.tabs, &mut self.active_tab, from, gap)
     }
 
@@ -92,6 +99,7 @@ impl DualPanelTabs {
             left: PanelTabSet {
                 tabs: vec![PanelTab {
                     id: 0,
+                    pinned: false,
                     snapshot: left,
                 }],
                 active_tab: 0,
@@ -99,6 +107,7 @@ impl DualPanelTabs {
             right: PanelTabSet {
                 tabs: vec![PanelTab {
                     id: 1,
+                    pinned: false,
                     snapshot: right,
                 }],
                 active_tab: 0,
@@ -154,7 +163,11 @@ impl DualPanelTabs {
         self.next_id = self.next_id.wrapping_add(1);
         let tabs = self.panel_mut(panel);
         let insert_at = tabs.tabs.len();
-        tabs.tabs.push(PanelTab { id, snapshot });
+        tabs.tabs.push(PanelTab {
+            id,
+            pinned: false,
+            snapshot,
+        });
         tabs.active_tab = insert_at;
         Some(insert_at)
     }

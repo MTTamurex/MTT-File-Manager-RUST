@@ -12,6 +12,9 @@ use std::collections::HashMap;
 
 #[cfg(test)]
 mod middle_click_tests;
+pub(crate) mod section_menu;
+#[cfg(test)]
+mod section_menu_tests;
 mod tags;
 pub use tags::render_tags_section;
 
@@ -89,6 +92,7 @@ pub struct SidebarContext<'a> {
 
 /// Actions that can be triggered by the sidebar
 pub enum SidebarAction {
+    SetAllSectionsCollapsed(bool),
     OpenInNewTab(String),
     NavigateTo(String),
     NavigateToComputer,
@@ -233,6 +237,12 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
     // Section header with inline collapse toggle
     let (qa_label_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+    action = section_menu::header_menu(
+        ui,
+        qa_label_rect,
+        "quick_access",
+        ctx.is_renaming || ctx.is_item_dragging,
+    );
 
     let toggle_size = 18.0;
     let toggle_rect = Rect::from_center_size(
@@ -441,6 +451,14 @@ pub fn render_sidebar_drives(
         // Section header with inline collapse toggle
         let (header_rect, _) =
             allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 16.0, Sense::hover());
+        if let Some(command) = section_menu::header_menu(
+            ui,
+            header_rect,
+            title,
+            ctx.is_renaming || ctx.is_item_dragging,
+        ) {
+            action = Some(command);
+        }
 
         let toggle_size = 18.0;
         let toggle_rect = Rect::from_center_size(

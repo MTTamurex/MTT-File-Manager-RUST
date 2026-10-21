@@ -631,6 +631,7 @@ fn render_physical_panel_content(
             render_single_panel_content(app, ui);
         },
     );
+    crate::ui::new_tab_request::set_render_panel(ui.ctx(), panel, false);
 }
 
 pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
@@ -833,6 +834,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             &left_titles,
             left_live_path,
             app.is_item_dragging,
+            panel_tabs.can_add_tab(),
             app.cache_manager.computer_icon.as_ref(),
             &mut app.svg_icon_manager,
             &mut app.item_icon_loader,
@@ -849,6 +851,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             &right_titles,
             right_live_path,
             app.is_item_dragging,
+            panel_tabs.can_add_tab(),
             app.cache_manager.computer_icon.as_ref(),
             &mut app.svg_icon_manager,
             &mut app.item_icon_loader,
@@ -1032,6 +1035,9 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             }
             PanelTabAction::Close(panel, index) => {
                 app.dual_panel_close_tab(panel, index);
+            }
+            PanelTabAction::Context(panel, index, action) => {
+                app.panel_tab_action(panel, index, action)
             }
             PanelTabAction::Move { panel, from, gap } => {
                 app.dual_panel_move_tab(panel, from, gap);

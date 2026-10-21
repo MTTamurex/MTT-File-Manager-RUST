@@ -183,7 +183,11 @@ impl ImageViewerApp {
                 continue; // The user navigated or changed tabs while the probe was pending.
             }
             if result.is_file {
-                self.open_location_in_new_tab(panel, &result.path);
+                if self.panel_path_is_pinned(panel) {
+                    self.open_pinned_destination(panel, &result.path);
+                } else {
+                    self.open_location_in_new_tab(panel, &result.path);
+                }
             } else if self.dual_panel_enabled && panel != self.dual_panel_active {
                 self.with_inactive_panel(|app| app.navigate_to(&result.path));
             } else {

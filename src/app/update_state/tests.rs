@@ -62,8 +62,10 @@ fn disconnected_worker_can_be_retried_without_leaving_busy_state() {
 
 #[test]
 fn fresh_check_dismisses_stale_release_details_when_no_update_is_available() {
-    let mut state = UpdateState::default();
-    state.show_dialog = true;
+    let mut state = UpdateState {
+        show_dialog: true,
+        ..Default::default()
+    };
     receive(&mut state, UpdateEvent::Checked(Ok(None)));
     assert!(!state.show_dialog);
     assert!(state.up_to_date);

@@ -68,6 +68,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                 })
                 .collect();
 
+            let can_go_back = app.can_go_back();
+            let can_go_forward = app.can_go_forward();
+            let can_go_up = app.can_go_up();
             let action = render_toolbar(
                 ui,
                 &app.navigation_state.current_path,
@@ -78,8 +81,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                 &mut app.address_bar_focus_request,
                 &mut app.search_query,
                 &recent_paths_displayed,
-                app.navigation_state.navigation.can_go_back(),
-                app.navigation_state.navigation.can_go_forward(),
+                can_go_back,
+                can_go_forward,
+                can_go_up,
                 app.view_mode,
                 app.sort_mode,
                 app.sort_descending,

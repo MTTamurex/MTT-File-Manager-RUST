@@ -9,6 +9,8 @@ use rust_i18n::t;
 use std::cell::RefCell;
 use std::path::Component;
 
+mod navigation_buttons;
+
 // M-3: Cache breadcrumb segments — recomputed only when current_path changes.
 // Each entry is (display_label, navigation_target).
 thread_local! {
@@ -157,6 +159,7 @@ pub fn render_toolbar(
     recent_paths: &[(String, String)],
     can_go_back: bool,
     can_go_forward: bool,
+    can_go_up: bool,
     _view_mode: ViewMode,
     _sort_mode: SortMode,
     _sort_descending: bool,
@@ -171,47 +174,12 @@ pub fn render_toolbar(
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 8.0;
 
-        // 1. NAVIGATION (LEFT) - Blocked during renaming
-        let can_back = can_go_back && !_is_renaming;
-        if widgets::icon_button(
+        action = navigation_buttons::render(
             ui,
             svg_manager,
-            theme::ICON_ARROW_LEFT,
-            &t!("toolbar.back"),
-            None,
-        )
-        .clicked()
-            && can_back
-        {
-            action = Some(ToolbarAction::GoBack);
-        }
-
-        let can_forward = can_go_forward && !_is_renaming;
-        if widgets::icon_button(
-            ui,
-            svg_manager,
-            theme::ICON_ARROW_RIGHT,
-            &t!("toolbar.forward"),
-            None,
-        )
-        .clicked()
-            && can_forward
-        {
-            action = Some(ToolbarAction::GoForward);
-        }
-
-        if widgets::icon_button(
-            ui,
-            svg_manager,
-            theme::ICON_ARROW_UP,
-            &t!("toolbar.up"),
-            None,
-        )
-        .clicked()
-            && !_is_renaming
-        {
-            action = Some(ToolbarAction::GoUp);
-        }
+            [can_go_back, can_go_forward, can_go_up],
+            _is_renaming,
+        );
 
         if widgets::icon_button(
             ui,
@@ -953,6 +921,7 @@ mod tests {
                         recent_paths,
                         false,
                         false,
+                        true,
                         ViewMode::Grid,
                         SortMode::Name,
                         false,

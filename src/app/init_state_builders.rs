@@ -88,6 +88,7 @@ pub(in crate::app) fn build_layout_state(
         sidebar_quick_access_height,
         sidebar_drives_height,
         sidebar_drives_heights: Default::default(),
+        sidebar_drives_height_before_collapse_all: None,
     }
 }
 

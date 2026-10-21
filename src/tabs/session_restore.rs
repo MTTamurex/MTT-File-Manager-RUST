@@ -30,6 +30,7 @@ impl TabManager {
 impl SessionTab {
     pub(crate) fn from_tab(tab: &TabState) -> Self {
         Self {
+            pinned: tab.pinned,
             path: tab.path.clone(),
             view_mode: tab.view_mode.preference_value().to_string(),
             sort_mode: sort_mode_preference(tab.sort_mode).to_string(),
@@ -65,6 +66,7 @@ impl SessionTab {
             TabState::new_at_path(id, &self.path)
         };
         tab.path = self.path.clone();
+        tab.pinned = self.pinned;
         tab.path_input = self.path.clone();
         tab.is_computer_view = self.path == COMPUTER_VIEW_ID;
         tab.is_recycle_bin_view = self.path == RECYCLE_BIN_VIEW_ID;
@@ -105,7 +107,11 @@ impl SessionPanelTabSet {
             tabs: set
                 .tabs
                 .iter()
-                .map(|tab| SessionPanelTab::from_snapshot(tab.id, &tab.snapshot))
+                .map(|tab| {
+                    let mut saved = SessionPanelTab::from_snapshot(tab.id, &tab.snapshot);
+                    saved.pinned = tab.pinned;
+                    saved
+                })
                 .collect(),
         }
     }
@@ -115,6 +121,7 @@ impl SessionPanelTab {
     fn from_snapshot(id: usize, snapshot: &PanelSnapshot) -> Self {
         Self {
             id,
+            pinned: false,
             path: snapshot.path.clone(),
             view_mode: snapshot.view_mode.preference_value().to_string(),
             sort_mode: sort_mode_preference(snapshot.sort_mode).to_string(),
@@ -266,6 +273,7 @@ fn restore_panel_tab_set(app: &mut ImageViewerApp, saved: &SessionPanelTabSet) -
             saved_tab.apply_to_snapshot(&mut snapshot);
             PanelTab {
                 id: saved_tab.id,
+                pinned: saved_tab.pinned,
                 snapshot,
             }
         })

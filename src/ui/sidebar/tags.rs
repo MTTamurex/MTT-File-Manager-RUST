@@ -39,6 +39,14 @@ pub fn render_tags_section(
         egui::vec2(ui.available_width(), TAG_HEADER_H),
         Sense::hover(),
     );
+    if let Some(command) = super::section_menu::header_menu(
+        ui,
+        header_rect,
+        "tags",
+        ctx.is_renaming || ctx.is_item_dragging,
+    ) {
+        *action = Some(command);
+    }
     let toggle_size = 18.0;
     let toggle_rect = Rect::from_center_size(
         Pos2::new(

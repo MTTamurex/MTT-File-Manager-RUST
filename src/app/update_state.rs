@@ -123,13 +123,12 @@ impl UpdateState {
                         self.release = release;
                         self.notes_cache = egui_commonmark::CommonMarkCache::default();
                         self.show_dialog = self.release.is_some();
-                        if self.release.is_some() {
-                            if self.automatic_check
-                                && self.auto_install
-                                && !updater::platform::elevated()
-                            {
-                                self.download(ctx);
-                            }
+                        if self.release.is_some()
+                            && self.automatic_check
+                            && self.auto_install
+                            && !updater::platform::elevated()
+                        {
+                            self.download(ctx);
                         }
                     }
                     UpdateEvent::Checked(Err(error)) | UpdateEvent::Downloaded(Err(error)) => {

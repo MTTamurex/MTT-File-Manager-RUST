@@ -291,6 +291,9 @@ impl ImageViewerApp {
         if index >= panel_tabs.tabs.len() {
             return false;
         }
+        if panel_tabs.tabs[index].pinned {
+            return false;
+        }
         if panel_tabs.tabs.len() == 1 {
             self.focus_panel_for_tab_action(panel.other());
             self.dual_panel_disable();
@@ -298,7 +301,15 @@ impl ImageViewerApp {
         }
 
         self.sync_to_tab();
-        self.focus_panel_for_tab_action(panel);
+        let closing_selected = self
+            .tab_manager
+            .active()
+            .dual_panel_tabs
+            .as_ref()
+            .is_some_and(|tabs| tabs.panel(panel).active_tab == index);
+        if closing_selected {
+            self.focus_panel_for_tab_action(panel);
+        }
 
         let was_active = self
             .tab_manager

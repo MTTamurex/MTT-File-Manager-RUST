@@ -8,6 +8,7 @@ mod variants;
 mod writer;
 pub use freshness::FolderPreviewSource;
 pub(super) use variants::initialize_variant_table;
+pub use writer::FolderPreviewPixels;
 
 fn resize_rgba_to_width(
     rgba_data: Vec<u8>,

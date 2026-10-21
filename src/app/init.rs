@@ -838,6 +838,7 @@ impl ImageViewerApp {
 
             folder_locks,
             current_folder_locked: false,
+            pending_pinned_navigation: None,
 
             pinned_folders,
 

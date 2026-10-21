@@ -106,6 +106,9 @@ impl ImageViewerApp {
         let tag_id = tag_id.filter(|id| self.tag_definitions.contains_key(id));
         if let Some(tag_id) = tag_id {
             let view_path = tag_view_path(tag_id);
+            if self.redirect_pinned_navigation(&view_path) {
+                return;
+            }
             if self.navigation_state.current_path != view_path {
                 self.navigation_state.navigation.navigate_to(view_path);
             }
@@ -119,9 +122,6 @@ impl ImageViewerApp {
         if self.active_tag_filter.is_none() && !in_tag_view {
             return;
         }
-        self.active_tag_filter = None;
-        self.save_preferences();
-
         if in_tag_view {
             let fallback = self
                 .navigation_state
@@ -133,6 +133,11 @@ impl ImageViewerApp {
                 .find(|path| tag_id_from_view_path(path).is_none())
                 .cloned()
                 .unwrap_or_else(|| COMPUTER_VIEW_ID.to_string());
+            if self.redirect_pinned_navigation(&fallback) {
+                return;
+            }
+            self.active_tag_filter = None;
+            self.save_preferences();
             if fallback == COMPUTER_VIEW_ID {
                 self.navigate_to_computer();
             } else if fallback == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID {
@@ -141,6 +146,8 @@ impl ImageViewerApp {
                 self.navigate_to(&fallback);
             }
         } else {
+            self.active_tag_filter = None;
+            self.save_preferences();
             self.refresh_visible_items_after_tag_change();
         }
     }

@@ -787,6 +787,8 @@ pub struct ImageViewerApp {
     // Per-folder locked view preferences
     pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,
     pub current_folder_locked: bool,
+    pub(crate) pending_pinned_navigation:
+        Option<crate::app::operations::pinned_tab_navigation::PendingNavigation>,
 
     // Quick Access pinned folders (ordered by position)
     pub pinned_folders: Vec<crate::domain::pinned_folder::PinnedFolder>,

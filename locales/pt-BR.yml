@@ -20,6 +20,8 @@ nav:
   recycle_bin: "Lixeira"
   tag: "Tag"
 sidebar:
+  collapse_all: "Recolher todas as seções"
+  expand_all: "Expandir todas as seções"
   quick_access: "Acesso Rápido"
   remove_from_quick_access: "Remover do Acesso Rápido"
   cloud_drives: "Unidades de nuvem"
@@ -1142,6 +1144,12 @@ notifications:
   initial_indexing_completed: "Indexação inicial concluída. A busca global e os recursos relacionados estão disponíveis."
 
 tabs:
+  close: "Fechar aba"
+  duplicate: "Duplicar aba"
+  close_left: "Fechar abas à esquerda"
+  close_right: "Fechar abas à direita"
+  pin: "Fixar aba"
+  unpin: "Desafixar aba"
   max_reached: "Limite de %{max} abas atingido. Feche uma aba para abrir outra."
   panel_new: "Nova aba do painel"
   panel_close: "Fechar aba do painel"

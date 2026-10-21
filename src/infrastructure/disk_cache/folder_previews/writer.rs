@@ -5,6 +5,14 @@ use rusqlite::params;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Borrowed preview pixels and their dimensions; writing never copies the input buffer.
+#[derive(Clone, Copy)]
+pub struct FolderPreviewPixels<'a> {
+    pub rgba: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+}
+
 fn preserves_larger_variant(
     db: &rusqlite::Connection,
     path: &Path,
@@ -56,9 +64,11 @@ impl ThumbnailDiskCache {
         self.put_folder_preview_inner(
             path,
             bucket,
-            rgba,
-            width,
-            height,
+            FolderPreviewPixels {
+                rgba,
+                width,
+                height,
+            },
             appearance,
             source.as_ref(),
             None,
@@ -70,9 +80,7 @@ impl ThumbnailDiskCache {
         &self,
         path: &Path,
         bucket: u32,
-        rgba: &[u8],
-        width: u32,
-        height: u32,
+        pixels: FolderPreviewPixels<'_>,
         appearance: FolderAppearance,
         source: &FolderPreviewSource,
         validity: &FolderPreviewValidity,
@@ -80,9 +88,7 @@ impl ThumbnailDiskCache {
         self.put_folder_preview_inner(
             path,
             bucket,
-            rgba,
-            width,
-            height,
+            pixels,
             appearance,
             Some(source),
             Some(validity),
@@ -93,13 +99,16 @@ impl ThumbnailDiskCache {
         &self,
         path: &Path,
         bucket: u32,
-        rgba: &[u8],
-        width: u32,
-        height: u32,
+        pixels: FolderPreviewPixels<'_>,
         appearance: FolderAppearance,
         source: Option<&FolderPreviewSource>,
         validity: Option<&FolderPreviewValidity>,
     ) {
+        let FolderPreviewPixels {
+            rgba,
+            width,
+            height,
+        } = pixels;
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|n| n.checked_mul(4));

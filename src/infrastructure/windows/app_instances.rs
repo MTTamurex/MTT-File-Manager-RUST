@@ -61,7 +61,7 @@ pub(crate) fn register_main_window(hwnd: HWND) {
         SetPropW(
             hwnd,
             w!("MTT.FileManager.MainWindow"),
-            Some(HANDLE(1usize as *mut _)),
+            Some(HANDLE(std::ptr::dangling_mut::<u8>().cast())),
         )
     };
     if let Err(error) = result {

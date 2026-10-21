@@ -130,6 +130,46 @@ mod tests {
     }
 
     #[test]
+    fn collapse_all_temporarily_fits_headers_without_losing_manual_divider_height() {
+        for saved in [None, Some(40.0), Some(180.0), Some(500.0)] {
+            let ctx = Context::default();
+            let mut layout = crate::app::layout_state::LayoutState {
+                sidebar_drives_height: saved,
+                ..Default::default()
+            };
+            let render = |collapsed: bool, height_override: Option<f32>| {
+                let mut geometry = (0.0, 0.0);
+                let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    ui.set_max_size(vec2(240.0, 500.0));
+                    let output = super::render_drives_block(
+                        ui,
+                        height_override.unwrap_or(400.0).min(400.0),
+                        height_override.is_some(),
+                        0.0,
+                        |ui| {
+                            ui.allocate_exact_size(
+                                vec2(220.0, if collapsed { 100.0 } else { 300.0 }),
+                                Sense::hover(),
+                            );
+                        },
+                    );
+                    geometry = (output.response.rect.height(), ui.cursor().top());
+                });
+                geometry
+            };
+            let before = render(false, layout.sidebar_drives_height);
+            layout.set_sidebar_sections_collapsed(true);
+            let collapsed = render(true, layout.sidebar_drives_height);
+            assert_eq!(collapsed.0, 100.0);
+            layout.set_sidebar_sections_collapsed(true);
+            assert_eq!(render(true, layout.sidebar_drives_height), collapsed);
+            layout.set_sidebar_sections_collapsed(false);
+            assert_eq!(render(false, layout.sidebar_drives_height), before);
+            assert_eq!(layout.sidebar_drives_height, saved);
+        }
+    }
+
+    #[test]
     fn drives_reserve_only_the_tags_header() {
         assert_eq!(drives_available_height(500.0, true, 3.0), 452.0);
         assert_eq!(drives_available_height(500.0, false, 3.0), 500.0);

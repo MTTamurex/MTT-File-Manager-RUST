@@ -14,6 +14,14 @@ pub(super) fn render_network_locations(
         return;
     }
     let (header, _) = allocate_sidebar_viewport_row(ui, width, 16.0, Sense::hover());
+    if let Some(command) = crate::ui::sidebar::section_menu::header_menu(
+        ui,
+        header,
+        "network_locations",
+        ctx.is_renaming || ctx.is_item_dragging,
+    ) {
+        *action = Some(command);
+    }
     let toggle_rect = Rect::from_center_size(
         Pos2::new(header.max.x - 12.0, header.center().y),
         egui::vec2(18.0, 18.0),

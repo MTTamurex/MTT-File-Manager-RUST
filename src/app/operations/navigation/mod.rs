@@ -125,6 +125,10 @@ impl ImageViewerApp {
     }
 
     pub fn navigate_to(&mut self, path: &str) {
+        self.navigate_to_impl(path, true);
+    }
+
+    fn navigate_to_impl(&mut self, path: &str, protect_pin: bool) {
         let destination = self.resolve_network_location_path(Path::new(path));
         let path = destination.to_string_lossy();
         let path = path.as_ref();
@@ -153,6 +157,9 @@ impl ImageViewerApp {
 
         // If we're already at this path, do nothing
         if self.navigation_state.current_path == normalized_path {
+            return;
+        }
+        if protect_pin && self.redirect_pinned_navigation(&normalized_path) {
             return;
         }
 
@@ -272,6 +279,9 @@ impl ImageViewerApp {
     }
 
     pub fn go_back(&mut self) {
+        if self.active_path_is_pinned() {
+            return;
+        }
         if let Some(path) = self.navigation_state.navigation.go_back().cloned() {
             self.remember_current_folder_timestamp_hints();
 
@@ -352,6 +362,9 @@ impl ImageViewerApp {
 
     /// Moves forward in history
     pub fn go_forward(&mut self) {
+        if self.active_path_is_pinned() {
+            return;
+        }
         if let Some(path) = self.navigation_state.navigation.go_forward().cloned() {
             self.remember_current_folder_timestamp_hints();
 
@@ -432,7 +445,14 @@ impl ImageViewerApp {
 
     /// Navigates to the "This PC" view (adding to history)
     pub fn navigate_to_computer(&mut self) {
+        self.navigate_to_computer_impl(true);
+    }
+
+    fn navigate_to_computer_impl(&mut self, protect_pin: bool) {
         if self.navigation_state.is_computer_view {
+            return;
+        }
+        if protect_pin && self.redirect_pinned_navigation(COMPUTER_VIEW_ID) {
             return;
         }
 
@@ -458,6 +478,9 @@ impl ImageViewerApp {
         if self.navigation_state.is_recycle_bin_view {
             return;
         }
+        if self.redirect_pinned_navigation(RECYCLE_BIN_VIEW_ID) {
+            return;
+        }
 
         if self.active_tag_filter.take().is_some() {
             self.save_preferences();
@@ -478,8 +501,7 @@ impl ImageViewerApp {
     }
 
     pub fn go_up_one_level(&mut self) {
-        if self.navigation_state.is_computer_view {
-            // Already at the top
+        if !self.can_go_up() {
             return;
         }
 
@@ -520,12 +542,16 @@ impl ImageViewerApp {
 
     /// Can go back in history?
     pub fn can_go_back(&self) -> bool {
-        self.navigation_state.navigation.can_go_back()
+        !self.active_path_is_pinned() && self.navigation_state.navigation.can_go_back()
     }
 
     /// Can go forward in history?
     pub fn can_go_forward(&self) -> bool {
-        self.navigation_state.navigation.can_go_forward()
+        !self.active_path_is_pinned() && self.navigation_state.navigation.can_go_forward()
+    }
+
+    pub fn can_go_up(&self) -> bool {
+        !self.active_path_is_pinned() && !self.navigation_state.is_computer_view
     }
 
     /// Navigates upward from the given path until a valid (existing) ancestor
@@ -557,14 +583,14 @@ impl ImageViewerApp {
                     parent
                 );
                 let target = parent.to_string_lossy();
-                self.navigate_to(target.as_ref());
+                self.navigate_to_impl(target.as_ref(), false);
                 return;
             }
         }
 
         // No valid ancestor (root of drive or empty) → go to computer view
         log::warn!("[NAV] No parent available — redirecting to Este Computador");
-        self.navigate_to_computer();
+        self.navigate_to_computer_impl(false);
     }
 }
 

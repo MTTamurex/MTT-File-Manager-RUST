@@ -13,6 +13,9 @@ use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32};
 
+pub(crate) mod context_menu;
+#[cfg(test)]
+mod context_menu_tests;
 mod drag_dwell;
 mod new_tab_area;
 mod tabs_renderer;
@@ -25,6 +28,7 @@ pub enum TabBarAction {
     None,
     SwitchTab(usize),
     CloseTab(usize),
+    Context(usize, crate::tabs::TabAction),
     MoveTab { from: usize, gap: usize },
     NewTab,
     CloseApp,

@@ -36,16 +36,8 @@ fn create_new_tab(app: &mut ImageViewerApp) {
     app.create_default_tab();
 }
 
-fn close_current_tab(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    app.sync_to_tab();
-    if app.tab_manager.close_active_tab() {
-        app.save_preferences();
-        app.request_window_close(ctx);
-    } else {
-        app.sync_from_tab();
-        app.update_video_visibility();
-        app.save_preferences();
-    }
+fn close_current_tab(app: &mut ImageViewerApp, _ctx: &egui::Context) {
+    app.close_main_tab(app.tab_manager.active_tab);
 }
 
 fn switch_tab(app: &mut ImageViewerApp, previous: bool) {

@@ -13,7 +13,10 @@ pub(crate) fn render_tab_bar_layer(
         .exact_size(36.0)
         .frame(egui::Frame {
             fill: if dark_mode {
-                crate::ui::theme::palette::background(root_ui.ctx(), egui::Color32::from_rgb(30, 30, 30))
+                crate::ui::theme::palette::background(
+                    root_ui.ctx(),
+                    egui::Color32::from_rgb(30, 30, 30),
+                )
             } else {
                 egui::Color32::from_rgb(230, 230, 230)
             },
@@ -66,45 +69,9 @@ pub(crate) fn render_tab_bar_layer(
                     app.create_default_main_tab();
                 }
                 TabBarAction::CloseTab(idx) => {
-                    log::debug!(
-                        "[DEBUG] Closing Tab index: {}. Active was: {}",
-                        idx, app.tab_manager.active_tab
-                    );
-
-                    if let Some(tab) = app.tab_manager.tabs.get(idx) {
-                        let tab_id = tab.id;
-                        if app.media_preview_owner_tab_id == Some(tab_id) {
-                            log::debug!("[DEBUG] Closing tab owns media player. Destroying player.");
-                            app.destroy_media_preview();
-                        }
-                    }
-
-                    app.sync_to_tab();
-                    let closing_active_tab = idx == app.tab_manager.active_tab;
-
-                    if app.tab_manager.close_tab(idx) {
-                        log::debug!("[DEBUG] Last tab closed. Closing app.");
-                        app.save_preferences();
-                        app.request_window_close(&ctx);
-                    } else {
-                        if closing_active_tab {
-                            log::debug!(
-                                "[DEBUG] Active tab closed. Switching to new active tab index: {}",
-                                app.tab_manager.active_tab
-                            );
-                            app.sync_from_tab();
-                        } else {
-                            log::debug!(
-                                "[DEBUG] Background tab closed. current active index adjusted to: {}. Saving live state to it.",
-                                app.tab_manager.active_tab
-                            );
-                            app.sync_to_tab();
-                        }
-
-                        app.update_video_visibility();
-                        app.save_preferences();
-                    }
+                    app.close_main_tab(idx);
                 }
+                TabBarAction::Context(index, action) => app.main_tab_action(index, action),
                 TabBarAction::CloseApp => {
                     app.request_window_close(&ctx);
                 }

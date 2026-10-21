@@ -23,15 +23,14 @@ pub(crate) fn settings(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             ),
         ] {
             let previous = *value;
-            if preference_row(ui, &label, value).changed() {
-                if app
+            if preference_row(ui, &label, value).changed()
+                && app
                     .app_state_db
                     .set_preference(key, if *value { "true" } else { "false" })
                     .is_err()
-                {
-                    *value = previous;
-                    app.updates.error = Some(t!("updates.save_failed").to_string());
-                }
+            {
+                *value = previous;
+                app.updates.error = Some(t!("updates.save_failed").to_string());
             }
         }
         ui.label(
@@ -90,36 +89,6 @@ fn preference_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> egui::Res
         response
     })
     .inner
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn long_update_labels_wrap_before_the_switch_in_narrow_settings() {
-        let ctx = egui::Context::default();
-        let mut switch_rect = egui::Rect::NOTHING;
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_width(220.0);
-            let mut enabled = false;
-            switch_rect = preference_row(
-                ui,
-                "Check for updates when opening MTT with a longer translated label",
-                &mut enabled,
-            )
-            .rect;
-        });
-        assert!(switch_rect.right() <= 230.0);
-        let mut text_shapes = 0;
-        for shape in output.shapes {
-            if let egui::epaint::Shape::Text(text) = shape.shape {
-                text_shapes += 1;
-                assert!(text.pos.x + text.galley.size().x <= switch_rect.left());
-            }
-        }
-        assert!(text_shapes > 0);
-    }
 }
 
 fn status(ui: &mut egui::Ui, app: &ImageViewerApp) {
@@ -208,4 +177,34 @@ pub(crate) fn dialog(ctx: &egui::Context, app: &mut ImageViewerApp) {
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_update_labels_wrap_before_the_switch_in_narrow_settings() {
+        let ctx = egui::Context::default();
+        let mut switch_rect = egui::Rect::NOTHING;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(220.0);
+            let mut enabled = false;
+            switch_rect = preference_row(
+                ui,
+                "Check for updates when opening MTT with a longer translated label",
+                &mut enabled,
+            )
+            .rect;
+        });
+        assert!(switch_rect.right() <= 230.0);
+        let mut text_shapes = 0;
+        for shape in output.shapes {
+            if let egui::epaint::Shape::Text(text) = shape.shape {
+                text_shapes += 1;
+                assert!(text.pos.x + text.galley.size().x <= switch_rect.left());
+            }
+        }
+        assert!(text_shapes > 0);
+    }
 }

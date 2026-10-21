@@ -104,8 +104,34 @@ pub(super) fn render_tabs(
             action = TabBarAction::SwitchTab(idx);
         }
 
-        if response.middle_clicked() {
+        if response.middle_clicked() && !tab.pinned {
             action = TabBarAction::CloseTab(idx);
+        }
+        if !is_item_dragging {
+            use crate::tabs::actions::{close_candidates, TabAction};
+            if let Some(command) = super::context_menu::tab_context_menu(
+                &response,
+                tab.pinned,
+                tab_manager.can_add_tab(),
+                !close_candidates(
+                    &tab_manager.tabs,
+                    idx,
+                    tab_manager.active_tab,
+                    TabAction::CloseLeft,
+                    |t| t.pinned,
+                )
+                .is_empty(),
+                !close_candidates(
+                    &tab_manager.tabs,
+                    idx,
+                    tab_manager.active_tab,
+                    TabAction::CloseRight,
+                    |t| t.pinned,
+                )
+                .is_empty(),
+            ) {
+                action = TabBarAction::Context(idx, command);
+            }
         }
         if drag_dwell::should_activate_tab_on_drag_hover(
             ui,
@@ -327,45 +353,19 @@ pub(super) fn render_tabs(
             }
         }
 
-        let close_response = ui.interact(
+        let close_response = super::context_menu::close_control(
+            ui,
             close_btn_rect,
-            egui::Id::new(idx).with("tab_close"), // M-9: no format! alloc
-            egui::Sense::click(),
+            egui::Id::new(idx).with("tab_close"),
+            tab.pinned,
+            hover_bg,
+            text_color,
+            inactive_text,
         );
 
         if close_response.clicked() {
             action = TabBarAction::CloseTab(idx);
         }
-
-        if close_response.hovered() {
-            ui.painter()
-                .rect_filled(close_btn_rect, CornerRadius::same(4), hover_bg);
-        }
-
-        let x_stroke = Stroke::new(
-            1.5,
-            if close_response.hovered() {
-                text_color
-            } else {
-                inactive_text
-            },
-        );
-        let x_center = close_btn_rect.center();
-        let x_radius = close_btn_size * 0.25;
-        ui.painter().line_segment(
-            [
-                x_center + Vec2::new(-x_radius, -x_radius),
-                x_center + Vec2::new(x_radius, x_radius),
-            ],
-            x_stroke,
-        );
-        ui.painter().line_segment(
-            [
-                x_center + Vec2::new(x_radius, -x_radius),
-                x_center + Vec2::new(-x_radius, x_radius),
-            ],
-            x_stroke,
-        );
     }
 
     if let Some(src) = drag_src {

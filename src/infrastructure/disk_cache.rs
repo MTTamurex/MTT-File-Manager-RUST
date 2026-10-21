@@ -16,7 +16,7 @@ use super::db_utils;
 
 mod cleanup;
 mod folder_previews;
-pub use folder_previews::FolderPreviewSource;
+pub use folder_previews::{FolderPreviewPixels, FolderPreviewSource};
 mod gc;
 mod thumbnail_freshness;
 mod thumbnails_repo;
