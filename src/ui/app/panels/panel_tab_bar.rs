@@ -153,39 +153,6 @@ pub(super) fn render_panel_tab_bar(
                                     egui::Sense::click_and_drag(),
                                 );
                                 let active_panel_tab = selected && panel == active_panel;
-                                if !is_item_dragging {
-                                    use crate::tabs::actions::{close_candidates, TabAction};
-                                    if let Some(command) =
-                                        crate::ui::tab_bar::context_menu::tab_context_menu(
-                                            &tab_response,
-                                            tab.pinned,
-                                            can_add_tab,
-                                            !close_candidates(
-                                                &tabs.tabs,
-                                                index,
-                                                tabs.active_tab,
-                                                TabAction::CloseLeft,
-                                                |t| t.pinned,
-                                            )
-                                            .is_empty(),
-                                            !close_candidates(
-                                                &tabs.tabs,
-                                                index,
-                                                tabs.active_tab,
-                                                TabAction::CloseRight,
-                                                |t| t.pinned,
-                                            )
-                                            .is_empty(),
-                                            crate::tabs::quick_access::tab_quick_access_action(
-                                                path,
-                                                pinned_folders,
-                                            ),
-                                        )
-                                    {
-                                        action =
-                                            Some(PanelTabAction::Context(panel, index, command));
-                                    }
-                                }
                                 if tab_response.middle_clicked() && !tab.pinned {
                                     action = Some(PanelTabAction::Close(panel, index));
                                 }
@@ -285,11 +252,16 @@ pub(super) fn render_panel_tab_bar(
                                         active_text,
                                         inactive_text,
                                     );
-                                if close_response.hovered() && !tab.pinned {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                }
-                                if close_response.clicked() && !tab.pinned {
-                                    action = Some(PanelTabAction::Close(panel, index));
+                                if close_response.clicked() {
+                                    action = Some(if tab.pinned {
+                                        PanelTabAction::Context(
+                                            panel,
+                                            index,
+                                            crate::tabs::TabAction::TogglePin,
+                                        )
+                                    } else {
+                                        PanelTabAction::Close(panel, index)
+                                    });
                                 }
 
                                 let title_x = icon_rect.right() + 6.0;
@@ -319,6 +291,44 @@ pub(super) fn render_panel_tab_bar(
                                     tab_response
                                         .clone()
                                         .on_hover_text(tab_tooltip_text(path, title));
+                                }
+                                if !is_item_dragging {
+                                    use crate::tabs::actions::{close_candidates, TabAction};
+                                    let context_response = if tab.pinned {
+                                        tab_response.union(close_response)
+                                    } else {
+                                        tab_response
+                                    };
+                                    if let Some(command) =
+                                        crate::ui::tab_bar::context_menu::tab_context_menu(
+                                            &context_response,
+                                            tab.pinned,
+                                            can_add_tab,
+                                            !close_candidates(
+                                                &tabs.tabs,
+                                                index,
+                                                tabs.active_tab,
+                                                TabAction::CloseLeft,
+                                                |t| t.pinned,
+                                            )
+                                            .is_empty(),
+                                            !close_candidates(
+                                                &tabs.tabs,
+                                                index,
+                                                tabs.active_tab,
+                                                TabAction::CloseRight,
+                                                |t| t.pinned,
+                                            )
+                                            .is_empty(),
+                                            crate::tabs::quick_access::tab_quick_access_action(
+                                                path,
+                                                pinned_folders,
+                                            ),
+                                        )
+                                    {
+                                        action =
+                                            Some(PanelTabAction::Context(panel, index, command));
+                                    }
                                 }
                             });
                         }

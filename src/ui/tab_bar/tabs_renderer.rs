@@ -110,36 +110,6 @@ pub(super) fn render_tabs(
         if response.middle_clicked() && !tab.pinned {
             action = TabBarAction::CloseTab(idx);
         }
-        if !is_item_dragging {
-            use crate::tabs::actions::{close_candidates, TabAction};
-            if let Some(command) = super::context_menu::tab_context_menu(
-                &response,
-                tab.pinned,
-                tab_manager.can_add_tab(),
-                !close_candidates(
-                    &tab_manager.tabs,
-                    idx,
-                    tab_manager.active_tab,
-                    TabAction::CloseLeft,
-                    |t| t.pinned,
-                )
-                .is_empty(),
-                !close_candidates(
-                    &tab_manager.tabs,
-                    idx,
-                    tab_manager.active_tab,
-                    TabAction::CloseRight,
-                    |t| t.pinned,
-                )
-                .is_empty(),
-                crate::tabs::quick_access::tab_quick_access_action(
-                    if is_active { live_path } else { &tab.path },
-                    pinned_folders,
-                ),
-            ) {
-                action = TabBarAction::Context(idx, command);
-            }
-        }
         if drag_dwell::should_activate_tab_on_drag_hover(
             ui,
             egui::Id::new("drag_tab_dwell").with(idx),
@@ -362,7 +332,46 @@ pub(super) fn render_tabs(
         );
 
         if close_response.clicked() {
-            action = TabBarAction::CloseTab(idx);
+            action = if tab.pinned {
+                TabBarAction::Context(idx, crate::tabs::TabAction::TogglePin)
+            } else {
+                TabBarAction::CloseTab(idx)
+            };
+        }
+        if !is_item_dragging {
+            use crate::tabs::actions::{close_candidates, TabAction};
+            let context_response = if tab.pinned {
+                response.union(close_response)
+            } else {
+                response
+            };
+            if let Some(command) = super::context_menu::tab_context_menu(
+                &context_response,
+                tab.pinned,
+                tab_manager.can_add_tab(),
+                !close_candidates(
+                    &tab_manager.tabs,
+                    idx,
+                    tab_manager.active_tab,
+                    TabAction::CloseLeft,
+                    |t| t.pinned,
+                )
+                .is_empty(),
+                !close_candidates(
+                    &tab_manager.tabs,
+                    idx,
+                    tab_manager.active_tab,
+                    TabAction::CloseRight,
+                    |t| t.pinned,
+                )
+                .is_empty(),
+                crate::tabs::quick_access::tab_quick_access_action(
+                    if is_active { live_path } else { &tab.path },
+                    pinned_folders,
+                ),
+            ) {
+                action = TabBarAction::Context(idx, command);
+            }
         }
     }
 

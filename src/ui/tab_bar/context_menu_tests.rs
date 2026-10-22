@@ -19,7 +19,12 @@ fn pointer_input(pos: egui::Pos2, button: PointerButton, pressed: bool) -> RawIn
 
 #[test]
 fn tab_context_menu_duplicates_the_clicked_tab_without_selecting_it_first() {
-    click_command_without_selecting_tab(None, TabAction::Duplicate, "tabs.duplicate");
+    click_command_without_selecting_tab(None, TabAction::Duplicate, "tabs.duplicate", false);
+}
+
+#[test]
+fn right_click_on_pin_keeps_the_tab_context_menu_available() {
+    click_command_without_selecting_tab(None, TabAction::TogglePin, "tabs.unpin", true);
 }
 
 #[test]
@@ -31,7 +36,7 @@ fn quick_access_commands_do_not_select_or_pin_the_tab() {
             "context_menu.unpin_quick_access",
         ),
     ] {
-        click_command_without_selecting_tab(Some(command), command, label);
+        click_command_without_selecting_tab(Some(command), command, label, false);
     }
 }
 
@@ -39,6 +44,7 @@ fn click_command_without_selecting_tab(
     quick_access: Option<TabAction>,
     expected: TabAction,
     label: &str,
+    pinned: bool,
 ) {
     let ctx = Context::default();
     let mut action = None;
@@ -46,7 +52,22 @@ fn click_command_without_selecting_tab(
     let mut render = |ui: &mut egui::Ui| {
         let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
         selected |= response.clicked();
-        if let Some(command) = tab_context_menu(&response, false, true, false, false, quick_access)
+        let context_response = if pinned {
+            let pin_response = close_control(
+                ui,
+                egui::Rect::from_center_size(pos2(40.0, 20.0), vec2(16.0, 16.0)),
+                ui.id().with("pin"),
+                true,
+                egui::Color32::GRAY,
+                egui::Color32::WHITE,
+                egui::Color32::GRAY,
+            );
+            response.union(pin_response)
+        } else {
+            response
+        };
+        if let Some(command) =
+            tab_context_menu(&context_response, pinned, true, false, false, quick_access)
         {
             action = Some(command);
         }
@@ -93,11 +114,17 @@ fn click_command_without_selecting_tab(
 }
 
 #[test]
-fn pinned_close_control_is_not_clickable() {
+fn tab_control_is_clickable_without_selecting_or_dragging_the_tab() {
     for pinned in [false, true] {
         let ctx = Context::default();
         let mut clicked = false;
+        let mut selected = false;
+        let mut dragged = false;
         let mut render = |ui: &mut egui::Ui| {
+            let tab_rect = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(180.0, 36.0));
+            let tab_response = ui.interact(tab_rect, ui.id().with("tab"), Sense::click_and_drag());
+            selected |= tab_response.clicked();
+            dragged |= tab_response.drag_started();
             let rect = egui::Rect::from_min_size(pos2(10.0, 10.0), vec2(16.0, 16.0));
             clicked |= close_control(
                 ui,
@@ -117,6 +144,28 @@ fn pinned_close_control_is_not_clickable() {
                 &mut render,
             );
         }
-        assert_eq!(clicked, !pinned);
+        assert!(clicked);
+        assert!(!selected);
+        assert!(!dragged);
     }
+}
+
+#[test]
+fn pinned_tab_control_uses_the_quick_access_icon() {
+    let ctx = Context::default();
+    let output = ctx.run_ui(RawInput::default(), |ui| {
+        close_control(
+            ui,
+            egui::Rect::from_min_size(pos2(10.0, 10.0), vec2(16.0, 16.0)),
+            ui.id().with("pin"),
+            true,
+            egui::Color32::GRAY,
+            egui::Color32::WHITE,
+            egui::Color32::GRAY,
+        );
+    });
+    assert!(output.shapes.iter().any(|shape| matches!(
+        &shape.shape,
+        egui::epaint::Shape::Text(text) if text.galley.text() == "📌"
+    )));
 }

@@ -55,43 +55,6 @@ pub(crate) fn tab_context_menu(
     action
 }
 
-pub(crate) fn paint_pin(ui: &egui::Ui, rect: egui::Rect) {
-    let center = rect.center();
-    let stroke = egui::Stroke::new(1.5, ui.visuals().text_color());
-    ui.painter().line_segment(
-        [
-            center + egui::vec2(-3.0, -4.0),
-            center + egui::vec2(3.0, -4.0),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [
-            center + egui::vec2(-2.0, -4.0),
-            center + egui::vec2(-2.0, 0.0),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [
-            center + egui::vec2(2.0, -4.0),
-            center + egui::vec2(2.0, 0.0),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [
-            center + egui::vec2(-4.0, 1.0),
-            center + egui::vec2(4.0, 1.0),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [center + egui::vec2(0.0, 1.0), center + egui::vec2(0.0, 6.0)],
-        stroke,
-    );
-}
-
 pub(crate) fn close_control(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -101,17 +64,24 @@ pub(crate) fn close_control(
     text: egui::Color32,
     inactive: egui::Color32,
 ) -> egui::Response {
-    let response = ui.interact(
-        rect,
-        id,
-        if pinned {
-            egui::Sense::hover()
-        } else {
-            egui::Sense::click()
-        },
-    );
+    let response = ui.interact(rect, id, egui::Sense::click());
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
     if pinned {
-        paint_pin(ui, rect);
+        let pin_color = if response.hovered() {
+            egui::Color32::from_rgb(220, 60, 60)
+        } else {
+            egui::Color32::from_gray(140)
+        };
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "📌",
+            egui::FontId::proportional(13.0),
+            pin_color,
+        );
+        response.clone().on_hover_text(t!("tabs.unpin"));
     } else {
         if response.hovered() {
             ui.painter()
