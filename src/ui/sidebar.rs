@@ -1040,7 +1040,7 @@ fn render_pinned_folders(
             // Share the user's folder artwork while keeping special native icons.
             let folder_icon = ctx
                 .icon_loader
-                .get_or_load_quick_access_folder_icon(ui.ctx(), &pinned.path);
+                .get_or_load_folder_navigation_icon(ui.ctx(), &pinned.path);
             if let Some(icon) = folder_icon {
                 let size = icon.size_vec2();
                 let icon_rect = Rect::from_center_size(

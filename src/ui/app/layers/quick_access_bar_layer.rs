@@ -238,7 +238,7 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 && app.navigation_state.current_path == *path;
                             let icon = app
                                 .item_icon_loader
-                                .get_or_load_quick_access_folder_icon(ui.ctx(), path);
+                                .get_or_load_folder_navigation_icon(ui.ctx(), path);
                             paint_chip(
                                 ui,
                                 rect,

@@ -237,11 +237,7 @@ pub(super) fn render_panel_tab_bar(
                                         icon_loader.ensure_recycle_bin_icon(ui.ctx())
                                     } else {
                                         icon_loader
-                                            .get_or_load_registered_folder_icon(ui.ctx(), path)
-                                            .or_else(|| {
-                                                icon_loader
-                                                    .get_or_load_folder_path_icon(ui.ctx(), path)
-                                            })
+                                            .get_or_load_folder_navigation_icon(ui.ctx(), path)
                                     };
                                 if let Some(texture) = native_icon {
                                     ui.painter().image(
