@@ -71,6 +71,48 @@ fn snapshot(path: &str) -> PanelSnapshot {
 }
 
 #[test]
+fn batch_close_panel_tabs_keeps_target_focus_when_selected_tab_is_closed() {
+    use crate::tabs::actions::{close_candidates, TabAction};
+
+    for panel in [ActivePanel::Left, ActivePanel::Right] {
+        for action in [TabAction::CloseLeft, TabAction::CloseRight] {
+            for pinned in [false, true] {
+                for target in 0..5 {
+                    for selected in 0..5 {
+                        let mut tabs = DualPanelTabs::new(snapshot("C:\\"), snapshot("D:\\"));
+                        for _ in 1..5 {
+                            tabs.add_tab(panel, snapshot("C:\\"));
+                        }
+                        let set = tabs.panel_mut(panel);
+                        set.tabs[0].pinned = pinned;
+                        set.select(selected);
+                        let candidates = close_candidates(&set.tabs, target, action, |t| t.pinned);
+                        let closing_active = candidates.contains(&selected);
+                        let expected_active =
+                            set.tabs[if closing_active { target } else { selected }].id;
+                        let closed_ids: Vec<_> =
+                            candidates.iter().map(|&i| set.tabs[i].id).collect();
+                        let target_id = set.tabs[target].id;
+                        if closing_active {
+                            assert!(set.select(target));
+                        }
+                        for index in candidates {
+                            assert_eq!(set.close(index), Some(false));
+                        }
+                        assert_eq!(set.active().unwrap().id, expected_active);
+                        assert!(set.tabs.iter().any(|t| t.id == target_id));
+                        assert!(set.tabs.iter().all(|t| !closed_ids.contains(&t.id)));
+                        if pinned {
+                            assert!(set.tabs[0].pinned);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn single_panel_navigation_preserves_four_pinned_tabs_and_resumes_the_selected_one() {
     let paths = ["C:\\", "D:\\", "E:\\", "F:\\"];
     for focused in [ActivePanel::Left, ActivePanel::Right] {

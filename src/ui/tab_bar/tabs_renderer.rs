@@ -352,7 +352,6 @@ pub(super) fn render_tabs(
                 !close_candidates(
                     &tab_manager.tabs,
                     idx,
-                    tab_manager.active_tab,
                     TabAction::CloseLeft,
                     |t| t.pinned,
                 )
@@ -360,7 +359,6 @@ pub(super) fn render_tabs(
                 !close_candidates(
                     &tab_manager.tabs,
                     idx,
-                    tab_manager.active_tab,
                     TabAction::CloseRight,
                     |t| t.pinned,
                 )

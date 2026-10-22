@@ -307,7 +307,6 @@ pub(super) fn render_panel_tab_bar(
                                             !close_candidates(
                                                 &tabs.tabs,
                                                 index,
-                                                tabs.active_tab,
                                                 TabAction::CloseLeft,
                                                 |t| t.pinned,
                                             )
@@ -315,7 +314,6 @@ pub(super) fn render_panel_tab_bar(
                                             !close_candidates(
                                                 &tabs.tabs,
                                                 index,
-                                                tabs.active_tab,
                                                 TabAction::CloseRight,
                                                 |t| t.pinned,
                                             )

@@ -65,13 +65,13 @@ impl ImageViewerApp {
                 self.save_preferences();
             }
             TabAction::CloseLeft | TabAction::CloseRight => {
-                let candidates = close_candidates(
-                    &self.tab_manager.tabs,
-                    index,
-                    self.tab_manager.active_tab,
-                    action,
-                    |tab| tab.pinned,
-                );
+                let candidates =
+                    close_candidates(&self.tab_manager.tabs, index, action, |tab| tab.pinned);
+                if candidates.contains(&self.tab_manager.active_tab) {
+                    self.sync_to_tab();
+                    self.tab_manager.switch_to(index);
+                    self.sync_from_tab();
+                }
                 for index in candidates {
                     self.close_main_tab(index);
                 }
@@ -144,8 +144,10 @@ impl ImageViewerApp {
                 self.dual_panel_select_tab(panel, insert);
             }
             TabAction::CloseLeft | TabAction::CloseRight => {
-                let candidates =
-                    close_candidates(&set.tabs, index, set.active_tab, action, |tab| tab.pinned);
+                let candidates = close_candidates(&set.tabs, index, action, |tab| tab.pinned);
+                if candidates.contains(&set.active_tab) {
+                    self.dual_panel_select_tab(panel, index);
+                }
                 for index in candidates {
                     self.dual_panel_close_tab(panel, index);
                 }

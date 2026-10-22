@@ -15,7 +15,6 @@ pub enum TabAction {
 pub(crate) fn close_candidates<T>(
     tabs: &[T],
     target: usize,
-    active: usize,
     action: TabAction,
     pinned: impl Fn(&T) -> bool,
 ) -> Vec<usize> {
@@ -25,8 +24,7 @@ pub(crate) fn close_candidates<T>(
     (0..tabs.len())
         .rev()
         .filter(|&index| {
-            index != active
-                && !pinned(&tabs[index])
+            !pinned(&tabs[index])
                 && match action {
                     TabAction::CloseLeft => index < target,
                     TabAction::CloseRight => index > target,
@@ -159,16 +157,54 @@ mod tests {
     }
 
     #[test]
-    fn batch_close_excludes_active_pinned_and_target_tabs() {
+    fn batch_close_excludes_only_pinned_and_target_tabs() {
         let pins = [true, false, false, false, false];
         assert_eq!(
-            close_candidates(&pins, 4, 2, TabAction::CloseLeft, |p| *p),
-            vec![3, 1]
+            close_candidates(&pins, 4, TabAction::CloseLeft, |p| *p),
+            vec![3, 2, 1]
         );
         assert_eq!(
-            close_candidates(&pins, 0, 2, TabAction::CloseRight, |p| *p),
-            vec![4, 3, 1]
+            close_candidates(&pins, 0, TabAction::CloseRight, |p| *p),
+            vec![4, 3, 2, 1]
         );
+    }
+
+    #[test]
+    fn batch_close_keeps_target_focus_when_active_tab_is_closed() {
+        for action in [TabAction::CloseLeft, TabAction::CloseRight] {
+            for pinned in [false, true] {
+                for target in 0..5 {
+                    for selected in 0..5 {
+                        let mut manager = TabManager::new();
+                        for _ in 1..5 {
+                            manager.new_tab();
+                        }
+                        manager.tabs[0].pinned = pinned;
+                        manager.switch_to(selected);
+                        let candidates =
+                            close_candidates(&manager.tabs, target, action, |t| t.pinned);
+                        let closing_active = candidates.contains(&selected);
+                        let expected_active =
+                            manager.tabs[if closing_active { target } else { selected }].id;
+                        let closed_ids: Vec<_> =
+                            candidates.iter().map(|&i| manager.tabs[i].id).collect();
+                        let target_id = manager.tabs[target].id;
+                        if closing_active {
+                            manager.switch_to(target);
+                        }
+                        for index in candidates {
+                            assert!(!manager.close_tab(index));
+                        }
+                        assert_eq!(manager.active().id, expected_active);
+                        assert!(manager.tabs.iter().any(|t| t.id == target_id));
+                        assert!(manager.tabs.iter().all(|t| !closed_ids.contains(&t.id)));
+                        if pinned {
+                            assert!(manager.tabs[0].pinned);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
