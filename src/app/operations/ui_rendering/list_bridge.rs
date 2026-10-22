@@ -528,6 +528,7 @@ impl ImageViewerApp {
             show_preview_panel: self.show_preview_panel,
             thumbnail_requests_this_frame: 0,
             folder_size_cache: &self.folder_size_state.batch_cache,
+            folder_size_progress: &self.folder_size_state.batch_progress,
             folder_sort_sizes: &self.folder_size_state.size_sorting.sizes,
             folder_size_batch_loading: &self.folder_size_state.batch_loading,
             folder_size_requests: &mut folder_size_requests,

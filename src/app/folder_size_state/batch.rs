@@ -10,6 +10,7 @@ impl FolderSizeState {
     pub fn fail_batch_requests(&mut self) -> bool {
         let had_pending = !self.batch_loading.is_empty();
         self.batch_loading.clear();
+        self.batch_progress.clear();
         self.batch_request_epochs.clear();
         let sorting_changed = self.size_sorting.mark_worker_disconnected();
         let selection_changed = self.selection_size.mark_worker_disconnected();
@@ -17,12 +18,14 @@ impl FolderSizeState {
     }
 
     pub fn cache_completed_folder_size(&mut self, path: PathBuf, size: u64) {
+        self.batch_progress.remove(&path);
         self.batch_cache.put(path.clone(), size);
         self.size_sorting.complete(&path, size);
         self.selection_size.complete(&path, size);
     }
 
     pub fn invalidate_calculated_folder_size(&mut self, path: &Path) {
+        self.batch_progress.remove(path);
         self.batch_cache.pop(path);
         self.size_sorting.invalidate(path);
         self.selection_size.invalidate(path);
@@ -45,6 +48,8 @@ impl FolderSizeState {
         Ok(())
     }
 
+    /// Apply display-only progress or release a terminal request.
+    /// Returns true only for a current terminal result.
     /// A previous navigation must not release a newer request for the same path.
     pub fn finish_batch_result(&mut self, result: &BatchSizeResult) -> bool {
         if result.request_generation != self.batch_generation.load(Ordering::Acquire) {
@@ -57,6 +62,28 @@ impl FolderSizeState {
         {
             return false;
         }
+        if !result.complete {
+            if self.batch_loading.contains(&result.folder_path)
+                && !self.loading.contains(&result.folder_path)
+                && self.batch_request_epochs.get(&result.folder_path) == Some(&result.request_epoch)
+                && result.request_epoch
+                    >= self
+                        .batch_invalidation_epoch
+                        .get(&result.folder_path)
+                        .copied()
+                        .unwrap_or(0)
+            {
+                if let Some(size) = result.total_size {
+                    let partial = self
+                        .batch_progress
+                        .entry(result.folder_path.clone())
+                        .or_default();
+                    *partial = (*partial).max(size);
+                }
+            }
+            return false;
+        }
+        self.batch_progress.remove(&result.folder_path);
         self.batch_loading.remove(&result.folder_path);
         self.batch_request_epochs.remove(&result.folder_path);
         result.request_epoch

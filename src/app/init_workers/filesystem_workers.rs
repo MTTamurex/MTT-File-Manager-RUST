@@ -612,6 +612,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
                                 total_size: Some(total_size),
+                                complete: true,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
                             });
@@ -629,6 +630,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                         let _ = res_tx.send(BatchSizeResult {
                                             folder_path: path,
                                             total_size: Some(result.total_size),
+                                            complete: true,
                                             request_epoch: req_epoch,
                                             request_generation: req_gen,
                                         });
@@ -656,6 +658,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
                                 total_size: None,
+                                complete: true,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
                             });
@@ -682,11 +685,34 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 crate::infrastructure::io_priority::set_thread_priority(priority);
 
                 let walk_start = std::time::Instant::now();
+                // The parallel scanner may call back from several threads.
+                // Limit UI traffic while still publishing the first partial total.
+                let last_progress = std::sync::Mutex::new(None::<Instant>);
                 let result =
                     crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
                         &path,
                         &cancel_worker,
-                        |_partial| { /* no progress needed for list view */ },
+                        |partial| {
+                            if cancel_worker.load(Ordering::Acquire)
+                                || req_gen != generation_worker.load(Ordering::Acquire)
+                            {
+                                return;
+                            }
+                            let mut last = last_progress.lock().unwrap();
+                            let now = Instant::now();
+                            if last.is_some_and(|sent| now.duration_since(sent) < Duration::from_millis(100)) {
+                                return;
+                            }
+                            *last = Some(now);
+                            let _ = res_tx.send(BatchSizeResult {
+                                folder_path: path.clone(),
+                                total_size: Some(partial),
+                                complete: false,
+                                request_epoch: req_epoch,
+                                request_generation: req_gen,
+                            });
+                            ctx.request_repaint();
+                        },
                     );
                 let walk_ms = walk_start.elapsed().as_millis() as u64;
                 crate::infrastructure::io_trace::record_folder_size_walk(walk_ms);
@@ -705,6 +731,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     let _ = res_tx.send(BatchSizeResult {
                         folder_path: path,
                         total_size: result.map(|result| result.total_size),
+                        complete: true,
                         request_epoch: req_epoch,
                         request_generation: req_gen,
                     });

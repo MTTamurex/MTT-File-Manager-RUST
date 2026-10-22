@@ -101,6 +101,8 @@ pub struct FolderSizeRequest {
 pub struct BatchSizeResult {
     pub folder_path: PathBuf,
     pub total_size: Option<u64>,
+    /// Partial totals update the display only; they must not finish the request.
+    pub complete: bool,
     /// Invalidation epoch copied from the request — compared against the
     /// current `batch_invalidation_epoch` to detect staleness.
     pub request_epoch: u64,
@@ -137,6 +139,8 @@ pub struct FolderSizeState {
     pub batch_generation: Arc<AtomicU64>,
     /// Paths already sent to batch worker, awaiting response.
     pub batch_loading: FxHashSet<PathBuf>,
+    /// Display-only partial totals, never used as completed sizes.
+    pub batch_progress: HashMap<PathBuf, u64>,
     pub batch_request_epochs: HashMap<PathBuf, u64>,
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
     pub batch_cache: LruCache<PathBuf, u64>,
@@ -184,6 +188,8 @@ impl FolderSizeState {
         }
 
         self.clear_failure(&folder_path);
+        // The preview now owns the displayed progress for this folder.
+        self.batch_progress.remove(&folder_path);
         self.loading.insert(folder_path.clone());
         self.active_requests.insert(
             folder_path,
@@ -385,6 +391,7 @@ impl FolderSizeState {
         // 4. Clear the dedup set so new requests for the same paths
         //    aren't incorrectly blocked.
         self.batch_loading.clear();
+        self.batch_progress.clear();
         self.batch_request_epochs.clear();
 
         // 5. The worker clears the cancel flag only after it receives a request

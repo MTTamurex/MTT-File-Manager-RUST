@@ -26,6 +26,7 @@ fn test_state() -> FolderSizeState {
         batch_cancel: Arc::new(AtomicBool::new(false)),
         batch_generation: Arc::new(AtomicU64::new(0)),
         batch_loading: FxHashSet::default(),
+        batch_progress: Default::default(),
         batch_request_epochs: Default::default(),
         batch_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         pending_revalidation: HashMap::new(),
@@ -37,6 +38,7 @@ fn test_state() -> FolderSizeState {
 
 mod selection_size_tests;
 mod size_sorting_tests;
+mod batch_progress_tests;
 
 #[test]
 fn panel_stale_summary_requires_complete_counts() {

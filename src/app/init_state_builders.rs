@@ -166,6 +166,7 @@ pub(in crate::app) fn build_folder_size_state(
         batch_cancel,
         batch_generation,
         batch_loading: FxHashSet::default(),
+        batch_progress: Default::default(),
         batch_request_epochs: Default::default(),
         batch_cache: LruCache::new(
             NonZeroUsize::new(2000).expect("folder_size_batch cache size must be non-zero"),

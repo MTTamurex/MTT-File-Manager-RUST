@@ -184,6 +184,7 @@ fn old_navigation_result_cannot_release_a_new_request_for_the_same_folder() {
     let mut result = BatchSizeResult {
         folder_path: path.clone(),
         total_size: Some(10),
+        complete: true,
         request_epoch: 0,
         request_generation: generation,
     };
@@ -203,6 +204,7 @@ fn invalidated_batch_result_is_rejected_and_releases_its_loading_slot() {
     let result = BatchSizeResult {
         folder_path: path.clone(),
         total_size: Some(10),
+        complete: true,
         request_epoch: 1,
         request_generation: state.batch_generation.load(Ordering::Acquire),
     };
@@ -224,6 +226,7 @@ fn old_epoch_result_does_not_release_a_newer_retry() {
     let mut result = BatchSizeResult {
         folder_path: path.clone(),
         total_size: Some(10),
+        complete: true,
         request_epoch: 0,
         request_generation: state.batch_generation.load(Ordering::Acquire),
     };

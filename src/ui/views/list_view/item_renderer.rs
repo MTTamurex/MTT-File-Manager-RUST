@@ -532,8 +532,9 @@ fn list_item_content_contains_pointer(
     }
 
     let size_str = if item.is_dir && !item.is_archive() {
-        ctx.folder_size_cache
-            .peek(&item.path)
+        ctx.folder_size_progress
+            .get(&item.path)
+            .or_else(|| ctx.folder_size_cache.peek(&item.path))
             .or_else(|| ctx.folder_sort_sizes.get(&item.path))
             .map(|size| format_size(*size))
             .unwrap_or_default()
@@ -703,10 +704,11 @@ fn render_regular_columns(
 
     // 4. Size
     let size_str = if item.is_dir && !item.is_archive() {
-        // Folder: look up cached size from the batch worker.
+        // Show partial totals while the batch worker is scanning.
         if let Some(&size) = ctx
-            .folder_size_cache
-            .peek(&item.path)
+            .folder_size_progress
+            .get(&item.path)
+            .or_else(|| ctx.folder_size_cache.peek(&item.path))
             .or_else(|| ctx.folder_sort_sizes.get(&item.path))
         {
             format_size(size)

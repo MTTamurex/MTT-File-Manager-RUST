@@ -11,12 +11,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{
-    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FIND_FIRST_EX_LARGE_FETCH,
-    WIN32_FIND_DATAW,
-};
+use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+mod enumeration;
+use enumeration::scan_dir_wide_local;
 
 /// Cached rayon thread pool for folder-size calculations.
 /// Previous code created a new pool on every call to `calculate_folder_size_parallel()`,
@@ -145,7 +143,14 @@ pub fn calculate_folder_size_parallel(
 
     // Phase 1: Breadth-first collection of first 2 levels to build a good work queue
     let mut level1_dirs: Vec<Vec<u16>> = Vec::new();
-    totals.add(scan_dir_wide_local(&root_wide, &mut level1_dirs));
+    totals.add(scan_dir_wide_local(
+        &root_wide,
+        &mut level1_dirs,
+        cancel,
+        |size| {
+            (progress_cb)(totals.snapshot().total_size.saturating_add(size));
+        },
+    ));
     (progress_cb)(totals.snapshot().total_size);
 
     if cancel.load(Ordering::Relaxed) {
@@ -159,7 +164,10 @@ pub fn calculate_folder_size_parallel(
             return None;
         }
         let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
-        totals.add(scan_dir_wide_local(dir, &mut sub_dirs));
+        totals.add(scan_dir_wide_local(dir, &mut sub_dirs, cancel, |size| {
+            (progress_cb)(totals.snapshot().total_size.saturating_add(size));
+        }));
+        (progress_cb)(totals.snapshot().total_size);
         if sub_dirs.is_empty() {
             // Leaf directory — already counted
         } else {
@@ -222,7 +230,16 @@ fn parallel_scan_recursive(
             }
 
             let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
-            local_totals.merge(scan_dir_wide_local(&current, &mut sub_dirs));
+            let scanned = scan_dir_wide_local(&current, &mut sub_dirs, cancel, |size| {
+                (progress_cb)(
+                    totals
+                        .snapshot()
+                        .total_size
+                        .saturating_add(local_totals.total_size)
+                        .saturating_add(size),
+                );
+            });
+            local_totals.merge(scanned);
             dirs_inline += 1;
 
             // Flush accumulated totals periodically.
@@ -258,65 +275,9 @@ fn parallel_scan_recursive(
         // Flush remaining
         if !local_totals.is_empty() {
             totals.add(local_totals);
+            (progress_cb)(totals.snapshot().total_size);
         }
     });
-}
-
-/// Scan a single directory. Returns aggregated file/folder totals.
-/// Pushes subdirectory wide-paths onto `sub_dirs`.
-/// Uses wide-string paths throughout — zero UTF conversions.
-fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> FolderScanResult {
-    // Build search pattern: dir\* (wide string, null-terminated)
-    let search = build_search_pattern(dir_wide);
-    let mut find_data = WIN32_FIND_DATAW::default();
-    let mut totals = FolderScanResult::default();
-
-    unsafe {
-        let handle = FindFirstFileExW(
-            PCWSTR(search.as_ptr()),
-            FindExInfoBasic,
-            &mut find_data as *mut _ as *mut std::ffi::c_void,
-            FindExSearchNameMatch,
-            Some(std::ptr::null_mut()),
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-
-        let handle = match handle {
-            Ok(h) => h,
-            Err(error) => {
-                totals.inaccessible_dir_count = 1;
-                totals.last_error_code = error.code().0;
-                return totals;
-            }
-        };
-
-        loop {
-            let attrs = find_data.dwFileAttributes;
-            let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-
-            if is_dir {
-                if !is_dot_or_dotdot(&find_data.cFileName)
-                    && !is_junction_or_symlink(attrs, find_data.dwReserved0)
-                {
-                    totals.folder_count = totals.folder_count.saturating_add(1);
-                    sub_dirs.push(build_child_wide(dir_wide, &find_data.cFileName));
-                }
-            } else {
-                totals.file_count = totals.file_count.saturating_add(1);
-                totals.total_size = totals.total_size.saturating_add(
-                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64),
-                );
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
-        }
-
-        let _ = FindClose(handle);
-    }
-
-    totals
 }
 
 // ── Helper functions ────────────────────────────────────────────────────────
@@ -388,3 +349,6 @@ fn num_cpus() -> usize {
         .map(|n| n.get())
         .unwrap_or(4)
 }
+
+#[cfg(test)]
+mod tests;
