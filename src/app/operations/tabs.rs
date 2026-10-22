@@ -187,8 +187,8 @@ impl ImageViewerApp {
             self.schedule_folder_cover_refresh(&folder_path);
         }
 
-        let restored_path = &self.navigation_state.current_path;
-        self.spawn_folder_meta_resolve_if_needed(Path::new(restored_path), restored_path);
+        let restored_path = self.navigation_state.current_path.clone();
+        self.spawn_folder_meta_resolve_if_needed(Path::new(&restored_path), &restored_path);
 
         // Active-panel folder jobs do not survive a tab switch because their
         // streamed UI results are routed only to the current tab. Cancel the

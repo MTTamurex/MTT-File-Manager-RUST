@@ -1,7 +1,53 @@
 //! Route background folder dates to matching live and stored browsing states.
 
 use crate::app::{dual_panel::PanelSnapshot, state::ImageViewerApp};
+use crate::domain::file_tag::normalize_tag_path_key;
 use std::path::{Path, PathBuf};
+
+type Hint = Option<(PathBuf, u64)>;
+
+fn visit_stored(
+    inactive: &mut Option<PanelSnapshot>,
+    tabs: &mut crate::tabs::TabManager,
+    mut visit: impl FnMut(&str, &mut Hint, &mut Hint),
+) {
+    if let Some(snapshot) = inactive {
+        visit(
+            &snapshot.path,
+            &mut snapshot.current_folder_modified_hint,
+            &mut snapshot.current_folder_created_hint,
+        );
+    }
+    for tab in &mut tabs.tabs {
+        visit(
+            &tab.path,
+            &mut tab.current_folder_modified_hint,
+            &mut tab.current_folder_created_hint,
+        );
+        if let Some(snapshot) = &mut tab.dual_panel_inactive_state {
+            visit(
+                &snapshot.path,
+                &mut snapshot.current_folder_modified_hint,
+                &mut snapshot.current_folder_created_hint,
+            );
+        }
+        if let Some(panels) = &mut tab.dual_panel_tabs {
+            for tab in panels
+                .left
+                .tabs
+                .iter_mut()
+                .chain(panels.right.tabs.iter_mut())
+            {
+                let snapshot = &mut tab.snapshot;
+                visit(
+                    &snapshot.path,
+                    &mut snapshot.current_folder_modified_hint,
+                    &mut snapshot.current_folder_created_hint,
+                );
+            }
+        }
+    }
+}
 
 fn apply_hints(
     current_path: &str,
@@ -10,42 +56,56 @@ fn apply_hints(
     resolved_path: &Path,
     modified: u64,
     created: Option<u64>,
-) {
-    if Path::new(current_path) != resolved_path {
-        return;
+) -> bool {
+    if normalize_tag_path_key(Path::new(current_path)) != normalize_tag_path_key(resolved_path) {
+        return false;
     }
+    // Keep the owner's spelling: the preview cache compares its hint path to
+    // current_path, even when the watcher used another case or extended prefix.
+    let owner = PathBuf::from(current_path);
     if modified > 0 {
-        *modified_hint = Some((resolved_path.to_path_buf(), modified));
+        *modified_hint = Some((owner.clone(), modified));
     }
     if let Some(created) = created.filter(|value| *value > 0) {
-        *created_hint = Some((resolved_path.to_path_buf(), created));
+        *created_hint = Some((owner, created));
     }
-}
-
-fn apply_snapshot(snapshot: &mut PanelSnapshot, path: &Path, modified: u64, created: Option<u64>) {
-    apply_hints(
-        &snapshot.path,
-        &mut snapshot.current_folder_modified_hint,
-        &mut snapshot.current_folder_created_hint,
-        path,
-        modified,
-        created,
-    );
+    true
 }
 
 impl ImageViewerApp {
+    pub(in crate::app::operations) fn visit_stored_folder_timestamps(
+        &mut self,
+        visit: impl FnMut(&str, &mut Hint, &mut Hint),
+    ) {
+        visit_stored(
+            &mut self.dual_panel_inactive_state,
+            &mut self.tab_manager,
+            visit,
+        );
+    }
+
+    pub(super) fn poll_folder_timestamps(&mut self, ctx: &eframe::egui::Context) {
+        for (path, dates) in self.folder_timestamps.poll(ctx, std::time::Instant::now()) {
+            self.apply_resolved_folder_timestamps(&path, dates.modified, dates.created);
+            ctx.request_repaint();
+        }
+    }
+
     pub(super) fn apply_resolved_folder_timestamps(
         &mut self,
         path: &Path,
         modified: u64,
         created: Option<u64>,
     ) {
-        if modified > 0 {
-            self.folder_modified_hints.put(path.to_path_buf(), modified);
-        }
-        if let Some(created) = created.filter(|value| *value > 0) {
-            self.folder_created_hints.put(path.to_path_buf(), created);
-        }
+        let key = normalize_tag_path_key(path);
+        let mut aliases: std::collections::HashSet<PathBuf> = self
+            .folder_modified_hints
+            .iter()
+            .chain(self.folder_created_hints.iter())
+            .filter(|(p, _)| normalize_tag_path_key(p) == key)
+            .map(|(p, _)| p.clone())
+            .collect();
+        aliases.insert(path.to_path_buf());
         apply_hints(
             &self.navigation_state.current_path,
             &mut self.current_folder_modified_hint,
@@ -54,34 +114,28 @@ impl ImageViewerApp {
             modified,
             created,
         );
-        if let Some(snapshot) = &mut self.dual_panel_inactive_state {
-            apply_snapshot(snapshot, path, modified, created);
-        }
-        for tab in &mut self.tab_manager.tabs {
-            apply_hints(
-                &tab.path,
-                &mut tab.current_folder_modified_hint,
-                &mut tab.current_folder_created_hint,
-                path,
-                modified,
-                created,
-            );
-            if let Some(snapshot) = &mut tab.dual_panel_inactive_state {
-                apply_snapshot(snapshot, path, modified, created);
+        aliases.insert(PathBuf::from(&self.navigation_state.current_path));
+        self.visit_stored_folder_timestamps(|owner, modified_hint, created_hint| {
+            if apply_hints(owner, modified_hint, created_hint, path, modified, created) {
+                aliases.insert(PathBuf::from(owner));
             }
-            if let Some(panels) = &mut tab.dual_panel_tabs {
-                for panel_tab in panels
-                    .left
-                    .tabs
-                    .iter_mut()
-                    .chain(panels.right.tabs.iter_mut())
-                {
-                    apply_snapshot(&mut panel_tab.snapshot, path, modified, created);
-                }
+        });
+        for alias in aliases {
+            if normalize_tag_path_key(&alias) != key {
+                continue;
+            }
+            if modified > 0 {
+                self.folder_modified_hints.put(alias.clone(), modified);
+            }
+            if let Some(created) = created.filter(|value| *value > 0) {
+                self.folder_created_hints.put(alias, created);
             }
         }
     }
 }
+
+#[cfg(test)]
+mod routing_tests;
 
 #[cfg(test)]
 mod tests {

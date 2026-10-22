@@ -291,6 +291,12 @@ impl ImageViewerApp {
             return;
         }
 
+        let mut changed_dates = result.changed_folder_contents.clone();
+        changed_dates.extend(result.changed_folder_covers.iter().cloned());
+        changed_dates.push(result.path.clone());
+        let timestamp_targets = self.folder_timestamp_targets();
+        self.queue_folder_timestamp_changes(&changed_dates, &timestamp_targets);
+
         for folder_path in &result.changed_folder_covers {
             let folder_path = folder_path.to_path_buf();
             self.invalidate_folder_size_cache(&folder_path);
@@ -540,6 +546,18 @@ impl ImageViewerApp {
                 return;
             }
 
+            let current_ui_signature = Self::compute_entries_signature(&self.all_items);
+            if result.disk_signature != current_ui_signature
+                || !result.changed_folder_contents.is_empty()
+                || !result.changed_folder_covers.is_empty()
+            {
+                let mut changed_dates = result.changed_folder_contents.clone();
+                changed_dates.extend(result.changed_folder_covers.iter().cloned());
+                changed_dates.push(result.path.clone());
+                let targets = self.folder_timestamp_targets();
+                self.queue_folder_timestamp_changes(&changed_dates, &targets);
+            }
+
             // Handle visible subfolder cover changes detected by the non-USN probe.
             if !result.changed_folder_covers.is_empty() {
                 log::debug!(
@@ -573,7 +591,6 @@ impl ImageViewerApp {
             }
 
             // Re-check UI signature in case items changed while probe was in flight.
-            let current_ui_signature = Self::compute_entries_signature(&self.all_items);
             if result.disk_signature == current_ui_signature {
                 continue;
             }

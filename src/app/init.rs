@@ -345,9 +345,6 @@ impl ImageViewerApp {
         let (tag_assignment_gc_sender, tag_assignment_gc_receiver) = std::sync::mpsc::channel();
         let (video_player_close_sender, video_player_close_receiver) = std::sync::mpsc::channel();
 
-        // Background metadata resolution for sidebar-navigated folders (Quick Access, Cloud Drives)
-        let (folder_meta_resolve_tx, folder_meta_resolve_rx) = std::sync::mpsc::channel();
-
         #[cfg(feature = "notify-watcher")]
         let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
             std::sync::mpsc::channel();
@@ -402,8 +399,7 @@ impl ImageViewerApp {
             current_folder_created_hint: None,
             folder_modified_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
             folder_created_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
-            folder_meta_resolve_tx,
-            folder_meta_resolve_rx,
+            folder_timestamps: Default::default(),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             thumbnail_pipeline_shutdown,

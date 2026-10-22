@@ -146,6 +146,8 @@ impl ImageViewerApp {
         let mut remove_parents_invalidated: HashSet<PathBuf> = HashSet::new();
         let mut forced_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
         let mut batched_remove_events = 0usize;
+        // Build owner/cache lookup only once, and only if a meaningful event arrives.
+        let mut timestamp_targets = None;
 
         if self.file_operation_state.file_ops_in_progress > 0 {
             // Defer events while a file operation is in progress so external
@@ -197,12 +199,20 @@ impl ImageViewerApp {
             // processing the synthetic marker.
             if timestamped_event.overflow {
                 let current = PathBuf::from(&self.navigation_state.current_path);
+                self.queue_folder_timestamp_refresh(
+                    &current,
+                    crate::app::folder_timestamp_state::RefreshReason::Watcher,
+                );
                 self.directory_dirty_registry.mark_dirty(&current);
                 let inactive_path = self
                     .dual_panel_inactive_state
                     .as_ref()
                     .map(|snapshot| PathBuf::from(&snapshot.path));
                 if let Some(path) = inactive_path.as_ref() {
+                    self.queue_folder_timestamp_refresh(
+                        path,
+                        crate::app::folder_timestamp_state::RefreshReason::Watcher,
+                    );
                     self.directory_dirty_registry.mark_dirty(path);
                     self.watcher_overflow_reload_inactive_for = Some(path.clone());
                 }
@@ -213,6 +223,25 @@ impl ImageViewerApp {
 
             match timestamped_event.result {
                 Ok(evt) => {
+                    if !matches!(evt.kind, notify::EventKind::Access(_)) {
+                        let paths: Vec<_> = evt
+                            .paths
+                            .iter()
+                            .filter(|path| {
+                                !self.should_ignore_watcher_path(
+                                    path,
+                                    internal_cache_root_norm,
+                                    internal_cache_root_prefix,
+                                )
+                            })
+                            .cloned()
+                            .collect();
+                        if !paths.is_empty() {
+                            let targets = timestamp_targets
+                                .get_or_insert_with(|| self.folder_timestamp_targets());
+                            self.queue_folder_timestamp_changes(&paths, targets);
+                        }
+                    }
                     let mut meaningful_change = false;
                     let mut needs_reload = false;
                     let current_folder_removed =

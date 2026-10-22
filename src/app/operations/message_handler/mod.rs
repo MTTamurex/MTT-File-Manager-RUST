@@ -117,6 +117,7 @@ impl ImageViewerApp {
             self.maintain_global_search_while_backgrounded();
             self.process_streaming_and_thumbnail_events(ctx, false);
             self.apply_ready_tag_view_hides();
+            self.poll_folder_timestamps(ctx);
             return;
         }
 
@@ -234,12 +235,7 @@ impl ImageViewerApp {
         // GLOBAL SEARCH: Process search results from worker
         self.process_global_search_events(true);
 
-        // Results may arrive after switching tabs or panes. Keep their owners
-        // updated rather than discarding metadata for an inactive folder.
-        while let Ok((path, modified, created)) = self.folder_meta_resolve_rx.try_recv() {
-            self.apply_resolved_folder_timestamps(&path, modified, created);
-            ctx.request_repaint();
-        }
+        self.poll_folder_timestamps(ctx);
 
         // PERF: Log detailed breakdown when process_incoming_messages is slow
         let _t_msg_total = _t_msg_start.elapsed().as_millis();

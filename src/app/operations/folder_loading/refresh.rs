@@ -28,6 +28,11 @@ impl ImageViewerApp {
         {
             self.reload_visible_tag_views();
         } else {
+            let current = std::path::PathBuf::from(&self.navigation_state.current_path);
+            self.queue_folder_timestamp_refresh(
+                &current,
+                crate::app::folder_timestamp_state::RefreshReason::Manual,
+            );
             // Force regeneration of visible folder previews and folder sizes on
             // manual refresh. This avoids reusing stale in-memory values for
             // folders whose contents changed while the app was offline or when

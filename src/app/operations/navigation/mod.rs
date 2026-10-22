@@ -59,42 +59,20 @@ impl ImageViewerApp {
         )
     }
 
-    /// Spawns a background thread to read folder metadata when no cached timestamp
-    /// exists (e.g. first visit to a Quick Access or Cloud Drive folder).
-    /// The result is sent back via `folder_meta_resolve_rx` and applied in
-    /// `process_incoming_messages` without blocking the UI thread.
-    pub(crate) fn spawn_folder_meta_resolve_if_needed(&self, dest_path: &Path, path_str: &str) {
+    /// Queue missing metadata without blocking navigation or duplicating reads.
+    pub(crate) fn spawn_folder_meta_resolve_if_needed(&mut self, dest_path: &Path, path_str: &str) {
         if !folder_timestamps::needs_resolution(
             dest_path,
             self.current_folder_modified_hint.as_ref(),
             self.current_folder_created_hint.as_ref(),
         ) || is_virtual_path(path_str)
-            || crate::infrastructure::io_priority::is_network_or_virtual(dest_path)
         {
             return;
         }
-        let tx = self.folder_meta_resolve_tx.clone();
-        let dest = dest_path.to_path_buf();
-        let current_path = path_str.to_string();
-        std::thread::Builder::new()
-            .name("folder-meta-resolve".into())
-            .spawn(move || {
-                if let Ok(meta) = std::fs::metadata(&dest) {
-                    let modified = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let created = meta
-                        .created()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs());
-                    let _ = tx.send((PathBuf::from(current_path), modified, created));
-                }
-            })
-            .ok();
+        self.queue_folder_timestamp_refresh(
+            dest_path,
+            crate::app::folder_timestamp_state::RefreshReason::Missing,
+        );
     }
 
     pub fn navigate_to(&mut self, path: &str) {
