@@ -470,7 +470,7 @@ pub fn encode_frame_to_file(
 
     let mut writer = BufWriter::new(file);
     if format == ExportImageFormat::Pdf {
-        encode_frame_to_pdf(buffer, &mut writer)?;
+        super::pdf_export::encode_frame_to_pdf(buffer, &mut writer)?;
     } else {
         let image = DynamicImage::ImageRgba8(buffer);
         let img_fmt = format.image_format().expect("PDF handled above");
@@ -494,62 +494,6 @@ fn validate_frame_buffer(frame: &DecodedFrame) -> io::Result<()> {
         ));
     }
     Ok(())
-}
-
-/// Encode an RGBA image into a single-page PDF using `printpdf`.
-/// Alpha is composited over a white background before embedding.
-fn encode_frame_to_pdf(rgba: image::RgbaImage, writer: &mut BufWriter<File>) -> io::Result<()> {
-    use printpdf::{ColorBits, ColorSpace, ImageTransform, ImageXObject, Mm, PdfDocument, Px};
-
-    let width_px = rgba.width();
-    let height_px = rgba.height();
-
-    // Composite alpha over white background — PDF does not support transparency
-    // in the base image stream.  Integer arithmetic avoids per-pixel f32 ops.
-    let rgb_bytes: Vec<u8> = rgba
-        .pixels()
-        .flat_map(|p| {
-            let a = p[3] as u32;
-            let inv = 255 - a;
-            [
-                ((p[0] as u32 * a + 255 * inv + 128) / 255) as u8,
-                ((p[1] as u32 * a + 255 * inv + 128) / 255) as u8,
-                ((p[2] as u32 * a + 255 * inv + 128) / 255) as u8,
-            ]
-        })
-        .collect();
-
-    let image_xobject = ImageXObject {
-        width: Px(width_px as usize),
-        height: Px(height_px as usize),
-        color_space: ColorSpace::Rgb,
-        bits_per_component: ColorBits::Bit8,
-        interpolate: true,
-        image_data: rgb_bytes,
-        image_filter: None,
-        smask: None,
-        clipping_bbox: None,
-    };
-
-    // At the default 300 DPI, pixel → mm conversion:
-    //   mm = pixels × 72/300 × 0.3528  (where 0.3528 = mm per point)
-    const PX_TO_MM: f64 = 72.0 / 300.0 * 0.352_777_8;
-    let page_w = width_px as f64 * PX_TO_MM;
-    let page_h = height_px as f64 * PX_TO_MM;
-
-    let (doc, page_idx, layer_idx) = PdfDocument::new(
-        "Image export",
-        Mm(page_w as f32),
-        Mm(page_h as f32),
-        "Layer 1",
-    );
-    let current_layer = doc.get_page(page_idx).get_layer(layer_idx);
-
-    let img = printpdf::Image::from(image_xobject);
-    img.add_to_layer(current_layer, ImageTransform::default());
-
-    doc.save(writer)
-        .map_err(|err| io::Error::other(err.to_string()))
 }
 
 /// Try to load a fast preview from the on-disk thumbnail cache.
