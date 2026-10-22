@@ -29,7 +29,18 @@ fn concurrent_startup_waits_until_the_receiver_is_ready() {
         acquired_rx.recv_timeout(Duration::from_millis(100)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-    drop(first);
+    first.hold_until_window_ready();
+    finish_startup(
+        || true,
+        || {
+            assert!(matches!(
+                acquired_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+            Ok(())
+        },
+    )
+    .unwrap();
     acquired_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     second.join().unwrap();
 }
@@ -94,7 +105,7 @@ fn native_restore_wakes_hidden_and_minimized_windows() {
     });
     let hwnd = window.0;
     assert!(window_subclass::install_borderless_subclass(hwnd));
-    register_main_window(hwnd);
+    register_main_window(hwnd).unwrap();
     assert!(!unsafe { GetPropW(hwnd, w!("MTT.FileManager.MainWindow")) }.is_invalid());
     assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool());
 
@@ -124,4 +135,40 @@ fn native_restore_wakes_hidden_and_minimized_windows() {
         system_tray::take_action(),
         Some(system_tray::TrayAction::Open)
     );
+}
+
+#[test]
+fn failed_startup_releases_the_mutex_without_publishing_a_window() {
+    for (stage, receiver_installed) in [("receiver", false), ("registration", true)] {
+        let name: Vec<u16> = format!(
+            "Local\\MTT.FileManager.Test.FailedStartup.{}.{}",
+            std::process::id(),
+            stage
+        )
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+        StartupLock::acquire_named(PCWSTR(name.as_ptr()))
+            .unwrap()
+            .hold_until_window_ready();
+        let mut registration_attempted = false;
+        let result = finish_startup(
+            || receiver_installed,
+            || {
+                registration_attempted = true;
+                // An invalid window deterministically fails SetPropW.
+                register_main_window(HWND::default())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(registration_attempted, receiver_installed);
+        STARTUP_LOCK.with(|lock| assert!(lock.borrow().is_none()));
+        let (tx, rx) = mpsc::channel();
+        let next = std::thread::spawn(move || {
+            let _lock = StartupLock::acquire_named(PCWSTR(name.as_ptr())).unwrap();
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        next.join().unwrap();
+    }
 }

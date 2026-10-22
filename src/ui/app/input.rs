@@ -422,6 +422,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         }
 
+        user_active |= super::quick_search::handle_backspace(app, ctx);
         user_active |=
             super::navigation_input::handle_navigation_input(app, ctx, text_input_active);
 
@@ -431,7 +432,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
 
         if !consumed_preview_shortcut_action {
-            handle_quick_search(app, ctx);
+            super::quick_search::handle_quick_search(app, ctx);
         }
     } else {
         // During rename or batch-rename modal: ESC cancels the operation
@@ -585,123 +586,4 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         ctx.request_repaint();
     }
     consumed
-}
-
-/// Handle quick search (type-to-search like Explorer)
-///
-/// Captures alphanumeric keys and searches for matching items in the current folder.
-/// Buffer is cleared after 1.5 seconds of inactivity.
-/// Each tab has its own independent search buffer.
-fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    const QUICK_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
-
-    // Get active tab's quick search state
-    let (buffer_is_empty, timeout_elapsed) = {
-        let active_tab = app.tab_manager.active();
-        (
-            active_tab.quick_search_buffer.is_empty(),
-            active_tab.quick_search_last_input.elapsed() > QUICK_SEARCH_TIMEOUT,
-        )
-    };
-
-    // Clear buffer if timeout elapsed
-    if timeout_elapsed && !buffer_is_empty {
-        let active_tab = app.tab_manager.active_mut();
-        active_tab.quick_search_buffer.clear();
-        log::debug!(
-            "[QUICK_SEARCH] Buffer cleared due to timeout (Tab {})",
-            active_tab.id
-        );
-    }
-
-    // Never treat typing inside text fields (toolbar search, global search,
-    // address edits, inline editors, etc.) as Explorer-style quick search.
-    if ctx.egui_wants_keyboard_input() {
-        let active_tab = app.tab_manager.active_mut();
-        if !active_tab.quick_search_buffer.is_empty() {
-            active_tab.quick_search_buffer.clear();
-            log::debug!(
-                "[QUICK_SEARCH] Buffer cleared because a text input has focus (Tab {})",
-                active_tab.id
-            );
-        }
-        return;
-    }
-
-    // Capture text input events (alphanumeric, space, etc.)
-    let text_input = ctx.input(|i| {
-        i.events.iter().find_map(|event| {
-            if let egui::Event::Text(text) = event {
-                // Filter out control characters
-                let filtered: String = text.chars().filter(|c| !c.is_control()).collect();
-                if !filtered.is_empty() {
-                    return Some(filtered);
-                }
-            }
-            None
-        })
-    });
-
-    if let Some(text) = text_input {
-        let active_tab = app.tab_manager.active_mut();
-        active_tab.quick_search_buffer.push_str(&text);
-        active_tab.quick_search_last_input = std::time::Instant::now();
-        log::debug!(
-            "[QUICK_SEARCH] Input: '{}' - Buffer: '{}' (Tab {})",
-            text,
-            active_tab.quick_search_buffer,
-            active_tab.id
-        );
-
-        perform_quick_search(app);
-    }
-}
-
-/// Find and scroll to the first item matching the search buffer
-fn perform_quick_search(app: &mut ImageViewerApp) {
-    let search_lower = app.tab_manager.active().quick_search_buffer.to_lowercase();
-
-    if search_lower.is_empty() {
-        return;
-    }
-
-    // Search in current items
-    let found_index = app
-        .items
-        .iter()
-        .position(|item| item.name.to_lowercase().starts_with(&search_lower));
-
-    if let Some(index) = found_index {
-        let tab_id = app.tab_manager.active().id;
-        log::debug!(
-            "[QUICK_SEARCH] Found match at index {} - '{}' (Tab {})",
-            index,
-            app.items[index].name,
-            tab_id
-        );
-
-        // Update selection
-        app.selected_item = Some(index);
-        app.selected_file = Some(app.items[index].clone());
-
-        // Clear multi-selection and add selected item (shows dark blue border)
-        app.multi_selection.clear();
-        app.multi_selection.insert(app.items[index].path.clone());
-
-        // Update selection anchor for shift+click support
-        app.selection_anchor = Some(index);
-
-        // Trigger scroll to selected item
-        app.scroll_to_selected = true;
-
-        // Mark keyboard as last input (strict hover control)
-        app.last_input = crate::app::state::LastInput::Keyboard;
-    } else {
-        let tab_id = app.tab_manager.active().id;
-        log::debug!(
-            "[QUICK_SEARCH] No match found for '{}' (Tab {})",
-            search_lower,
-            tab_id
-        );
-    }
 }

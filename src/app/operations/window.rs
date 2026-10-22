@@ -6,7 +6,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
-use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
 
@@ -38,6 +37,19 @@ impl ImageViewerApp {
                 let hwnd = HWND(handle.hwnd.get() as *mut _);
                 self.native_hwnd = Some(hwnd);
 
+                // The subclass also receives instance restoration/open requests.
+                // Never advertise a window without that receiver, or leave a
+                // failed startup alive holding the serialization mutex.
+                if let Err(error) =
+                    crate::infrastructure::windows::app_instances::initialize_main_window(hwnd)
+                {
+                    log::error!("[INSTANCES] Main window initialization failed: {error}");
+                    self.tray_exit_requested = true;
+                    self.ui_ctx
+                        .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+                    return;
+                }
+
                 // Create the invisible proxy window used as owner for Shell
                 // file-operation dialogs so the Shell cannot disable the app's
                 // main window during long or cancelled operations.
@@ -47,15 +59,6 @@ impl ImageViewerApp {
                         "Shell op proxy window creation failed; \
                              Shell dialogs may disable the app window during file ops"
                     );
-                }
-
-                // Install borderless subclass for resize borders
-                // This handles WM_NCHITTEST to provide resize zones on window edges
-                if install_borderless_subclass(hwnd) {
-                    crate::infrastructure::windows::app_instances::register_main_window(hwnd);
-                    log::info!("Borderless resize subclass installed successfully");
-                } else {
-                    log::warn!("Failed to install borderless resize subclass");
                 }
 
                 // Keep rounded corners in windowed mode (Windows 11 DWM).

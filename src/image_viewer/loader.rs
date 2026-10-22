@@ -447,20 +447,12 @@ pub fn normalize_export_path(path: &Path, format: ExportImageFormat) -> PathBuf 
     normalized
 }
 
-pub fn encode_frame_to_path(
-    frame: DecodedFrame,
-    format: ExportImageFormat,
-    output_path: &Path,
-) -> io::Result<()> {
-    validate_frame_buffer(&frame)?;
-    encode_frame_to_file(frame, format, File::create(output_path)?)
-}
-
 pub fn encode_frame_to_file(
     frame: DecodedFrame,
     format: ExportImageFormat,
     file: File,
 ) -> io::Result<()> {
+    validate_frame_buffer(&frame)?;
     let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -938,12 +930,18 @@ mod tests {
             original_height: 1,
         };
 
-        assert!(encode_frame_to_path(invalid, ExportImageFormat::Png, &path).is_err());
+        assert!(crate::image_viewer::export::ExportDestination::confirm(
+            path.clone(),
+            ExportImageFormat::Png
+        )
+        .unwrap()
+        .write(invalid)
+        .is_err());
         assert_eq!(std::fs::read(path).unwrap(), b"original");
     }
 
     #[test]
-    fn encode_frame_to_path_writes_pdf_file() {
+    fn atomic_export_writes_pdf_file() {
         let dir = tempfile::tempdir().expect("temp dir should be created");
         let path = dir.path().join("export.pdf");
         let frame = DecodedFrame {
@@ -954,7 +952,13 @@ mod tests {
             original_height: 1,
         };
 
-        encode_frame_to_path(frame, ExportImageFormat::Pdf, &path).expect("PDF should encode");
+        crate::image_viewer::export::ExportDestination::confirm(
+            path.clone(),
+            ExportImageFormat::Pdf,
+        )
+        .unwrap()
+        .write(frame)
+        .expect("PDF should encode");
 
         let bytes = std::fs::read(path).expect("PDF should be readable");
         assert!(bytes.starts_with(b"%PDF-"));

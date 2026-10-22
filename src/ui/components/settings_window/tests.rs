@@ -113,3 +113,81 @@ fn escape_without_capture_closes_settings() {
         |ui| assert!(settings_escape_closes_window(ui.ctx(), &mut editor)),
     );
 }
+
+#[test]
+fn escape_dismisses_a_settings_combo_popup_before_closing_the_window() {
+    let ctx = egui::Context::default();
+    let mut editor = ShortcutEditorState::default();
+    let button = std::cell::Cell::new(egui::Pos2::ZERO);
+    let mut draw = |ui: &mut egui::Ui, expect_close: bool| {
+        assert_eq!(
+            settings_escape_closes_window(ui.ctx(), &mut editor),
+            expect_close
+        );
+        let combo = egui::ComboBox::from_id_salt("new_tab_location")
+            .selected_text("Folder")
+            .show_ui(ui, |ui| {
+                ui.label("Folder");
+            });
+        button.set(combo.response.rect.center());
+    };
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| draw(ui, false));
+    let point = button.get();
+    for pressed in [true, false] {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| draw(ui, false),
+        );
+    }
+    assert!(egui::Popup::is_any_open(&ctx));
+    // Give the newly opened popup its sizing pass.
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| draw(ui, false));
+    let escape = |pressed| egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![escape(true)],
+            ..Default::default()
+        },
+        |ui| draw(ui, false),
+    );
+    assert!(!egui::Popup::is_any_open(&ctx));
+    // Holding Escape after closing the popup must not close settings as well.
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![escape(true)],
+            ..Default::default()
+        },
+        |ui| draw(ui, false),
+    );
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![escape(false)],
+            ..Default::default()
+        },
+        |ui| draw(ui, false),
+    );
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![escape(true)],
+            ..Default::default()
+        },
+        |ui| draw(ui, true),
+    );
+}

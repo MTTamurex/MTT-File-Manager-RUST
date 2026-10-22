@@ -197,6 +197,24 @@ pub(crate) fn save_frame_atomically_without_cleanup(
     save_frame_atomically_impl(frame, format, destination, false, None, false)
 }
 
+/// Export has its own confirmed destination and must not clean up unrelated
+/// stale crop files as a side effect of conversion.
+pub(super) fn save_export_atomically(
+    frame: DecodedFrame,
+    format: ExportImageFormat,
+    destination: &Path,
+    expected: Option<FileSnapshot>,
+) -> io::Result<()> {
+    save_frame_atomically_impl(
+        frame,
+        format,
+        destination,
+        expected.is_some(),
+        expected,
+        false,
+    )
+}
+
 fn save_frame_atomically_impl(
     frame: DecodedFrame,
     format: ExportImageFormat,

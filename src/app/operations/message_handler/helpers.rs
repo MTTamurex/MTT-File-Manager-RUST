@@ -880,7 +880,8 @@ impl ImageViewerApp {
         self.folder_size_state.cache.pop(&folder_path);
         self.folder_size_state.clear_failure(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
-        self.folder_size_state.invalidate_calculated_folder_size(&folder_path);
+        self.folder_size_state
+            .invalidate_calculated_folder_size(&folder_path);
 
         // Bump per-path invalidation epoch so that any in-flight batch
         // worker result (carrying its request_epoch) is detected as stale
@@ -894,7 +895,9 @@ impl ImageViewerApp {
         if schedule_revalidation {
             // The service validates the live directory identity. This single
             // delayed pass only covers changes still in transit through USN.
-            let delay = self.folder_size_state.schedule_revalidation(folder_path, now);
+            let delay = self
+                .folder_size_state
+                .schedule_revalidation(folder_path, now);
             self.ui_ctx
                 .request_repaint_after(delay + std::time::Duration::from_millis(25));
         } else {
@@ -955,7 +958,10 @@ impl ImageViewerApp {
         }
 
         self.invalidate_content_ancestor_sizes(
-            &folders_with_changed_contents.iter().cloned().collect::<Vec<_>>(),
+            &folders_with_changed_contents
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
         );
 
         log::debug!(

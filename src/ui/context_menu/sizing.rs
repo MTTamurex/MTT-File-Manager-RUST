@@ -16,6 +16,10 @@ fn measure_text(ctx: &egui::Context, text: &str, font_size: f32) -> f32 {
     })
 }
 
+pub(super) fn header_button_width(ctx: &egui::Context, item: &ContextMenuItem) -> f32 {
+    super::HEADER_BUTTON_WIDTH.max(measure_text(ctx, &item.text, 10.0) + 12.0)
+}
+
 /// Width required to draw the widest non-separator item: icon + label +
 /// trailing shortcut or submenu arrow. Shared by the top-level menu and
 /// submenus so long translations never overflow the menu frame.
@@ -49,6 +53,17 @@ pub(super) fn submenu_width(ui: &egui::Ui, items: &[ContextMenuItem]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_button_fits_the_permanent_delete_label() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {
+            let item = ContextMenuItem::primary(-6, rust_i18n::t!("context_menu.delete_permanent"));
+            assert!(
+                header_button_width(&ctx, &item) >= measure_text(&ctx, &item.text, 10.0) + 12.0
+            );
+        });
+    }
 
     #[test]
     fn submenu_width_fits_content_and_shortcuts() {

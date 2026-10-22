@@ -2,7 +2,6 @@
 
 pub mod adaptive_batch;
 pub mod app_state_db;
-pub(crate) mod updater;
 pub mod archive_create;
 pub mod archive_extract;
 pub mod db_utils;
@@ -28,6 +27,7 @@ pub(crate) mod removal_aware_watcher;
 pub mod security;
 pub mod shell_menu_worker;
 pub mod threading;
+pub(crate) mod updater;
 pub mod user_session_search;
 pub mod virtual_drive_config;
 pub mod windows;

@@ -161,281 +161,280 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     }
 
     // Render modal
-    let modal = layout::centered_modal_area(screen_rect)
-        .show(ctx, |ui| {
-            let hover_color = if ui.visuals().dark_mode {
-                theme::color_dark_hover()
+    let modal = layout::centered_modal_area(screen_rect).show(ctx, |ui| {
+        let hover_color = if ui.visuals().dark_mode {
+            theme::color_dark_hover()
+        } else {
+            theme::color_hover()
+        };
+        let dark_mode = ui.visuals().dark_mode;
+        ui.visuals_mut().selection.bg_fill = theme::selection_color(ui.ctx());
+        ui.visuals_mut().selection.stroke =
+            egui::Stroke::new(0.0, theme::selection_text_color(ui.ctx()));
+        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+        ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
+        ui.visuals_mut().widgets.hovered.bg_stroke =
+            egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
+        ui.visuals_mut().widgets.active.bg_fill = hover_color;
+        ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
+        ui.visuals_mut().widgets.active.bg_stroke =
+            egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
+
+        egui::Frame::window(ui.style())
+            .fill(if dark_mode {
+                theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(43, 43, 43))
             } else {
-                theme::color_hover()
-            };
-            let dark_mode = ui.visuals().dark_mode;
-            ui.visuals_mut().selection.bg_fill = theme::selection_color(ui.ctx());
-            ui.visuals_mut().selection.stroke =
-                egui::Stroke::new(0.0, theme::selection_text_color(ui.ctx()));
-            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
-            ui.visuals_mut().widgets.active.bg_fill = hover_color;
-            ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, theme::accent_color(ui.ctx()));
-
-            egui::Frame::window(ui.style())
-                .fill(if dark_mode {
-                    theme::palette::surface(ui.ctx(), egui::Color32::from_rgb(43, 43, 43))
+                egui::Color32::from_rgb(246, 246, 246)
+            })
+            .stroke(egui::Stroke::new(
+                1.0,
+                if dark_mode {
+                    theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
                 } else {
-                    egui::Color32::from_rgb(246, 246, 246)
-                })
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    if dark_mode {
-                        theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
-                    } else {
-                        egui::Color32::from_gray(220)
-                    },
-                ))
-                .inner_margin(egui::Margin::same(16))
-                .corner_radius(10.0)
-                .shadow(egui::epaint::Shadow {
-                    spread: 8,
-                    blur: 24,
-                    color: egui::Color32::from_black_alpha(70),
-                    offset: [0, 8],
-                })
-                .show(ui, |ui| {
-                    ui.set_width(modal_width - 32.0);
-                    ui.set_min_height(modal_max_height - 32.0);
+                    egui::Color32::from_gray(220)
+                },
+            ))
+            .inner_margin(egui::Margin::same(16))
+            .corner_radius(10.0)
+            .shadow(egui::epaint::Shadow {
+                spread: 8,
+                blur: 24,
+                color: egui::Color32::from_black_alpha(70),
+                offset: [0, 8],
+            })
+            .show(ui, |ui| {
+                ui.set_width(modal_width - 32.0);
+                ui.set_min_height(modal_max_height - 32.0);
 
-                    // Header
-                    ui.horizontal_wrapped(|ui| {
+                // Header
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(&*t!("search.title"))
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.add_space(10.0);
+
+                    if !app.global_search.available {
+                        let service_starting = app.global_search.opened_at.elapsed()
+                            < Duration::from_secs(SERVICE_STARTUP_GRACE_SECS);
                         ui.label(
-                            egui::RichText::new(&*t!("search.title"))
-                                .size(16.0)
-                                .strong(),
-                        );
-                        ui.add_space(10.0);
-
-                        if !app.global_search.available {
-                            let service_starting = app.global_search.opened_at.elapsed()
-                                < Duration::from_secs(SERVICE_STARTUP_GRACE_SECS);
-                            ui.label(
-                                egui::RichText::new(if service_starting {
-                                    t!("search.service_starting")
-                                } else {
-                                    t!("search.service_offline")
-                                })
-                                .size(11.0)
-                                .color(if service_starting {
-                                    egui::Color32::from_gray(120)
-                                } else {
-                                    egui::Color32::from_rgb(200, 80, 80)
-                                }),
-                            );
-                        } else if app.global_search.total_indexed == 0 {
-                            ui.label(
-                                egui::RichText::new(&*t!("search.index_preparing"))
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(120)),
-                            );
-                        } else {
-                            let headline = if app.global_search.indexing_in_progress {
-                                t!(
-                                    "search.indexing_files",
-                                    count = format_exact_number(app.global_search.total_indexed)
-                                )
+                            egui::RichText::new(if service_starting {
+                                t!("search.service_starting")
                             } else {
-                                t!(
-                                    "search.indexed_files",
-                                    count = format_exact_number(app.global_search.total_indexed)
-                                )
-                            };
-                            ui.label(
-                                egui::RichText::new(headline)
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(120)),
-                            );
-                        }
-                    });
-
-                    ui.add_space(8.0);
-
-                    // Search input (custom container with magnifying glass icon)
-                    let input_height = 32.0;
-                    let full_width = ui.available_width();
-                    let (search_rect, container_resp) = ui.allocate_exact_size(
-                        egui::vec2(full_width, input_height),
-                        egui::Sense::click_and_drag(),
-                    );
-
-                    // Draw background and border
-                    let input_fill = if dark_mode {
-                        theme::palette::raised(ui.ctx(), egui::Color32::from_gray(50))
+                                t!("search.service_offline")
+                            })
+                            .size(11.0)
+                            .color(if service_starting {
+                                egui::Color32::from_gray(120)
+                            } else {
+                                egui::Color32::from_rgb(200, 80, 80)
+                            }),
+                        );
+                    } else if app.global_search.total_indexed == 0 {
+                        ui.label(
+                            egui::RichText::new(&*t!("search.index_preparing"))
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(120)),
+                        );
                     } else {
-                        egui::Color32::WHITE
-                    };
-                    let input_stroke = egui::Stroke::new(
-                        1.0,
-                        if dark_mode {
-                            egui::Color32::from_gray(72)
+                        let headline = if app.global_search.indexing_in_progress {
+                            t!(
+                                "search.indexing_files",
+                                count = format_exact_number(app.global_search.total_indexed)
+                            )
                         } else {
-                            egui::Color32::from_gray(214)
-                        },
-                    );
-                    ui.painter().rect_filled(search_rect, 8.0, input_fill);
-                    ui.painter()
-                        .rect_stroke(search_rect, 8.0, input_stroke, egui::StrokeKind::Inside);
-
-                    let mut search_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(search_rect)
-                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                    );
-
-                    // Left padding + magnifying glass icon
-                    search_ui.add_space(8.0);
-                    crate::ui::svg_icons::icon_image(
-                        &mut search_ui,
-                        &mut app.svg_icon_manager,
-                        "search",
-                        16.0,
-                    );
-                    search_ui.add_space(6.0);
-
-                    // Text input
-                    let has_text = !app.global_search.query.is_empty();
-                    let clear_btn_space = if has_text { 22.0 + 4.0 } else { 0.0 };
-                    let text_available_w = search_ui.available_width() - 8.0 - clear_btn_space;
-                    let hint = egui::RichText::new(t!("search.placeholder"))
-                        .color(egui::Color32::from_gray(120));
-                    let mut search_resp = search_ui.add_sized(
-                        egui::vec2(text_available_w, input_height - 2.0),
-                        egui::TextEdit::singleline(&mut app.global_search.query)
-                            .frame(
-                                egui::Frame::NONE
-                                    .inner_margin(egui::Margin::symmetric(4, 2)),
+                            t!(
+                                "search.indexed_files",
+                                count = format_exact_number(app.global_search.total_indexed)
                             )
-                            .hint_text(hint)
-                            .text_color(ui.visuals().text_color())
-                            .vertical_align(egui::Align::Center)
-                            .id_source("global_search_input"),
-                    );
-                    let search_text_menu =
-                        crate::ui::components::inline_rename::add_text_context_menu(
-                            &mut search_ui,
-                            &search_resp,
-                            &mut app.global_search.query,
-                            false,
+                        };
+                        ui.label(
+                            egui::RichText::new(headline)
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(120)),
                         );
-                    if search_text_menu.text_changed {
-                        search_resp.mark_changed();
-                    }
-
-                    // Clear button (X)
-                    if has_text
-                        && search_ui
-                            .add(
-                                egui::Button::new("\u{2715}")
-                                    .frame(false)
-                                    .min_size(egui::vec2(18.0, 18.0)),
-                            )
-                            .clicked()
-                    {
-                        app.global_search.query.clear();
-                        app.global_search.release_transient_results();
-                        app.global_search.clear_transient_caches();
-                        app.global_search.loading = false;
-                        app.global_search.scroll_offset_y = 0.0;
-                        app.global_search.last_scroll_offset_y = 0.0;
-                        app.global_search.in_flight_query = None;
-                        app.global_search.in_flight_started_at = None;
-                        search_resp.request_focus();
-                    }
-
-                    // Focus input when clicking empty container area
-                    if container_resp.clicked() {
-                        search_resp.request_focus();
-                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
-                    }
-
-                    // Auto-focus on open
-                    if app.global_search.focus_request {
-                        search_resp.request_focus();
-                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
-                        app.global_search.focus_request = false;
-                    }
-
-                    if search_resp.clicked()
-                        || search_resp.gained_focus()
-                        || search_resp.changed()
-                        || search_text_menu.menu_active
-                    {
-                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
-                        app.global_search.rename_state = None;
-                    }
-
-                    // Trigger search on text change (with debounce)
-                    if search_resp.changed() && !app.global_search.query.is_empty() {
-                        app.global_search.clear_transient_results();
-                        app.global_search.tooltip_texture_cache.clear();
-                        app.global_search.metadata_cache.clear();
-                        app.global_search.loading = true;
-                        app.global_search.requested_offset = 0;
-                        app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
-                        app.global_search.scroll_offset_y = 0.0;
-                        app.global_search.last_scroll_offset_y = 0.0;
-                        app.global_search.in_flight_query = None;
-                        app.global_search.in_flight_started_at = None;
-                        app.global_search.pending_query_dispatch_at = Some(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_millis(SEARCH_INPUT_DEBOUNCE_MS),
-                        );
-                        ctx.request_repaint_after(std::time::Duration::from_millis(
-                            SEARCH_INPUT_DEBOUNCE_MS,
-                        ));
-                    } else if app.global_search.query.is_empty() {
-                        app.global_search.release_transient_results();
-                        app.global_search.clear_transient_caches();
-                        app.global_search.loading = false;
-                        app.global_search.requested_offset = 0;
-                        app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
-                        app.global_search.pending_query_dispatch_at = None;
-                        app.global_search.scroll_offset_y = 0.0;
-                        app.global_search.last_scroll_offset_y = 0.0;
-                        app.global_search.in_flight_query = None;
-                        app.global_search.in_flight_started_at = None;
-                        app.global_search.min_size_mb = None;
-                        app.global_search.max_size_mb = None;
-                        app.global_search.created_after = None;
-                        app.global_search.created_before = None;
-                        app.global_search.created_after_text.clear();
-                        app.global_search.created_before_text.clear();
-                    }
-
-                    if app.global_search.available && app.global_search.indexing_in_progress {
-                        ui.add_space(8.0);
-                        render_indexing_activity(ui, app, dark_mode);
-                    }
-
-                    ui.add_space(8.0);
-                    render_filter_controls(ui, app);
-                    ui.add_space(8.0);
-
-                    results_panel::render_results_panel(
-                        ui,
-                        app,
-                        ctx,
-                        modal_max_height,
-                        theme::selection_hover_color(ui.ctx()),
-                    );
-                    if app.global_search.interaction_target
-                        != crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput
-                        && search_resp.has_focus()
-                    {
-                        search_resp.surrender_focus();
                     }
                 });
-        });
+
+                ui.add_space(8.0);
+
+                // Search input (custom container with magnifying glass icon)
+                let input_height = 32.0;
+                let full_width = ui.available_width();
+                let (search_rect, container_resp) = ui.allocate_exact_size(
+                    egui::vec2(full_width, input_height),
+                    egui::Sense::click_and_drag(),
+                );
+
+                // Draw background and border
+                let input_fill = if dark_mode {
+                    theme::palette::raised(ui.ctx(), egui::Color32::from_gray(50))
+                } else {
+                    egui::Color32::WHITE
+                };
+                let input_stroke = egui::Stroke::new(
+                    1.0,
+                    if dark_mode {
+                        egui::Color32::from_gray(72)
+                    } else {
+                        egui::Color32::from_gray(214)
+                    },
+                );
+                ui.painter().rect_filled(search_rect, 8.0, input_fill);
+                ui.painter()
+                    .rect_stroke(search_rect, 8.0, input_stroke, egui::StrokeKind::Inside);
+
+                let mut search_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(search_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+
+                // Left padding + magnifying glass icon
+                search_ui.add_space(8.0);
+                crate::ui::svg_icons::icon_image(
+                    &mut search_ui,
+                    &mut app.svg_icon_manager,
+                    "search",
+                    16.0,
+                );
+                search_ui.add_space(6.0);
+
+                // Text input
+                let has_text = !app.global_search.query.is_empty();
+                let clear_btn_space = if has_text { 22.0 + 4.0 } else { 0.0 };
+                let text_available_w = search_ui.available_width() - 8.0 - clear_btn_space;
+                let hint = egui::RichText::new(t!("search.placeholder"))
+                    .color(egui::Color32::from_gray(120));
+                let mut search_resp = search_ui.add_sized(
+                    egui::vec2(text_available_w, input_height - 2.0),
+                    egui::TextEdit::singleline(&mut app.global_search.query)
+                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
+                        .hint_text(hint)
+                        .text_color(ui.visuals().text_color())
+                        .vertical_align(egui::Align::Center)
+                        .id_source("global_search_input"),
+                );
+                let search_text_menu = crate::ui::components::inline_rename::add_text_context_menu(
+                    &mut search_ui,
+                    &search_resp,
+                    &mut app.global_search.query,
+                    false,
+                );
+                if search_text_menu.text_changed {
+                    search_resp.mark_changed();
+                }
+
+                // Clear button (X)
+                if has_text
+                    && search_ui
+                        .add(
+                            egui::Button::new("\u{2715}")
+                                .frame(false)
+                                .min_size(egui::vec2(18.0, 18.0)),
+                        )
+                        .clicked()
+                {
+                    app.global_search.query.clear();
+                    app.global_search.release_transient_results();
+                    app.global_search.clear_transient_caches();
+                    app.global_search.loading = false;
+                    app.global_search.scroll_offset_y = 0.0;
+                    app.global_search.last_scroll_offset_y = 0.0;
+                    app.global_search.in_flight_query = None;
+                    app.global_search.in_flight_started_at = None;
+                    search_resp.request_focus();
+                }
+
+                // Focus input when clicking empty container area
+                if container_resp.clicked() {
+                    search_resp.request_focus();
+                    app.global_search.interaction_target =
+                        crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
+                }
+
+                // Auto-focus on open
+                if app.global_search.focus_request {
+                    search_resp.request_focus();
+                    app.global_search.interaction_target =
+                        crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
+                    app.global_search.focus_request = false;
+                }
+
+                if search_resp.clicked()
+                    || search_resp.gained_focus()
+                    || search_resp.changed()
+                    || search_text_menu.menu_active
+                {
+                    app.global_search.interaction_target =
+                        crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
+                    app.global_search.rename_state = None;
+                }
+
+                // Trigger search on text change (with debounce)
+                if search_resp.changed() && !app.global_search.query.is_empty() {
+                    app.global_search.clear_transient_results();
+                    app.global_search.tooltip_texture_cache.clear();
+                    app.global_search.metadata_cache.clear();
+                    app.global_search.loading = true;
+                    app.global_search.requested_offset = 0;
+                    app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
+                    app.global_search.scroll_offset_y = 0.0;
+                    app.global_search.last_scroll_offset_y = 0.0;
+                    app.global_search.in_flight_query = None;
+                    app.global_search.in_flight_started_at = None;
+                    app.global_search.pending_query_dispatch_at = Some(
+                        std::time::Instant::now()
+                            + std::time::Duration::from_millis(SEARCH_INPUT_DEBOUNCE_MS),
+                    );
+                    ctx.request_repaint_after(std::time::Duration::from_millis(
+                        SEARCH_INPUT_DEBOUNCE_MS,
+                    ));
+                } else if app.global_search.query.is_empty() {
+                    app.global_search.release_transient_results();
+                    app.global_search.clear_transient_caches();
+                    app.global_search.loading = false;
+                    app.global_search.requested_offset = 0;
+                    app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
+                    app.global_search.pending_query_dispatch_at = None;
+                    app.global_search.scroll_offset_y = 0.0;
+                    app.global_search.last_scroll_offset_y = 0.0;
+                    app.global_search.in_flight_query = None;
+                    app.global_search.in_flight_started_at = None;
+                    app.global_search.min_size_mb = None;
+                    app.global_search.max_size_mb = None;
+                    app.global_search.created_after = None;
+                    app.global_search.created_before = None;
+                    app.global_search.created_after_text.clear();
+                    app.global_search.created_before_text.clear();
+                }
+
+                if app.global_search.available && app.global_search.indexing_in_progress {
+                    ui.add_space(8.0);
+                    render_indexing_activity(ui, app, dark_mode);
+                }
+
+                ui.add_space(8.0);
+                render_filter_controls(ui, app);
+                ui.add_space(8.0);
+
+                results_panel::render_results_panel(
+                    ui,
+                    app,
+                    ctx,
+                    modal_max_height,
+                    theme::selection_hover_color(ui.ctx()),
+                );
+                if app.global_search.interaction_target
+                    != crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput
+                    && search_resp.has_focus()
+                {
+                    search_resp.surrender_focus();
+                }
+            });
+    });
     if backdrop_click.is_some_and(|pos| !modal.response.rect.contains(pos)) {
         app.close_global_search();
     }

@@ -1,4 +1,5 @@
 //! Listing-scoped sizes must survive eviction from the display LRU cache.
+use super::batch::{MAX_IN_FLIGHT_REQUESTS, MAX_REQUESTS_PER_UPDATE};
 use super::FolderSizeState;
 use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use std::collections::HashMap;
@@ -119,8 +120,8 @@ impl FolderSizeState {
             if self.batch_loading.contains(path)
                 || self.loading.contains(path)
                 || self.pending_revalidation.contains_key(path)
-                || requests.len() >= 30
-                || self.batch_loading.len() + requests.len() >= 120
+                || requests.len() >= MAX_REQUESTS_PER_UPDATE
+                || self.batch_loading.len() + requests.len() >= MAX_IN_FLIGHT_REQUESTS
                 || self.size_sorting.worker_disconnected
             {
                 continue;

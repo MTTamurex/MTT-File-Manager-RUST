@@ -397,6 +397,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
 
+    super::delete_feedback::update_menu_labels(
+        &mut context_menu.items,
+        ctx.input(|input| input.modifiers.shift),
+        &app.shortcuts,
+    );
+
     let _ = crate::ui::context_menu::render_context_menu(
         ctx,
         &mut context_menu,

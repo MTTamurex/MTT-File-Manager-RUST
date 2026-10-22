@@ -170,7 +170,10 @@ pub fn render_context_menu(
     // long translations cannot overflow the menu frame.
     let menu_width = {
         let header_width = if !primary_items.is_empty() {
-            primary_items.len() as f32 * HEADER_BUTTON_WIDTH
+            primary_items
+                .iter()
+                .map(|item| sizing::header_button_width(ctx, item))
+                .sum::<f32>()
                 + (primary_items.len().saturating_sub(1)) as f32 * HEADER_SPACING
                 + 8.0 // inner_margin * 2
         } else {
@@ -344,7 +347,10 @@ fn render_header_bar(
         let disabled_text_color = egui::Color32::from_gray(128);
 
         for item in items {
-            let btn_size = egui::vec2(HEADER_BUTTON_WIDTH, HEADER_BUTTON_HEIGHT);
+            let btn_size = egui::vec2(
+                sizing::header_button_width(ui.ctx(), item),
+                HEADER_BUTTON_HEIGHT,
+            );
             let (rect, response) = ui.allocate_exact_size(btn_size, Sense::click());
 
             // Hover highlight

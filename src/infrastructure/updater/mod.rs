@@ -8,9 +8,17 @@ pub(crate) use helper::HelperProcess;
 pub(crate) use release::{check, Release};
 
 fn client() -> Result<reqwest::blocking::Client, String> {
+    client_builder()
+        .build()
+        .map_err(|_| "Could not initialize the update connection".into())
+}
+
+fn client_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder()
         .user_agent(concat!("MTT-File-Manager/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(15))
+        // The blocking client's timeout bounds each Read, not the complete
+        // streamed download. A request-level override also sets a total timeout.
         .timeout(std::time::Duration::from_secs(600))
         .https_only(true)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
@@ -23,6 +31,7 @@ fn client() -> Result<reqwest::blocking::Client, String> {
                 attempt.error("Untrusted update redirect")
             }
         }))
-        .build()
-        .map_err(|_| "Could not initialize the update connection".into())
 }
+
+#[cfg(test)]
+mod timeout_tests;

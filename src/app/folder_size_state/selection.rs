@@ -1,4 +1,5 @@
 //! Aggregate selected files and completed directory sizes without blocking the UI.
+use super::batch::{MAX_IN_FLIGHT_REQUESTS, MAX_REQUESTS_PER_UPDATE};
 use super::FolderSizeState;
 use crate::domain::file_entry::FileEntry;
 use crate::ui::cache::FxHashSet;
@@ -140,8 +141,8 @@ impl FolderSizeState {
                     value = FolderSize::Unavailable;
                 } else if !self.batch_loading.contains(&item.path)
                     && !self.pending_revalidation.contains_key(&item.path)
-                    && requested < 30
-                    && self.batch_loading.len() < 120
+                    && requested < MAX_REQUESTS_PER_UPDATE
+                    && self.batch_loading.len() < MAX_IN_FLIGHT_REQUESTS
                 {
                     if self.enqueue_batch_size(item.path.clone()).is_ok() {
                         requested += 1;

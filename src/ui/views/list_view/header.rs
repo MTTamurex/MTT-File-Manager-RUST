@@ -29,7 +29,10 @@ fn draw_header_resizable(
     let is_active = sort_mode == mode;
     let is_hovered = header_response.hovered()
         && ui.input(|input| {
-            input.pointer.hover_pos().is_some_and(|pos| header_rect.contains(pos))
+            input
+                .pointer
+                .hover_pos()
+                .is_some_and(|pos| header_rect.contains(pos))
         });
 
     if ui.is_rect_visible(header_rect) {

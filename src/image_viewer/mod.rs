@@ -10,6 +10,7 @@ use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 mod app;
 mod cache;
 mod crop;
+mod export;
 mod indexer;
 mod ipc;
 pub(crate) mod loader;

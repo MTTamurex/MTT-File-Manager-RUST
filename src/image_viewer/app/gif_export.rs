@@ -72,19 +72,7 @@ impl super::DedicatedImageViewerApp {
             }
         }
 
-        dialog
-            .save_file()
-            .map(|path| loader::normalize_export_path(&path, format))
-    }
-
-    fn current_export_frame(&self) -> Result<loader::DecodedFrame, String> {
-        // The cache no longer holds CPU-side RGBA buffers (they are dropped
-        // immediately after GPU upload to keep RAM low), so the only way to
-        // get the full pixel data for encoding is to re-decode from disk.
-        let path = self
-            .current_path()
-            .ok_or_else(|| t!("imageviewer.convert_no_image").to_string())?;
-        loader::decode_export_frame(path).map_err(|err| err.to_string())
+        dialog.save_file()
     }
 
     pub(super) fn start_conversion(
@@ -100,20 +88,20 @@ impl super::DedicatedImageViewerApp {
             return;
         };
 
-        let frame = match self.current_export_frame() {
-            Ok(frame) => frame,
-            Err(err) => {
-                self.status_message = Some(ViewerStatusMessage {
-                    text: t!("imageviewer.convert_error", error = err).to_string(),
-                    is_error: true,
-                });
-                return;
-            }
+        let Some(source_path) = self.current_path().cloned() else {
+            self.status_message = Some(ViewerStatusMessage {
+                text: t!(
+                    "imageviewer.convert_error",
+                    error = t!("imageviewer.convert_no_image")
+                )
+                .to_string(),
+                is_error: true,
+            });
+            return;
         };
 
         let (tx, rx) = std::sync::mpsc::channel();
         let repaint_ctx = ctx.clone();
-        let worker_path = output_path.clone();
         let format_label = Self::export_format_label(format);
 
         self.conversion_rx = Some(rx);
@@ -126,9 +114,15 @@ impl super::DedicatedImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("image-convert".into())
             .spawn(move || {
-                let result = loader::encode_frame_to_path(frame, format, &worker_path)
-                    .map(|_| worker_path)
-                    .map_err(|err| err.to_string());
+                // Both the destination snapshot and source decode may block on
+                // a network filesystem. Capture before decoding, off the UI.
+                let result =
+                    crate::image_viewer::export::ExportDestination::confirm(output_path, format)
+                        .and_then(|destination| {
+                            let frame = loader::decode_export_frame(&source_path)?;
+                            destination.write(frame)
+                        })
+                        .map_err(|err| err.to_string());
                 let _ = tx.send(result);
                 repaint_ctx.request_repaint();
             });

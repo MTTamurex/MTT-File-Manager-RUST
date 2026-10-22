@@ -164,7 +164,11 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         ) {
             action = SecAction::CreateFolder;
         }
-        if render_btn("delete", can_delete, &t!("secondary_toolbar.delete")) {
+        if render_btn(
+            "delete",
+            can_delete,
+            &crate::ui::app::delete_feedback::toolbar_tooltip(shift_down),
+        ) {
             action = SecAction::Delete {
                 permanently: shift_down,
             };

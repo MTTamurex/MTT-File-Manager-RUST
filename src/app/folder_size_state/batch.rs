@@ -3,6 +3,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+pub(super) const MAX_REQUESTS_PER_UPDATE: usize = 30;
+pub(super) const MAX_IN_FLIGHT_REQUESTS: usize = 120;
+
 impl FolderSizeState {
     pub fn fail_batch_requests(&mut self) -> bool {
         let had_pending = !self.batch_loading.is_empty();

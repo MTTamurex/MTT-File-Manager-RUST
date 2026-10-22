@@ -55,20 +55,38 @@ impl Drop for StartupLock {
     }
 }
 
+/// Complete startup or release its lock on failure so a failed window cannot
+/// block every subsequent launch. The caller must close on failure.
+pub(crate) fn initialize_main_window(hwnd: HWND) -> windows::core::Result<()> {
+    finish_startup(
+        || super::window_subclass::install_borderless_subclass(hwnd),
+        || register_main_window(hwnd),
+    )
+}
+
+fn finish_startup(
+    install_receiver: impl FnOnce() -> bool,
+    register: impl FnOnce() -> windows::core::Result<()>,
+) -> windows::core::Result<()> {
+    let _startup_lock = STARTUP_LOCK.with(|lock| lock.borrow_mut().take());
+    if !install_receiver() {
+        return Err(windows::core::Error::new(
+            windows::core::HRESULT(0x80004005u32 as i32),
+            "Could not install the main window message receiver",
+        ));
+    }
+    register()
+}
+
 /// Call only after the main window's message receiver has been installed.
-pub(crate) fn register_main_window(hwnd: HWND) {
-    let result = unsafe {
+fn register_main_window(hwnd: HWND) -> windows::core::Result<()> {
+    unsafe {
         SetPropW(
             hwnd,
             w!("MTT.FileManager.MainWindow"),
             Some(HANDLE(std::ptr::dangling_mut::<u8>().cast())),
         )
-    };
-    if let Err(error) = result {
-        log::error!("[INSTANCES] Could not register the main window: {error}");
-        return;
     }
-    STARTUP_LOCK.with(|lock| drop(lock.borrow_mut().take()));
 }
 
 pub fn find_main_window() -> Option<HWND> {

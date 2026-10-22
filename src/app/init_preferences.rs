@@ -429,7 +429,9 @@ impl StartupPreferences {
             initial_indexing_notice_generation,
             saved_tab_session,
             minimize_to_tray,
-            explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences::load(&prefs),
+            explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences::load(
+                &prefs,
+            ),
         }
     }
 }
