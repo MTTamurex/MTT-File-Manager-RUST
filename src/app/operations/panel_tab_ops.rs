@@ -12,6 +12,12 @@ impl ImageViewerApp {
 
         snapshot.path_input = path.clone();
         snapshot.path = path.clone();
+        snapshot.current_folder_modified_hint = snapshot
+            .current_folder_modified_hint
+            .filter(|(folder, _)| folder == std::path::Path::new(&path));
+        snapshot.current_folder_created_hint = snapshot
+            .current_folder_created_hint
+            .filter(|(folder, _)| folder == std::path::Path::new(&path));
         snapshot.is_computer_view = path == crate::domain::special_paths::COMPUTER_VIEW_ID;
         snapshot.is_recycle_bin_view = path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
         snapshot.navigation = NavigationHistory::new(path);

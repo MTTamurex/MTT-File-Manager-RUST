@@ -26,6 +26,8 @@ impl ImageViewerApp {
         };
         let active = self.tab_manager.active_mut();
         active.path = self.navigation_state.current_path.clone();
+        active.current_folder_modified_hint = self.current_folder_modified_hint.clone();
+        active.current_folder_created_hint = self.current_folder_created_hint.clone();
         active.path_input = self.navigation_state.path_input.clone();
         active.is_computer_view = self.navigation_state.is_computer_view;
         active.is_recycle_bin_view = self.navigation_state.is_recycle_bin_view;

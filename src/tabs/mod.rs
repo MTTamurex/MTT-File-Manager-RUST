@@ -51,6 +51,9 @@ pub struct TabState {
     pub pinned: bool,
     /// Current directory path
     pub path: String,
+    /// Cached filesystem timestamps for this tab's current folder.
+    pub current_folder_modified_hint: Option<(PathBuf, u64)>,
+    pub current_folder_created_hint: Option<(PathBuf, u64)>,
     /// Display title (folder name or "Este Computador")
     pub title: String,
     /// Navigation history (linear)
@@ -153,6 +156,8 @@ impl TabState {
             id,
             pinned: false,
             path: COMPUTER_VIEW_ID.to_string(),
+            current_folder_modified_hint: None,
+            current_folder_created_hint: None,
             title: COMPUTER_VIEW_ID.to_string(),
             navigation: NavigationHistory::new(COMPUTER_VIEW_ID.to_string()),
             is_computer_view: true,
@@ -216,6 +221,8 @@ impl TabState {
             id,
             pinned: false,
             path: path.to_string(),
+            current_folder_modified_hint: None,
+            current_folder_created_hint: None,
             title,
             navigation: NavigationHistory::new(path.to_string()),
             is_computer_view: path == COMPUTER_VIEW_ID,
@@ -282,6 +289,8 @@ impl TabState {
 
         // Update current path
         self.path = new_path.to_string();
+        self.current_folder_modified_hint = None;
+        self.current_folder_created_hint = None;
         self.path_input = new_path.to_string();
         self.is_computer_view = new_path == COMPUTER_VIEW_ID;
         self.is_recycle_bin_view = new_path == RECYCLE_BIN_VIEW_ID;
@@ -333,6 +342,8 @@ impl TabState {
 
         self.path = path.clone();
         self.path_input = path.clone();
+        self.current_folder_modified_hint = None;
+        self.current_folder_created_hint = None;
         self.is_computer_view = path == COMPUTER_VIEW_ID;
         self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
         self.title = if self.is_computer_view {
@@ -366,6 +377,8 @@ impl TabState {
 
     fn sync_from_history(&mut self) {
         if let Some(path) = self.navigation.current_path() {
+            self.current_folder_modified_hint = None;
+            self.current_folder_created_hint = None;
             self.path_input = path.clone();
             self.is_computer_view = path == COMPUTER_VIEW_ID;
             self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;

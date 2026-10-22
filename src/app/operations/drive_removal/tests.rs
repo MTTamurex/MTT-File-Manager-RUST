@@ -37,6 +37,8 @@ fn snapshot(path: &str) -> PanelSnapshot {
     let tab = tab(0, path);
     PanelSnapshot {
         path: path.to_string(),
+        current_folder_modified_hint: None,
+        current_folder_created_hint: None,
         path_input: path.to_string(),
         is_computer_view: false,
         is_recycle_bin_view: false,

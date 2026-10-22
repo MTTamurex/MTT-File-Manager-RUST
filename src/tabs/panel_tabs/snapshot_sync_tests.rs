@@ -9,6 +9,8 @@ use std::time::Instant;
 fn snapshot(path: &str) -> PanelSnapshot {
     PanelSnapshot {
         path: path.to_owned(),
+        current_folder_modified_hint: None,
+        current_folder_created_hint: None,
         path_input: path.to_owned(),
         is_computer_view: false,
         is_recycle_bin_view: false,
@@ -148,6 +150,62 @@ fn unpinned_tabs_still_follow_single_panel_navigation() {
         assert_eq!(active.snapshot.path, "Z:\\Folder");
         assert!(tabs.panel(focused).pinned_snapshot_for_resume().is_none());
     }
+}
+
+#[test]
+fn folder_timestamps_survive_panel_tab_and_outer_tab_round_trips() {
+    for focused in [ActivePanel::Left, ActivePanel::Right] {
+        let mut first = snapshot(r"C:\Folder");
+        first.current_folder_modified_hint = Some((PathBuf::from(&first.path), 100));
+        first.current_folder_created_hint = Some((PathBuf::from(&first.path), 50));
+        let mut second = snapshot(r"D:\Folder");
+        second.current_folder_modified_hint = Some((PathBuf::from(&second.path), 200));
+        let mut tabs = DualPanelTabs::new(first.clone(), first.clone());
+        tabs.add_tab(focused, second.clone());
+        let mut manager = TabManager::new_at_path(r"C:\Folder");
+        manager.active_mut().dual_panel_tabs = Some(tabs);
+        assert!(manager.new_tab_at(r"E:\Folder"));
+        manager.active_tab = 0;
+        let tabs = manager.active_mut().dual_panel_tabs.as_mut().unwrap();
+        for index in [0, 1, 0] {
+            tabs.panel_mut(focused).select(index);
+            let mut restored = tabs.panel(focused).active().unwrap().snapshot.clone();
+            restored.compact_for_storage();
+            restored.restore_from_storage();
+            let expected = if index == 0 { &first } else { &second };
+            assert_eq!(restored.path, expected.path);
+            assert_eq!(
+                restored.current_folder_modified_hint,
+                expected.current_folder_modified_hint
+            );
+            assert_eq!(
+                restored.current_folder_created_hint,
+                expected.current_folder_created_hint
+            );
+            tabs.panel_mut(focused).sync_active_snapshot(restored, true);
+            let other = &tabs.panel(focused.other()).active().unwrap().snapshot;
+            assert_eq!(
+                other.current_folder_modified_hint,
+                first.current_folder_modified_hint
+            );
+            assert_eq!(
+                other.current_folder_created_hint,
+                first.current_folder_created_hint
+            );
+        }
+    }
+}
+
+#[test]
+fn redirecting_panel_snapshot_clears_previous_folder_timestamps() {
+    let mut panel = snapshot(r"C:\Folder");
+    panel.current_folder_modified_hint = Some((PathBuf::from(&panel.path), 100));
+    panel.current_folder_created_hint = Some((PathBuf::from(&panel.path), 50));
+    panel.navigation.navigate_to(r"D:\Folder".to_owned());
+    panel.redirect_to_history_current();
+    assert_eq!(panel.path, r"D:\Folder");
+    assert!(panel.current_folder_modified_hint.is_none());
+    assert!(panel.current_folder_created_hint.is_none());
 }
 
 #[test]

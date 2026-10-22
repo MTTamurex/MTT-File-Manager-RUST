@@ -137,6 +137,9 @@ impl PanelListColumnWidths {
 pub struct PanelSnapshot {
     // Navigation
     pub path: String,
+    /// Cached filesystem timestamps travel with the panel's current folder.
+    pub current_folder_modified_hint: Option<(PathBuf, u64)>,
+    pub current_folder_created_hint: Option<(PathBuf, u64)>,
     pub path_input: String,
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
@@ -242,6 +245,8 @@ impl PanelSnapshot {
             .unwrap_or_else(|| COMPUTER_VIEW_ID.to_string());
 
         self.path = path.clone();
+        self.current_folder_modified_hint = None;
+        self.current_folder_created_hint = None;
         self.path_input = path.clone();
         self.is_computer_view = path == COMPUTER_VIEW_ID;
         self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
@@ -315,6 +320,8 @@ impl PanelSnapshot {
     pub fn from_app(app: &crate::app::state::ImageViewerApp) -> Self {
         Self {
             path: app.navigation_state.current_path.clone(),
+            current_folder_modified_hint: app.current_folder_modified_hint.clone(),
+            current_folder_created_hint: app.current_folder_created_hint.clone(),
             path_input: app.navigation_state.path_input.clone(),
             is_computer_view: app.navigation_state.is_computer_view,
             is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
@@ -378,6 +385,8 @@ impl PanelSnapshot {
     pub fn apply_to(mut self, app: &mut crate::app::state::ImageViewerApp) {
         self.restore_items_snapshot();
         app.navigation_state.current_path = self.path;
+        app.current_folder_modified_hint = self.current_folder_modified_hint;
+        app.current_folder_created_hint = self.current_folder_created_hint;
         app.navigation_state.path_input = self.path_input;
         app.navigation_state.is_computer_view = self.is_computer_view;
         app.navigation_state.is_recycle_bin_view = self.is_recycle_bin_view;
@@ -440,6 +449,14 @@ impl PanelSnapshot {
     pub fn swap_with_app(&mut self, app: &mut crate::app::state::ImageViewerApp) {
         self.restore_items_snapshot();
         std::mem::swap(&mut self.path, &mut app.navigation_state.current_path);
+        std::mem::swap(
+            &mut self.current_folder_modified_hint,
+            &mut app.current_folder_modified_hint,
+        );
+        std::mem::swap(
+            &mut self.current_folder_created_hint,
+            &mut app.current_folder_created_hint,
+        );
         std::mem::swap(&mut self.path_input, &mut app.navigation_state.path_input);
         std::mem::swap(
             &mut self.is_computer_view,

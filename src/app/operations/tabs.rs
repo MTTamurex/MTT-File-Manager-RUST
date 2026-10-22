@@ -50,6 +50,8 @@ impl ImageViewerApp {
             let active = self.tab_manager.active_mut();
             let panel_tabs = active.dual_panel_tabs.clone();
             self.navigation_state.current_path = active.path.clone();
+            self.current_folder_modified_hint = active.current_folder_modified_hint.clone();
+            self.current_folder_created_hint = active.current_folder_created_hint.clone();
             self.navigation_state.path_input = active.path_input.clone();
             self.navigation_state.is_computer_view = active.is_computer_view;
             self.navigation_state.is_recycle_bin_view = active.is_recycle_bin_view;
