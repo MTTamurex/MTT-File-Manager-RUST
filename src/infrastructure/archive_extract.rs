@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::domain::file_entry::{ends_with_ignore_case, split_archive_path};
 
+#[cfg(test)]
+mod tests;
+
 const MAX_EXTRACTED_ENTRY_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_TOTAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_RAR_IN_MEMORY_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;

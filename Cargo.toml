@@ -77,7 +77,7 @@ zip = "2"                   # Native ZIP extraction fallback when Shell fails
 sevenz-rust = "0.6"         # Native 7z extraction fallback when Shell fails
 sevenz-rust2 = { version = "0.20", default-features = false, features = ["compress"] } # 7z creation: optimized lzma-rust2 encoder
 unrar = "0.5"               # Native RAR extraction (statically links unrar C++ source)
-tar = "0.4"                 # Native TAR archive reading
+tar = "0.4.46"              # Native TAR archive reading
 flate2 = "1"                # Gzip decompression for .tar.gz / .tgz
 bzip2 = "0.5"               # Bzip2 decompression for .tar.bz2 / .tbz2
 xz2 = "0.1"                 # XZ/LZMA decompression for .tar.xz / .txz
