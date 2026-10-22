@@ -62,6 +62,11 @@ impl ImageViewerApp {
         let sort_mode = self.sort_mode;
         let sort_descending = self.sort_descending;
         let folders_position = self.folders_position;
+        // Resolve while the source listing/selection is still available: the new
+        // tab has no items and its destination may never have been visited.
+        let destination_path = std::path::Path::new(path);
+        let modified_hint = self.resolve_destination_folder_modified_hint(destination_path);
+        let created_hint = self.resolve_destination_folder_created_hint(destination_path);
         if !self.tab_manager.new_tab_at(path) {
             return;
         }
@@ -70,6 +75,8 @@ impl ImageViewerApp {
         active.sort_mode = sort_mode;
         active.sort_descending = sort_descending;
         active.folders_position = folders_position;
+        active.current_folder_modified_hint = modified_hint;
+        active.current_folder_created_hint = created_hint;
         self.sync_from_tab();
         // sync_from_tab already prepares Computer/tag views and starts regular
         // folder loads. An empty Recycle Bin tab needs its own virtual listing.

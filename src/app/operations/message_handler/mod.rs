@@ -23,6 +23,7 @@ macro_rules! debug_log {
 mod dual_panel_events;
 mod file_op_events;
 mod file_op_sizes;
+mod folder_timestamps;
 mod global_search_events;
 mod google_drive_events;
 mod helpers;
@@ -233,20 +234,11 @@ impl ImageViewerApp {
         // GLOBAL SEARCH: Process search results from worker
         self.process_global_search_events(true);
 
-        // FOLDER METADATA: Resolve timestamps for sidebar-navigated folders (Quick Access, Cloud Drives)
+        // Results may arrive after switching tabs or panes. Keep their owners
+        // updated rather than discarding metadata for an inactive folder.
         while let Ok((path, modified, created)) = self.folder_meta_resolve_rx.try_recv() {
-            // Only apply if user is still viewing the same folder
-            if Path::new(&self.navigation_state.current_path) == path.as_path() {
-                if modified > 0 {
-                    self.current_folder_modified_hint = Some((path.clone(), modified));
-                    self.folder_modified_hints.put(path.clone(), modified);
-                }
-                if let Some(c) = created.filter(|&c| c > 0) {
-                    self.current_folder_created_hint = Some((path.clone(), c));
-                    self.folder_created_hints.put(path, c);
-                }
-                ctx.request_repaint();
-            }
+            self.apply_resolved_folder_timestamps(&path, modified, created);
+            ctx.request_repaint();
         }
 
         // PERF: Log detailed breakdown when process_incoming_messages is slow

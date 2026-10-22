@@ -12,12 +12,10 @@ impl ImageViewerApp {
 
         snapshot.path_input = path.clone();
         snapshot.path = path.clone();
-        snapshot.current_folder_modified_hint = snapshot
-            .current_folder_modified_hint
-            .filter(|(folder, _)| folder == std::path::Path::new(&path));
-        snapshot.current_folder_created_hint = snapshot
-            .current_folder_created_hint
-            .filter(|(folder, _)| folder == std::path::Path::new(&path));
+        snapshot.current_folder_modified_hint =
+            self.resolve_destination_folder_modified_hint(std::path::Path::new(&path));
+        snapshot.current_folder_created_hint =
+            self.resolve_destination_folder_created_hint(std::path::Path::new(&path));
         snapshot.is_computer_view = path == crate::domain::special_paths::COMPUTER_VIEW_ID;
         snapshot.is_recycle_bin_view = path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
         snapshot.navigation = NavigationHistory::new(path);
@@ -118,6 +116,7 @@ impl ImageViewerApp {
         snapshot.restore_from_storage();
         snapshot.is_loading_folder = false;
         snapshot.apply_to(self);
+        self.spawn_folder_meta_resolve_if_needed(&restored_path_buf, &restored_path);
         self.sync_thumbnail_generation_gate();
         self.visible_group_paths.clear();
 
@@ -227,6 +226,15 @@ impl ImageViewerApp {
             return false;
         }
 
+        // The destination can belong to the other pane. Capture its source
+        // metadata before changing focus and replacing the source listing.
+        let source_hints = target_path.map(|path| {
+            let path = std::path::Path::new(path);
+            (
+                self.resolve_destination_folder_modified_hint(path),
+                self.resolve_destination_folder_created_hint(path),
+            )
+        });
         self.sync_to_tab();
         self.focus_panel_for_tab_action(panel);
 
@@ -248,7 +256,12 @@ impl ImageViewerApp {
                 &self.tab_preferences.custom_path,
             )
         });
-        let snapshot = self.new_panel_tab_snapshot(&path);
+        let mut snapshot = self.new_panel_tab_snapshot(&path);
+        if let Some((modified, created)) = source_hints {
+            snapshot.current_folder_modified_hint =
+                modified.or(snapshot.current_folder_modified_hint);
+            snapshot.current_folder_created_hint = created.or(snapshot.current_folder_created_hint);
+        }
         let index = {
             let tabs = self
                 .tab_manager

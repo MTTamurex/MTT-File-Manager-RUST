@@ -2,6 +2,7 @@
 //!
 //! This module handles history based navigation and switching to special views.
 
+mod folder_timestamps;
 pub mod keyboard;
 pub mod selection;
 
@@ -32,70 +33,42 @@ impl ImageViewerApp {
         }
     }
 
-    fn resolve_destination_folder_modified_hint(
+    pub(crate) fn resolve_destination_folder_modified_hint(
         &self,
         destination_path: &Path,
     ) -> Option<(PathBuf, u64)> {
-        self.items
-            .iter()
-            .find(|item| item.is_dir && item.path == destination_path && item.modified > 0)
-            .map(|item| (item.path.clone(), item.modified))
-            .or_else(|| {
-                self.selected_file.as_ref().and_then(|selected| {
-                    if selected.is_dir && selected.path == destination_path && selected.modified > 0
-                    {
-                        Some((selected.path.clone(), selected.modified))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .or_else(|| {
-                self.folder_modified_hints
-                    .peek(destination_path)
-                    .copied()
-                    .filter(|modified| *modified > 0)
-                    .map(|modified| (destination_path.to_path_buf(), modified))
-            })
+        folder_timestamps::resolve_modified_hint(
+            destination_path,
+            &self.items,
+            self.selected_file.as_ref(),
+            self.current_folder_modified_hint.as_ref(),
+            self.folder_modified_hints.peek(destination_path).copied(),
+        )
     }
 
-    fn resolve_destination_folder_created_hint(
+    pub(crate) fn resolve_destination_folder_created_hint(
         &self,
         destination_path: &Path,
     ) -> Option<(PathBuf, u64)> {
-        self.items
-            .iter()
-            .find(|item| item.is_dir && item.path == destination_path)
-            .and_then(|item| item.created.map(|created| (item.path.clone(), created)))
-            .filter(|(_, created)| *created > 0)
-            .or_else(|| {
-                self.selected_file.as_ref().and_then(|selected| {
-                    if selected.is_dir && selected.path == destination_path {
-                        selected
-                            .created
-                            .map(|created| (selected.path.clone(), created))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .filter(|(_, created)| *created > 0)
-            .or_else(|| {
-                self.folder_created_hints
-                    .peek(destination_path)
-                    .copied()
-                    .filter(|created| *created > 0)
-                    .map(|created| (destination_path.to_path_buf(), created))
-            })
+        folder_timestamps::resolve_created_hint(
+            destination_path,
+            &self.items,
+            self.selected_file.as_ref(),
+            self.current_folder_created_hint.as_ref(),
+            self.folder_created_hints.peek(destination_path).copied(),
+        )
     }
 
     /// Spawns a background thread to read folder metadata when no cached timestamp
     /// exists (e.g. first visit to a Quick Access or Cloud Drive folder).
     /// The result is sent back via `folder_meta_resolve_rx` and applied in
     /// `process_incoming_messages` without blocking the UI thread.
-    fn spawn_folder_meta_resolve_if_needed(&self, dest_path: &Path, path_str: &str) {
-        if self.current_folder_modified_hint.is_some()
-            || is_virtual_path(path_str)
+    pub(crate) fn spawn_folder_meta_resolve_if_needed(&self, dest_path: &Path, path_str: &str) {
+        if !folder_timestamps::needs_resolution(
+            dest_path,
+            self.current_folder_modified_hint.as_ref(),
+            self.current_folder_created_hint.as_ref(),
+        ) || is_virtual_path(path_str)
             || crate::infrastructure::io_priority::is_network_or_virtual(dest_path)
         {
             return;
