@@ -273,6 +273,8 @@ fn render_row(
     let is_focused = ctx.selected_file.is_some_and(|p| p == item.path.as_path());
     let dim = if item.is_hidden { 0.5 } else { 1.0 };
 
+    crate::ui::list_stripes::paint(ui, row_rect, index);
+
     if is_navigation_child && !is_selected {
         ui.painter()
             .rect_filled(row_rect, 0.0, theme::selection_hover_color(ui.ctx()));

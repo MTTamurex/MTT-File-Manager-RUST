@@ -432,6 +432,8 @@ settings:
   theme_light: "Light"
   themes: "Themes"
   folder_colors: "Folder Colors"
+  file_lists: "File lists"
+  alternating_row_colors: "Alternate row colors"
   folder_original: "Original"
   folder_pastel_yellow: "Pastel yellow"
   folder_blue_gray: "Blue gray"

@@ -432,6 +432,8 @@ settings:
   theme_light: "浅色"
   themes: "主题"
   folder_colors: "文件夹颜色"
+  file_lists: "文件列表"
+  alternating_row_colors: "交替行颜色"
   folder_original: "原始"
   folder_pastel_yellow: "粉彩黄"
   folder_blue_gray: "灰蓝色"

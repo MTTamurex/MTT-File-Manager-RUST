@@ -432,6 +432,8 @@ settings:
   theme_light: "Светлая"
   themes: "Темы"
   folder_colors: "Цвета папок"
+  file_lists: "Списки файлов"
+  alternating_row_colors: "Чередовать цвета строк"
   folder_original: "Исходный"
   folder_pastel_yellow: "Пастельный жёлтый"
   folder_blue_gray: "Серо-голубой"

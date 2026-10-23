@@ -15,6 +15,7 @@ pub mod global_search_overlay;
 
 pub mod icon_loader;
 pub(crate) mod interface_scale;
+pub(crate) mod list_stripes;
 pub mod navigation;
 pub(crate) mod new_tab_request;
 pub mod preview_panel;

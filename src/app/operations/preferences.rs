@@ -381,6 +381,10 @@ impl ImageViewerApp {
         let theme_str = self.theme_mode.preference();
         prefs.push(("theme_mode", theme_str.to_string()));
         prefs.push((
+            crate::ui::list_stripes::PREFERENCE_KEY,
+            self.list_stripes_enabled.to_string(),
+        ));
+        prefs.push((
             crate::domain::folder_appearance::FolderAppearance::PREFERENCE_KEY,
             self.folder_appearance.preference().to_string(),
         ));

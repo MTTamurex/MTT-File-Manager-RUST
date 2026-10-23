@@ -399,6 +399,7 @@ fn render_grouped_virtualized(
                 render_list_item(
                     child_ui,
                     index,
+                    position,
                     item,
                     item_rect,
                     ctx,
@@ -468,6 +469,7 @@ fn render_regular_virtualized(
 
         render_list_item(
             child_ui,
+            i,
             i,
             item,
             item_rect,

@@ -46,6 +46,7 @@ pub(super) fn render_visible_columns(
             render_column_item(
                 &mut child_ui,
                 index,
+                row,
                 rect,
                 ctx,
                 ops,
@@ -115,6 +116,7 @@ pub(super) fn render_grouped_columns(
                 render_column_item(
                     &mut child_ui,
                     item_index,
+                    row,
                     rect,
                     ctx,
                     ops,
@@ -134,6 +136,7 @@ pub(super) fn render_grouped_columns(
 fn render_column_item(
     ui: &mut Ui,
     index: usize,
+    stripe_row: usize,
     rect: Rect,
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
@@ -242,6 +245,8 @@ fn render_column_item(
         let is_focused = ctx.selected_item == Some(index);
         let accent = crate::ui::theme::accent_color(ui.ctx());
         let visual_rect = rect.shrink2(egui::vec2(2.0, 0.0));
+
+        crate::ui::list_stripes::paint(ui, visual_rect, stripe_row);
 
         if is_selected {
             ui.painter().rect_stroke(

@@ -92,6 +92,7 @@ pub(crate) fn prepare_list_item_resources(
 pub(super) fn render_list_item(
     ui: &mut Ui,
     i: usize,
+    stripe_row: usize,
     item: &FileEntry,
     rect: Rect,
     ctx: &mut ListViewContext,
@@ -209,6 +210,8 @@ pub(super) fn render_list_item(
         // ADJUST RECT TO AVOID SCROLLBAR OVERLAP
         let mut visual_rect = rect;
         visual_rect.max.x -= 8.0;
+
+        crate::ui::list_stripes::paint(ui, visual_rect, stripe_row);
 
         if is_selected {
             // Selected: Bold primary border

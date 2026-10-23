@@ -11,6 +11,16 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         &t!("settings.appearance_description"),
     );
     let changed = render_theme_settings(ui, &mut app.theme_mode);
+    settings_ui::subsection_header(ui, &t!("settings.file_lists"), "");
+    if settings_ui::toggle_row(
+        ui,
+        &t!("settings.alternating_row_colors"),
+        &mut app.list_stripes_enabled,
+    ) {
+        crate::ui::list_stripes::remember(ui.ctx(), app.list_stripes_enabled);
+        app.save_preferences();
+        app.force_save_preferences();
+    }
     let previous = app.folder_appearance;
     render_folder_appearance(ui, &mut app.folder_appearance);
     if previous != app.folder_appearance {
