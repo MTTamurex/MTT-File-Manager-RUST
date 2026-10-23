@@ -13,6 +13,46 @@ const BATCH_SIZE: usize = 16;
 
 mod worker;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadLane {
+    Local,
+    Virtual,
+}
+
+/// A stalled virtual filesystem must not hold up metadata for local folders.
+/// Each lane keeps the same bounded, coalesced single-worker policy.
+#[derive(Default)]
+pub(crate) struct FolderTimestampQueues {
+    local: FolderTimestampState,
+    virtual_drives: FolderTimestampState,
+}
+
+impl FolderTimestampQueues {
+    pub(crate) fn request(
+        &mut self,
+        path: &Path,
+        reason: RefreshReason,
+        now: Instant,
+        lane: ReadLane,
+    ) -> bool {
+        match lane {
+            ReadLane::Local => &mut self.local,
+            ReadLane::Virtual => &mut self.virtual_drives,
+        }
+        .request(path, reason, now)
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        ctx: &egui::Context,
+        now: Instant,
+    ) -> Vec<(PathBuf, FolderDates)> {
+        let mut dates = self.local.poll(ctx, now);
+        dates.extend(self.virtual_drives.poll(ctx, now));
+        dates
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RefreshReason {
     Missing,
@@ -207,3 +247,6 @@ mod tests;
 
 #[cfg(test)]
 mod review_tests;
+
+#[cfg(test)]
+mod queue_tests;

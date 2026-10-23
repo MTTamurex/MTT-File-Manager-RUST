@@ -1,23 +1,37 @@
 //! Refresh policy: missing navigation dates, debounced filesystem events, and F5.
-use crate::app::folder_timestamp_state::RefreshReason;
+use crate::app::folder_timestamp_state::{ReadLane, RefreshReason};
 use crate::app::ImageViewerApp;
 use crate::domain::file_tag::normalize_tag_path_key;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-fn query_allowed(path: &Path, remote_or_virtual: impl FnOnce(&Path) -> bool) -> bool {
+fn query_lane(
+    path: &Path,
+    remote_drive: impl FnOnce(&Path) -> bool,
+    virtual_drive: impl FnOnce(&Path) -> bool,
+) -> Option<ReadLane> {
     let text = path.to_string_lossy();
     // The generic drive filter treats every leading double backslash as UNC.
     // Strip only the extended *drive* prefix for that check; never reinterpret
     // UNC, device or volume namespaces as local drive paths.
     let drive_path = text.strip_prefix(r"\\?\").unwrap_or(&text);
     let bytes = drive_path.as_bytes();
-    bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'\\' | b'/')
-        && !remote_or_virtual(Path::new(drive_path))
+    if bytes.len() < 3
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || !matches!(bytes[2], b'\\' | b'/')
+    {
+        return None;
+    }
+    let drive_path = Path::new(drive_path);
+    if virtual_drive(drive_path) {
+        Some(ReadLane::Virtual)
+    } else if !remote_drive(drive_path) {
+        Some(ReadLane::Local)
+    } else {
+        None
+    }
 }
 
 fn changed_targets(paths: &[PathBuf], known: &HashMap<String, PathBuf>) -> Vec<PathBuf> {
@@ -41,10 +55,26 @@ impl ImageViewerApp {
         path: &Path,
         reason: RefreshReason,
     ) {
-        if query_allowed(
+        let Some(lane) = query_lane(
             path,
-            crate::infrastructure::io_priority::is_network_or_virtual,
-        ) && self.folder_timestamps.request(path, reason, Instant::now())
+            |candidate| {
+                use crate::infrastructure::windows::{detect_drive_type, DriveType};
+                // query_lane already validated an absolute drive-letter path.
+                // Check only its drive type here; do not probe virtual markers
+                // a second time through is_network_or_virtual.
+                let text = candidate.to_string_lossy();
+                matches!(
+                    detect_drive_type(&text[..2]),
+                    DriveType::Remote | DriveType::Unknown
+                )
+            },
+            crate::infrastructure::io_priority::is_virtual_drive_path,
+        ) else {
+            return;
+        };
+        if self
+            .folder_timestamps
+            .request(path, reason, Instant::now(), lane)
         {
             self.ui_ctx.request_repaint();
         }
@@ -119,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn virtual_relative_and_remote_paths_are_not_queried() {
+    fn namespace_relative_and_network_paths_are_not_queried() {
         for path in [
             "",
             "::computer::",
@@ -132,21 +162,32 @@ mod tests {
             r"\\.\C:\Folder",
             r"\\?\Volume{00000000-0000-0000-0000-000000000000}\Folder",
         ] {
-            assert!(!query_allowed(Path::new(path), |_| panic!(
-                "must reject before drive lookup"
-            )));
+            assert!(query_lane(
+                Path::new(path),
+                |_| panic!("must reject before drive lookup"),
+                |_| panic!("must reject before virtual drive lookup"),
+            )
+            .is_none());
         }
         for path in [r"\\server\share\Folder", r"Z:\Folder"] {
-            assert!(!query_allowed(Path::new(path), |_| true));
+            assert!(query_lane(Path::new(path), |_| true, |_| false).is_none());
         }
-        assert!(query_allowed(Path::new(r"C:\Folder"), |_| false));
+        assert_eq!(
+            query_lane(Path::new(r"C:\Folder"), |_| false, |_| false),
+            Some(ReadLane::Local)
+        );
     }
 
     #[test]
     fn extended_local_alias_is_checked_as_a_drive_path_not_as_a_network_share() {
-        assert!(query_allowed(Path::new(r"\\?\C:\Folder"), |candidate| {
-            candidate.to_string_lossy().starts_with(r"\\")
-        }));
+        assert_eq!(
+            query_lane(
+                Path::new(r"\\?\C:\Folder"),
+                |candidate| { candidate.to_string_lossy().starts_with(r"\\") },
+                |_| false
+            ),
+            Some(ReadLane::Local)
+        );
     }
 
     #[test]
@@ -154,6 +195,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let child = dir.path().join("folder.zip").join("Child");
         std::fs::create_dir_all(&child).unwrap();
-        assert!(query_allowed(&child, |_| false));
+        assert_eq!(
+            query_lane(&child, |_| false, |_| false),
+            Some(ReadLane::Local)
+        );
+    }
+
+    #[test]
+    fn cryptomator_drive_uses_isolated_lane_instead_of_being_rejected() {
+        for path in [r"Z:\Folder", r"\\?\Z:\Folder"] {
+            assert_eq!(
+                query_lane(
+                    Path::new(path),
+                    |_| true,
+                    |candidate| {
+                        assert_eq!(candidate, Path::new(r"Z:\Folder"));
+                        true
+                    }
+                ),
+                Some(ReadLane::Virtual)
+            );
+        }
     }
 }

@@ -230,8 +230,8 @@ pub struct ImageViewerApp {
     pub folder_modified_hints: lru::LruCache<PathBuf, u64>,
     /// Cache of known folder creation timestamps by folder path.
     pub folder_created_hints: lru::LruCache<PathBuf, u64>,
-    /// Coalesced metadata resolution for navigation, watcher events and F5.
-    pub(crate) folder_timestamps: crate::app::folder_timestamp_state::FolderTimestampState,
+    /// Coalesced metadata resolution with isolated local/virtual worker queues.
+    pub(crate) folder_timestamps: crate::app::folder_timestamp_state::FolderTimestampQueues,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---
