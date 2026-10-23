@@ -8,7 +8,7 @@ pub(crate) fn tab_icon_style(
     tag_definitions: &FxHashMap<i64, FileTag>,
 ) -> (&'static str, [u8; 4]) {
     if let Some(tag) = tag_id_from_view_path(path).and_then(|id| tag_definitions.get(&id)) {
-        return ("folder_filled", tag.color.to_color32().to_array());
+        return ("tag", tag.color.to_color32().to_array());
     }
 
     let name = if path == COMPUTER_VIEW_ID {

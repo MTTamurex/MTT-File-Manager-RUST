@@ -159,7 +159,19 @@ pub(super) fn render_tabs(
             icon_loader.get_or_load_folder_navigation_icon(ui.ctx(), &tab.path)
         };
 
-        if let Some(texture) = native_icon {
+        if icon_name == "tag" {
+            crate::ui::tag_icon::paint_filled(
+                ui.painter(),
+                icon_rect.center(),
+                icon_size,
+                Color32::from_rgba_unmultiplied(
+                    icon_color[0],
+                    icon_color[1],
+                    icon_color[2],
+                    icon_color[3],
+                ),
+            );
+        } else if let Some(texture) = native_icon {
             ui.painter().image(
                 texture.id(),
                 icon_rect,
@@ -349,20 +361,10 @@ pub(super) fn render_tabs(
                 &context_response,
                 tab.pinned,
                 tab_manager.can_add_tab(),
-                !close_candidates(
-                    &tab_manager.tabs,
-                    idx,
-                    TabAction::CloseLeft,
-                    |t| t.pinned,
-                )
-                .is_empty(),
-                !close_candidates(
-                    &tab_manager.tabs,
-                    idx,
-                    TabAction::CloseRight,
-                    |t| t.pinned,
-                )
-                .is_empty(),
+                !close_candidates(&tab_manager.tabs, idx, TabAction::CloseLeft, |t| t.pinned)
+                    .is_empty(),
+                !close_candidates(&tab_manager.tabs, idx, TabAction::CloseRight, |t| t.pinned)
+                    .is_empty(),
                 crate::tabs::quick_access::tab_quick_access_action(
                     if is_active { live_path } else { &tab.path },
                     pinned_folders,

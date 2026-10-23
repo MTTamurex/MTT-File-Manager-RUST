@@ -64,7 +64,7 @@ mod tests {
     use rustc_hash::FxHashMap;
 
     #[test]
-    fn tag_tabs_use_filled_icons_in_the_current_tag_color() {
+    fn tag_tabs_use_tag_icons_in_the_current_tag_color() {
         let mut tags = FxHashMap::default();
         let path = tag_view_path(1);
         for color in TagColor::expanded_palette() {
@@ -80,7 +80,7 @@ mod tests {
             for selected in [false, true] {
                 assert_eq!(
                     tab_icon_style(&path, selected, &tags),
-                    ("folder_filled", color.to_color32().to_array())
+                    ("tag", color.to_color32().to_array())
                 );
             }
         }

@@ -206,7 +206,19 @@ pub(super) fn render_panel_tab_bar(
                                         icon_loader
                                             .get_or_load_folder_navigation_icon(ui.ctx(), path)
                                     };
-                                if let Some(texture) = native_icon {
+                                if icon_name == "tag" {
+                                    crate::ui::tag_icon::paint_filled(
+                                        ui.painter(),
+                                        icon_rect.center(),
+                                        icon_size,
+                                        egui::Color32::from_rgba_unmultiplied(
+                                            icon_color[0],
+                                            icon_color[1],
+                                            icon_color[2],
+                                            icon_color[3],
+                                        ),
+                                    );
+                                } else if let Some(texture) = native_icon {
                                     ui.painter().image(
                                         texture.id(),
                                         icon_rect,
