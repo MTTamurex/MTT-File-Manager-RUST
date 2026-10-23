@@ -92,6 +92,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                 app.renaming_state.is_some(),
                 app.cache_manager.computer_icon.as_ref(),
                 &mut app.svg_icon_manager,
+                &app.shortcuts,
             );
 
             if let Some(act) = action {

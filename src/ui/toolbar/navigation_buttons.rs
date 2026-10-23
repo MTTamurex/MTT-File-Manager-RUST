@@ -1,4 +1,5 @@
 use super::{theme, widgets, SvgIconManager, ToolbarAction};
+use crate::app::shortcuts::{ShortcutAction, ShortcutBindings};
 use eframe::egui;
 use rust_i18n::t;
 
@@ -7,28 +8,33 @@ pub(super) fn render(
     svg_manager: &mut SvgIconManager,
     available: [bool; 3],
     is_renaming: bool,
+    shortcuts: &ShortcutBindings,
 ) -> Option<ToolbarAction> {
     let mut action = None;
-    for (enabled, icon, tooltip, command) in [
+    for (enabled, icon, tooltip, command, shortcut) in [
         (
             available[0],
             theme::ICON_ARROW_LEFT,
             t!("toolbar.back"),
             ToolbarAction::GoBack,
+            ShortcutAction::GoBack,
         ),
         (
             available[1],
             theme::ICON_ARROW_RIGHT,
             t!("toolbar.forward"),
             ToolbarAction::GoForward,
+            ShortcutAction::GoForward,
         ),
         (
             available[2],
             theme::ICON_ARROW_UP,
             t!("toolbar.up"),
             ToolbarAction::GoUp,
+            ShortcutAction::GoUp,
         ),
     ] {
+        let tooltip = navigation_tooltip(&tooltip, shortcuts, shortcut);
         let response = ui
             .add_enabled_ui(enabled && !is_renaming, |ui| {
                 widgets::icon_button(ui, svg_manager, icon, &tooltip, None)
@@ -41,9 +47,42 @@ pub(super) fn render(
     action
 }
 
+fn navigation_tooltip(label: &str, shortcuts: &ShortcutBindings, action: ShortcutAction) -> String {
+    format!("{} ({})", label, shortcuts.label(action))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_tooltips_follow_configured_shortcuts() {
+        use crate::app::shortcuts::ShortcutBinding;
+
+        for (label, action) in [
+            ("Back", ShortcutAction::GoBack),
+            ("Forward", ShortcutAction::GoForward),
+            ("Up", ShortcutAction::GoUp),
+        ] {
+            let mut shortcuts = ShortcutBindings::default();
+            assert_eq!(
+                navigation_tooltip(label, &shortcuts, action),
+                format!("{} ({})", label, action.default_binding())
+            );
+            let custom = ShortcutBinding::plain(egui::Key::Backspace);
+            assert!(shortcuts.validate_candidate(action, custom).is_ok());
+            shortcuts.set(action, custom);
+            assert_eq!(
+                navigation_tooltip(label, &shortcuts, action),
+                format!("{} (Backspace)", label)
+            );
+            shortcuts.reset(action).unwrap();
+            assert_eq!(
+                navigation_tooltip(label, &shortcuts, action),
+                format!("{} ({})", label, action.default_binding())
+            );
+        }
+    }
 
     #[test]
     fn disabled_navigation_buttons_never_emit_actions() {
@@ -65,7 +104,13 @@ mod tests {
                                         size * 0.5,
                                     ),
                             );
-                            if let Some(command) = render(ui, &mut svg, available, renaming) {
+                            if let Some(command) = render(
+                                ui,
+                                &mut svg,
+                                available,
+                                renaming,
+                                &ShortcutBindings::default(),
+                            ) {
                                 action = Some(command);
                             }
                         });

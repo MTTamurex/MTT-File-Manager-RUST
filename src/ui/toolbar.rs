@@ -168,6 +168,7 @@ pub fn render_toolbar(
     _is_renaming: bool,
     computer_icon: Option<&egui::TextureHandle>,
     svg_manager: &mut SvgIconManager,
+    shortcuts: &crate::app::shortcuts::ShortcutBindings,
 ) -> Option<ToolbarAction> {
     let mut action = None;
 
@@ -179,6 +180,7 @@ pub fn render_toolbar(
             svg_manager,
             [can_go_back, can_go_forward, can_go_up],
             _is_renaming,
+            shortcuts,
         );
 
         if widgets::icon_button(
@@ -930,6 +932,7 @@ mod tests {
                         false,
                         None,
                         svg_manager,
+                        &crate::app::shortcuts::ShortcutBindings::default(),
                     );
                 },
             );
