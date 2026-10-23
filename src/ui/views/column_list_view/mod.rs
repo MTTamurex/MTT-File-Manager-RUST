@@ -4,7 +4,12 @@ mod scroll;
 
 use eframe::egui::{self, Rect, Sense, Ui};
 
-use self::geometry::{calculate_grouped_layout, calculate_layout, COLUMN_WIDTH, ROW_HEIGHT};
+use self::geometry::header_height;
+use self::geometry::{calculate_grouped_layout, calculate_layout, COLUMN_WIDTH};
+pub use self::geometry::{
+    column_list_grouped_rows, column_list_grouped_rows_for_counts, column_list_rows,
+    column_list_visible_columns,
+};
 use self::item_renderer::{render_grouped_columns, render_visible_columns};
 use super::list_view::{ListViewAction, ListViewContext, ListViewOperations};
 use super::rectangle_selection::{
@@ -12,42 +17,6 @@ use super::rectangle_selection::{
     GroupedRectangleMetrics, GroupedRectangleSection, RectangleSelectionMetrics,
     RectangleSelectionView,
 };
-const COMPUTER_HEADER_HEIGHT: f32 = 28.0;
-
-pub fn column_list_rows(item_count: usize, available_width: f32, available_height: f32) -> usize {
-    calculate_layout(item_count, available_width, available_height).rows_per_column
-}
-
-pub fn column_list_grouped_rows(
-    local_count: usize,
-    network_count: usize,
-    available_width: f32,
-    available_height: f32,
-) -> usize {
-    calculate_grouped_layout(
-        &[local_count, network_count],
-        available_width,
-        (available_height - COMPUTER_HEADER_HEIGHT).max(0.0),
-    )
-    .rows_per_column
-}
-
-pub fn column_list_grouped_rows_for_counts(
-    group_counts: &[usize],
-    available_width: f32,
-    available_height: f32,
-) -> usize {
-    calculate_grouped_layout(
-        group_counts,
-        available_width,
-        (available_height - COMPUTER_HEADER_HEIGHT).max(0.0),
-    )
-    .rows_per_column
-}
-
-pub fn column_list_visible_columns(available_width: f32) -> usize {
-    (available_width / COLUMN_WIDTH).floor().max(1.0) as usize
-}
 
 pub fn render_column_list_view(
     ui: &mut Ui,
@@ -64,7 +33,8 @@ pub fn render_column_list_view(
     let available_rect = ui.available_rect_before_wrap();
     ctx.visible_group_paths.clear();
     let grouped = ctx.group_projection.is_grouped() && !ctx.compact;
-    let header_height = if grouped { COMPUTER_HEADER_HEIGHT } else { 0.0 };
+    let header_height = if grouped { header_height(ui) } else { 0.0 };
+    let row_height = geometry::row_height(ui);
     let layout_height = (available_rect.height() - header_height).max(0.0);
     let group_counts: Vec<usize> = ctx
         .group_projection
@@ -79,9 +49,19 @@ pub fn render_column_list_view(
         })
         .collect();
     let layout = if grouped {
-        calculate_grouped_layout(&group_counts, available_rect.width(), layout_height)
+        calculate_grouped_layout(
+            &group_counts,
+            available_rect.width(),
+            layout_height,
+            row_height,
+        )
     } else {
-        calculate_layout(ctx.items.len(), available_rect.width(), layout_height)
+        calculate_layout(
+            ctx.items.len(),
+            available_rect.width(),
+            layout_height,
+            row_height,
+        )
     };
     let viewport_rect = Rect::from_min_max(
         available_rect.min,
@@ -137,10 +117,11 @@ pub fn render_column_list_view(
     } else if grouped && rectangle_geometry_needed {
         Some(RectangleSelectionMetrics::Grouped(
             grouped_column_rectangle_metrics(
+                ui,
                 ctx,
                 layout.rows_per_column,
                 layout.content_width,
-                header_height + layout.rows_per_column as f32 * ROW_HEIGHT,
+                header_height + layout.rows_per_column as f32 * row_height,
             ),
         ))
     } else if !grouped {
@@ -149,9 +130,9 @@ pub fn render_column_list_view(
                 count: ctx.items.len(),
                 rows_per_column: layout.rows_per_column,
                 column_width: COLUMN_WIDTH,
-                row_height: ROW_HEIGHT,
+                row_height,
                 content_width: layout.content_width,
-                content_height: layout.rows_per_column as f32 * ROW_HEIGHT,
+                content_height: layout.rows_per_column as f32 * row_height,
             },
         ))
     } else {
@@ -203,7 +184,7 @@ pub fn render_column_list_view(
         render_grouped_columns(
             ui,
             viewport_rect,
-            viewport_rect.top() + COMPUTER_HEADER_HEIGHT,
+            viewport_rect.top() + header_height,
             current_scroll,
             layout.rows_per_column,
             &groups,
@@ -234,10 +215,11 @@ pub fn render_column_list_view(
     {
         ctx.rectangle_selection_frame.metrics = Some(RectangleSelectionMetrics::Grouped(
             grouped_column_rectangle_metrics(
+                ui,
                 ctx,
                 layout.rows_per_column,
                 layout.content_width,
-                header_height + layout.rows_per_column as f32 * ROW_HEIGHT,
+                header_height + layout.rows_per_column as f32 * row_height,
             ),
         ));
     }
@@ -272,6 +254,7 @@ pub fn render_column_list_view(
 }
 
 fn grouped_column_rectangle_metrics(
+    ui: &Ui,
     ctx: &ListViewContext,
     rows_per_column: usize,
     content_width: f32,
@@ -286,10 +269,7 @@ fn grouped_column_rectangle_metrics(
         }
         sections.push(GroupedRectangleSection {
             item_indices: section.item_indices.clone(),
-            origin: egui::pos2(
-                group_start_column as f32 * COLUMN_WIDTH,
-                COMPUTER_HEADER_HEIGHT,
-            ),
+            origin: egui::pos2(group_start_column as f32 * COLUMN_WIDTH, header_height(ui)),
         });
         group_start_column += section.item_indices.len().div_ceil(rows_per_column).max(1);
     }
@@ -301,7 +281,7 @@ fn grouped_column_rectangle_metrics(
         layout: GroupedRectangleLayout::ColumnList {
             rows_per_column,
             column_width: COLUMN_WIDTH,
-            row_height: ROW_HEIGHT,
+            row_height: geometry::row_height(ui),
         },
         item_count: ctx.items.len(),
         content_width,
@@ -348,7 +328,7 @@ fn render_group_headers(
                 viewport_rect.left() + start_column as f32 * COLUMN_WIDTH - scroll_x,
                 viewport_rect.top(),
             ),
-            egui::vec2(COLUMN_WIDTH, COMPUTER_HEADER_HEIGHT),
+            egui::vec2(COLUMN_WIDTH, header_height(ui)),
         );
         if rect.intersects(viewport_rect)
             && crate::ui::views::group_header::render_group_header(

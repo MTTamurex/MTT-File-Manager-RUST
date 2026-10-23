@@ -168,9 +168,14 @@ fn viewer_font_cell() -> &'static Arc<Mutex<ViewerFontState>> {
                 let selected = read_pref_readonly(crate::ui::fonts::selection::PREFERENCE_KEY)
                     .unwrap_or_default();
                 if !selected.is_empty() {
-                    fonts = crate::ui::fonts::selection::LoadedFonts::load(fonts, selected)
+                    fonts = crate::ui::fonts::selection::LoadedFonts::load(fonts, selected.clone())
                         .into_definitions();
                 }
+                let scale = read_pref_readonly(&crate::ui::fonts::sizing::preference_key(&selected));
+                crate::ui::fonts::sizing::apply(
+                    &mut fonts,
+                    crate::ui::fonts::sizing::from_preference(scale.as_deref()),
+                );
                 if let Ok(mut state) = thread_cell.lock() {
                     *state = ViewerFontState::Ready(fonts);
                 }

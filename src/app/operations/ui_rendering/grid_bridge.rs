@@ -113,7 +113,7 @@ impl ImageViewerApp {
         // Calculate cols for keyboard navigation
         let padding = 8.0;
         let item_w = self.thumbnail_size;
-        let item_h = self.thumbnail_size + 20.0;
+        let item_h = self.thumbnail_size + crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0);
         let cell_h = item_h + padding;
         let available_w = ui.available_width();
         let cols = ((available_w - padding) / (item_w + padding))

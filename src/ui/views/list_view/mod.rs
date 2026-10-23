@@ -342,7 +342,7 @@ pub fn render_list_view(
             .and_then(|index| ctx.items.get(index))
             .map(|item| item.path.as_path()),
     );
-    let row_height = 24.0;
+    let row_height = crate::ui::fonts::layout::row_height(ui, 24.0, 12.0, 6.0);
     let available_w = ui.available_width();
 
     // Compact Miller columns do not resize the stored detail-view columns.

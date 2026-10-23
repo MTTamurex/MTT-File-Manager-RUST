@@ -88,7 +88,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     } else {
         display_effective_px.max(min_effective_size_for_bucket)
     };
-    let text_height = 18.0;
+    let text_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
@@ -253,7 +253,10 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     if !ctx.is_dense_mode {
         let text_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left(), text_start_y),
-            egui::vec2(rect.width(), 20.0), // Fixed height for text
+            egui::vec2(
+                rect.width(),
+                crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0),
+            ),
         );
         ctx.rename_name_rect = Some(text_rect);
 

@@ -285,7 +285,7 @@ pub fn render_grid_view(
 
     let padding = 8.0;
     let item_w = ctx.thumbnail_size;
-    let item_h = ctx.thumbnail_size + 20.0; // Height: thumb + text
+    let item_h = ctx.thumbnail_size + crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0);
     let available_w = ui.available_width();
     let cols = ((available_w - padding) / (item_w + padding))
         .floor()

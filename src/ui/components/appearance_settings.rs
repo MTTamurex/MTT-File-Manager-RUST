@@ -11,7 +11,7 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         &t!("settings.appearance_description"),
     );
     let changed = render_theme_settings(ui, &mut app.theme_mode);
-    super::font_settings::render(ui);
+    super::font_settings::render(ui, &app.app_state_db);
     settings_ui::subsection_header(ui, &t!("settings.file_lists"), "");
     if settings_ui::toggle_row(
         ui,

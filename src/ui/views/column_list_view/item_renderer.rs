@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Sense, Ui};
 
-use super::geometry::{COLUMN_WIDTH, ROW_HEIGHT};
+use super::geometry::COLUMN_WIDTH;
 use crate::domain::file_entry::FileEntry;
 use crate::ui::views::list_view::item_renderer::prepare_list_item_resources;
 use crate::ui::views::list_view::item_renderer_details::{render_item_icon, render_item_tooltip};
@@ -19,6 +19,7 @@ pub(super) fn render_visible_columns(
     secondary_clicked_item: &mut Option<usize>,
     secondary_clicked_empty_area: &mut bool,
 ) {
+    let row_height = super::geometry::row_height(ui);
     let column_count = ctx.items.len().div_ceil(rows_per_column);
     let first_column = ((scroll_x / COLUMN_WIDTH).floor() as usize).saturating_sub(1);
     let last_column =
@@ -39,9 +40,9 @@ pub(super) fn render_visible_columns(
             let rect = Rect::from_min_size(
                 egui::pos2(
                     viewport_rect.left() + column as f32 * COLUMN_WIDTH - scroll_x,
-                    viewport_rect.top() + row as f32 * ROW_HEIGHT,
+                    viewport_rect.top() + row as f32 * row_height,
                 ),
-                egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
+                egui::vec2(COLUMN_WIDTH, row_height),
             );
             render_column_item(
                 &mut child_ui,
@@ -74,6 +75,7 @@ pub(super) fn render_grouped_columns(
     secondary_clicked_item: &mut Option<usize>,
     secondary_clicked_empty_area: &mut bool,
 ) {
+    let row_height = super::geometry::row_height(ui);
     *ctx.visible_index_range = None;
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
@@ -103,9 +105,9 @@ pub(super) fn render_grouped_columns(
                 let rect = Rect::from_min_size(
                     egui::pos2(
                         viewport_rect.left() + column as f32 * COLUMN_WIDTH - scroll_x,
-                        item_top + row as f32 * ROW_HEIGHT,
+                        item_top + row as f32 * row_height,
                     ),
-                    egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
+                    egui::vec2(COLUMN_WIDTH, row_height),
                 );
                 if child_ui.is_rect_visible(rect) {
                     visible_min = visible_min.min(item_index);
@@ -170,7 +172,7 @@ fn render_column_item(
             rect.min + egui::vec2(24.0 + tag_offset, 2.0),
             egui::vec2(
                 (COLUMN_WIDTH - 32.0 - tag_offset).max(0.0),
-                ROW_HEIGHT - 4.0,
+                rect.height() - 4.0,
             ),
         );
         if !ctx.compact
@@ -329,7 +331,7 @@ fn column_item_content_contains_pointer(
         .width();
     Rect::from_min_size(
         rect.min + egui::vec2(24.0 + tag_offset, 3.0),
-        egui::vec2(text_width.min(max_width), ROW_HEIGHT - 6.0),
+        egui::vec2(text_width.min(max_width), rect.height() - 6.0),
     )
     .expand(3.0)
     .contains(point)
@@ -371,7 +373,7 @@ fn render_column_item_name(
             .unwrap_or_default();
         let edit_rect = Rect::from_min_size(
             rect.min + egui::vec2(24.0 + tag_offset, 2.0),
-            egui::vec2(COLUMN_WIDTH - 32.0 - tag_offset, ROW_HEIGHT - 4.0),
+            egui::vec2(COLUMN_WIDTH - 32.0 - tag_offset, rect.height() - 4.0),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
             let response = ui.add(

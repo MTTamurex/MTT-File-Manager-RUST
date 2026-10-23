@@ -13,7 +13,9 @@ fn fixture(selected: &str) -> (egui::Context, AppStateDb) {
             selected.into(),
             Arc::new(Catalog::from_database(fontdb::Database::new())),
         ),
+        FontSizes::default(),
     );
+    flush_font_updates(&ctx);
     (ctx, db)
 }
 
@@ -52,7 +54,8 @@ fn saved_family_is_loaded_again_at_startup() {
         super::super::catalog::CUSTOM_FONT
     );
     let ctx = egui::Context::default();
-    install(&ctx, loaded);
+    install(&ctx, loaded, FontSizes::default());
+    flush_font_updates(&ctx);
     let _ = ctx.run_ui(Default::default(), |ui| {
         ui.label("Sample text");
     });
@@ -155,6 +158,7 @@ fn complete_preview(ctx: &egui::Context, selected: &str, fonts: egui::FontDefini
 #[test]
 fn preview_changes_rendered_text_but_cancel_restores_without_saving() {
     fn width(ctx: &egui::Context) -> f32 {
+        flush_font_updates(ctx);
         let mut width = 0.0;
         let _ = ctx.run_ui(Default::default(), |ui| {
             width = ui.label("iiiiiiiiiiiiiiii").rect.width();

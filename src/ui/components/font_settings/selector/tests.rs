@@ -1,6 +1,20 @@
 use super::*;
 
 fn frame(ctx: &egui::Context, selected: &str, events: Vec<egui::Event>) -> Output {
+    frame_with_families(
+        ctx,
+        &["Test Font A".into(), "Test Font B".into()],
+        selected,
+        events,
+    )
+}
+
+pub(super) fn frame_with_families(
+    ctx: &egui::Context,
+    families: &[String],
+    selected: &str,
+    events: Vec<egui::Event>,
+) -> Output {
     let mut result = None;
     let _ = ctx.run_ui(
         egui::RawInput {
@@ -9,20 +23,17 @@ fn frame(ctx: &egui::Context, selected: &str, events: Vec<egui::Event>) -> Outpu
                 egui::vec2(900.0, 700.0),
             )),
             events,
+            time: Some(ctx.input(|input| input.time) + 1.0 / 60.0),
             ..Default::default()
         },
         |ui| {
-            result = Some(render(
-                ui,
-                &["Test Font A".into(), "Test Font B".into()],
-                selected,
-            ));
+            result = Some(render(ui, families, selected));
         },
     );
     result.unwrap()
 }
 
-fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+pub(super) fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
     egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
@@ -31,7 +42,7 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
     }
 }
 
-fn key(key: egui::Key) -> Vec<egui::Event> {
+pub(super) fn key(key: egui::Key) -> Vec<egui::Event> {
     [true, false]
         .into_iter()
         .map(|pressed| egui::Event::Key {

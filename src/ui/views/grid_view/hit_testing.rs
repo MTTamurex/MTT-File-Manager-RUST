@@ -14,7 +14,7 @@ pub(super) fn grid_item_content_contains(
     }
 
     if item.drive_info.is_some() {
-        return grid_drive_content_contains(rect, ctx.thumbnail_size, point);
+        return grid_drive_content_contains(ui, rect, ctx.thumbnail_size, point);
     }
     if item.is_dir && !item.is_archive() {
         return grid_folder_content_contains(ui, item, rect, ctx, point);
@@ -32,7 +32,7 @@ fn grid_file_content_contains(
     let available_h = rect.height();
     let available_w = rect.width();
     let thumb_size = (ctx.thumbnail_size - 6.0).min(available_w - 4.0).max(1.0);
-    let text_height = 18.0;
+    let text_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
     let content_h = thumb_size + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
     let x_offset = (available_w - thumb_size) / 2.0;
@@ -53,7 +53,10 @@ fn grid_file_content_contains(
 
     let text_rect = Rect::from_min_size(
         egui::pos2(rect.left(), thumb_rect.bottom() + 4.0),
-        egui::vec2(rect.width(), 20.0),
+        egui::vec2(
+            rect.width(),
+            crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0),
+        ),
     );
 
     visual_rect.expand(2.0).contains(point)
@@ -71,7 +74,7 @@ fn grid_folder_content_contains(
     let available_h = rect.height();
     let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
-    let text_height = 18.0;
+    let text_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
     let x_offset = (rect.width() - folder_w) / 2.0;
@@ -92,7 +95,10 @@ fn grid_folder_content_contains(
 
     let text_rect = Rect::from_min_size(
         egui::pos2(rect.left(), folder_rect.bottom() + 6.0),
-        egui::vec2(rect.width(), 20.0),
+        egui::vec2(
+            rect.width(),
+            crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0),
+        ),
     );
     let display_name = crate::ui::components::item_slot::display_name_for_item(item);
 
@@ -124,12 +130,18 @@ fn grid_text_contains(
         .contains(point)
 }
 
-fn grid_drive_content_contains(rect: Rect, thumbnail_size: f32, point: Pos2) -> bool {
+fn grid_drive_content_contains(
+    ui: &egui::Ui,
+    rect: Rect,
+    thumbnail_size: f32,
+    point: Pos2,
+) -> bool {
     let available_h = rect.height();
     let available_w = rect.width();
     let icon_size = (thumbnail_size * 0.4).min(available_w * 0.5);
     let progress_w = (available_w * 0.8).min(150.0);
-    let text_height = 36.0;
+    let line_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
+    let text_height = line_height * 2.0;
     let content_h = icon_size + 12.0 + 8.0 + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
@@ -147,14 +159,14 @@ fn grid_drive_content_contains(rect: Rect, thumbnail_size: f32, point: Pos2) -> 
     current_y += 18.0;
 
     let name_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 9.0),
-        egui::vec2(progress_w, 18.0),
+        egui::pos2(rect.center().x, current_y + line_height / 2.0),
+        egui::vec2(progress_w, line_height),
     );
-    current_y += 18.0;
+    current_y += line_height;
 
     let details_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 9.0),
-        egui::vec2(progress_w, 18.0),
+        egui::pos2(rect.center().x, current_y + line_height / 2.0),
+        egui::vec2(progress_w, line_height),
     );
 
     [icon_rect, bar_rect, name_rect, details_rect]

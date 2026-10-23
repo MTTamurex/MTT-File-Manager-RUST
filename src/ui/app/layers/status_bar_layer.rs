@@ -68,8 +68,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
 
     let compact_status_layout = root_ui.available_width()
         < crate::ui::components::status_bar_size_controls::compact_width(root_ui);
+    let status_height = crate::ui::fonts::layout::row_height(root_ui, 24.0, 14.0, 4.0);
     egui::Panel::bottom("status_bar")
-        .exact_size(if compact_status_layout { 48.0 } else { 24.0 })
+        .exact_size(if compact_status_layout {
+            status_height * 2.0
+        } else {
+            status_height
+        })
         .frame(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 0))

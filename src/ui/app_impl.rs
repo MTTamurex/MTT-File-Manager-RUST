@@ -301,7 +301,11 @@ impl eframe::App for ImageViewerApp {
         // Apply asynchronously loaded fonts as soon as the worker finishes.
         if let Some(rx) = &self.font_loader_rx {
             if let Ok(fonts) = rx.try_recv() {
-                crate::ui::fonts::selection::install(ctx, fonts);
+                crate::ui::fonts::selection::install(
+                    ctx,
+                    fonts,
+                    crate::ui::fonts::sizing::FontSizes::load(&self.app_state_db),
+                );
                 self.font_loader_rx = None; // Disable loader once done
                 ctx.request_repaint(); // Force refresh with new fonts
             }
@@ -705,6 +709,7 @@ impl eframe::App for ImageViewerApp {
         }
 
         crate::ui::fonts::selection::finish_preview_frame(ctx);
+        crate::ui::fonts::selection::flush_font_updates(ctx);
 
         // 13. Batch Rename Modal
         if self.batch_rename_state.is_some() {

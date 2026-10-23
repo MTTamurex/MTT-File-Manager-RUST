@@ -128,7 +128,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     let available_h = rect.height();
     let available_w = rect.width();
     let thumb_size = (ctx.thumbnail_size - 6.0).min(available_w - 4.0); // 6px margem total
-    let text_height = 18.0;
+    let text_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
     let content_h = thumb_size + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
@@ -206,7 +206,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     if !ctx.is_dense_mode {
         let text_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left(), text_start_y),
-            egui::vec2(rect.width(), 20.0),
+            egui::vec2(
+                rect.width(),
+                crate::ui::fonts::layout::row_height(ui, 20.0, 11.0, 4.0),
+            ),
         );
         ctx.rename_name_rect = Some(text_rect);
 

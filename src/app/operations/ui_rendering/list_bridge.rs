@@ -190,12 +190,14 @@ impl ImageViewerApp {
                     .collect();
                 let rows = if self.group_projection.is_grouped() {
                     crate::ui::views::column_list_view::column_list_grouped_rows_for_counts(
+                        ui,
                         &group_counts,
                         ui.available_width(),
                         ui.available_height(),
                     )
                 } else {
                     crate::ui::views::column_list_view::column_list_rows(
+                        ui,
                         self.items.len(),
                         ui.available_width(),
                         ui.available_height(),

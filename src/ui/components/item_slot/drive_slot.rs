@@ -21,7 +21,8 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
     let available_w = rect.width();
     let icon_size = (ctx.thumbnail_size * 0.4).min(available_w * 0.5);
     let progress_w = (available_w * 0.8).min(150.0);
-    let text_height = 36.0; // Name + Free Space
+    let line_height = crate::ui::fonts::layout::row_height(ui, 18.0, 11.0, 2.0);
+    let text_height = line_height * 2.0;
     let content_h = icon_size + 12.0 + 8.0 + text_height; // Icon + Bar + Padding + Text
 
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
@@ -86,8 +87,8 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
     // 3. TEXT (Name and Free Space)
     // Label for Name
     let name_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 9.0), // ~half text height
-        egui::vec2(progress_w, 18.0),
+        egui::pos2(rect.center().x, current_y + line_height / 2.0),
+        egui::vec2(progress_w, line_height),
     );
     ctx.rename_name_rect = Some(name_rect);
 
@@ -143,7 +144,7 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         );
     }
 
-    current_y += 18.0;
+    current_y += line_height;
 
     if drive_info.total_space > 0 {
         let free_gb = drive_info.free_space as f64 / (1024.0 * 1024.0 * 1024.0);
@@ -162,8 +163,8 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         };
 
         let details_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.center().x, current_y + 9.0),
-            egui::vec2(progress_w, 18.0),
+            egui::pos2(rect.center().x, current_y + line_height / 2.0),
+            egui::vec2(progress_w, line_height),
         );
 
         ui.put(

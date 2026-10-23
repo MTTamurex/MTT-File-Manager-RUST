@@ -95,12 +95,16 @@ fn render_tree_node(
 
     // Allocate row — use max of available width and content width so deep nodes
     // push the ScrollArea's content wider, enabling horizontal scroll.
-    // Approximate text width with per-char estimate (avoids font shaping every frame).
-    let approx_text_width = node.name.len() as f32 * 7.0;
-    let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0 + approx_text_width + 8.0; // right padding
+    // Use the active font metrics so larger text also expands horizontal scrolling.
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(node.name.clone(), egui::FontId::proportional(11.0), egui::Color32::WHITE)
+        .size()
+        .x;
+    let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0 + text_width + 8.0; // right padding
     let row_width = ui.available_width().max(content_min_width);
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(row_width, ROW_HEIGHT), Sense::click());
+    let row_height = crate::ui::fonts::layout::row_height(ui, ROW_HEIGHT, 12.0, 6.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(row_width, row_height), Sense::click());
     let is_selected =
         crate::ui::sidebar_selection::row_is_selected(
             ctx.context_selection,
@@ -144,7 +148,7 @@ fn render_tree_node(
         if has_children || is_loading {
             let arrow_rect = Rect::from_center_size(
                 Pos2::new(cursor_x + ARROW_WIDTH / 2.0, rect.center().y),
-                egui::vec2(ARROW_WIDTH, ROW_HEIGHT),
+                egui::vec2(ARROW_WIDTH, rect.height()),
             );
 
             let arrow_text = if is_loading {
@@ -331,8 +335,10 @@ fn render_tree_node(
 /// Render a "loading..." placeholder row at the given depth.
 fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
     let indent = BASE_INDENT + (depth as f32) * INDENT_PX + ARROW_WIDTH;
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let row_height = crate::ui::fonts::layout::row_height(ui, ROW_HEIGHT, 12.0, 6.0);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), row_height), Sense::hover(),
+    );
 
     if ui.is_rect_visible(rect) {
         ui.painter().text(

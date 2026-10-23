@@ -79,6 +79,7 @@ pub fn render_miller_column(
 ) -> MillerColumnOutput {
     let dark = ui.visuals().dark_mode;
     let rect = ui.max_rect();
+    let row_height = crate::ui::fonts::layout::row_height(ui, COL_ROW_HEIGHT, 13.0, 6.0);
     let column_id = ui.make_persistent_id(id_salt);
     let background_response =
         ui.interact(rect, column_id.with("background"), Sense::click_and_drag());
@@ -135,7 +136,7 @@ pub fn render_miller_column(
             let current_offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
                 .map(|state| state.offset.y)
                 .unwrap_or(0.0);
-            let max_scroll = (ctx.items.len() as f32 * COL_ROW_HEIGHT - rect.height()).max(0.0);
+            let max_scroll = (ctx.items.len() as f32 * row_height - rect.height()).max(0.0);
             raw_wheel_scroll_offset(current_offset, wheel_delta, max_scroll)
         } else {
             None
@@ -167,7 +168,7 @@ pub fn render_miller_column(
         scroll_area
     };
     let scroll_output =
-        scroll_area.show_rows(ui, COL_ROW_HEIGHT, ctx.items.len(), |ui, row_range| {
+        scroll_area.show_rows(ui, row_height, ctx.items.len(), |ui, row_range| {
             for index in row_range {
                 let Some(item) = ctx.items.get(index) else {
                     continue;
@@ -204,9 +205,9 @@ pub fn render_miller_column(
         max_scroll_y,
         Some(RectangleSelectionMetrics::List(ListRectangleMetrics {
             count: ctx.items.len(),
-            row_height: COL_ROW_HEIGHT,
+            row_height,
             content_width: scroll_output.inner_rect.width(),
-            content_height: ctx.items.len() as f32 * COL_ROW_HEIGHT,
+            content_height: ctx.items.len() as f32 * row_height,
         })),
     );
     rectangle_selection_frame.source = source;
@@ -240,8 +241,9 @@ fn render_row(
     rename_update: &mut Option<MillerRenameUpdate>,
 ) -> Option<MillerColumnAction> {
     let width = ui.available_width();
+    let row_height = crate::ui::fonts::layout::row_height(ui, COL_ROW_HEIGHT, 13.0, 6.0);
     let (row_rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, COL_ROW_HEIGHT), Sense::click_and_drag());
+        ui.allocate_exact_size(egui::vec2(width, row_height), Sense::click_and_drag());
     let is_selected = crate::ui::views::common::effective_item_selection(
         ctx.multi_selection.contains(&item.path),
         ctx.rectangle_selection_state
@@ -520,7 +522,7 @@ fn row_content_contains_pointer(
         .width();
     let text_rect = Rect::from_min_size(
         egui::pos2(text_x, row_rect.top() + 3.0),
-        egui::vec2(text_width.min(max_text_w), COL_ROW_HEIGHT - 6.0),
+        egui::vec2(text_width.min(max_text_w), row_rect.height() - 6.0),
     );
     if text_rect.expand(2.0).contains(point) {
         return true;
@@ -529,7 +531,7 @@ fn row_content_contains_pointer(
     item.is_dir
         && Rect::from_min_size(
             egui::pos2(row_rect.right() - CHEVRON_W, row_rect.top()),
-            egui::vec2(CHEVRON_W, COL_ROW_HEIGHT),
+            egui::vec2(CHEVRON_W, row_rect.height()),
         )
         .contains(point)
 }

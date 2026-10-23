@@ -2,6 +2,7 @@
 //! retained so resetting never loses icon fonts or multilingual fallbacks.
 
 use super::catalog::Catalog;
+use super::sizing::{self, FontSizes};
 use eframe::egui;
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -53,7 +54,10 @@ struct State {
     catalog: Arc<Catalog>,
     selected: String,
     committed_fonts: egui::FontDefinitions,
+    displayed_family: String,
+    queued_fonts: Option<egui::FontDefinitions>,
     committed_unavailable: bool,
+    sizes: FontSizes,
     pending: Option<Pending>,
     desired: Option<Request>,
     preview_pass: Option<u64>,
@@ -66,25 +70,25 @@ fn state(ctx: &egui::Context) -> Option<Arc<Mutex<State>>> {
     ctx.data(|data| data.get_temp(egui::Id::new(PREFERENCE_KEY)))
 }
 
-pub(crate) fn install(ctx: &egui::Context, loaded: LoadedFonts) {
-    ctx.set_fonts(loaded.fonts.clone());
-    clear_metrics();
-    let pass = ctx.cumulative_pass_nr();
+pub(crate) fn install(ctx: &egui::Context, loaded: LoadedFonts, sizes: FontSizes) {
     ctx.data_mut(|data| {
         data.insert_temp(
             egui::Id::new(PREFERENCE_KEY),
             Arc::new(Mutex::new(State {
                 base: loaded.base,
                 catalog: loaded.catalog,
+                displayed_family: loaded.selected.clone(),
+                queued_fonts: Some(loaded.fonts.clone()),
                 selected: loaded.selected,
                 committed_fonts: loaded.fonts,
                 committed_unavailable: loaded.unavailable,
+                sizes,
                 pending: None,
                 desired: None,
                 preview_pass: None,
                 unavailable: loaded.unavailable,
                 save_failed: false,
-                metrics_changed_at: Some(pass),
+                metrics_changed_at: None,
             })),
         )
     });
@@ -98,6 +102,7 @@ pub(crate) struct Snapshot {
     pub committing: bool,
     pub unavailable: bool,
     pub save_failed: bool,
+    pub scale: f32,
 }
 
 pub(crate) fn snapshot(ctx: &egui::Context) -> Option<Snapshot> {
@@ -110,6 +115,7 @@ pub(crate) fn snapshot(ctx: &egui::Context) -> Option<Snapshot> {
         committing: state.desired.as_ref().is_some_and(|request| request.commit),
         unavailable: state.unavailable,
         save_failed: state.save_failed,
+        scale: state.sizes.get(&state.displayed_family),
     })
 }
 
@@ -149,7 +155,8 @@ pub(crate) fn cancel_preview(ctx: &egui::Context) {
         state.desired = None;
         state.unavailable = state.committed_unavailable;
         let fonts = state.committed_fonts.clone();
-        apply(ctx, &mut state, fonts);
+        let selected = state.selected.clone();
+        apply(ctx, &mut state, fonts, &selected);
     }
 }
 
@@ -197,7 +204,8 @@ fn start_request(ctx: &egui::Context, state: &mut State) {
         state.unavailable = true;
         if commit {
             let fonts = state.committed_fonts.clone();
-            apply(ctx, state, fonts);
+            let selected = state.selected.clone();
+            apply(ctx, state, fonts, &selected);
         }
     }
     ctx.request_repaint();
@@ -247,27 +255,65 @@ pub(crate) fn poll(ctx: &egui::Context, db: &crate::infrastructure::app_state_db
             state.save_failed = db
                 .set_preference(PREFERENCE_KEY, &request.selected)
                 .is_err();
-            state.selected = request.selected;
+            state.selected = request.selected.clone();
             state.committed_fonts = fonts.clone();
             state.committed_unavailable = false;
         }
-        apply(ctx, &mut state, fonts);
+        apply(ctx, &mut state, fonts, &request.selected);
     } else if request.commit {
         let fonts = state.committed_fonts.clone();
-        apply(ctx, &mut state, fonts);
+        let selected = state.selected.clone();
+        apply(ctx, &mut state, fonts, &selected);
     }
 }
 
-fn apply(ctx: &egui::Context, state: &mut State, fonts: egui::FontDefinitions) {
+fn apply(ctx: &egui::Context, state: &mut State, fonts: egui::FontDefinitions, family: &str) {
+    state.displayed_family = family.to_owned();
+    state.queued_fonts = Some(fonts);
+    ctx.request_repaint();
+}
+
+/// Submit only the final choice of this UI pass. egui compares against the
+/// currently active fonts, not its pending update: submitting B then restoring
+/// A in one pass can otherwise leave B pending even though A was requested last.
+pub(crate) fn flush_font_updates(ctx: &egui::Context) {
+    let Some(state) = state(ctx) else { return };
+    let Ok(mut state) = state.lock() else { return };
+    let Some(mut fonts) = state.queued_fonts.take() else {
+        return;
+    };
+    sizing::apply(&mut fonts, state.sizes.get(&state.displayed_family));
     ctx.set_fonts(fonts);
     clear_metrics();
     state.metrics_changed_at = Some(ctx.cumulative_pass_nr());
     ctx.request_repaint();
 }
 
+pub(crate) fn set_scale(
+    ctx: &egui::Context,
+    db: &crate::infrastructure::app_state_db::AppStateDb,
+    scale: f32,
+) {
+    let Some(state) = state(ctx) else { return };
+    let Ok(mut state) = state.lock() else { return };
+    if state.preview_pass.is_some() || state.desired.is_some() {
+        return;
+    }
+    let selected = state.selected.clone();
+    let scale = sizing::normalize(scale);
+    state.save_failed = db
+        .set_preference(&sizing::preference_key(&selected), &scale.to_string())
+        .is_err();
+    state.sizes.set(&selected, scale);
+    let fonts = state.committed_fonts.clone();
+    apply(ctx, &mut state, fonts, &selected);
+}
+
 fn clear_metrics() {
     crate::ui::views::list_view::clear_font_metrics_cache();
 }
 
+#[cfg(test)]
+mod size_tests;
 #[cfg(test)]
 mod tests;

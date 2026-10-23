@@ -8,9 +8,11 @@
 use eframe::egui;
 
 mod catalog;
+pub(crate) mod layout;
 #[cfg(windows)]
 mod registry;
 pub(crate) mod selection;
+pub(crate) mod sizing;
 
 /// Slightly strengthen partially covered pixels on light backgrounds. This
 /// changes edge coverage, not glyph size or layout; keep dark-mode compensation.
