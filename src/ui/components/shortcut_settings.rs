@@ -46,12 +46,6 @@ pub fn render_shortcut_settings_section(
     );
     ui.add_space(12.0);
 
-    ui.label(
-        RichText::new(t!("settings.shortcuts_view_mode_scroll_note"))
-            .size(12.0)
-            .color(theme::secondary_text_color(ui.ctx())),
-    );
-
     if ui
         .add_enabled(
             shortcuts.any_customized(),
