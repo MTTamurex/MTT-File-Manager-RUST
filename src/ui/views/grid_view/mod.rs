@@ -347,6 +347,30 @@ pub fn render_grid_view(
         consume_scroll,
         ctx.scroll_interpolation_enabled,
     );
+    // Resolve the target before calculating the visual position, so a one-shot
+    // reveal request is reflected in this frame even without another repaint.
+    if ctx.scroll_to_selected {
+        if let Some(selected_idx) = ctx.selected_item {
+            if selected_idx < count {
+                let item_top = if grouped {
+                    grouped_item_top(ctx, selected_idx, cols, virtual_cell_h, padding)
+                } else {
+                    Some((selected_idx / cols) as f32 * virtual_cell_h + padding)
+                };
+                if let Some(item_top) = item_top {
+                    let item_bottom = item_top + item_h;
+                    let current_target = *ctx.mut_scroll_offset_y;
+
+                    if item_top < current_target {
+                        *ctx.mut_scroll_offset_y = item_top.max(0.0);
+                    } else if item_bottom > current_target + viewport_h {
+                        *ctx.mut_scroll_offset_y =
+                            (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                    }
+                }
+            }
+        }
+    }
     let (current_scroll, scroll_delta) = scroll::compute_visual_scroll(
         ui,
         *ctx.mut_scroll_offset_y,
@@ -418,34 +442,6 @@ pub fn render_grid_view(
     let thumbnail_work_scrolling = is_scrolling
         || (ctx.low_res_thumbnails_while_scrolling
             && ctx.last_scroll_time.elapsed() < THUMBNAIL_SCROLL_SETTLING_DURATION);
-
-    // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
-    if ctx.scroll_to_selected {
-        if let Some(selected_idx) = ctx.selected_item {
-            if selected_idx < count {
-                let item_top = if grouped {
-                    grouped_item_top(ctx, selected_idx, cols, virtual_cell_h, padding)
-                } else {
-                    Some((selected_idx / cols) as f32 * virtual_cell_h + padding)
-                };
-                if let Some(item_top) = item_top {
-                    let item_bottom = item_top + item_h; // Keep item_h for visual bottom check
-
-                    // We check against TARGET scroll to ensure we snap to the final correct position
-                    // but we might want to check visual if we want to smooth scroll TO the item.
-                    // For now, snap target instantly as per requirement (keyboard nav usually snaps)
-                    let current_target = *ctx.mut_scroll_offset_y;
-
-                    if item_top < current_target {
-                        *ctx.mut_scroll_offset_y = item_top.max(0.0);
-                    } else if item_bottom > current_target + viewport_h {
-                        *ctx.mut_scroll_offset_y =
-                            (item_bottom - viewport_h).clamp(0.0, max_scroll);
-                    }
-                }
-            }
-        }
-    }
 
     // 3. Render Virtual Grid
     if !ctx.is_computer_view

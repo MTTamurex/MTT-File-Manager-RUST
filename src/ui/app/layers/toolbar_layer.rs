@@ -71,6 +71,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
             let can_go_back = app.can_go_back();
             let can_go_forward = app.can_go_forward();
             let can_go_up = app.can_go_up();
+            let had_search_query = !app.search_query.is_empty();
             let action = render_toolbar(
                 ui,
                 &app.navigation_state.current_path,
@@ -173,7 +174,18 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                         app.sort_items();
                         app.save_preferences();
                     }
-                    ToolbarAction::Search(_query) => app.filter_items(),
+                    ToolbarAction::Search(query) => {
+                        app.filter_items();
+                        // Resolve the selection in the restored listing before asking
+                        // the view to reveal it at its new position.
+                        if should_reveal_search_selection(
+                            had_search_query,
+                            &query,
+                            app.selected_item,
+                        ) {
+                            app.scroll_to_selected = true;
+                        }
+                    }
                     ToolbarAction::Navigate(path) => app.navigate_to(&path),
                     ToolbarAction::StartAddressEdit => {
                         app.navigation_state.path_input = address_bar::editable_path(
@@ -227,4 +239,32 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                 }
             }
         });
+}
+
+fn should_reveal_search_selection(
+    had_search_query: bool,
+    query: &str,
+    selected_item: Option<usize>,
+) -> bool {
+    had_search_query && query.is_empty() && selected_item.is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_reveal_search_selection;
+
+    #[test]
+    fn clearing_local_search_reveals_selection_at_its_restored_index() {
+        for index in [0, 80, 999] {
+            assert!(should_reveal_search_selection(true, "", Some(index)));
+        }
+    }
+
+    #[test]
+    fn editing_local_search_or_clearing_without_selection_does_not_request_scroll() {
+        assert!(!should_reveal_search_selection(true, "file", Some(80)));
+        assert!(!should_reveal_search_selection(false, "file", Some(80)));
+        assert!(!should_reveal_search_selection(false, "", Some(80)));
+        assert!(!should_reveal_search_selection(true, "", None));
+    }
 }
