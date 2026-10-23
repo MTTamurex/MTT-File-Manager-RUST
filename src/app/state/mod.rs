@@ -603,7 +603,7 @@ pub struct ImageViewerApp {
     pub pending_shell_open_confirmation: Option<(PathBuf, Instant)>,
 
     // STARTUP OPTIMIZATION: Async Font Loading
-    pub font_loader_rx: Option<Receiver<egui::FontDefinitions>>,
+    pub(crate) font_loader_rx: Option<Receiver<crate::ui::fonts::selection::LoadedFonts>>,
 
     // NAVIGATION / ADDRESS BAR (Breadcrumbs vs Edit)
     pub is_address_editing: bool,

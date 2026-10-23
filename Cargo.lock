@@ -3875,6 +3875,7 @@ dependencies = [
  "egui_commonmark",
  "env_logger",
  "flate2",
+ "fontdb",
  "fxhash",
  "image",
  "kamadak-exif",

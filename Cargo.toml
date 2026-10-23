@@ -23,6 +23,7 @@ edition = "2021"
 
 [dependencies]
 eframe = { version = "0.35", features = ["persistence", "wgpu", "glow"] }
+fontdb = "0.22"
 windows-core = "0.62"
 rayon = "1.10"
 walkdir = "2.5"

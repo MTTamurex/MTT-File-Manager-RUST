@@ -104,12 +104,14 @@ pub(in crate::app) fn font_definitions_with_embedded_icons() -> egui::FontDefini
     fonts
 }
 
-pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefinitions> {
+pub(in crate::app) fn spawn_async_font_loader(
+    selected: String,
+) -> mpsc::Receiver<crate::ui::fonts::selection::LoadedFonts> {
     let (font_tx, font_rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut fonts = font_definitions_with_embedded_icons();
         crate::ui::fonts::install_system_fonts(&mut fonts);
-        let _ = font_tx.send(fonts);
+        let _ = font_tx.send(crate::ui::fonts::selection::LoadedFonts::load(fonts, selected));
     });
     font_rx
 }

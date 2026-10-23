@@ -165,6 +165,12 @@ fn viewer_font_cell() -> &'static Arc<Mutex<ViewerFontState>> {
             .spawn(move || {
                 let mut fonts = egui::FontDefinitions::default();
                 crate::ui::fonts::install_system_fonts(&mut fonts);
+                let selected = read_pref_readonly(crate::ui::fonts::selection::PREFERENCE_KEY)
+                    .unwrap_or_default();
+                if !selected.is_empty() {
+                    fonts = crate::ui::fonts::selection::LoadedFonts::load(fonts, selected)
+                        .into_definitions();
+                }
                 if let Ok(mut state) = thread_cell.lock() {
                     *state = ViewerFontState::Ready(fonts);
                 }

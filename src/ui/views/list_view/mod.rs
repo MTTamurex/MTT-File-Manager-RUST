@@ -2,6 +2,8 @@
 //! Splits rendering into header, virtualization, item rendering, and helpers
 
 pub(crate) mod autofit_layout;
+#[cfg(test)]
+mod font_metrics_tests;
 mod header;
 mod helpers;
 mod horizontal;
@@ -49,6 +51,12 @@ pub fn clear_truncation_cache() {
     TRUNCATION_CACHE.with(|cache| {
         cache.borrow_mut().clear();
     });
+}
+
+/// Font changes invalidate widths as well as already-truncated labels.
+pub(crate) fn clear_font_metrics_cache() {
+    FONT_WIDTH_CACHE.with(|cache| cache.borrow_mut().clear());
+    clear_truncation_cache();
 }
 
 /// Compute hash key for (text, max_width) pair

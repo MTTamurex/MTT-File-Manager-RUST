@@ -73,7 +73,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) bulk_thumbnail_total: Arc<AtomicUsize>,
     pub(in crate::app) bulk_thumbnail_completed: Arc<AtomicUsize>,
     pub(in crate::app) bulk_thumbnail_session: Arc<AtomicU64>,
-    pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
+    pub(in crate::app) font_rx: mpsc::Receiver<crate::ui::fonts::selection::LoadedFonts>,
 
     pub(in crate::app) icon_req_tx:
         crossbeam_channel::Sender<crate::app::init_workers::IconRequest>,
@@ -398,7 +398,11 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
     let startup_preferences = StartupPreferences::load(&app_state_db);
-    let font_rx = spawn_async_font_loader();
+    let font_rx = spawn_async_font_loader(
+        app_state_db
+            .get_preference(crate::ui::fonts::selection::PREFERENCE_KEY)
+            .unwrap_or_default(),
+    );
     log_bootstrap_step!("onedrive_preferences_fonts");
 
     let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> = Arc::new(dashmap::DashMap::new());

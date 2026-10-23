@@ -301,11 +301,13 @@ impl eframe::App for ImageViewerApp {
         // Apply asynchronously loaded fonts as soon as the worker finishes.
         if let Some(rx) = &self.font_loader_rx {
             if let Ok(fonts) = rx.try_recv() {
-                ctx.set_fonts(fonts);
+                crate::ui::fonts::selection::install(ctx, fonts);
                 self.font_loader_rx = None; // Disable loader once done
                 ctx.request_repaint(); // Force refresh with new fonts
             }
         }
+
+        crate::ui::fonts::selection::poll(ctx, &self.app_state_db);
 
         // 1. Initial validation
         if self.startup_tick == 0 {
@@ -646,6 +648,7 @@ impl eframe::App for ImageViewerApp {
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
                 self.shortcut_editor.clear();
+                crate::ui::fonts::selection::cancel_preview(ctx);
             }
             if output.theme_changed {
                 self.system_theme_dark = self.theme_mode.resolve_dark();
@@ -700,6 +703,8 @@ impl eframe::App for ImageViewerApp {
                 self.start_win_e_action(enable);
             }
         }
+
+        crate::ui::fonts::selection::finish_preview_frame(ctx);
 
         // 13. Batch Rename Modal
         if self.batch_rename_state.is_some() {

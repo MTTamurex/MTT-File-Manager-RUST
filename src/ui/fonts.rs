@@ -7,6 +7,11 @@
 
 use eframe::egui;
 
+mod catalog;
+#[cfg(windows)]
+mod registry;
+pub(crate) mod selection;
+
 /// Slightly strengthen partially covered pixels on light backgrounds. This
 /// changes edge coverage, not glyph size or layout; keep dark-mode compensation.
 pub(crate) fn apply_text_contrast(ctx: &egui::Context) {
@@ -17,6 +22,23 @@ pub(crate) fn apply_text_contrast(ctx: &egui::Context) {
             egui::epaint::FontColorTransferFunction::Gamma(0.85)
         };
     });
+}
+
+fn hinted_font(data: Vec<u8>, index: u32) -> egui::FontData {
+    let mut font = egui::FontData::from_owned(data).tweak(egui::FontTweak {
+        hinting: Some(true),
+        hinting_target: egui::epaint::text::HintingTarget::Smooth(
+            egui::epaint::text::SmoothHinting {
+                light: false,
+                symmetric_rendering: false,
+                preserve_linear_metrics: false,
+            },
+        ),
+        subpixel_binning: Some(false),
+        ..Default::default()
+    });
+    font.index = index;
+    font
 }
 
 /// Loads the Windows system fonts into `fonts` and registers them as fallbacks
@@ -42,19 +64,7 @@ pub fn install_system_fonts(fonts: &mut egui::FontDefinitions) {
         if let Ok(data) = std::fs::read(fonts_dir.join(file)) {
             // Fit stems to physical pixels rather than preserving fractional
             // outlines. This matters most for small UI text on low-DPI screens.
-            let font = egui::FontData::from_owned(data).tweak(egui::FontTweak {
-                hinting: Some(true),
-                hinting_target: egui::epaint::text::HintingTarget::Smooth(
-                    egui::epaint::text::SmoothHinting {
-                        light: false,
-                        symmetric_rendering: false,
-                        preserve_linear_metrics: false,
-                    },
-                ),
-                // Keep the hinted outlines on whole pixels when placing glyphs.
-                subpixel_binning: Some(false),
-                ..Default::default()
-            });
+            let font = hinted_font(data, 0);
             fonts
                 .font_data
                 .insert(key.to_owned(), std::sync::Arc::new(font));
