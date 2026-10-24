@@ -235,8 +235,6 @@ Update requests identify the application and its version in the User-Agent heade
 
 Startup checks are enabled by default and can be disabled in **Settings > About**. Automatic startup installation is a separate option and is disabled by default; manual checks and installation remain available.
 
-This update-only scope does not mean that user-requested actions are offline: opening web links uses your browser, accessing network locations contacts the selected server, and accessing cloud-backed files may cause the installed cloud provider to download or synchronize them. Those services have their own privacy policies.
-
 ### Optional local diagnostics
 
 - Enable **Settings > Diagnostics** only when needed for troubleshooting. It records technical information about the application's operation, such as errors, timings, counters, and resource usage, along with the application version, operating-system family, and architecture.
