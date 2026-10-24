@@ -18,29 +18,32 @@
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
 - **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
-- **Updating:** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually, or enable optional startup installation there (off by default). Updates wait for file operations to finish and other MTT windows/viewers to close; pause enabled Organizer rules before proceeding. Windows requests administrator approval, then MTT reopens without elevation. Setup rebuilds the search index as it already does for manual upgrades. You can still close MTT and run the newer installer manually; no uninstall is needed. See the [update release requirements and validation checklist](installer/UPDATES.md).
+- **Updating:** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually, disable startup checks, or enable optional startup installation (off by default). Downloaded installers are verified against GitHub's SHA-256 digest. Updates wait for file operations to finish and other MTT windows/viewers to close; pause enabled Organizer rules before proceeding. Windows requests administrator approval, then MTT reopens without elevation. Setup rebuilds the search index as it already does for manual upgrades. You can still close MTT and run the newer installer manually; no uninstall is needed. Versions released before the built-in updater require one manual upgrade. See [Privacy](#privacy) and the [update release requirements and validation checklist](installer/UPDATES.md).
 
 ## Key Features
 
 ### Interface & Navigation
-- **Appearance themes** — Choose Light, Dark, Dark Deep, Midnight, or System in Settings > General > Appearance; saved between sessions and shared with image, PDF, DOCX, XLSX, and text viewers, including native title bar styling
-- **Text and interface scaling** — Open **Settings > General > Appearance > Text and interface size** and choose 100–200%; release the slider to apply and save the size. Text and controls grow together on top of Windows display scaling. Use **Reset to 100%** to follow Windows scaling alone. Thumbnail size remains separately adjustable
+- **Appearance themes** — Choose Light, Dark, Dark Deep, Midnight, or System in Settings > Appearance; saved between sessions and shared with image, PDF, DOCX, XLSX, and text viewers, including native title bar styling
+- **Interface fonts and text size** — Choose an installed Windows font in **Settings > Appearance**, preview it before confirming, and save a separate text-size preference for each font without resizing icons or document contents
+- **Text and interface scaling** — Adjust the status-bar interface-size slider from 100–200%; release it to apply and save the size. Text and controls grow together on top of Windows display scaling; 100% follows Windows scaling alone. Thumbnail size remains separately adjustable alongside it
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
-- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation
+- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation. Right-click tabs to close, duplicate, close tabs to the left or right, or pin/unpin them. Pinned tabs stay on the left, cannot be closed until unpinned, and open other locations in a new tab instead of replacing their pinned location
 - **Session restoration and startup location** — Continue the previous session with saved tabs, pane layouts, and view preferences, or start at This PC, Documents, the user profile, or a custom folder; restored Tag tabs display their names immediately
 - **New-tab preferences** — Choose the current location, This PC, Documents, the user profile, or a custom folder for new tabs, and optionally open archives in a new tab; middle-click supported sidebar locations to open them in a new tab
 - **System tray** — Optionally send the main window to the notification area when closing it; reopen it or exit the app from the tray menu
+- **Single or multiple instances** — Choose whether to allow multiple application instances in **Settings > General**. When disabled, launching MTT again restores the existing window, including from the system tray
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
 - **File grouping** — Group items by name, date, type, or size in supported views; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions
-- **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings; Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
+- **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings, including Back, Forward, and Up navigation with support for assigning Backspace. Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
+- **File-list preferences** — Independently disable automatic column resizing or hover previews in **Settings > General**; manual column widths support horizontal scrolling. Enable optional alternating row colors in **Settings > Appearance**
 - **Date formats** — Choose DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD for displayed dates and Global Search date filters
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs
-- **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
+- **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin; sections reclaim space when collapsed, with an adjustable drives area and a separate collapsible Network Locations section. Right-click empty space or section headers to collapse or expand all sections
 - **Sidebar renaming** — Rename folders directly in the sidebar tree
 - **Network browsing** — Enter a UNC server address to list its shares; browse saved Windows Network Locations from the sidebar or This PC, and launch the Windows Add Network Location wizard
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
-- **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
+- **Quick Access** — Pin folders via right-click or drag-and-drop; pin/unpin supported folder locations directly from tab context menus; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Tags
@@ -54,11 +57,13 @@
 ### Media Preview
 - **Media metadata** — The preview panel extracts video and audio details such as codec, bitrate, channels, sample rate, and music tags
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
+- **Selection sizes** — Include folder contents in selection totals, with background calculation and progress updates while folder sizes are resolved; size sorting uses calculated folder sizes as they become available
 - **Animated GIF playback** — Animated preview on details panel
 
 ### Image, PDF, DOCX, XLSX & Text Viewers
 - **Consistent dedicated windows** — Images, PDF documents, DOCX documents, XLSX workbooks, and text files open in lightweight viewer windows with the selected appearance theme, themed toolbars, and native title bar integration
 - **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, crop with a rotation-aware selection and safe save workflow, or switch to full screen with F11. Crops can replace supported raster images after confirmation or be saved as PNG, JPEG, WebP, BMP, or TIFF; animated GIFs export the displayed frame
+- **Image conversion** — Convert images in the background, including export to a single-page PDF, with safe destination replacement that preserves existing files on encoding failure and refuses to overwrite files changed after confirmation
 - **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar; supports single-page, two-page, and two-page-with-cover layouts
 - **DOCX viewer** — Uses BetterOffice's native OOXML parsing, pagination, and raster renderer in a read-only window with zoom and page navigation; supports document search and text selection/copying. Double-click continues to open the Windows default application
 - **XLSX viewer** — Uses BetterOffice's native workbook model and rendering in a read-only window with worksheet tabs, zoom, workbook search, and cell-range selection/copying
@@ -105,8 +110,10 @@
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
+- **Clipboard feedback** — Distinct markers identify copied and cut files and folders, with faded icons for items marked for moving
+- **Permanent deletion** — Use Shift+Delete or hold Shift while clicking Delete in the context menu or toolbar to bypass the Recycle Bin
 - **Selection controls** — Select all, clear selection, or invert selection from the status bar
-- **Folder access assistance** — For access-denied folders, request a permanent access grant for your Windows user through an administrator-authorized helper; the main file manager stays unelevated
+- **Folder access assistance** — For access-denied folders, request permanent full control for your Windows account through an administrator-authorized helper; the main file manager stays unelevated. A warning explains that the grant also applies to inheriting files/subfolders and can be used by other programs running under your account
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
 - **Archive creation** — Compress selected files and folders to ZIP or 7Z from the context menu, with byte-level progress, cancellation, conflict-free archive naming, and temporary output cleanup after failures
@@ -146,7 +153,7 @@ These options are available in **Settings > General**. They modify the current u
 
 ### Set MTT as the default file manager
 
-Use MTT as the default handler for filesystem folders and drives and add **Open in MTT** to folder context menus. Virtual folders such as Control Panel retain their native Windows handlers.
+Use MTT as the default handler for filesystem folders and drives through Windows' existing **Open** action, without adding duplicate folder context-menu entries. Obsolete MTT entries belonging to the current installation are cleaned up. Virtual folders such as Control Panel retain their native Windows handlers.
 
 ### Open MTT with Win+E
 
@@ -156,7 +163,7 @@ Pressing Win+E and running explorer.exe will open MTT instead of Windows File Ex
 
 ## Graphics Backend
 
-The app supports three rendering backend choices, selectable in **Settings > General > GPU Backend** (requires app restart):
+The app supports three rendering backend choices, selectable in **Settings > Graphics > GPU Backend** (requires app restart):
 
 ### Wgpu — DirectX 12 (Default)
 - Default backend for the main window on Windows
@@ -214,13 +221,29 @@ The main file manager does not need to run as administrator for normal file brow
 - **pdfium.dll** — Required for PDF viewer
 - **Video codecs** — Required for video thumbnail extraction (see [Video Thumbnail Codecs](#video-thumbnail-codecs) below)
 
-## Diagnostic Mode Privacy Notes
+## Privacy
 
-- `Settings > Diagnostics` writes a local, privacy-filtered diagnostic file intended for technical troubleshooting.
-- The logger redacts recognized paths, filenames, search terms, and other sensitive identifiers; inspect the plain-text file before sharing it.
-- Nothing is sent automatically outside the application. The diagnostic file stays local unless the user chooses to share it.
-- The feature auto-disables after 24 hours and caps the file at 10 MiB while retaining recent filtered events.
-- This is a technical privacy measure for minimization and safer troubleshooting. It is not a standalone legal certification of LGPD or any other regulatory compliance.
+### No tracking or automatic data uploads
+
+MTT does not collect user or machine information for analytics, advertising, or profiling, and does not automatically upload diagnostic reports. File browsing, search indexing, previews, and hardware information are processed on your computer; file metadata and device information used by these features are not sent to the project or the update service.
+
+### Internet access and updates
+
+MTT's built-in Internet requests are used exclusively to check for application updates, retrieve release notes, and download the installer needed to perform an update. These HTTPS requests go to the official GitHub repository and GitHub's download infrastructure, without account credentials or uploads of files, search terms, diagnostics, or machine identifiers. Installation then runs locally through Windows setup.
+
+Update requests identify the application and its version in the User-Agent header. Like any Internet connection, they expose the connection's public IP address to the service provider; this is not an anonymous connection. GitHub handles these requests under its own [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+
+Startup checks are enabled by default and can be disabled in **Settings > About**. Automatic startup installation is a separate option and is disabled by default; manual checks and installation remain available.
+
+This update-only scope does not mean that user-requested actions are offline: opening web links uses your browser, accessing network locations contacts the selected server, and accessing cloud-backed files may cause the installed cloud provider to download or synchronize them. Those services have their own privacy policies.
+
+### Optional local diagnostics
+
+- Enable **Settings > Diagnostics** only when needed for troubleshooting. It records technical information about the application's operation, such as errors, timings, counters, and resource usage, along with the application version, operating-system family, and architecture.
+- Before writing diagnostic text, the logger filters recognized file and folder names, filesystem paths, network server/share names, drive labels, search terms, and other sensitive identifiers. Filtering reduces exposure but is not a guarantee that every possible identifier will be recognized; inspect the plain-text file before sharing it.
+- The diagnostic file stays on your computer. It is never uploaded automatically, including during updates. You decide whether, when, and with whom to share it.
+- Diagnostic mode auto-disables after 24 hours and limits the file to approximately 10 MiB while retaining recent filtered events.
+- These are technical privacy measures for data minimization and safer troubleshooting, not a standalone legal certification of LGPD or any other regulatory compliance.
 
 ## Temporary GPU Recovery Tests
 
