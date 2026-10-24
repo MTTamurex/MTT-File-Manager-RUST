@@ -28,7 +28,6 @@ const BACKDROP_ALPHA: u8 = 72;
 const SEARCH_INPUT_DEBOUNCE_MS: u64 = 180;
 const SEARCH_LOADING_TIMEOUT_MS: u64 = 12_000;
 const SERVICE_STARTUP_GRACE_SECS: u64 = 8;
-const NO_PROGRESS_WARNING_SECS: u64 = 10;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -411,11 +410,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     app.global_search.created_before_text.clear();
                 }
 
-                if app.global_search.available && app.global_search.indexing_in_progress {
-                    ui.add_space(8.0);
-                    render_indexing_activity(ui, app, dark_mode);
-                }
-
                 ui.add_space(8.0);
                 render_filter_controls(ui, app);
                 ui.add_space(8.0);
@@ -437,144 +431,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     });
     if backdrop_click.is_some_and(|pos| !modal.response.rect.contains(pos)) {
         app.close_global_search();
-    }
-}
-
-fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: bool) {
-    let idle_for = app.global_search.last_progress_advance_at.elapsed();
-    let status_age = app.global_search.last_status_received_at.elapsed();
-    let freshness_color = if idle_for >= Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
-        egui::Color32::from_rgb(196, 141, 56)
-    } else {
-        egui::Color32::from_gray(135)
-    };
-    let fill = if dark_mode {
-        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14)
-    } else {
-        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 10)
-    };
-    let stroke = if idle_for >= Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
-        egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgba_unmultiplied(196, 141, 56, 120),
-        )
-    } else {
-        egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgba_unmultiplied(120, 120, 120, 60),
-        )
-    };
-    let status_color = if status_age >= Duration::from_secs(2) {
-        egui::Color32::from_rgb(196, 141, 56)
-    } else {
-        egui::Color32::from_gray(135)
-    };
-    let freshness_text = if app.global_search.total_indexed == 0 {
-        t!("search.indexing_waiting_first_batch")
-    } else if idle_for < Duration::from_secs(2) {
-        t!("search.indexing_recent_update")
-    } else if idle_for < Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
-        t!(
-            "search.indexing_waiting_next_update",
-            seconds = idle_for.as_secs().max(1)
-        )
-    } else {
-        t!(
-            "search.indexing_waiting_progress",
-            seconds = idle_for.as_secs().max(1)
-        )
-    };
-    let status_text = if status_age < Duration::from_secs(2) {
-        t!("search.indexing_status_recent")
-    } else {
-        t!(
-            "search.indexing_status_age",
-            seconds = status_age.as_secs().max(1)
-        )
-    };
-    let activity_title = if app.global_search.total_indexed == 0 {
-        t!("search.index_preparing")
-    } else {
-        t!(
-            "search.indexing_files",
-            count = format_exact_number(app.global_search.total_indexed)
-        )
-    };
-    let summary = build_scanning_volume_summary(&app.global_search.status_volumes);
-
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(stroke)
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(activity_title).size(11.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(freshness_text)
-                            .size(10.0)
-                            .color(freshness_color),
-                    );
-                });
-            });
-
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(status_text)
-                    .size(10.0)
-                    .color(status_color),
-            );
-
-            if !summary.is_empty() {
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(t!("search.indexing_drives", volumes = summary))
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(145)),
-                );
-            }
-        });
-}
-
-fn build_scanning_volume_summary(volumes: &[mtt_search_protocol::VolumeStatus]) -> String {
-    volumes
-        .iter()
-        .filter(|volume| volume.state == "scanning")
-        .map(format_scanning_volume)
-        .collect::<Vec<_>>()
-        .join(" • ")
-}
-
-fn format_scanning_volume(volume: &mtt_search_protocol::VolumeStatus) -> String {
-    let phase = phase_label(&volume.phase);
-    match volume.phase_total {
-        Some(total) => format!(
-            "{}: {} {}/{}",
-            volume.drive_letter,
-            phase,
-            format_exact_number(volume.phase_progress.unwrap_or(0)),
-            format_exact_number(total),
-        ),
-        None => format!(
-            "{}: {} {}",
-            volume.drive_letter,
-            phase,
-            format_exact_number(volume.phase_progress.unwrap_or(volume.files_indexed)),
-        ),
-    }
-}
-
-fn phase_label(phase: &str) -> String {
-    match phase {
-        "loading_cache" => t!("search.phase_loading_cache").to_string(),
-        "catching_up" => t!("search.phase_catching_up").to_string(),
-        "scanning_mft" => t!("search.phase_scanning_mft").to_string(),
-        "loading_sizes" => t!("search.phase_loading_sizes").to_string(),
-        "persisting" => t!("search.phase_persisting").to_string(),
-        "filesystem_scan" => t!("search.phase_filesystem_scan").to_string(),
-        "starting" | "open_volume" | "query_journal" => t!("search.phase_starting").to_string(),
-        _ => t!("search.phase_indexing").to_string(),
     }
 }
 
