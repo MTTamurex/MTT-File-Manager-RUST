@@ -541,6 +541,12 @@ impl ImageViewerApp {
             .unwrap_or(-1.0);
 
         if is_hitch {
+            crate::ui::performance_diagnostics::record_gap(
+                self,
+                "logic_interval",
+                now.saturating_duration_since(previous),
+                repaint_requested,
+            );
             log::warn!(
                 "[PERF] frame hitch interval_ms={:.0} prev_update_ms={:.1} post_ui_gap_ms={:.1} repaint_requested={} viewport_active={} scrolling={} burst={} folder_previews_loading={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
                 interval_ms,
@@ -1044,6 +1050,14 @@ impl ImageViewerApp {
         self.last_ui_gap_log = Some(now);
 
         let kind = if is_hitch { "hitch" } else { "trace" };
+        if is_hitch {
+            crate::ui::performance_diagnostics::record_gap(
+                self,
+                "paint_interval",
+                now.saturating_duration_since(previous),
+                repaint_requested,
+            );
+        }
         log::warn!(
             "[PERF] paint gap kind={} gap_ms={:.0} repaint_requested={} viewport_active={} previous_active={} scrolling={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
             kind,
@@ -2484,6 +2498,7 @@ fn trim_process_working_set(reason: &str, scheduled_epoch: u64, require_minimize
         };
         use windows::Win32::System::Threading::GetCurrentProcess;
 
+        let trim_started = Instant::now();
         let before = current_process_memory_snapshot();
         let process = GetCurrentProcess();
         match SetProcessWorkingSetSizeEx(
@@ -2493,6 +2508,7 @@ fn trim_process_working_set(reason: &str, scheduled_epoch: u64, require_minimize
             SETPROCESSWORKINGSETSIZEEX_FLAGS(0),
         ) {
             Ok(()) => {
+                crate::infrastructure::diagnostic_logger::frame_trace::memory_trim_completed();
                 let after = current_process_memory_snapshot();
                 if let (Some(before), Some(after)) = (before, after) {
                     let effective = working_set_trim_was_effective(before, after);
@@ -2514,6 +2530,14 @@ fn trim_process_working_set(reason: &str, scheduled_epoch: u64, require_minimize
                         "memory_trim",
                         "api_succeeded",
                         &[
+                            crate::infrastructure::diagnostic_logger::field_duration_ms(
+                                "duration",
+                                trim_started.elapsed(),
+                            ),
+                            crate::infrastructure::diagnostic_logger::field_bool(
+                                "require_minimized",
+                                require_minimized,
+                            ),
                             crate::infrastructure::diagnostic_logger::field_u64(
                                 "working_set_before_bytes",
                                 before.working_set_bytes,

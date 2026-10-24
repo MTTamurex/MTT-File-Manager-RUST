@@ -58,6 +58,7 @@ fn current_id() -> Option<u64> {
 
 /// Nested stage timings are inclusive; do not add parent and child durations.
 pub(crate) struct Stage {
+    continuous: super::frame_trace::Stage,
     id: Option<u64>,
     name: &'static str,
     started: Option<Instant>,
@@ -67,6 +68,7 @@ impl Stage {
     pub(crate) fn new(name: &'static str) -> Self {
         let id = current_id();
         Self {
+            continuous: super::frame_trace::Stage::new(name),
             id,
             name,
             started: id.map(|_| Instant::now()),
@@ -74,6 +76,7 @@ impl Stage {
     }
 
     pub(crate) fn lap(&mut self, next: &'static str) {
+        self.continuous.lap(next);
         let Some(started) = self.started else { return };
         let elapsed = started.elapsed();
         if let Some(id) = self.id {
@@ -97,6 +100,7 @@ impl Drop for Stage {
 }
 
 pub(crate) struct Frame {
+    continuous: Option<super::frame_trace::Frame>,
     started: Instant,
     last: Instant,
     ui_gap: Duration,
@@ -117,6 +121,7 @@ impl Frame {
             }
         });
         Self {
+            continuous: super::frame_trace::Frame::new(previous_exit),
             started: now,
             last: now,
             ui_gap: previous_exit
@@ -127,13 +132,20 @@ impl Frame {
     }
 
     pub(crate) fn checkpoint(&mut self, name: &'static str) {
+        if let Some(frame) = &self.continuous {
+            frame.checkpoint(name, self.last.elapsed());
+        }
         if let Some(stages) = &mut self.stages {
             stages.push((name, self.last.elapsed()));
             self.last = Instant::now();
         }
     }
 
-    pub(crate) fn finish(self, loading: bool, items: usize, generation: usize) {
+    pub(crate) fn finish(mut self, loading: bool, items: usize, generation: usize) {
+        if let Some(frame) = self.continuous.take() {
+            frame.checkpoint("frame_tail", self.last.elapsed());
+            frame.finish(loading, items, generation);
+        }
         if let Some((session, events)) = self.collect(loading, items, generation) {
             emit(session, events);
         }

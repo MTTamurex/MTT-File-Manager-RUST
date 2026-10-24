@@ -1,7 +1,9 @@
 mod background_jobs;
 pub(crate) mod consistency_probe_worker;
+mod cover_worker;
 mod filesystem_workers;
 pub(crate) mod folder_load_pool;
+mod folder_size_diagnostics;
 mod pipeline_workers;
 mod visual_workers;
 
@@ -11,6 +13,7 @@ pub(super) use background_jobs::{
     spawn_organizer_history_retention_worker,
 };
 pub(super) use consistency_probe_worker::spawn_consistency_probe_worker;
+pub(super) use cover_worker::spawn_cover_worker;
 pub(crate) use filesystem_workers::CacheInvalidationEntry;
 pub(super) use filesystem_workers::{
     spawn_disk_cache_invalidation_worker, spawn_folder_preview_workers,
@@ -21,7 +24,7 @@ pub(super) use pipeline_workers::{
     PrefetchWorkerHandles,
 };
 pub(super) use visual_workers::{
-    font_definitions_with_embedded_icons, spawn_async_font_loader, spawn_cover_worker,
-    spawn_file_hash_worker, spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
+    font_definitions_with_embedded_icons, spawn_async_font_loader, spawn_file_hash_worker,
+    spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
 };
 pub(crate) use visual_workers::{IconRequest, IconResponse};

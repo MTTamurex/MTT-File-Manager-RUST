@@ -109,6 +109,10 @@ pub struct AppStateDb {
 }
 
 impl AppStateDb {
+    #[cfg(test)]
+    pub(crate) fn test_hold_writer(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.writer.lock().unwrap()
+    }
     const ACL_HARDENED_MARKER: &'static str = ".acl_hardened";
 
     fn acl_marker_path(state_dir: &Path) -> PathBuf {

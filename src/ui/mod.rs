@@ -18,6 +18,7 @@ pub(crate) mod interface_scale;
 pub(crate) mod list_stripes;
 pub mod navigation;
 pub(crate) mod new_tab_request;
+pub(crate) mod performance_diagnostics;
 pub mod preview_panel;
 pub mod sidebar;
 pub mod sidebar_cloud_roots;

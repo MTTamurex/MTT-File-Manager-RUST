@@ -122,6 +122,10 @@ impl ImageViewerApp {
         let mut has_more = false;
 
         while processed < max_cover_events_per_frame {
+            if processed > 0 && t0.elapsed() >= Duration::from_millis(3) {
+                has_more = true;
+                break;
+            }
             match self.cover_worker_receiver.try_recv() {
                 Ok((folder_path, cover_opt)) => {
                     cover_updates.insert(folder_path, cover_opt);
@@ -199,7 +203,9 @@ impl ImageViewerApp {
             self.cache_manager
                 .folder_preview_requests
                 .invalidate(folder_path);
-            self.disk_cache.remove_folder_preview_cache(folder_path);
+            // The preview worker validates cover identity and exact source
+            // metadata before cache reuse. Keep disk I/O off the UI thread;
+            // a changed source will miss and replace its cached preview there.
             if preserve_texture {
                 // Keep the displayed texture, but restart work with the new cover.
                 self.cache_manager
@@ -283,10 +289,9 @@ impl ImageViewerApp {
                 }
             }
         }
-        self.enqueue_disk_cache_invalidations(folders_to_remove.clone());
-        for folder_path in folders_to_remove {
-            self.remove_folder_cover_without_blocking(&folder_path, false);
-        }
+        self.enqueue_disk_cache_invalidations(folders_to_remove);
+        // The cover worker has already removed stale cover metadata before
+        // publishing None. Repeating that SQLite write here could stall input.
 
         let t_trigger = Instant::now();
         let total_ms = t0.elapsed().as_millis();
@@ -997,8 +1002,13 @@ impl ImageViewerApp {
         // ── Drain batch worker results (list-view folder sizes) ──
         {
             const MAX_BATCH_PER_FRAME: usize = 120;
+            let batch_started = Instant::now();
             let mut batch_count = 0usize;
             while batch_count < MAX_BATCH_PER_FRAME {
+                if batch_count > 0 && batch_started.elapsed() >= Duration::from_millis(3) {
+                    has_more = true;
+                    break;
+                }
                 let result = match self.folder_size_state.batch_res_receiver.try_recv() {
                     Ok(r) => r,
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -1046,6 +1056,9 @@ impl ImageViewerApp {
                     FolderContentSummary::size_only(total_size),
                 );
                 received_any = true;
+            }
+            if batch_count >= MAX_BATCH_PER_FRAME {
+                has_more = true;
             }
         }
 

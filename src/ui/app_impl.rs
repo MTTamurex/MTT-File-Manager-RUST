@@ -221,6 +221,7 @@ impl ImageViewerApp {
 
 impl eframe::App for ImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let _diagnostic_logic = crate::infrastructure::diagnostic_logger::SlowScope::new("logic");
         self.poll_default_file_manager_action();
         // Real inter-frame interval tracking (captures hitches that stable_dt
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
@@ -660,39 +661,39 @@ impl eframe::App for ImageViewerApp {
                 crate::ui::theme::apply_theme_visuals(ctx, self.theme_mode);
                 crate::ui::interface_scale::apply(ctx, self.interface_scale);
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.language_changed || output.startup_date_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.backend_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.interpolation_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.shortcuts_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.quick_access_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.recycle_bin_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.minimize_to_tray_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.tags_changed {
                 self.save_preferences();
-                self.force_save_preferences();
+                self.save_preferences_async();
             }
             if output.diagnostic_mode_changed {
                 self.set_diagnostic_mode(self.diagnostic_mode);
@@ -830,6 +831,7 @@ impl eframe::App for ImageViewerApp {
                 frame_ms
             );
         }
+        crate::ui::performance_diagnostics::record_context(self, ctx);
         diagnostic_frame.finish(self.is_loading_folder, self.items.len(), self.generation);
         self.last_ui_exit = Some(std::time::Instant::now());
     }

@@ -18,6 +18,7 @@ fn seed(started: Instant) {
 fn test_frame() -> Frame {
     let now = Instant::now();
     Frame {
+        continuous: None,
         started: now,
         last: now,
         ui_gap: Duration::ZERO,

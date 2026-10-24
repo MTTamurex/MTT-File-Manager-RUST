@@ -78,20 +78,27 @@ fn query_ntfs_folder_size_with_retry(
     folder_path: &std::path::Path,
     cancel: &Arc<AtomicBool>,
 ) -> Result<(u64, u64, u64), String> {
+    let mut diagnostic = super::folder_size_diagnostics::Query::new();
     let mut last_error = String::from("Search service not available");
     let deadline = Instant::now() + Duration::from_secs(NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS);
     let mut retry_delay = NTFS_FOLDER_SIZE_SERVICE_INITIAL_RETRY_DELAY;
 
     for attempt in 0..NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
         if cancel.load(Ordering::Acquire) {
+            diagnostic.outcome("cancelled");
             return Err("cancelled".to_string());
         }
         if Instant::now() >= deadline {
+            diagnostic.outcome("deadline");
             break;
         }
 
+        diagnostic.attempt();
         match crate::infrastructure::global_search::folder_size(folder_path) {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                diagnostic.outcome("completed");
+                return Ok(result);
+            }
             Err(error) => {
                 let retryable = is_retryable_folder_size_service_error(&error);
                 last_error = error;
@@ -103,6 +110,7 @@ fn query_ntfs_folder_size_with_retry(
                 let sleep_end = Instant::now() + retry_delay;
                 while Instant::now() < sleep_end {
                     if cancel.load(Ordering::Acquire) {
+                        diagnostic.outcome("cancelled");
                         return Err("cancelled".to_string());
                     }
                     let remaining = sleep_end.saturating_duration_since(Instant::now());

@@ -1,8 +1,6 @@
 use crate::domain::file_entry::IconSize;
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::windows as windows_infra;
-use crate::infrastructure::windows::is_mpeg_ts_file;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -22,68 +20,6 @@ struct IconPersistRequest {
     pixels: Arc<[u8]>,
     width: u32,
     height: u32,
-}
-
-pub(in crate::app) fn spawn_cover_worker(
-    app_state_db: Arc<AppStateDb>,
-) -> (
-    mpsc::Sender<PathBuf>,
-    mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
-) {
-    let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>();
-    let (cover_res_tx, cover_res_rx) = mpsc::channel();
-
-    let cover_worker_db = app_state_db.clone();
-    std::thread::spawn(move || {
-        crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Background,
-        );
-
-        while let Ok(folder_path) = cover_req_rx.recv() {
-            // Prefer the persisted cover. The renderer only asks when the listing
-            // path did not carry a cover, but the cover itself is usually already
-            // cached — and re-enumerating the folder is a real directory read on
-            // HDD/virtual drives (Cryptomator), which made cover loading slow and
-            // audibly noisy. A stale row self-heals: preview extraction fails,
-            // the cover is invalidated, and the next request scans normally.
-            let cached_cover =
-                match cover_worker_db.try_get_folder_covers(std::slice::from_ref(&folder_path)) {
-                    crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(
-                        covers,
-                    ) => covers.get(&folder_path).cloned(),
-                    _ => None,
-                };
-            if let Some(cover) = cached_cover {
-                // Validate cheaply (a single attribute read): a cover that no
-                // longer exists must fall through to a full rescan, so a tile
-                // never renders from an invalid path.
-                if crate::infrastructure::onedrive::fast_path_exists(&cover) {
-                    let _ = cover_res_tx.send((folder_path, Some(cover)));
-                    continue;
-                }
-            }
-
-            let cover = windows_infra::find_folder_preview_item(&folder_path).filter(|p| {
-                // Reject .ts files that aren't real MPEG-TS video.
-                // Real MPEG-TS starts with sync byte 0x47.
-                if p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
-                {
-                    return is_mpeg_ts_file(p);
-                }
-                true
-            });
-
-            if let Some(c) = &cover {
-                cover_worker_db.set_folder_cover(&folder_path, c);
-            }
-
-            let _ = cover_res_tx.send((folder_path, cover));
-        }
-    });
-
-    (cover_req_tx, cover_res_rx)
 }
 
 pub(in crate::app) fn font_definitions_with_embedded_icons() -> egui::FontDefinitions {
@@ -111,7 +47,9 @@ pub(in crate::app) fn spawn_async_font_loader(
     std::thread::spawn(move || {
         let mut fonts = font_definitions_with_embedded_icons();
         crate::ui::fonts::install_system_fonts(&mut fonts);
-        let _ = font_tx.send(crate::ui::fonts::selection::LoadedFonts::load(fonts, selected));
+        let _ = font_tx.send(crate::ui::fonts::selection::LoadedFonts::load(
+            fonts, selected,
+        ));
     });
     font_rx
 }

@@ -430,6 +430,7 @@ impl ImageViewerApp {
             inactive_items_rebuild_registry: Arc::new(Default::default()),
             // Cover Worker
             cover_worker_sender: cover_req_tx,
+            preference_writer: None,
             cover_worker_receiver: cover_res_rx,
             scanned_folders: LruCache::new(
                 NonZeroUsize::new(200).expect("scanned_folders cache size must be non-zero"),

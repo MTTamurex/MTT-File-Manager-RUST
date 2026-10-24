@@ -92,6 +92,10 @@ impl ImageViewerApp {
     }
 
     fn process_incoming_messages_impl(&mut self, ctx: &egui::Context, upload_textures: bool) {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+                "messages_setup",
+            );
         let _t_msg_start = Instant::now();
         let removed = crate::infrastructure::windows::device_change::take_removed_volumes();
         self.redirect_tabs_from_removed_drives(&removed);
@@ -168,6 +172,7 @@ impl ImageViewerApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(0));
         }
 
+        diagnostic_stage.lap("messages_rebuilds");
         // Apply async rebuild results (filter/sort) from background thread
         self.process_items_rebuild_results(ctx);
         self.process_inactive_items_rebuild_results(ctx);
@@ -207,6 +212,7 @@ impl ImageViewerApp {
         let current_path_norm =
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
+        diagnostic_stage.lap("messages_operations");
         self.process_organizer_events(&current_path_norm);
 
         // BLOCKING: Process all available file operation results in batch
@@ -222,14 +228,17 @@ impl ImageViewerApp {
         crate::app::operations::tag_ops::purge_worker::process_purge_results(self);
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
+        diagnostic_stage.lap("messages_watcher");
         let watcher_perf = self.process_watcher_events_and_auto_reload(&current_path_norm);
         let _t_watcher_start = watcher_perf.watcher_start;
         let _t_drive_events_done = watcher_perf.drive_events_done;
         let _t_auto_reload_done = watcher_perf.auto_reload_done;
 
+        diagnostic_stage.lap("messages_streaming");
         let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx, true);
         self.apply_ready_tag_view_hides();
 
+        diagnostic_stage.lap("messages_cloud_and_search");
         self.process_google_drive_statuses(ctx);
 
         // GLOBAL SEARCH: Process search results from worker

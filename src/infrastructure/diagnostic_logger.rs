@@ -1,10 +1,13 @@
+pub(crate) mod frame_trace;
 pub(crate) mod navigation_trace;
+mod slow_scope;
+mod writer;
+pub(crate) use slow_scope::SlowScope;
 mod privacy;
 mod storage;
 
 use env_logger::Logger;
 use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
-use parking_lot::Mutex;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,17 +34,12 @@ pub enum DiagnosticField {
     Text(&'static str, String),
 }
 
-#[derive(Default)]
-struct DiagnosticState {
-    file: Option<DiagnosticFile>,
-    enabled_since: Option<SystemTime>,
-}
-
 pub struct DiagnosticLogger {
     console: Logger,
     diagnostic_filter: Logger,
     base_level: LevelFilter,
-    state: Mutex<DiagnosticState>,
+    writer: writer::Writer,
+    enabled_since: parking_lot::Mutex<Option<SystemTime>>,
     // Odd values identify an enabled session; reads never wait for file I/O.
     capture_session: AtomicU64,
 }
@@ -52,48 +50,34 @@ impl DiagnosticLogger {
             base_level: console.filter(),
             console,
             diagnostic_filter,
-            state: Mutex::new(DiagnosticState::default()),
+            writer: writer::Writer::new(),
+            enabled_since: parking_lot::Mutex::new(None),
             capture_session: AtomicU64::new(0),
         }
     }
 
     fn enable_file_logging_with_since(&self, enabled_since: SystemTime) -> Result<PathBuf, String> {
+        // Serialize lifecycle transitions only; the writer never takes this lock.
+        let mut state = self.enabled_since.lock();
         let path = log_file_path();
-        let log_dir = path
-            .parent()
-            .ok_or_else(|| "Diagnostic log path has no parent directory".to_string())?;
-
-        fs::create_dir_all(log_dir)
-            .map_err(|err| format!("Failed to create diagnostic log directory: {}", err))?;
-        let diagnostic_file = DiagnosticFile::open(path.clone(), enabled_since)
-            .map_err(|err| format!("Failed to prepare diagnostic log: {}", err))?;
-
-        {
-            let mut state = self.state.lock();
-            state.file = Some(diagnostic_file);
-            state.enabled_since = Some(enabled_since);
-            self.capture_session
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
-                    Some(value.wrapping_add(2) | 1)
-                })
-                .ok();
-        }
-
+        let session = self.capture_session.load(Ordering::Acquire).wrapping_add(2) | 1;
+        self.writer.open(session, path.clone(), enabled_since)?;
+        *state = Some(enabled_since);
+        self.capture_session.store(session, Ordering::Release);
         Ok(path)
     }
 
     fn disable_file_logging(&self) {
-        let mut state = self.state.lock();
-        self.capture_session.fetch_and(!1, Ordering::Release);
-        if let Some(mut file) = state.file.take() {
-            let _ = file.write_session_footer();
-            let _ = file.flush();
+        let mut state = self.enabled_since.lock();
+        let session = self.capture_session.fetch_and(!1, Ordering::AcqRel);
+        if session & 1 != 0 {
+            self.writer.close(session);
         }
-        state.enabled_since = None;
+        *state = None;
     }
 
     fn is_enabled(&self) -> bool {
-        self.state.lock().file.is_some()
+        self.capture_session().is_some()
     }
 
     fn capture_session(&self) -> Option<u64> {
@@ -102,13 +86,11 @@ impl DiagnosticLogger {
     }
 
     fn enabled_since(&self) -> Option<SystemTime> {
-        self.state.lock().enabled_since
+        *self.enabled_since.lock()
     }
 
     fn flush_file(&self) {
-        if let Some(file) = self.state.lock().file.as_mut() {
-            let _ = file.flush();
-        }
+        self.writer.flush(Duration::from_millis(250));
     }
 
     fn write_event(
@@ -118,16 +100,16 @@ impl DiagnosticLogger {
         event_code: &'static str,
         fields: &[DiagnosticField],
     ) {
-        let mut state = self.state.lock();
-        if let Some(file) = state.file.as_mut() {
-            let _ = file.write_event(level, component, event_code, fields);
-            if matches!(
-                component,
-                "memory_trim" | "image_viewer_memory" | "diagnostic_mode"
-            ) || matches!(level, Level::Warn | Level::Error)
-            {
-                let _ = file.flush();
-            }
+        if let Some(session) = self.capture_session() {
+            self.writer.events(
+                session,
+                vec![writer::Event::new(
+                    level,
+                    component,
+                    event_code,
+                    fields.to_vec(),
+                )],
+            );
         }
     }
 
@@ -218,6 +200,17 @@ pub(crate) fn capture_session() -> Option<u64> {
 
 pub fn enabled_since() -> Option<SystemTime> {
     LOGGER.get().and_then(|logger| logger.enabled_since())
+}
+
+/// Includes asynchronous open/write failures without consulting the filesystem.
+pub fn writer_failures() -> u64 {
+    LOGGER.get().map_or(0, |logger| logger.writer.failures())
+}
+
+pub fn take_output_failure() -> bool {
+    LOGGER
+        .get()
+        .is_some_and(|logger| logger.writer.take_output_failure())
 }
 
 pub fn flush() {

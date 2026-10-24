@@ -20,14 +20,14 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
     ) {
         crate::ui::list_stripes::remember(ui.ctx(), app.list_stripes_enabled);
         app.save_preferences();
-        app.force_save_preferences();
+        app.save_preferences_async();
     }
     let previous = app.folder_appearance;
     render_folder_appearance(ui, &mut app.folder_appearance);
     if previous != app.folder_appearance {
         app.apply_folder_appearance(ui.ctx());
         app.save_preferences();
-        app.force_save_preferences();
+        app.save_preferences_async();
     }
     changed
 }

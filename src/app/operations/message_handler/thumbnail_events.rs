@@ -10,6 +10,8 @@ impl ImageViewerApp {
         ctx: &egui::Context,
         process_visual_results: bool,
     ) -> Instant {
+        let mut diagnostic_stage =
+            crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new("stream_setup");
         const MAX_FILE_BATCHES_PER_FRAME: usize = 48;
         const FILE_BATCH_BUDGET_MS: u64 = 5;
 
@@ -62,6 +64,7 @@ impl ImageViewerApp {
         let mut processed_batches = 0usize;
         let mut has_more_stream_batches = false;
         let stream_start = Instant::now();
+        diagnostic_stage.lap("stream_receive");
 
         // Collect batches destined for the inactive panel (processed after the loop)
         let mut inactive_batches: Vec<Vec<FileEntry>> = Vec::new();
@@ -127,6 +130,7 @@ impl ImageViewerApp {
         }
 
         let t_stream_recv = Instant::now();
+        diagnostic_stage.lap("stream_rebuild");
 
         // Process active panel end-of-load / rebuild
         if saw_end_of_load {
@@ -150,18 +154,22 @@ impl ImageViewerApp {
         }
 
         let t_rebuild = Instant::now();
+        diagnostic_stage.lap("stream_covers");
 
         if process_visual_results {
             self.process_cover_worker_results(ctx);
         }
         let streaming_done = Instant::now();
+        diagnostic_stage.lap("stream_icons");
         if process_visual_results {
             self.process_icon_worker_results(ctx);
         }
         let t_icons = Instant::now();
+        diagnostic_stage.lap("stream_thumbnail_uploads");
         let mut received_any =
             process_visual_results && self.process_thumbnail_upload_pipeline(ctx);
         let t_thumbs = Instant::now();
+        diagnostic_stage.lap("stream_metadata");
 
         // Under frame pressure, preserve smoothness by deferring lower-priority
         // metadata/folder-size processing to subsequent frames.
@@ -181,6 +189,7 @@ impl ImageViewerApp {
             self.process_file_hash_worker_results(ctx);
         }
         let t_meta = Instant::now();
+        diagnostic_stage.lap("stream_folder_sizes");
 
         // 6. Folder size updates (lowest priority in critical frames)
         if !should_defer_low_priority {

@@ -26,6 +26,6 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     }
     if columns_changed || preview_changed {
         app.save_preferences();
-        app.force_save_preferences();
+        app.save_preferences_async();
     }
 }

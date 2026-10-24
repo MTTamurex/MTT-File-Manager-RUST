@@ -279,6 +279,8 @@ pub struct ImageViewerApp {
     pub(crate) inactive_items_rebuild_registry: Arc<InactiveItemsRebuildRegistry>,
 
     // COVER WORKER: Folder cover system (Single Thread Worker)
+    pub(crate) preference_writer:
+        Option<crate::app::operations::preferences::writer::PreferenceWriter>,
     pub cover_worker_sender: Sender<PathBuf>, // UI â†’ Worker: Sends folder to process
     pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker â†’ UI: Result
     pub scanned_folders: LruCache<PathBuf, ()>, // Cache: avoids re-scan (LRU bounded)

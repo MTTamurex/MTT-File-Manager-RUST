@@ -360,7 +360,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         parallel_start.elapsed().as_millis()
     );
 
-    let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone());
+    let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone(), ctx.clone());
     // EST-01: bounded intake for filesystem events. On saturation the producer
     // drops the oldest queued event and coalesces the burst into a single
     // overflow marker, so a sustained event storm cannot grow this queue

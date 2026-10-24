@@ -2,31 +2,30 @@
 //!
 //! This module handles saving application state to the SQLite database.
 //!
-//! PERFORMANCE: `save_preferences()` is debounced — it sets a dirty flag and the
-//! actual write happens in `flush_preferences_if_needed()` which runs once per frame
-//! but only writes to disk if >1 second has passed since the last write. This prevents
-//! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
+//! PERFORMANCE: the frame loop submits debounced snapshots to a dedicated
+//! writer. Lock and disk waits happen only there, never on the UI thread.
 
 use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::QuickAccessPlacement;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
-use crate::infrastructure::app_state_db::PreferenceWriteOutcome;
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
+
+pub(crate) mod writer;
 
 fn view_mode_preference_value(view_mode: ViewMode) -> &'static str {
     view_mode.preference_value()
 }
 
-/// Minimum interval between actual disk writes
+/// Minimum interval between debounced snapshot submissions.
 const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
 const FINAL_PREFERENCES_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl ImageViewerApp {
     /// Marks preferences as dirty (deferred write).
-    /// The actual SQLite writes happen in `flush_preferences_if_needed()`.
+    /// The frame loop submits the snapshot later; a worker persists it.
     pub fn save_preferences(&mut self) {
         self.preferences_dirty = true;
     }
@@ -34,6 +33,22 @@ impl ImageViewerApp {
     /// Flushes dirty preferences to SQLite if enough time has passed.
     /// Called once per frame from the update loop.
     pub fn flush_preferences_if_needed(&mut self) {
+        if self
+            .preference_writer
+            .as_ref()
+            .is_some_and(|writer| !writer.is_running())
+        {
+            self.preference_writer = None;
+            self.preferences_dirty = true;
+        }
+        if self
+            .preference_writer
+            .as_ref()
+            .is_some_and(|writer| writer.take_failure())
+        {
+            self.preferences_dirty = true;
+            log::warn!("[PREFERENCES] Background write failed; retrying latest state");
+        }
         if !self.preferences_dirty {
             return;
         }
@@ -41,42 +56,51 @@ impl ImageViewerApp {
         {
             return;
         }
-        self.sync_to_tab();
-        // Non-blocking flush: if DB writer is busy, keep dirty=true and retry next frame.
-        match self.do_save_preferences_nonblocking() {
-            PreferenceWriteOutcome::Persisted => {
-                self.preferences_dirty = false;
-                self.preferences_last_save = std::time::Instant::now();
-            }
-            PreferenceWriteOutcome::Busy => {
-                self.preferences_last_save = std::time::Instant::now();
-            }
-            PreferenceWriteOutcome::Failed(error) => {
-                log::error!("[PREFERENCES] Failed to persist preferences: {error}");
-                // Keep dirty, but back off instead of retrying and logging every frame.
-                self.preferences_last_save = std::time::Instant::now();
-            }
-        }
+        self.enqueue_preferences();
     }
 
-    /// Force-flushes preferences immediately (for exit).
+    /// Submits final preferences and waits at most 250 ms (for exit).
     pub fn force_save_preferences(&mut self) -> bool {
+        let Some(id) = self.enqueue_preferences() else {
+            return false;
+        };
+        let persisted = self
+            .preference_writer
+            .as_ref()
+            .is_some_and(|writer| writer.wait(id, FINAL_PREFERENCES_FLUSH_TIMEOUT));
+        if !persisted {
+            self.preferences_dirty = true;
+        }
+        persisted
+    }
+
+    /// Immediate submission, not immediate disk I/O. Settings changes use this;
+    /// only shutdown/update paths should wait for persistence.
+    pub fn save_preferences_async(&mut self) {
+        self.enqueue_preferences();
+    }
+
+    fn enqueue_preferences(&mut self) -> Option<u64> {
         self.sync_to_tab();
-        match self.do_save_preferences_bounded() {
-            PreferenceWriteOutcome::Persisted => {
-                self.preferences_dirty = false;
-                self.preferences_last_save = std::time::Instant::now();
-                true
-            }
-            PreferenceWriteOutcome::Busy => {
-                log::error!("[PREFERENCES] Final preference flush timed out");
-                false
-            }
-            PreferenceWriteOutcome::Failed(error) => {
-                log::error!("[PREFERENCES] Final preference flush failed: {error}");
-                false
+        self.preferences_last_save = std::time::Instant::now();
+        self.preferences_dirty = true;
+        if self
+            .preference_writer
+            .as_ref()
+            .is_some_and(|writer| !writer.is_running())
+        {
+            self.preference_writer = None;
+        }
+        if self.preference_writer.is_none() {
+            match writer::PreferenceWriter::new(self.app_state_db.clone()) {
+                Ok(writer) => self.preference_writer = Some(writer),
+                Err(_) => return None,
             }
         }
+        let snapshot = self.collect_preferences();
+        let id = self.preference_writer.as_mut()?.submit(snapshot)?;
+        self.preferences_dirty = false;
+        Some(id)
     }
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
@@ -356,12 +380,9 @@ impl ImageViewerApp {
             prefs.push(("last_folder", last_folder));
         }
 
-        // The standalone player owns this preference while running or flushing
-        // its final debounced value. Omitting the key avoids a read/write race
-        // where this batch could restore an older value after the player saves.
-        if self.video_player_process.is_none() && !self.video_player_close_in_progress {
-            prefs.push(("media_volume", self.session_volume.to_string()));
-        }
+        // The player persists media_volume itself. Never include the main
+        // window's cached value in an asynchronous snapshot: the player could
+        // open and save a newer volume before that snapshot reaches the disk.
 
         // Show hidden files toggle
         prefs.push((
@@ -478,19 +499,6 @@ impl ImageViewerApp {
         prefs
     }
 
-    /// Non-blocking write attempt used by frame loop flush.
-    fn do_save_preferences_nonblocking(&self) -> PreferenceWriteOutcome {
-        let prefs = self.collect_preferences();
-        self.app_state_db.try_set_preferences_batch(&prefs)
-    }
-
-    /// Deadline-bounded write used on exit to maximize persistence reliability.
-    fn do_save_preferences_bounded(&self) -> PreferenceWriteOutcome {
-        let prefs = self.collect_preferences();
-        self.app_state_db
-            .set_preferences_batch_bounded(&prefs, FINAL_PREFERENCES_FLUSH_TIMEOUT)
-    }
-
     pub fn set_diagnostic_mode(&mut self, enabled: bool) {
         self.set_diagnostic_mode_with_reason(enabled, "manual");
     }
@@ -544,10 +552,15 @@ impl ImageViewerApp {
         }
 
         self.save_preferences();
-        let _ = self.force_save_preferences();
+        self.save_preferences_async();
     }
 
     pub fn auto_disable_diagnostic_mode_if_needed(&mut self) {
+        if diagnostic_logger::take_output_failure() {
+            self.notifications.warning(
+                "Diagnostic logging encountered an output error. Check disk space and permissions.",
+            );
+        }
         if !self.diagnostic_mode {
             return;
         }
