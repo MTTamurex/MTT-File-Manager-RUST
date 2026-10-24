@@ -243,14 +243,6 @@ Startup checks are enabled by default and can be disabled in **Settings > About*
 - Diagnostic mode auto-disables after 24 hours and limits the file to approximately 10 MiB while retaining recent filtered events.
 - These are technical privacy measures for data minimization and safer troubleshooting, not a standalone legal certification of LGPD or any other regulatory compliance.
 
-## Temporary GPU Recovery Tests
-
-- Glow preserves its GPU texture handles after prolonged background or minimize recovery by default.
-- Set `MTT_OPENGL_FLUSH_TEXTURES=1` to re-enable the OpenGL texture flush for comparison.
-- Set `MTT_DISABLE_WS_TRIM=1` to disable process working-set trimming for comparison.
-- Set `MTT_TRACE_FRAME_GAPS=1` to log visible frame gaps even when thumbnail work is idle.
-- These variables are intended for local performance tests and are not required for normal use.
-
 ## Video Thumbnail Codecs
 
 The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage 3), **IThumbnailCache** (Stage 4), and **Media Foundation** (Stage 5). All three require video codecs to be registered on the system.
