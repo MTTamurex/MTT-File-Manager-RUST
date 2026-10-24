@@ -167,11 +167,7 @@ impl ImageViewerApp {
                 self.is_media_keyboard_focused(),
             )
         {
-            let visible_indices = if compact {
-                (0..self.items.len()).collect::<Vec<_>>()
-            } else {
-                self.visible_group_item_indices()
-            };
+            let visible_indices = self.visible_group_item_indices();
             let mut visual_slots: Vec<Option<usize>> =
                 visible_indices.iter().copied().map(Some).collect();
             let mut navigation_block_size = 1usize;
@@ -241,7 +237,7 @@ impl ImageViewerApp {
                 let row_height = 24.0;
                 let header_h = if compact { 0.0 } else { 32.0 };
                 let viewport_h = (ui.available_height() - header_h).max(0.0);
-                let navigation_viewport_h = if !compact && self.group_projection.is_grouped() {
+                let navigation_viewport_h = if self.group_projection.is_grouped() {
                     grouped_visible_list_item_count(
                         &self.group_projection,
                         &collapsed_groups,
@@ -293,16 +289,7 @@ impl ImageViewerApp {
                                 self.selection_anchor = old_focus;
                             }
                             if let Some(anchor) = self.selection_anchor {
-                                let range = if compact {
-                                    let (start, end) = if anchor <= clamped {
-                                        (anchor, clamped)
-                                    } else {
-                                        (clamped, anchor)
-                                    };
-                                    (start..=end).collect()
-                                } else {
-                                    self.visible_group_range(anchor, clamped)
-                                };
+                                let range = self.visible_group_range(anchor, clamped);
                                 for i in range {
                                     if let Some(it) = self.items.get(i) {
                                         self.multi_selection.insert(it.path.clone());
@@ -668,16 +655,7 @@ impl ImageViewerApp {
                         } else if shift {
                             // Shift + Click: Range between anchor and click
                             if let Some(anchor) = self.selection_anchor {
-                                let range = if compact {
-                                    let (start, end) = if anchor <= idx {
-                                        (anchor, idx)
-                                    } else {
-                                        (idx, anchor)
-                                    };
-                                    (start..=end).collect()
-                                } else {
-                                    self.visible_group_range(anchor, idx)
-                                };
+                                let range = self.visible_group_range(anchor, idx);
                                 for i in range {
                                     if let Some(it) = self.items.get(i) {
                                         self.multi_selection.insert(it.path.clone());

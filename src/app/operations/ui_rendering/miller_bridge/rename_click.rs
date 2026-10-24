@@ -12,6 +12,9 @@ pub(super) fn finish_rename_for_click_away(
     let rename_path = app.renaming_state.as_ref().map(|(path, _)| path.clone());
     let clicked_away = rename_path.as_ref().is_some_and(|rename_path| {
         outputs.iter().any(|(column_index, output)| {
+            if output.toggled_group.is_some() {
+                return true;
+            }
             let Some(item_index) = output.action.as_ref().and_then(clicked_item_index) else {
                 return false;
             };

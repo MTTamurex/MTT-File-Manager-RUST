@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::application::sorting::sort_items;
+mod grouping;
 use crate::domain::file_entry::{
     is_archive_extension, is_path_inside_archive, FileEntry, FoldersPosition, SortMode,
 };
@@ -38,6 +39,7 @@ const LOAD_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 /// Cache of ancestor-column directory listings for the Miller's Columns view.
 pub struct MillerColumnsState {
+    pub(crate) grouping: grouping::ColumnGroupingCache,
     listings: HashMap<PathBuf, Arc<Vec<FileEntry>>>,
     loading: HashMap<PathBuf, u64>,
     failed_at: HashMap<PathBuf, Instant>,
@@ -62,6 +64,7 @@ impl Clone for MillerColumnsState {
     fn clone(&self) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
+            grouping: self.grouping.clone(),
             listings: self.listings.clone(),
             // In-flight tasks still target the original receiver. Missing
             // listings will be scheduled again when this clone is rendered.
@@ -83,6 +86,7 @@ impl MillerColumnsState {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
+            grouping: Default::default(),
             listings: HashMap::new(),
             loading: HashMap::new(),
             failed_at: HashMap::new(),
@@ -102,6 +106,7 @@ impl MillerColumnsState {
     pub fn set_signature(&mut self, signature: ListingSignature) {
         if self.signature != signature {
             self.signature = signature;
+            self.grouping.clear();
             self.listings.clear();
             self.loading.clear();
             self.failed_at.clear();
@@ -179,6 +184,7 @@ impl MillerColumnsState {
     /// Invalidate a directory. A new load starts only if the directory is still
     /// part of a rendered ancestor chain and `ensure()` requests it again.
     pub fn invalidate(&mut self, dir: &Path) {
+        self.grouping.invalidate(dir);
         self.listings.remove(dir);
         self.loading.remove(dir);
         self.failed_at.remove(dir);
@@ -186,6 +192,7 @@ impl MillerColumnsState {
 
     /// Drop cached listings for directories not in `keep` to bound memory.
     pub fn retain(&mut self, keep: &HashSet<PathBuf>) {
+        self.grouping.retain(keep);
         self.listings.retain(|dir, _| keep.contains(dir));
         self.loading.retain(|dir, _| keep.contains(dir));
         self.failed_at.retain(|dir, _| keep.contains(dir));

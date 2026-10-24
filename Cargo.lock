@@ -3843,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-explorer-command"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "windows",
  "windows-core",
@@ -3851,7 +3851,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-file-manager"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "base64 0.22.1",
  "betteroffice-docx-edit",
@@ -3925,7 +3925,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "bincode",
  "serde",
@@ -3933,7 +3933,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "bincode",
  "libmimalloc-sys",

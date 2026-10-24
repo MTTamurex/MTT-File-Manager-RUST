@@ -136,6 +136,32 @@ impl ImageViewerApp {
             })
             .collect();
 
+        let ancestor_groups: Vec<_> = chain
+            .iter()
+            .zip(&ancestor_data)
+            .take(focused_index)
+            .map(|(dir, (listing, _))| {
+                let projection = listing
+                    .as_ref()
+                    .map(|items| {
+                        self.miller_columns.grouping.projection(
+                            dir,
+                            items.clone(),
+                            self.group_mode,
+                            self.group_descending,
+                        )
+                    })
+                    .unwrap_or_default();
+                let key = self.grouping_context_key_for_path(&dir.to_string_lossy());
+                let collapsed = self
+                    .collapsed_groups_by_context
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                (projection, collapsed)
+            })
+            .collect();
+
         let snap_to_focused = self.miller_columns.take_scroll_to_focused_pending();
         let strip_width = focused_index as f32 * ANCESTOR_COL_WIDTH + FOCUSED_COL_WIDTH;
         let max_horizontal_offset = (strip_width - viewport.width()).max(0.0);
@@ -198,6 +224,8 @@ impl ImageViewerApp {
                                 |ui| {
                                     let mut cctx = MillerColumnContext {
                                         items,
+                                        group_projection: &ancestor_groups[col_idx].0,
+                                        collapsed_groups: &ancestor_groups[col_idx].1,
                                         directory: &chain[col_idx],
                                         selected_child,
                                         selected_file: selected_file_path.as_deref(),

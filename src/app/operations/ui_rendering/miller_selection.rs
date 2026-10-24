@@ -2,7 +2,7 @@ use eframe::egui;
 use std::path::Path;
 
 use crate::app::operations::rectangle_selection::{
-    resolve_rectangle_preview_indices, resolve_rectangle_selection,
+    grouped_visual_order, resolve_rectangle_preview_indices, resolve_rectangle_selection,
 };
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
@@ -124,6 +124,12 @@ impl ImageViewerApp {
             return;
         };
         let anchor_index = self.miller_columns.selection_anchor_index(directory, items);
+        let (visual_order, visual_order_source) = grouped_visual_order(
+            &metrics,
+            state.visual_order.as_ref(),
+            state.visual_order_source.as_ref(),
+        )
+        .unzip();
         let hit_indices = collect_indices_in_rect(state.content_rect(), metrics);
         let preview_indices = resolve_rectangle_preview_indices(
             items.len(),
@@ -131,11 +137,13 @@ impl ImageViewerApp {
             &hit_indices,
             anchor_index,
             state.modifiers,
-            None,
+            visual_order.as_deref(),
         );
         if let Some(state) = self.rectangle_selection_state.as_mut() {
             state.hit_indices = hit_indices;
             state.preview_indices = preview_indices;
+            state.visual_order = visual_order;
+            state.visual_order_source = visual_order_source;
         }
 
         if primary_released {
@@ -177,7 +185,7 @@ impl ImageViewerApp {
             anchor_index,
             state.modifiers,
             |index| items.get(index).map(|item| item.path.clone()),
-            None,
+            state.visual_order.as_deref(),
         );
 
         if !resolved.selection_changed {

@@ -12,10 +12,7 @@ use crate::domain::file_entry::FileEntry;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::theme;
 use crate::ui::views::list_view::truncate_text_for_column;
-use crate::ui::views::rectangle_selection::{
-    paint_overlay, ListRectangleMetrics, RectangleSelectionFrame, RectangleSelectionMetrics,
-    RectangleSelectionSource, RectangleSelectionState,
-};
+use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionState};
 
 use super::layout::COL_ROW_HEIGHT;
 
@@ -32,9 +29,9 @@ pub enum MillerColumnAction {
     EmptyClicked,
     EmptySecondaryClicked(egui::Pos2),
 }
-
 pub struct MillerColumnOutput {
     pub action: Option<MillerColumnAction>,
+    pub toggled_group: Option<crate::application::grouping::GroupKey>,
     pub rectangle_selection_frame: RectangleSelectionFrame,
     pub rename_update: Option<MillerRenameUpdate>,
 }
@@ -48,6 +45,8 @@ pub struct MillerRenameUpdate {
 /// Borrowed context needed to render one ancestor column.
 pub struct MillerColumnContext<'a> {
     pub items: &'a [FileEntry],
+    pub group_projection: &'a crate::application::grouping::GroupProjection,
+    pub collapsed_groups: &'a crate::ui::cache::FxHashSet<crate::application::grouping::GroupKey>,
     pub directory: &'a Path,
     /// The child directory (from this column) that leads to the next column.
     pub selected_child: Option<&'a Path>,
@@ -69,169 +68,7 @@ pub struct MillerColumnContext<'a> {
     pub scroll_interpolation_enabled: bool,
 }
 
-/// Render one ancestor column into the current (already column-sized) `ui`.
-/// The caller allocates the column region (inside a horizontal `ScrollArea`),
-/// so this renders directly without manual positioning or clip overrides.
-pub fn render_miller_column(
-    ui: &mut Ui,
-    id_salt: impl egui::AsIdSalt,
-    ctx: &mut MillerColumnContext,
-) -> MillerColumnOutput {
-    let dark = ui.visuals().dark_mode;
-    let rect = ui.max_rect();
-    let row_height = crate::ui::fonts::layout::row_height(ui, COL_ROW_HEIGHT, 13.0, 6.0);
-    let column_id = ui.make_persistent_id(id_salt);
-    let background_response =
-        ui.interact(rect, column_id.with("background"), Sense::click_and_drag());
-
-    let pointer_pos = ctx
-        .external_drop_pointer_pos
-        .or_else(|| ui.input(|input| input.pointer.hover_pos()));
-    if ctx.is_item_dragging && pointer_pos.is_some_and(|position| rect.contains(position)) {
-        *ctx.drop_target = Some(ctx.directory.to_path_buf());
-    }
-
-    // Right separator between columns.
-    let sep_color = if dark {
-        theme::palette::border(ui.ctx(), Color32::from_gray(60))
-    } else {
-        Color32::from_gray(210)
-    };
-    ui.painter().vline(
-        rect.right(),
-        rect.top()..=rect.bottom(),
-        egui::Stroke::new(1.0, sep_color),
-    );
-
-    if ctx.items.is_empty() {
-        if ctx.is_loading {
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "…",
-                FontId::proportional(13.0),
-                Color32::from_gray(120),
-            );
-        }
-        return MillerColumnOutput {
-            action: background_action(&background_response, ui),
-            rectangle_selection_frame: RectangleSelectionFrame::default(),
-            rename_update: None,
-        };
-    }
-
-    let mut action = None;
-    let mut rename_update = None;
-    let mut rectangle_start = None;
-    ui.spacing_mut().item_spacing.y = 0.0;
-
-    let scroll_id = ui.make_persistent_id(column_id);
-    let custom_wheel_offset = if !ctx.scroll_interpolation_enabled && ui.rect_contains_pointer(rect)
-    {
-        let dragged_id = ui.ctx().dragged_id();
-        if dragged_id.is_none() {
-            let wheel_delta = ui
-                .input(|input| crate::ui::views::common::raw_wheel_delta(input, rect.height()))
-                .y;
-            let current_offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
-                .map(|state| state.offset.y)
-                .unwrap_or(0.0);
-            let max_scroll = (ctx.items.len() as f32 * row_height - rect.height()).max(0.0);
-            raw_wheel_scroll_offset(current_offset, wheel_delta, max_scroll)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    if custom_wheel_offset.is_some() {
-        // The enclosing horizontal Miller strip also sees wheel input. Consume
-        // the vertical delta here so it cannot turn this column's wheel scroll
-        // into horizontal movement of the entire strip.
-        ui.ctx()
-            .input_mut(|input| input.smooth_scroll_delta.y = 0.0);
-    }
-
-    let scroll_source = if ctx.scroll_interpolation_enabled {
-        egui::scroll_area::ScrollSource::SCROLL_BAR | egui::scroll_area::ScrollSource::MOUSE_WHEEL
-    } else {
-        egui::scroll_area::ScrollSource::SCROLL_BAR
-    };
-    let scroll_area = egui::ScrollArea::vertical()
-        .id_salt(column_id)
-        .auto_shrink([false, false])
-        .scroll_source(scroll_source)
-        .animated(ctx.scroll_interpolation_enabled);
-    let scroll_area = if let Some(offset) = custom_wheel_offset {
-        scroll_area.vertical_scroll_offset(offset)
-    } else {
-        scroll_area
-    };
-    let scroll_output =
-        scroll_area.show_rows(ui, row_height, ctx.items.len(), |ui, row_range| {
-            for index in row_range {
-                let Some(item) = ctx.items.get(index) else {
-                    continue;
-                };
-                if let Some(a) = render_row(
-                    ui,
-                    index,
-                    item,
-                    ctx,
-                    dark,
-                    &mut rectangle_start,
-                    &mut rename_update,
-                ) {
-                    action = Some(a);
-                }
-            }
-        });
-
-    if action.is_none() && background_response.drag_started_by(egui::PointerButton::Primary) {
-        rectangle_start = ui.input(|input| input.pointer.press_origin());
-    }
-
-    let source = RectangleSelectionSource::MillerAncestor {
-        directory: ctx.directory.to_path_buf(),
-    };
-    let current_scroll_y = scroll_output.state.offset.y;
-    let max_scroll_y = (scroll_output.content_size.y - scroll_output.inner_rect.height()).max(0.0);
-    let mut rectangle_selection_frame = RectangleSelectionFrame::default();
-    rectangle_selection_frame.begin(
-        scroll_output.inner_rect,
-        0.0,
-        current_scroll_y,
-        0.0,
-        max_scroll_y,
-        Some(RectangleSelectionMetrics::List(ListRectangleMetrics {
-            count: ctx.items.len(),
-            row_height,
-            content_width: scroll_output.inner_rect.width(),
-            content_height: ctx.items.len() as f32 * row_height,
-        })),
-    );
-    rectangle_selection_frame.source = source;
-    if let Some(start) = rectangle_start {
-        rectangle_selection_frame.request_start(start);
-    }
-
-    if let Some(state) = ctx.rectangle_selection_state {
-        paint_overlay(ui, state, scroll_output.inner_rect, 0.0, current_scroll_y);
-    }
-
-    MillerColumnOutput {
-        action: action.or_else(|| background_action(&background_response, ui)),
-        rectangle_selection_frame,
-        rename_update,
-    }
-}
-
-fn raw_wheel_scroll_offset(current_offset: f32, wheel_delta: f32, max_offset: f32) -> Option<f32> {
-    let next_offset = (current_offset - wheel_delta).clamp(0.0, max_offset);
-    (wheel_delta != 0.0 && next_offset != current_offset).then_some(next_offset)
-}
-
-fn render_row(
+pub(super) fn render_row(
     ui: &mut Ui,
     index: usize,
     item: &FileEntry,
@@ -536,7 +373,7 @@ fn row_content_contains_pointer(
         .contains(point)
 }
 
-fn background_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnAction> {
+pub(super) fn background_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnAction> {
     if response.secondary_clicked() {
         let position = response
             .interact_pointer_pos()
@@ -547,19 +384,5 @@ fn background_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnA
         Some(MillerColumnAction::EmptyClicked)
     } else {
         None
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::raw_wheel_scroll_offset;
-
-    #[test]
-    fn raw_wheel_scroll_changes_only_the_column_offset() {
-        assert_eq!(raw_wheel_scroll_offset(20.0, -15.0, 100.0), Some(35.0));
-        assert_eq!(raw_wheel_scroll_offset(20.0, 15.0, 100.0), Some(5.0));
-        assert_eq!(raw_wheel_scroll_offset(0.0, 15.0, 100.0), None);
-        assert_eq!(raw_wheel_scroll_offset(95.0, -15.0, 100.0), Some(100.0));
-        assert_eq!(raw_wheel_scroll_offset(20.0, 0.0, 100.0), None);
     }
 }

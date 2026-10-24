@@ -115,12 +115,16 @@ impl ImageViewerApp {
     }
 
     pub fn grouping_context_key(&self) -> String {
+        self.grouping_context_key_for_path(&self.navigation_state.current_path)
+    }
+
+    pub(crate) fn grouping_context_key_for_path(&self, path: &str) -> String {
         let mode = if self.navigation_state.is_computer_view {
             "computer"
         } else {
             self.group_mode.preference_value()
         };
-        format!("{}\u{1f}{}", self.navigation_state.current_path, mode)
+        format!("{}\u{1f}{}", path, mode)
     }
 
     pub fn is_group_collapsed(&self, key: &crate::application::grouping::GroupKey) -> bool {

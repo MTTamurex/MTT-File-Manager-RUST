@@ -9,6 +9,8 @@ use rust_i18n::t;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+mod panel_focus;
+
 // M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
 // Keyed by (current_path, modified_hint, created_hint, drive_info_epoch);
 // invalidated on navigation, folder update, or drive volume-info refresh.
@@ -1004,28 +1006,20 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // ── Click-to-focus: detect click AFTER rendering so item interactions
     //    are processed first. Only primary-button clicks may switch focus;
     //    right/middle clicks are reserved for context menus and other UI. ──
-    // Guard: do NOT process panel clicks while a modal/overlay is open.
-    // The overlay uses an egui::Area as a backdrop which consumes the click, but
-    // ui.input(pointer.primary_clicked()) reads raw events and ignores consumption,
-    // so without this guard clicks on the overlay would switch panel focus.
-    let (pointer_pos, primary_clicked) =
-        ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked()));
-    if primary_clicked
-        && panel_tab_action.is_none()
+    // Modal guards and layer-aware hit testing keep clicks on toolbar popups
+    // from also activating the pane underneath, even as the popup closes.
+    if panel_tab_action.is_none()
         && !app.global_search.active
         && !app.navigation_state.show_settings_window
         && !file_panel_input_blocked
         && !app.context_menu.is_open
     {
-        if let Some(pos) = pointer_pos {
-            // Switch focus when clicking in the inactive panel area.
-            let inactive_tab_strip = match active {
-                ActivePanel::Left => right_tab_strip_rect,
-                ActivePanel::Right => left_tab_strip_rect,
-            };
-            if inactive_content_rect.contains(pos) || inactive_tab_strip.contains(pos) {
-                app.dual_panel_switch_active();
-            }
+        let inactive_tab_strip = match active {
+            ActivePanel::Left => right_tab_strip_rect,
+            ActivePanel::Right => left_tab_strip_rect,
+        };
+        if panel_focus::clicked_in_panel(ui, inactive_content_rect, inactive_tab_strip) {
+            app.dual_panel_switch_active();
         }
     }
 

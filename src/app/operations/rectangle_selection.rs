@@ -177,7 +177,7 @@ fn selection_range(
     Some((start..=end).collect())
 }
 
-fn grouped_visual_order(
+pub(super) fn grouped_visual_order(
     metrics: &RectangleSelectionMetrics,
     cached: Option<&Arc<[usize]>>,
     cached_source: Option<&GroupedProjectionIdentity>,

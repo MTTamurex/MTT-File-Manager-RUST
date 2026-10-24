@@ -16,7 +16,7 @@ fn row_color(ctx: &egui::Context, row: usize) -> Option<Color32> {
     let enabled = ctx
         .data(|data| data.get_temp::<bool>(egui::Id::new(PREFERENCE_KEY)))
         .unwrap_or(false);
-    if !enabled || row % 2 == 0 {
+    if !enabled || row.is_multiple_of(2) {
         return None;
     }
     // A translucent theme foreground keeps custom palettes' hue intact.

@@ -47,13 +47,38 @@ impl ImageViewerApp {
                 .set_selection_anchor(directory, &entry.path);
         } else if shift {
             if let Some(anchor) = anchor {
-                let (start, end) = if anchor < index {
-                    (anchor, index)
+                let projection = if let Some(items) =
+                    self.miller_columns.get_arc(directory).filter(|items| {
+                        items.as_ptr() == listing.as_ptr() && items.len() == listing.len()
+                    }) {
+                    self.miller_columns.grouping.projection(
+                        directory,
+                        items,
+                        self.group_mode,
+                        self.group_descending,
+                    )
                 } else {
-                    (index, anchor)
+                    std::sync::Arc::new(crate::application::grouping::build_group_projection(
+                        listing,
+                        self.group_mode,
+                        self.group_descending,
+                    ))
                 };
-                for item in &listing[start..=end] {
-                    self.multi_selection.insert(item.path.clone());
+                let context = self.grouping_context_key_for_path(&directory.to_string_lossy());
+                let visible = crate::application::grouping::visible_item_indices(
+                    &projection,
+                    self.collapsed_groups_by_context.get(&context),
+                    listing.len(),
+                );
+                let range = match (
+                    visible.iter().position(|i| *i == anchor),
+                    visible.iter().position(|i| *i == index),
+                ) {
+                    (Some(a), Some(b)) => &visible[a.min(b)..=a.max(b)],
+                    _ => std::slice::from_ref(&index),
+                };
+                for &i in range {
+                    self.multi_selection.insert(listing[i].path.clone());
                 }
             } else {
                 self.multi_selection.clear();

@@ -250,7 +250,7 @@ fn promote_extract_all_shell_item(
 
 fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu::ContextMenuItem {
     use crate::application::context_menu::ContextMenuItem;
-    use crate::domain::file_entry::{GroupMode, ViewMode};
+    use crate::domain::file_entry::GroupMode;
 
     let mut sub_items = Vec::new();
     for (index, mode, label) in [
@@ -282,11 +282,7 @@ fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu:
 
     ContextMenuItem::new(-299, t!("secondary_toolbar.group_by"))
         .with_subitems(sub_items)
-        .enabled(
-            !app.current_folder_locked
-                && !app.navigation_state.is_computer_view
-                && app.view_mode != ViewMode::Miller,
-        )
+        .enabled(!app.current_folder_locked && !app.navigation_state.is_computer_view)
 }
 
 impl ImageViewerApp {

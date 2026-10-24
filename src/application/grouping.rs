@@ -88,10 +88,10 @@ impl GroupProjection {
 }
 
 pub fn is_grouping_rendered(
-    view_mode: crate::domain::file_entry::ViewMode,
+    _view_mode: crate::domain::file_entry::ViewMode,
     projection: &GroupProjection,
 ) -> bool {
-    view_mode != crate::domain::file_entry::ViewMode::Miller && projection.is_grouped()
+    projection.is_grouped()
 }
 
 pub fn build_group_projection(
@@ -104,6 +104,11 @@ pub fn build_group_projection(
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
     build_group_projection_at(items, mode, descending, now)
+}
+
+pub(crate) fn local_grouping_day() -> Option<i64> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    unix_to_local_date(now).map(CivilDate::days_since_epoch)
 }
 
 mod computer;
@@ -521,6 +526,29 @@ fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn miller_renders_the_same_group_projection_as_other_views() {
+        use crate::domain::file_entry::ViewMode;
+        let items = [entry("file.txt", false, 1, 0)];
+        for mode in [
+            GroupMode::Name,
+            GroupMode::Date,
+            GroupMode::Type,
+            GroupMode::Size,
+        ] {
+            let projection = build_group_projection(&items, mode, false);
+            for view in [
+                ViewMode::Grid,
+                ViewMode::List,
+                ViewMode::ColumnList,
+                ViewMode::Miller,
+            ] {
+                assert!(is_grouping_rendered(view, &projection));
+                assert!(!is_grouping_rendered(view, &GroupProjection::default()));
+            }
+        }
+    }
 
     fn entry(name: &str, is_dir: bool, size: u64, modified: u64) -> FileEntry {
         FileEntry {

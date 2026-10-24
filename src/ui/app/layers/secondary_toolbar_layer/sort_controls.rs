@@ -1,5 +1,5 @@
 use crate::app::ImageViewerApp;
-use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
+use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode};
 use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
@@ -197,9 +197,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
 }
 
 fn render_group_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
-    let unavailable = app.current_folder_locked
-        || app.navigation_state.is_computer_view
-        || app.view_mode == ViewMode::Miller;
+    let unavailable = app.current_folder_locked || app.navigation_state.is_computer_view;
     ui.scope(|ui| {
         if unavailable {
             ui.disable();

@@ -33,7 +33,7 @@ pub(super) fn render_virtualized_content(
     col_widths: &ColumnWidths,
 ) -> InteractionResult {
     let total_rows = ctx.items.len();
-    let grouped = ctx.group_projection.is_grouped() && !ctx.compact;
+    let grouped = ctx.group_projection.is_grouped();
     ctx.visible_group_paths.clear();
     let mut clicked_item = None;
     let mut double_clicked_item = None;

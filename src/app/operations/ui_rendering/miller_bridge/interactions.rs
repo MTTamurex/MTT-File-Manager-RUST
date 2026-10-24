@@ -25,6 +25,17 @@ pub(super) fn apply_ancestor_interactions(
         let Some(listing) = ancestor_data[*column_index].0.as_ref() else {
             continue;
         };
+        if let Some(key) = output.toggled_group.take() {
+            app.cancel_rectangle_selection();
+            let context =
+                app.grouping_context_key_for_path(&chain[*column_index].to_string_lossy());
+            let groups = app.collapsed_groups_by_context.entry(context).or_default();
+            if !groups.remove(&key) {
+                groups.insert(key);
+            }
+            ui.ctx().request_repaint();
+            continue;
+        }
         app.handle_miller_rectangle_selection_frame(ui, &output.rectangle_selection_frame, listing);
         if app.renaming_state.is_some() {
             continue;
