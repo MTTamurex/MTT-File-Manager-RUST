@@ -102,8 +102,25 @@ impl ImageViewerApp {
     }
 
     pub fn rebuild_group_projection(&mut self) {
+        let mut column_context = None;
         let projection = if self.navigation_state.is_computer_view {
             crate::application::grouping::build_computer_projection(&self.items)
+        } else if let crate::domain::file_entry::GroupMode::Column(column) = self.group_mode {
+            let signature = self.column_group_signature(column);
+            let pane = usize::from(
+                matches!(
+                    self.dual_panel_active,
+                    crate::app::dual_panel::ActivePanel::Right
+                ) ^ self.in_inactive_panel_context,
+            );
+            column_context = Some((signature, pane));
+            self.columns.column_group_projection(
+                signature,
+                pane,
+                &self.items,
+                column,
+                self.group_descending,
+            )
         } else {
             crate::application::grouping::build_group_projection(
                 &self.items,
@@ -112,6 +129,10 @@ impl ImageViewerApp {
             )
         };
         self.group_projection = Arc::new(projection);
+        if let Some((signature, pane)) = column_context {
+            self.columns
+                .remember_column_group_projection(signature, pane, &self.group_projection);
+        }
     }
 
     pub fn grouping_context_key(&self) -> String {
@@ -120,7 +141,7 @@ impl ImageViewerApp {
 
     pub(crate) fn grouping_context_key_for_path(&self, path: &str) -> String {
         let mode = if self.navigation_state.is_computer_view {
-            "computer"
+            "computer".to_owned()
         } else {
             self.group_mode.preference_value()
         };

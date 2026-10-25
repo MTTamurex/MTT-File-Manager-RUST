@@ -8,6 +8,7 @@ pub mod file_tag;
 pub mod folder_appearance;
 pub mod folder_lock;
 pub mod folder_preview_validity;
+mod group_mode;
 pub mod list_columns;
 pub mod network_location;
 pub mod network_path;

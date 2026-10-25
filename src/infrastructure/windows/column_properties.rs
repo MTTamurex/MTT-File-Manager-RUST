@@ -1,7 +1,9 @@
 //! Windows column catalog and read-only property access. Called only by workers.
+mod grouping;
 mod indexed;
 use crate::domain::date_format::{date_format, DateFormat};
 use crate::domain::list_columns::{ColumnId, PropertyId};
+pub use grouping::{FolderGrouping, NativeCategory, PropertyGrouping, SchemaGroup};
 pub use indexed::IndexedProperties;
 use std::cmp::Ordering;
 use std::os::windows::ffi::OsStrExt;
@@ -103,6 +105,12 @@ pub fn catalog() -> windows::core::Result<Vec<PropertyColumn>> {
 /// Owns a PROPVARIANT on its originating COM thread. Never crosses a channel.
 pub struct PropertyValue(PROPVARIANT);
 
+impl From<PROPVARIANT> for PropertyValue {
+    fn from(value: PROPVARIANT) -> Self {
+        Self(value)
+    }
+}
+
 /// Dates stay unformatted in the UI cache so preference changes need no new Shell reads.
 #[derive(Clone, Debug)]
 pub enum PropertyDisplayValue {
@@ -179,6 +187,11 @@ impl PropertyReader {
     }
 
     pub fn open(path: &Path) -> Result<Self, PropertyReadError> {
+        Self::check_safe(path)?;
+        Self::open_with_flags(path, GPS_BESTEFFORT | GPS_DELAYCREATION)
+    }
+
+    pub fn check_safe(path: &Path) -> Result<(), PropertyReadError> {
         // Avoid hydration and interference with active writers. These checks are also worker-only.
         if (crate::infrastructure::onedrive::is_cloud_sync_path(path)
             && !crate::infrastructure::onedrive::is_locally_available(path))
@@ -188,7 +201,7 @@ impl PropertyReader {
         {
             return Err(PropertyReadError::Deferred);
         }
-        Self::open_with_flags(path, GPS_BESTEFFORT | GPS_DELAYCREATION)
+        Ok(())
     }
 
     fn open_with_flags(
@@ -207,7 +220,7 @@ impl PropertyReader {
 
     pub fn read(&self, id: PropertyId) -> Option<PropertyValue> {
         unsafe {
-            let value = PropertyValue(self.0.GetValue(&key(id)).ok()?);
+            let value = PropertyValue::from(self.0.GetValue(&key(id)).ok()?);
             // VT_EMPTY and VT_NULL are both missing, rather than zero or an empty date.
             if value.0.Anonymous.Anonymous.vt.0 <= 1 {
                 None

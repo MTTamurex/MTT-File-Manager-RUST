@@ -1052,6 +1052,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
     let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
     app.refresh_column_sort(ui.ctx());
+    app.refresh_column_grouping(ui.ctx());
 
     if app.is_loading_folder && app.items.is_empty() {
         ui.centered_and_justified(|ui| {

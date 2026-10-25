@@ -6,6 +6,8 @@ use crate::ui::{theme, widgets};
 use eframe::egui;
 
 mod actions;
+mod column_options;
+mod group_controls;
 mod sort_controls;
 mod view_zoom_controls;
 

@@ -51,7 +51,7 @@ pub enum TypeGroup {
     Extension(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub enum GroupKey {
     Name(NameGroup),
     Date(DateGroup),
@@ -60,7 +60,14 @@ pub enum GroupKey {
     LocalDrives,
     NetworkDrives,
     NetworkLocations,
+    Column {
+        column: crate::domain::list_columns::ColumnId,
+        identity: String,
+        label: String,
+    },
 }
+
+mod key;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupSection {
@@ -113,6 +120,7 @@ pub(crate) fn local_grouping_day() -> Option<i64> {
 
 mod computer;
 pub use computer::build_computer_projection;
+pub mod columns;
 
 pub fn group_label(key: &GroupKey) -> String {
     match key {
@@ -151,6 +159,10 @@ pub fn group_label(key: &GroupKey) -> String {
         GroupKey::LocalDrives => t!("sidebar.local_disks").to_string(),
         GroupKey::NetworkDrives => t!("sidebar.network_drives").to_string(),
         GroupKey::NetworkLocations => t!("sidebar.network_locations").to_string(),
+        GroupKey::Column { label, .. } if label.is_empty() => {
+            t!("grouping.unspecified").to_string()
+        }
+        GroupKey::Column { label, .. } => label.clone(),
     }
 }
 
@@ -280,7 +292,7 @@ fn build_group_projection_at(
     descending: bool,
     now_unix: u64,
 ) -> GroupProjection {
-    if mode == GroupMode::None || items.is_empty() {
+    if matches!(mode, GroupMode::None | GroupMode::Column(_)) || items.is_empty() {
         return GroupProjection::default();
     }
 
@@ -324,6 +336,7 @@ fn group_key(item: &FileEntry, mode: GroupMode, today: Option<CivilDate>) -> Gro
         GroupMode::Date => GroupKey::Date(classify_date(item.modified, today)),
         GroupMode::Type => GroupKey::Type(classify_type(item)),
         GroupMode::Size => GroupKey::Size(classify_size(item)),
+        GroupMode::Column(_) => unreachable!("column groups are built from worker results"),
     }
 }
 
@@ -374,7 +387,11 @@ fn classify_size(item: &FileEntry) -> SizeGroup {
     if is_physical_folder(item) {
         return SizeGroup::Unspecified;
     }
-    match item.size {
+    classify_byte_size(item.size)
+}
+
+fn classify_byte_size(bytes: u64) -> SizeGroup {
+    match bytes {
         0 => SizeGroup::Empty,
         1..=16_384 => SizeGroup::Tiny,
         16_385..=1_048_576 => SizeGroup::Small,

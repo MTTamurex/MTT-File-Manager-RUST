@@ -30,6 +30,7 @@ impl Fixture {
                 pending: HashMap::new(),
                 display_sources: Default::default(),
                 sorting: sorting::ColumnSorting::new(),
+                grouping: grouping::ColumnGrouping::new(),
             },
             results,
             requests,

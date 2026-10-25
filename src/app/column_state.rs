@@ -1,6 +1,8 @@
 //! Shared column preferences and bounded, asynchronous display-property cache.
 mod display_source;
 mod display_worker;
+mod grouping;
+mod grouping_worker;
 mod rank_order;
 mod sorting;
 mod sorting_worker;
@@ -83,6 +85,7 @@ pub struct ColumnState {
     pending: HashMap<ValueKey, Arc<AtomicBool>>,
     display_sources: display_source::DisplaySources,
     sorting: sorting::ColumnSorting,
+    grouping: grouping::ColumnGrouping,
 }
 
 impl ColumnState {
@@ -119,6 +122,7 @@ impl ColumnState {
             pending: HashMap::new(),
             display_sources: Default::default(),
             sorting: sorting::ColumnSorting::new(),
+            grouping: grouping::ColumnGrouping::new(),
         }
     }
 

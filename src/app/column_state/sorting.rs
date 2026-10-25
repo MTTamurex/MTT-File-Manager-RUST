@@ -135,7 +135,7 @@ impl ColumnSorting {
         }
     }
 
-    fn fingerprint(&mut self, items: &Arc<Vec<FileEntry>>) -> u64 {
+    pub(super) fn fingerprint(&mut self, items: &Arc<Vec<FileEntry>>) -> u64 {
         let pointer = Arc::as_ptr(items) as usize;
         if let Some((_, fingerprint)) = self.fingerprints.get(&pointer) {
             return *fingerprint;

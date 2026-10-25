@@ -327,28 +327,7 @@ pub enum GroupMode {
     Date,
     Type,
     Size,
-}
-
-impl GroupMode {
-    pub const fn preference_value(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Name => "name",
-            Self::Date => "date",
-            Self::Type => "type",
-            Self::Size => "size",
-        }
-    }
-
-    pub fn from_preference(value: &str) -> Self {
-        match value {
-            "name" => Self::Name,
-            "date" => Self::Date,
-            "type" => Self::Type,
-            "size" => Self::Size,
-            _ => Self::None,
-        }
-    }
+    Column(crate::domain::list_columns::ColumnId),
 }
 
 /// View mode

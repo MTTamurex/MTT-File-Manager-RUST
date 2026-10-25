@@ -51,14 +51,13 @@ pub(super) fn dialog(ui: &mut Ui, ctx: &mut ListViewContext) {
         return;
     }
     let mut open = true;
-    egui::Window::new(t!("column_headers.choose_columns"))
-        .id(ctx.rename_click_scope.with("column_picker"))
+    picker_window(ctx.rename_click_scope.with("column_picker"))
         .open(&mut open)
-        .default_width(420.0)
-        .resizable(true)
         .show(ui.ctx(), |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.add(
                 egui::TextEdit::singleline(&mut ctx.columns.picker_search)
+                    .desired_width(f32::INFINITY)
                     .hint_text(t!("column_headers.search")),
             );
             if !ctx.columns.catalog_loaded && !ctx.columns.catalog_failed {
@@ -76,22 +75,43 @@ pub(super) fn dialog(ui: &mut Ui, ctx: &mut ListViewContext) {
                 columns::scope(ctx),
                 |id| columns::label(ctx, id),
             );
-            egui::ScrollArea::vertical()
-                .max_height(440.0)
-                .show(ui, |ui| {
-                    for (id, label, canonical) in choices {
-                        if id == ColumnId::Status && !ctx.is_onedrive_folder {
-                            continue;
-                        }
-                        if !search.is_empty()
-                            && !label.to_lowercase().contains(&search)
-                            && !canonical.to_lowercase().contains(&search)
-                        {
-                            continue;
-                        }
-                        ui.push_id(id, |ui| checkbox(ui, ctx, id, &label));
+            choices_scroll(ui, |ui| {
+                for (id, label, canonical) in choices {
+                    if id == ColumnId::Status && !ctx.is_onedrive_folder {
+                        continue;
                     }
-                });
+                    if !search.is_empty()
+                        && !label.to_lowercase().contains(&search)
+                        && !canonical.to_lowercase().contains(&search)
+                    {
+                        continue;
+                    }
+                    ui.push_id(id, |ui| checkbox(ui, ctx, id, &label));
+                }
+            });
         });
     ctx.columns.show_picker = open;
 }
+
+fn picker_window(id: egui::Id) -> egui::Window<'static> {
+    egui::Window::new(t!("column_headers.choose_columns").to_string())
+        .id(id)
+        .default_width(340.0)
+        .min_width(280.0)
+        .max_width(440.0)
+        .resizable(true)
+}
+
+fn choices_scroll(
+    ui: &mut Ui,
+    contents: impl FnOnce(&mut Ui),
+) -> egui::scroll_area::ScrollAreaOutput<()> {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .max_height(440.0)
+        .show(ui, contents)
+}
+
+#[cfg(test)]
+#[path = "column_picker_tests.rs"]
+mod tests;
