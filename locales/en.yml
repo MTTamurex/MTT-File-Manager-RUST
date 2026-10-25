@@ -1,3 +1,13 @@
+column_headers:
+  app_tags: "MTT Tags"
+  original_location: "Original location"
+  status: "Status"
+  more_columns: "More columns…"
+  choose_columns: "Choose columns"
+  search: "Search columns…"
+  catalog_failed: "The Windows property catalog could not be loaded."
+  custom_sort: "Column property"
+  sorting: "Loading properties for sorting…"
 updates:
   title: "Updates"
   description: "Choose how MTT checks for and installs new versions."
@@ -458,7 +468,7 @@ settings:
   miscellaneous: "Miscellaneous"
   file_browsing: "File browsing"
   auto_resize_columns: "Automatically resize columns"
-  auto_resize_columns_description: "Fit list columns to the available space. Turn off to keep manual widths and use horizontal scrolling."
+  auto_resize_columns_description: "Size columns to their content, with horizontal scrolling when needed. Turn off to keep manual widths."
   hover_preview: "Show preview on hover"
   hover_preview_description: "Show thumbnails and file/folder information on hover in lists, grids and global search results."
   show_quick_access_sidebar: "Show Quick Access"

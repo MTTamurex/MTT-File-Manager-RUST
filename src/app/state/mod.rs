@@ -830,6 +830,7 @@ pub struct ImageViewerApp {
 
     // MILLER'S COLUMNS (ancestor-column directory listing cache)
     pub miller_columns: crate::app::miller_columns_state::MillerColumnsState,
+    pub(crate) columns: crate::app::column_state::ColumnState,
 
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,

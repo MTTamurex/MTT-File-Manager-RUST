@@ -165,6 +165,15 @@ pub(super) fn render_virtualized_content(
     // CLIP FIX: Intersect with parent clip rect to ensure content never
     // extends beyond the central panel bounds into the right sidebar.
     child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
+    if total_rows == 0 && !ctx.compact {
+        child_ui.painter().text(
+            viewport_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            rust_i18n::t!("panels.empty_folder"),
+            egui::FontId::proportional(14.0),
+            crate::ui::theme::text_color(ui.ctx()),
+        );
+    }
 
     let content_min = viewport_rect.min - egui::vec2(scroll_x, 0.0);
 
@@ -392,6 +401,7 @@ fn render_grouped_virtualized(
                     egui::vec2(available_w, row_height),
                 );
                 if child_ui.is_rect_visible(item_rect) {
+                    ctx.autofit_visible_indices.push(index);
                     visible_min = visible_min.min(index);
                     visible_max = visible_max.max(index);
                     ctx.visible_group_paths.push(item.path.clone());
@@ -466,6 +476,10 @@ fn render_regular_virtualized(
             ),
             egui::vec2(available_w, row_height),
         );
+
+        if child_ui.is_rect_visible(item_rect) {
+            ctx.autofit_visible_indices.push(i);
+        }
 
         render_list_item(
             child_ui,

@@ -159,7 +159,7 @@ fn query_cloud_sync_folder_size_with_timeout(
             crate::infrastructure::onedrive::IoTimeoutResult::Ok(entries) => {
                 let mut totals =
                     crate::infrastructure::windows::folder_size::FolderScanResult::default();
-                for (name, attrs, size, _modified) in entries {
+                for (name, attrs, size, _modified, _created) in entries {
                     if cancel.load(Ordering::Acquire) {
                         return Err("cancelled".to_string());
                     }

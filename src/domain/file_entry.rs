@@ -33,7 +33,7 @@ pub struct FileEntry {
     pub size: u64,     // Size in bytes (0 for directories)
     pub modified: u64, // Timestamp (seconds since UNIX_EPOCH)
     /// Creation timestamp (seconds since UNIX_EPOCH), if available.
-    /// `None` for recycle-bin items, DirectoryIndex cached entries, and shell folder entries.
+    /// May be `None` for recycle-bin items, legacy cached entries, and shell folder entries.
     pub created: Option<u64>,
     pub folder_cover: Option<PathBuf>, // First image found in the folder (for preview)
     pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
@@ -314,6 +314,8 @@ pub enum SortMode {
     DriveFreeSpace,
     /// Drive letter (Computer View only)
     DriveLetter,
+    /// User-selected Shell property or application Tags column.
+    Column(crate::domain::list_columns::ColumnId),
 }
 
 /// Optional visual grouping applied after filtering and sorting.

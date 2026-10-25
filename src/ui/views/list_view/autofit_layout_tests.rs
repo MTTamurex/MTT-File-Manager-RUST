@@ -1,9 +1,8 @@
 use super::{needs_refit, record_fitted_width};
 use crate::domain::file_entry::{FileEntry, SyncStatus};
-use crate::ui::views::list_view::auto_fit_columns;
+use crate::domain::list_columns::ColumnId;
+use crate::ui::views::list_view::autofit::{allocate, ColumnMeasurement};
 use eframe::egui;
-use lru::LruCache;
-use std::num::NonZeroUsize;
 
 fn sample_items() -> Vec<FileEntry> {
     vec![FileEntry {
@@ -38,22 +37,31 @@ fn render_pane(
                 egui::vec2(width, 600.0),
             )),
         |ui| {
-            if needs_refit(ui, *pending) {
-                let [name, date, type_col, size, status] = columns;
-                fitted = auto_fit_columns(
-                    ui,
-                    items,
-                    false,
-                    false,
-                    false,
-                    ui.available_width(),
-                    name,
-                    date,
-                    type_col,
-                    size,
-                    status,
-                    &LruCache::new(NonZeroUsize::new(1).unwrap()),
-                );
+            if needs_refit(ui, *pending) && !items.is_empty() {
+                let measured = vec![
+                    ColumnMeasurement {
+                        id: ColumnId::Name,
+                        width: 100.0,
+                    },
+                    ColumnMeasurement {
+                        id: ColumnId::Date,
+                        width: 120.0,
+                    },
+                    ColumnMeasurement {
+                        id: ColumnId::Type,
+                        width: 80.0,
+                    },
+                    ColumnMeasurement {
+                        id: ColumnId::Size,
+                        width: 80.0,
+                    },
+                ];
+                if let Some(widths) = allocate(ui.available_width(), &measured) {
+                    for (slot, (_, width)) in columns.iter_mut().zip(widths) {
+                        *slot = width;
+                    }
+                    fitted = true;
+                }
                 if fitted {
                     *pending = false;
                     record_fitted_width(ui);

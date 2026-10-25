@@ -1,4 +1,4 @@
-//! Horizontal layout for manually sized columns. Vertical virtualization stays independent.
+//! Horizontal layout for content-sized or manual columns. Vertical virtualization stays independent.
 
 use super::ListViewContext;
 use crate::domain::file_entry::SortMode;
@@ -6,40 +6,49 @@ use eframe::egui::{self, Rect, Sense, Ui};
 
 const SCROLLBAR_HEIGHT: f32 = 14.0;
 
+fn offset_to_reveal(current: f32, viewport: f32, start: f32, width: f32) -> f32 {
+    if current > start {
+        return start;
+    }
+    let end = start + width.min(viewport.max(0.0));
+    if current + viewport < end {
+        end - viewport
+    } else {
+        current
+    }
+}
+
+pub(super) fn reveal_name_for_rename(ctx: &mut ListViewContext, available: f32) {
+    if ctx.compact || !ctx.focus_rename || ctx.renaming_state.is_none() {
+        return;
+    }
+    if let Some(cell) = super::columns::cells(ctx)
+        .iter()
+        .find(|cell| cell.id == crate::domain::list_columns::ColumnId::Name)
+    {
+        *ctx.mut_scroll_offset_x = offset_to_reveal(
+            *ctx.mut_scroll_offset_x,
+            (available - 8.0).max(0.0),
+            cell.offset,
+            cell.width,
+        );
+    }
+}
+
 pub(super) fn content_width(ctx: &ListViewContext, available_width: f32) -> f32 {
+    if ctx.compact {
+        return available_width;
+    }
     required_width(
-        [
-            *ctx.col_name_width,
-            *ctx.col_date_width,
-            *ctx.col_type_width,
-            *ctx.col_size_width,
-            *ctx.col_status_width,
-        ],
+        super::columns::cells(ctx)
+            .into_iter()
+            .map(|cell| cell.width),
         available_width,
-        ctx.auto_resize_columns || ctx.compact,
-        ctx.is_computer_view,
-        ctx.is_onedrive_folder,
     )
 }
 
-fn required_width(
-    [name, date, type_col, size, status]: [f32; 5],
-    available_width: f32,
-    fit: bool,
-    computer: bool,
-    onedrive: bool,
-) -> f32 {
-    if fit {
-        return available_width;
-    }
-    let mut width = name + date + size;
-    if !computer {
-        width += type_col;
-        if onedrive {
-            width += status;
-        }
-    }
-    (width + 8.0).max(available_width)
+fn required_width(widths: impl IntoIterator<Item = f32>, available_width: f32) -> f32 {
+    (widths.into_iter().sum::<f32>() + 8.0).max(available_width)
 }
 
 pub(super) fn prepare(ui: &mut Ui, ctx: &mut ListViewContext) {
@@ -137,7 +146,7 @@ pub(super) fn render_header(
     ctx: &mut ListViewContext,
     available_w: f32,
 ) -> Option<SortMode> {
-    if ctx.auto_resize_columns {
+    if content_width(ctx, available_w) <= available_w {
         return super::header::render_list_header(ui, ctx, available_w);
     }
     let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(available_w, 22.0));

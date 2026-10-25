@@ -284,28 +284,12 @@ fn restore_panel_tab_set(app: &mut ImageViewerApp, saved: &SessionPanelTabSet) -
     }
 }
 
-fn sort_mode_preference(mode: SortMode) -> &'static str {
-    match mode {
-        SortMode::Name => "name",
-        SortMode::Date => "date",
-        SortMode::Size => "size",
-        SortMode::Type => "type",
-        SortMode::DriveTotalSpace => "drive_total",
-        SortMode::DriveFreeSpace => "drive_free",
-        SortMode::DriveLetter => "drive_letter",
-    }
+fn sort_mode_preference(mode: SortMode) -> String {
+    mode.preference_value()
 }
 
 fn parse_sort_mode(value: &str) -> SortMode {
-    match value {
-        "date" => SortMode::Date,
-        "size" => SortMode::Size,
-        "type" => SortMode::Type,
-        "drive_total" => SortMode::DriveTotalSpace,
-        "drive_free" => SortMode::DriveFreeSpace,
-        "drive_letter" => SortMode::DriveLetter,
-        _ => SortMode::Name,
-    }
+    SortMode::from_preference(value)
 }
 
 fn folders_position_preference(position: FoldersPosition) -> &'static str {

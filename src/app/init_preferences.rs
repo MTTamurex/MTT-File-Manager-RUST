@@ -56,6 +56,7 @@ pub(super) struct StartupPreferences {
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
     pub(super) minimize_to_tray: bool,
     pub(super) explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences,
+    pub(super) column_preferences: crate::domain::list_columns::ColumnPreferences,
     pub(super) startup_location: crate::app::startup_location::StartupLocation,
     pub(super) startup_custom_path: String,
     pub(super) tab_preferences: crate::app::tab_preferences::TabPreferences,
@@ -70,35 +71,17 @@ impl StartupPreferences {
 
         let sort_mode = prefs
             .get("sort_mode")
-            .map(|s| match s.as_str() {
-                "date" => SortMode::Date,
-                "size" => SortMode::Size,
-                "type" => SortMode::Type,
-                "drive_total" => SortMode::DriveTotalSpace,
-                "drive_free" => SortMode::DriveFreeSpace,
-                "drive_letter" => SortMode::DriveLetter,
-                _ => SortMode::Name,
-            })
+            .map(|s| SortMode::from_preference(s))
             .unwrap_or(SortMode::Name);
 
         let sort_mode_computer = prefs
             .get("sort_mode_computer")
-            .map(|s| match s.as_str() {
-                "drive_total" => SortMode::DriveTotalSpace,
-                "drive_free" => SortMode::DriveFreeSpace,
-                "drive_letter" => SortMode::DriveLetter,
-                _ => SortMode::Name,
-            })
+            .map(|s| SortMode::from_preference(s))
             .unwrap_or(SortMode::Name);
 
         let sort_mode_normal = prefs
             .get("sort_mode_normal")
-            .map(|s| match s.as_str() {
-                "date" => SortMode::Date,
-                "size" => SortMode::Size,
-                "type" => SortMode::Type,
-                _ => SortMode::Name,
-            })
+            .map(|s| SortMode::from_preference(s))
             .unwrap_or(SortMode::Name);
 
         let sort_descending = prefs
@@ -435,6 +418,9 @@ impl StartupPreferences {
             initial_indexing_notice_generation,
             saved_tab_session,
             minimize_to_tray,
+            column_preferences: crate::domain::list_columns::ColumnPreferences::load(
+                prefs.get("list_columns").map(String::as_str),
+            ),
             explorer_preferences: crate::app::explorer_preferences::ExplorerPreferences::load(
                 &prefs,
             ),

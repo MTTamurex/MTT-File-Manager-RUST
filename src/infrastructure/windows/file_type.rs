@@ -319,7 +319,7 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
         match onedrive_read_directory(folder_path) {
             IoTimeoutResult::Ok(entries) => {
                 let mut files_checked = 0usize;
-                for (idx, (filename, attrs, _, _)) in entries.into_iter().enumerate() {
+                for (idx, (filename, attrs, _, _, _)) in entries.into_iter().enumerate() {
                     if idx >= MAX_ENTRIES_SCAN {
                         break;
                     }

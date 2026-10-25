@@ -125,6 +125,8 @@ pub(super) fn sort_items_with_folder_sizes(
         // 2. Primary sort criteria.
         let ordering = match mode {
             SortMode::Name => natord::compare_ignore_case(&a.name, &b.name),
+            // Shell properties are sorted asynchronously by the application worker.
+            SortMode::Column(_) => natord::compare_ignore_case(&a.name, &b.name),
             SortMode::Date => get_sort_date_for_comparison(a, b),
             SortMode::Size => {
                 let size = |item: &FileEntry| {

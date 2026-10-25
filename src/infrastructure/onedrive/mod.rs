@@ -613,7 +613,7 @@ fn directory_cache_is_recent_at(cached_at_ms: u64, now_ms: u64) -> bool {
 }
 
 /// Result type for directory enumeration with timeout
-pub type DirectoryEntries = Vec<(String, u32, u64, u64)>; // (name, attributes, size, modified)
+pub type DirectoryEntries = Vec<(String, u32, u64, u64, Option<u64>)>; // (name, attributes, size, modified, created)
 
 /// Reads a directory with timeout protection for OneDrive.
 /// This is CRITICAL because FindFirstFileW can block for 30-60 seconds on OneDrive folders.

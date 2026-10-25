@@ -395,6 +395,13 @@ impl ImageViewerApp {
         let scroll_interpolation_enabled = self.uses_scroll_interpolation();
         let widths_before_render =
             crate::app::dual_panel::PanelListColumnWidths::from_layout(&self.layout);
+        let columns_before_render = self.columns.preferences.clone();
+        let column_sort_pending = self.columns.sort_pending(usize::from(
+            matches!(
+                self.dual_panel_active,
+                crate::app::dual_panel::ActivePanel::Right
+            ) ^ self.in_inactive_panel_context,
+        ));
 
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
@@ -427,38 +434,15 @@ impl ImageViewerApp {
                 )
             };
 
-        // Auto-fit list columns after navigation, session restore or layout changes.
-        // Measures content for Size/Type/Date columns and gives remaining space to Name.
-        // Save is deferred until after ListViewContext is dropped (borrow release).
-        // Window geometry may settle after the first restored listing is drawn.
-        // Refit each physical pane if its available width subsequently changes.
-        // Keep the request pending until both content and a valid width exist.
-        let needs_save_after_autofit = !column_list
-            && self.explorer_preferences.auto_resize_columns
-            && !compact
-            && list_view::autofit_layout::needs_refit(ui, self.pending_list_column_autofit)
-            && list_view::auto_fit_columns(
-                ui,
-                &items,
-                self.navigation_state.is_computer_view,
-                self.navigation_state.is_recycle_bin_view,
-                is_onedrive_folder,
-                ui.available_width(),
-                col_name_width,
-                col_date_width,
-                col_type_width,
-                col_size_width,
-                col_status_width,
-                &self.folder_size_state.batch_cache,
-            );
-        if needs_save_after_autofit {
-            self.pending_list_column_autofit = false;
-            list_view::autofit_layout::record_fitted_width(ui);
-        }
-
         let mut folder_size_requests: Vec<PathBuf> = Vec::new();
 
         let mut ctx = ListViewContext {
+            columns: &mut self.columns,
+            autofit_requested: &mut self.pending_list_column_autofit,
+            autofit_widths: None,
+            autofit_visible_indices: Vec::new(),
+            items_revision: self.items_revision,
+            tag_assignments_epoch: self.tag_assignments_epoch,
             items: &items,
             group_projection: &group_projection,
             collapsed_groups: &collapsed_groups,
@@ -467,6 +451,7 @@ impl ImageViewerApp {
             multi_selection,
             sort_mode,
             sort_descending,
+            column_sort_pending,
             renaming_state,
             focus_rename,
             rename_click_scope: ui.id().with("main_panel_inline_rename"),
@@ -562,7 +547,7 @@ impl ImageViewerApp {
         self.focus_rename = false;
 
         // Persist automatic fits and manual resizing after releasing the context borrows.
-        if needs_save_after_autofit
+        if self.columns.preferences != columns_before_render
             || crate::app::dual_panel::PanelListColumnWidths::from_layout(&self.layout)
                 != widths_before_render
         {
@@ -749,7 +734,9 @@ impl ImageViewerApp {
                         self.sort_mode = mode;
                         self.sort_descending = false;
                     }
-                    if !self.current_folder_locked {
+                    if self.navigation_state.is_computer_view {
+                        self.sort_mode_computer = self.sort_mode;
+                    } else if !self.current_folder_locked {
                         self.sort_mode_normal = self.sort_mode;
                         self.sort_descending_normal = self.sort_descending;
                     }

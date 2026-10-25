@@ -14,30 +14,32 @@ pub(super) fn pending_on_restore(
 #[cfg(test)]
 mod tests {
     use super::pending_on_restore;
-    use crate::domain::file_entry::{FileEntry, SyncStatus};
-    use crate::ui::views::list_view::auto_fit_columns;
+    use crate::domain::list_columns::ColumnId;
+    use crate::ui::views::list_view::autofit::{allocate, ColumnMeasurement};
     use crate::ui::views::list_view::autofit_layout::{needs_refit, record_fitted_width};
     use eframe::egui;
-    use lru::LruCache;
-    use std::num::NonZeroUsize;
 
     #[test]
     fn loaded_normal_tab_refits_on_every_return_from_dual_panel() {
         let ctx = egui::Context::default();
-        let items = [FileEntry {
-            path: "file.txt".into(),
-            name: "file.txt".into(),
-            is_dir: false,
-            size: 1024,
-            modified: 1_700_000_000,
-            created: None,
-            folder_cover: None,
-            drive_info: None,
-            sync_status: SyncStatus::None,
-            is_hidden: false,
-            recycle_bin: None,
-        }];
-        let cache = LruCache::new(NonZeroUsize::new(1).unwrap());
+        let measured = vec![
+            ColumnMeasurement {
+                id: ColumnId::Name,
+                width: 100.0,
+            },
+            ColumnMeasurement {
+                id: ColumnId::Date,
+                width: 120.0,
+            },
+            ColumnMeasurement {
+                id: ColumnId::Type,
+                width: 80.0,
+            },
+            ColumnMeasurement {
+                id: ColumnId::Size,
+                width: 80.0,
+            },
+        ];
         for _ in 0..3 {
             // Restoring a dual-panel tab replaces the shared LayoutState widths.
             let mut columns = [100.0; 5];
@@ -47,21 +49,10 @@ mod tests {
                 assert!(!needs_refit(ui, false));
                 let pending = pending_on_restore(true, false, false, false);
                 assert!(needs_refit(ui, pending));
-                let [name, date, type_col, size, status] = &mut columns;
-                assert!(auto_fit_columns(
-                    ui,
-                    &items,
-                    false,
-                    false,
-                    false,
-                    ui.available_width(),
-                    name,
-                    date,
-                    type_col,
-                    size,
-                    status,
-                    &cache,
-                ));
+                let widths = allocate(ui.available_width(), &measured).unwrap();
+                for (slot, (_, width)) in columns.iter_mut().zip(widths) {
+                    *slot = width;
+                }
                 assert!(
                     (columns[..4].iter().sum::<f32>() - (ui.available_width() - 8.0)).abs() < 1.0
                 );

@@ -80,7 +80,7 @@ pub(super) fn run_tier3_fallback(
                 batch.clear();
                 batch.reserve((*batch_size).max(64));
 
-                for (filename, attrs, size, modified) in entries {
+                for (filename, attrs, size, modified, created) in entries {
                     if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                         break;
                     }
@@ -104,7 +104,7 @@ pub(super) fn run_tier3_fallback(
                             is_dir,
                             size: file_size,
                             modified,
-                            created: None,
+                            created,
                             folder_cover: None,
                             drive_info: None,
                             sync_status,

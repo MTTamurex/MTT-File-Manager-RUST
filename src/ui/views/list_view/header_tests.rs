@@ -215,3 +215,43 @@ fn resizing_header_does_not_trigger_sorting_in_both_layout_modes() {
         assert_eq!(width, 220.0);
     }
 }
+
+#[test]
+fn non_primary_buttons_cannot_resize_columns() {
+    for button in [
+        egui::PointerButton::Secondary,
+        egui::PointerButton::Middle,
+        egui::PointerButton::Extra1,
+    ] {
+        let ctx = egui::Context::default();
+        let mut width = 200.0;
+        let (_, rect) = interaction_frame(&ctx, vec![], &mut width, f32::INFINITY);
+        let start = egui::pos2(rect.right() - 1.0, rect.center().y);
+        let end = start + egui::vec2(40.0, 0.0);
+        interaction_frame(
+            &ctx,
+            vec![egui::Event::PointerMoved(start)],
+            &mut width,
+            f32::INFINITY,
+        );
+        interaction_frame(
+            &ctx,
+            vec![egui::Event::PointerButton {
+                pos: start,
+                button,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            &mut width,
+            f32::INFINITY,
+        );
+        let (clicked, _) = interaction_frame(
+            &ctx,
+            vec![egui::Event::PointerMoved(end)],
+            &mut width,
+            f32::INFINITY,
+        );
+        assert!(!clicked);
+        assert_eq!(width, 200.0, "button {button:?} resized the column");
+    }
+}

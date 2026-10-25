@@ -55,7 +55,7 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
     // CRITICAL: Use GPS_BESTEFFORT only — NOT GPS_OPENSLOWITEM.
     // GPS_OPENSLOWITEM tells Windows to WAIT for slow/network items (OneDrive cloud files),
     // which can block the calling thread for 30-60+ seconds on cloud-only files.
-    // GPS_BESTEFFORT returns whatever metadata is locally cached without blocking.
+    // GPS_BESTEFFORT tolerates missing properties; local property handlers can still perform I/O.
     SHGetPropertyStoreFromParsingName(PCWSTR(wide_path.as_ptr()), None, GPS_BESTEFFORT)
 }
 

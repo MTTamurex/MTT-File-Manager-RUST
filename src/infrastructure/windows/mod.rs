@@ -5,6 +5,7 @@ pub mod app_instances;
 pub mod app_theme;
 pub mod bitmap_conversion;
 pub mod codec_registry;
+pub(crate) mod column_properties;
 pub mod com_scope;
 pub mod default_file_manager;
 pub mod device_change;

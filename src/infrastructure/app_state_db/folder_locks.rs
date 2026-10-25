@@ -13,15 +13,7 @@ impl AppStateDb {
         lock: &FolderLock,
     ) -> Result<(), AppStateWriteError> {
         let view_mode_str = lock.view_mode.preference_value();
-        let sort_mode_str = match lock.sort_mode {
-            SortMode::Name => "name",
-            SortMode::Date => "date",
-            SortMode::Size => "size",
-            SortMode::Type => "type",
-            SortMode::DriveTotalSpace => "drive_total",
-            SortMode::DriveFreeSpace => "drive_free",
-            SortMode::DriveLetter => "drive_letter",
-        };
+        let sort_mode_str = lock.sort_mode.preference_value();
         let sort_desc_str = if lock.sort_descending {
             "true"
         } else {
@@ -129,15 +121,7 @@ impl AppStateDb {
                     scope_s,
                 ) = row;
                 let view_mode = ViewMode::from_preference(&view_mode_s);
-                let sort_mode = match sort_mode_s.as_str() {
-                    "date" => SortMode::Date,
-                    "size" => SortMode::Size,
-                    "type" => SortMode::Type,
-                    "drive_total" => SortMode::DriveTotalSpace,
-                    "drive_free" => SortMode::DriveFreeSpace,
-                    "drive_letter" => SortMode::DriveLetter,
-                    _ => SortMode::Name,
-                };
+                let sort_mode = SortMode::from_preference(&sort_mode_s);
                 let sort_descending = sort_desc_s == "true";
                 let folders_position = match folders_pos_s.as_str() {
                     "last" => FoldersPosition::Last,

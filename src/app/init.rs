@@ -243,6 +243,7 @@ impl ImageViewerApp {
             mut saved_tab_session,
             minimize_to_tray,
             explorer_preferences,
+            column_preferences,
             startup_location,
             startup_custom_path,
             date_format,
@@ -873,6 +874,7 @@ impl ImageViewerApp {
 
             // MILLER'S COLUMNS (ancestor-column listing cache)
             miller_columns: crate::app::miller_columns_state::MillerColumnsState::new(),
+            columns: crate::app::column_state::ColumnState::new(column_preferences),
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

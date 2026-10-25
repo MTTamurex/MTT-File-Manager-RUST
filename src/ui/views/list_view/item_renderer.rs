@@ -1,18 +1,7 @@
-//! Individual list item rendering: icons, columns, selection, tooltips, rename
-
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Sense, Ui};
-
-use super::helpers::{get_file_type_string, render_status_badge};
-use super::item_renderer_details::{render_item_icon, render_item_tooltip};
-use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOperations};
+//! Row interactions; cell geometry and painting live in separate modules.
+use super::{cell_content, ColumnWidths, ListViewContext, ListViewOperations};
 use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::windows::{format_date, format_size};
-
-fn first_tag_color(item: &FileEntry, ctx: &ListViewContext) -> Option<Color32> {
-    crate::domain::file_tag::tag_ids_for_path(ctx.tag_assignments, &item.path)
-        .and_then(|ids| ids.iter().find_map(|id| ctx.tag_definitions.get(id)))
-        .map(|tag| tag.color.to_color32())
-}
+use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
 pub(crate) fn prepare_list_item_resources(
     ui: &Ui,
@@ -30,12 +19,10 @@ pub(crate) fn prepare_list_item_resources(
         ctx.scanned_folders.put(item.path.clone(), ());
         ops.request_folder_scan(item.path.clone());
     }
-
     if item.is_dir || ctx.is_recycle_bin_view || !item.is_media() {
         return;
     }
-
-    let is_selected_for_preview = ctx
+    let selected = ctx
         .selected_file
         .is_some_and(|selected| selected.path == item.path);
     if ctx.failed_thumbnails.contains(&item.path)
@@ -43,51 +30,38 @@ pub(crate) fn prepare_list_item_resources(
     {
         return;
     }
-
-    let is_loading = ctx.loading_set.contains(&item.path);
-    let is_pending = ctx.pending_upload_set.contains(&item.path);
-    let has_texture = ctx.texture_cache.peek(&item.path).is_some();
     let ppp = ui.ctx().pixels_per_point().max(1.0);
-    let display_request_size_px = if ctx.show_preview_panel && is_selected_for_preview {
+    let display_size = if ctx.show_preview_panel && selected {
         crate::domain::thumbnail::detail_preview_size(&item.path)
     } else {
         1
     };
-    let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
-    let display_bucket =
-        crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
-    let desired_thumbnail_bucket = display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
-    let min_effective_size_for_bucket = match desired_thumbnail_bucket {
+    let bucket = crate::workers::thumbnail::processing::get_bucket_size(
+        ((display_size as f32) * ppp).ceil() as u32,
+    )
+    .max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
+    let minimum = match bucket {
         0..=128 => 1,
         129..=256 => 129,
         257..=512 => 257,
         _ => 513,
     };
-    let min_request_size_for_bucket = ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
-    let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
-    let needs_bucket_refresh = ctx
+    let size = display_size.max(((minimum as f32) / ppp).ceil() as u32);
+    let refresh = ctx
         .attempted_thumbnail_bucket
         .peek(&item.path)
-        .is_some_and(|bucket| *bucket < desired_thumbnail_bucket);
-
-    const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
-    if (!has_texture || needs_bucket_refresh)
-        && !is_loading
-        && !is_pending
-        && ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME
+        .is_some_and(|old| *old < bucket);
+    if (ctx.texture_cache.peek(&item.path).is_none() || refresh)
+        && !ctx.loading_set.contains(&item.path)
+        && !ctx.pending_upload_set.contains(&item.path)
+        && ctx.thumbnail_requests_this_frame < 96
     {
         ctx.thumbnail_requests_this_frame += 1;
         ctx.loading_set.insert(item.path.clone());
-        ops.request_thumbnail_load_with_size(
-            item.path.clone(),
-            request_size_px,
-            index,
-            item.modified,
-        );
+        ops.request_thumbnail_load_with_size(item.path.clone(), size, index, item.modified);
     }
 }
 
-/// Renders a single list item row
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_list_item(
     ui: &mut Ui,
@@ -102,71 +76,58 @@ pub(super) fn render_list_item(
     secondary_clicked_item: &mut Option<usize>,
     secondary_clicked_empty_area: &mut bool,
     col_widths: &ColumnWidths,
-    row_height: f32,
+    _row_height: f32,
 ) {
     prepare_list_item_resources(ui, i, item, ctx, ops);
-    let is_recycle_bin = ctx.is_recycle_bin_view;
-    let w_name = col_widths.name;
-    let w_date = col_widths.date;
-    let w_type = col_widths.type_col;
-    let w_size = col_widths.size;
-
     ui.push_id(i, |ui| {
-        let hidden_opacity = if item.is_hidden { 0.5 } else { 1.0 };
+        let opacity = if item.is_hidden { 0.5 } else { 1.0 };
         let response = ui.interact(rect, ui.id().with(i), Sense::click_and_drag());
         crate::ui::new_tab_request::item_middle_click(&response, item, ctx.is_recycle_bin_view);
-
         if response.clicked() {
             *clicked_item = Some(i);
         }
-
         if response.double_clicked() {
             *double_clicked_item = Some(i);
         }
-
         if response.secondary_clicked() {
-            let pointer_pos = ui.input(|input| input.pointer.interact_pos());
-            let is_selected = crate::ui::views::common::effective_item_selection(
+            let point = ui.input(|input| input.pointer.interact_pos());
+            let selected = crate::ui::views::common::effective_item_selection(
                 ctx.multi_selection.contains(&item.path),
                 ctx.rectangle_selection_state
                     .map(|state| state.preview_contains(i)),
             );
-            let content_hit = pointer_pos.is_some_and(|point| {
-                list_item_content_contains_pointer(
-                    ui, item, ctx, rect, col_widths, row_height, point,
-                )
+            let hit = point.is_some_and(|point| {
+                cell_content::contains(ui, item, ctx, rect, col_widths, point)
             });
             if ctx.is_computer_view
-                || crate::ui::views::common::secondary_click_targets_item(is_selected, content_hit)
+                || crate::ui::views::common::secondary_click_targets_item(selected, hit)
             {
                 *secondary_clicked_item = Some(i);
             } else {
                 *secondary_clicked_empty_area = true;
             }
         }
-        let (press_origin, pointer_pos, primary_button_down) = ui.input(|i| {
+        let (origin, point, primary_down) = ui.input(|input| {
             (
-                i.pointer.press_origin(),
-                i.pointer.hover_pos(),
-                i.pointer.button_down(egui::PointerButton::Primary),
+                input.pointer.press_origin(),
+                input.pointer.hover_pos(),
+                input.pointer.primary_down(),
             )
         });
         let drag_candidate = crate::ui::views::common::should_start_item_drag(
             response.drag_started_by(egui::PointerButton::Primary),
             response.dragged_by(egui::PointerButton::Primary),
-            primary_button_down,
-            response.is_pointer_button_down_on() && primary_button_down,
-            press_origin,
-            pointer_pos,
+            primary_down,
+            response.is_pointer_button_down_on() && primary_down,
+            origin,
+            point,
         );
-        let rectangle_select_active = ctx.rectangle_selection_state.is_some();
-        if drag_candidate && !rectangle_select_active {
+        let rectangle_active = ctx.rectangle_selection_state.is_some();
+        if drag_candidate && !rectangle_active {
             if ctx.is_computer_view {
                 *ctx.drag_started_item = Some(i);
-            } else if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
-                if list_item_content_contains_pointer(
-                    ui, item, ctx, rect, col_widths, row_height, origin,
-                ) {
+            } else if let Some(origin) = origin {
+                if cell_content::contains(ui, item, ctx, rect, col_widths, origin) {
                     *ctx.drag_started_item = Some(i);
                 } else {
                     ctx.rectangle_selection_frame.request_start(origin);
@@ -175,581 +136,92 @@ pub(super) fn render_list_item(
                 *ctx.drag_started_item = Some(i);
             }
         }
-        let is_pointer_over = if let Some(pointer_pos) = ctx.external_drop_pointer_pos {
-            rect.contains(pointer_pos)
-        } else {
-            response.contains_pointer() || response.hovered()
-        };
-        // During an internal drag, response.hovered() can stay locked to the
-        // source widget; use its geometric hit test. External OLE drags use the
-        // native cursor position above because egui may not receive pointer moves.
-        let drag_pointer_over = ctx
+        let pointer_over = ctx
             .external_drop_pointer_pos
-            .map(|pointer_pos| rect.contains(pointer_pos))
+            .map(|point| rect.contains(point))
+            .unwrap_or_else(|| response.contains_pointer() || response.hovered());
+        let drag_over = ctx
+            .external_drop_pointer_pos
+            .map(|point| rect.contains(point))
             .unwrap_or_else(|| response.contains_pointer());
-        if drag_pointer_over && item.is_dir {
+        if drag_over && item.is_dir {
             *ctx.drag_hovered_item = Some(i);
         }
-
-        // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
-        let is_selected = crate::ui::views::common::effective_item_selection(
+        let selected = crate::ui::views::common::effective_item_selection(
             ctx.multi_selection.contains(&item.path),
             ctx.rectangle_selection_state
                 .map(|state| state.preview_contains(i)),
         );
-
-        // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
-        let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
-        let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
-
-        let is_focused = ctx.selected_item == Some(i);
-
-        let rounding = 4.0;
-        let accent_color = crate::ui::theme::accent_color(ui.ctx());
-
-        // ADJUST RECT TO AVOID SCROLLBAR OVERLAP
-        let mut visual_rect = rect;
-        visual_rect.max.x -= 8.0;
-
-        crate::ui::list_stripes::paint(ui, visual_rect, stripe_row);
-
-        if is_selected {
-            // Selected: Bold primary border
-            let stroke_width = if is_hovered_visual { 2.5 } else { 2.0 };
+        let hovered = matches!(ctx.last_input, crate::app::state::LastInput::Mouse)
+            && response.hovered()
+            && !selected;
+        let focused = ctx.selected_item == Some(i);
+        let accent = crate::ui::theme::accent_color(ui.ctx());
+        let mut visual = rect;
+        visual.max.x -= 8.0;
+        crate::ui::list_stripes::paint(ui, visual, stripe_row);
+        if selected {
             ui.painter().rect_stroke(
-                visual_rect,
-                rounding,
-                egui::Stroke::new(stroke_width, accent_color),
+                visual,
+                4.0,
+                egui::Stroke::new(if hovered { 2.5 } else { 2.0 }, accent),
                 egui::StrokeKind::Inside,
             );
-        } else if is_hovered_visual || is_focused {
-            // Hovered or Focused: Thin subtle border
-            let hover_color = accent_color.gamma_multiply(0.35);
+        } else if hovered || focused {
             ui.painter().rect_stroke(
-                visual_rect,
-                rounding,
-                egui::Stroke::new(1.0, hover_color),
+                visual,
+                4.0,
+                egui::Stroke::new(1.0, accent.gamma_multiply(0.35)),
                 egui::StrokeKind::Inside,
             );
         }
-
-        crate::ui::clipboard_feedback::paint(ui, visual_rect, &item.path);
-
-        let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
-        let is_active_drop_target = ctx.is_item_dragging
+        crate::ui::clipboard_feedback::paint(ui, visual, &item.path);
+        let candidate = ctx.is_item_dragging && item.is_dir && pointer_over;
+        let target = ctx.is_item_dragging
             && item.is_dir
             && ctx
                 .drag_target_folder
                 .as_ref()
-                .is_some_and(|target| *target == item.path);
-
-        if pointer_over_drop_candidate || is_active_drop_target {
-            let stroke_color = if is_active_drop_target {
+                .is_some_and(|path| *path == item.path);
+        if candidate || target {
+            let color = if target {
                 Color32::from_rgb(24, 122, 255)
             } else {
-                accent_color.gamma_multiply(0.75)
+                accent.gamma_multiply(0.75)
             };
             ui.painter().rect_stroke(
-                visual_rect.shrink(1.0),
-                rounding,
-                egui::Stroke::new(2.0, stroke_color),
+                visual.shrink(1.0),
+                4.0,
+                egui::Stroke::new(2.0, color),
                 egui::StrokeKind::Inside,
             );
         }
-
-        // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        // Suppress tooltips during item drag to avoid clutter with drag ghost
-        if !ctx.is_item_dragging && !rectangle_select_active {
-            render_item_tooltip(ui, &response, item, ctx, is_recycle_bin);
+        if !ctx.is_item_dragging && !rectangle_active {
+            super::item_renderer_details::render_item_tooltip(
+                ui,
+                &response,
+                item,
+                ctx,
+                ctx.is_recycle_bin_view,
+            );
         }
-
-        let text_color = if is_selected {
+        let text_color = if selected {
             crate::ui::theme::selection_text_color(ui.ctx())
         } else {
             crate::ui::theme::text_color(ui.ctx())
         }
-        .gamma_multiply(hidden_opacity);
-        let secondary_color = if is_selected {
+        .gamma_multiply(opacity);
+        let secondary = if selected {
             crate::ui::theme::selection_text_color(ui.ctx())
         } else {
             crate::ui::theme::secondary_text_color(ui.ctx())
         }
-        .gamma_multiply(hidden_opacity);
-
-        // 1. Icon + Name
-        let icon_tint = Color32::WHITE.gamma_multiply(
-            hidden_opacity * crate::ui::clipboard_feedback::icon_opacity(ui.ctx(), &item.path),
+        .gamma_multiply(opacity);
+        super::name_cell::render(
+            ui, i, item, rect, col_widths, ctx, ops, &response, text_color, opacity,
         );
-        render_item_icon(ui, item, ctx, ops, rect, icon_tint);
-        let tag_color = first_tag_color(item, ctx);
-        let tag_name_offset = if tag_color.is_some() { 12.0 } else { 0.0 };
-        if let Some(color) = tag_color {
-            crate::ui::tag_icon::paint_filled(
-                ui.painter(),
-                Pos2::new(rect.min.x + 27.0, rect.center().y),
-                9.0,
-                color.gamma_multiply(hidden_opacity),
-            );
-        }
-
-        let rename_hit_rect = Rect::from_min_size(
-            rect.min + egui::vec2(24.0 + tag_name_offset, 2.0),
-            egui::vec2((w_name - 30.0 - tag_name_offset).max(0.0), row_height - 4.0),
-        );
-        if !ctx.compact
-            && !ctx.is_recycle_bin_view
-            && !ctx.global_search_active
-            && ctx.renaming_state.is_none()
-            && (ctx.selected_item == Some(i) || response.clicked() || response.double_clicked())
-            && crate::ui::components::inline_rename::selected_name_click_starts_rename(
-                ui,
-                ctx.rename_click_scope,
-                &response,
-                &item.path,
-                rename_hit_rect,
-                ctx.selected_item == Some(i) && ctx.multi_selection.len() <= 1,
-            )
-        {
-            ctx.rename_requested_item = Some(i);
-        }
-
-        // RENAMING LOGIC (LIST VIEW)
-        let is_renaming_this = ctx
-            .renaming_state
-            .as_ref()
-            .is_some_and(|(path, _)| *path == item.path);
-        if is_renaming_this {
-            let Some((_, ref rename_text)) = ctx.renaming_state else {
-                return;
-            };
-            let mut text = rename_text.clone();
-            let name_rect = Rect::from_min_size(
-                rect.min + egui::vec2(24.0 + tag_name_offset, 2.0),
-                egui::vec2(w_name - 30.0 - tag_name_offset, row_height - 4.0),
-            );
-
-            ui.scope_builder(egui::UiBuilder::new().max_rect(name_rect), |ui| {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .horizontal_align(egui::Align::Min)
-                        .id_source("rename_input_list"),
-                );
-                let text_menu_active = crate::ui::components::inline_rename::add_text_context_menu(
-                    ui,
-                    &response,
-                    &mut text,
-                    ctx.focus_rename,
-                );
-
-                if ctx.focus_rename {
-                    response.request_focus();
-
-                    // Select name without extension (Windows Explorer behavior)
-                    if let Some(mut state) =
-                        egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
-                    {
-                        let char_count = text.chars().count();
-                        let select_end = if item.is_dir {
-                            char_count
-                        } else {
-                            text.rfind('.')
-                                .map(|byte_pos| text[..byte_pos].chars().count())
-                                .filter(|&pos| pos > 0)
-                                .unwrap_or(char_count)
-                        };
-                        state
-                            .cursor
-                            .set_char_range(Some(egui::text::CCursorRange::two(
-                                egui::text::CCursor::new(0),
-                                egui::text::CCursor::new(select_end),
-                            )));
-                        state.store(ui.ctx(), response.id);
-                    }
-                }
-
-                let commit = (response.has_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Enter)))
-                    || (response.lost_focus() && !text_menu_active.menu_active);
-                if commit {
-                    ops.rename_with_shell(i);
-                }
-            });
-
-            // Persist edited text back to rename state (same behavior as grid mode).
-            if let Some((_, rename_text)) = ctx.renaming_state.as_mut() {
-                *rename_text = text;
-            }
-        } else {
-            // Name (truncated to fit column precisely)
-            let font_id = FontId::proportional(12.0);
-            let available_name_width = w_name - 30.0 - tag_name_offset; // Space for icon + tag + padding
-            let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
-            let display_name =
-                truncate_text_for_column(&resolved_name, available_name_width, &font_id, ui);
-
-            ui.painter().text(
-                rect.min + egui::vec2(24.0 + tag_name_offset, 5.0),
-                egui::Align2::LEFT_TOP,
-                display_name,
-                font_id,
-                text_color,
-            );
-        }
-
-        // Column data (Date/Type/Size) — omitted in compact (name-only) mode.
         if !ctx.compact {
-            if ctx.is_computer_view {
-                render_computer_view_columns(ui, item, rect, w_name, w_date, secondary_color);
-            } else {
-                render_regular_columns(
-                    ui,
-                    item,
-                    ctx,
-                    rect,
-                    w_name,
-                    w_date,
-                    w_type,
-                    w_size,
-                    secondary_color,
-                    is_recycle_bin,
-                );
-            }
+            cell_content::render(ui, item, rect, col_widths, ctx, secondary);
         }
     });
-}
-
-fn list_item_content_contains_pointer(
-    ui: &Ui,
-    item: &FileEntry,
-    ctx: &ListViewContext,
-    rect: Rect,
-    col_widths: &ColumnWidths,
-    row_height: f32,
-    point: Pos2,
-) -> bool {
-    let icon_rect = Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(16.0, 16.0));
-    if icon_rect.expand(2.0).contains(point) {
-        return true;
-    }
-
-    let font_id = FontId::proportional(12.0);
-    let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
-    let has_tag = first_tag_color(item, ctx).is_some();
-    let tag_name_offset = if has_tag { 12.0 } else { 0.0 };
-    if has_tag
-        && Rect::from_center_size(
-            Pos2::new(rect.min.x + 27.0, rect.center().y),
-            egui::vec2(9.0, 9.0),
-        )
-        .expand(2.0)
-        .contains(point)
-    {
-        return true;
-    }
-    if text_content_contains(
-        ui,
-        resolved_name.as_ref(),
-        col_widths.name - 30.0 - tag_name_offset,
-        font_id.clone(),
-        rect.min + egui::vec2(24.0 + tag_name_offset, 5.0),
-        row_height,
-        point,
-    ) {
-        return true;
-    }
-
-    if ctx.is_computer_view {
-        let total_str = item
-            .drive_info
-            .as_ref()
-            .map(|drive| format_size(drive.total_space))
-            .unwrap_or_else(|| "-".to_string());
-        if text_content_contains(
-            ui,
-            &total_str,
-            col_widths.date - 8.0,
-            font_id.clone(),
-            Pos2::new(rect.min.x + col_widths.name, rect.min.y + 5.0),
-            row_height,
-            point,
-        ) {
-            return true;
-        }
-
-        let free_str = item
-            .drive_info
-            .as_ref()
-            .map(|drive| format_size(drive.free_space))
-            .unwrap_or_else(|| "-".to_string());
-        return text_content_contains(
-            ui,
-            &free_str,
-            col_widths.size - 8.0,
-            font_id,
-            Pos2::new(
-                rect.min.x + col_widths.name + col_widths.date,
-                rect.min.y + 5.0,
-            ),
-            row_height,
-            point,
-        );
-    }
-
-    let date_str = if ctx.is_recycle_bin_view {
-        if item.modified > 0 {
-            format_date(item.modified)
-        } else {
-            item.deletion_date()
-                .map(crate::infrastructure::windows::format_metadata_date)
-                .unwrap_or_else(|| "-".to_string())
-        }
-    } else {
-        format_date(item.modified)
-    };
-    if text_content_contains(
-        ui,
-        &date_str,
-        col_widths.date - 8.0,
-        font_id.clone(),
-        Pos2::new(rect.min.x + col_widths.name, rect.min.y + 5.0),
-        row_height,
-        point,
-    ) {
-        return true;
-    }
-
-    let type_str = get_file_type_string(item);
-    if text_content_contains(
-        ui,
-        &type_str,
-        col_widths.type_col - 8.0,
-        font_id.clone(),
-        Pos2::new(
-            rect.min.x + col_widths.name + col_widths.date,
-            rect.min.y + 5.0,
-        ),
-        row_height,
-        point,
-    ) {
-        return true;
-    }
-
-    let size_str = if item.is_dir && !item.is_archive() {
-        ctx.folder_size_progress
-            .get(&item.path)
-            .or_else(|| ctx.folder_size_cache.peek(&item.path))
-            .or_else(|| ctx.folder_sort_sizes.get(&item.path))
-            .map(|size| format_size(*size))
-            .unwrap_or_default()
-    } else {
-        format_size(
-            crate::app::live_file_size::cached_live_file_size(
-                &item.path,
-                item.modified,
-                ctx.live_file_size_cache,
-            )
-            .unwrap_or(item.size),
-        )
-    };
-    if text_content_contains(
-        ui,
-        &size_str,
-        col_widths.size - 8.0,
-        font_id,
-        Pos2::new(
-            rect.min.x + col_widths.name + col_widths.date + col_widths.type_col,
-            rect.min.y + 5.0,
-        ),
-        row_height,
-        point,
-    ) {
-        return true;
-    }
-
-    if ctx.is_onedrive_folder && item.sync_status != crate::domain::file_entry::SyncStatus::None {
-        let status_rect = Rect::from_min_size(
-            Pos2::new(
-                rect.min.x
-                    + col_widths.name
-                    + col_widths.date
-                    + col_widths.type_col
-                    + col_widths.size
-                    + 8.0,
-                rect.min.y + 4.0,
-            ),
-            egui::vec2(18.0, 16.0),
-        );
-        return status_rect.expand(2.0).contains(point);
-    }
-
-    false
-}
-
-fn text_content_contains(
-    ui: &Ui,
-    text: &str,
-    max_width: f32,
-    font_id: FontId,
-    origin: Pos2,
-    row_height: f32,
-    point: Pos2,
-) -> bool {
-    let max_width = max_width.max(0.0);
-    if text.is_empty() || max_width <= 0.0 {
-        return false;
-    }
-
-    let display_text = truncate_text_for_column(text, max_width, &font_id, ui);
-    if display_text.is_empty() {
-        return false;
-    }
-
-    let width = ui
-        .painter()
-        .layout_no_wrap(display_text, font_id, Color32::WHITE)
-        .rect
-        .width();
-    let hit_rect = Rect::from_min_size(
-        origin,
-        egui::vec2(width.min(max_width), (row_height - 6.0).max(12.0)),
-    );
-    hit_rect.expand(3.0).contains(point)
-}
-
-/// Renders columns for Computer View (Total Space, Free Space)
-fn render_computer_view_columns(
-    ui: &mut Ui,
-    item: &FileEntry,
-    rect: Rect,
-    w_name: f32,
-    w_date: f32,
-    secondary_color: Color32,
-) {
-    // 2. Total Size - positioned at w_name
-    let total_str = if let Some(di) = &item.drive_info {
-        format_size(di.total_space)
-    } else {
-        "-".to_string()
-    };
-    ui.painter().text(
-        Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
-        egui::Align2::LEFT_TOP,
-        total_str,
-        FontId::proportional(12.0),
-        secondary_color,
-    );
-
-    // 3. Free Space - positioned at w_name + w_date
-    let free_str = if let Some(di) = &item.drive_info {
-        format_size(di.free_space)
-    } else {
-        "-".to_string()
-    };
-    ui.painter().text(
-        Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
-        egui::Align2::LEFT_TOP,
-        free_str,
-        FontId::proportional(12.0),
-        secondary_color,
-    );
-}
-
-/// Renders columns for regular view (Date, Type, Size, OneDrive status)
-#[allow(clippy::too_many_arguments)]
-fn render_regular_columns(
-    ui: &mut Ui,
-    item: &FileEntry,
-    ctx: &mut ListViewContext,
-    rect: Rect,
-    w_name: f32,
-    w_date: f32,
-    w_type: f32,
-    w_size: f32,
-    secondary_color: Color32,
-    is_recycle_bin: bool,
-) {
-    // 2. Date (truncated)
-    let date_str = if is_recycle_bin {
-        if item.modified > 0 {
-            format_date(item.modified)
-        } else {
-            item.deletion_date()
-                .map(crate::infrastructure::windows::format_metadata_date)
-                .unwrap_or_else(|| "-".to_string())
-        }
-    } else {
-        format_date(item.modified)
-    };
-    let font_id = FontId::proportional(12.0);
-    let available_date_width = w_date - 8.0; // Padding
-    let display_date = truncate_text_for_column(&date_str, available_date_width, &font_id, ui);
-
-    ui.painter().text(
-        Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
-        egui::Align2::LEFT_TOP,
-        display_date,
-        font_id.clone(),
-        secondary_color,
-    );
-
-    // 3. Type (truncated precisely)
-    let type_str = get_file_type_string(item);
-    let available_type_width = w_type - 8.0; // Padding
-    let display_type = truncate_text_for_column(&type_str, available_type_width, &font_id, ui);
-
-    ui.painter().text(
-        Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
-        egui::Align2::LEFT_TOP,
-        display_type,
-        font_id.clone(),
-        secondary_color,
-    );
-
-    // 4. Size
-    let size_str = if item.is_dir && !item.is_archive() {
-        // Show partial totals while the batch worker is scanning.
-        if let Some(&size) = ctx
-            .folder_size_progress
-            .get(&item.path)
-            .or_else(|| ctx.folder_size_cache.peek(&item.path))
-            .or_else(|| ctx.folder_sort_sizes.get(&item.path))
-        {
-            format_size(size)
-        } else {
-            // Request size if not already loading (collected by caller after render).
-            if !ctx.folder_size_batch_loading.contains(&item.path) {
-                ctx.folder_size_requests.push(item.path.clone());
-            }
-            String::new()
-        }
-    } else {
-        let size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
-            &item.path,
-            item.modified,
-            item.size,
-            ctx.live_file_size_cache,
-            ctx.live_file_size_loading,
-            ctx.live_file_size_req_sender,
-        );
-        format_size(size)
-    };
-    ui.painter().text(
-        Pos2::new(rect.min.x + w_name + w_date + w_type, rect.min.y + 5.0),
-        egui::Align2::LEFT_TOP,
-        size_str,
-        FontId::proportional(12.0),
-        secondary_color,
-    );
-
-    // 5. OneDrive Status (if in OneDrive folder)
-    if ctx.is_onedrive_folder {
-        render_status_badge(
-            ui,
-            Pos2::new(
-                rect.min.x + w_name + w_date + w_type + w_size + 8.0,
-                rect.min.y + 4.0,
-            ),
-            item.sync_status,
-        );
-    }
 }

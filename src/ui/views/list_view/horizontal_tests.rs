@@ -2,23 +2,32 @@ use super::required_width;
 use eframe::egui;
 
 #[test]
-fn automatic_and_compact_layouts_keep_viewport_width() {
-    assert_eq!(required_width([300.0; 5], 400.0, true, false, false), 400.0);
+fn renaming_reveals_the_name_column_after_it_has_been_moved_offscreen() {
+    assert_eq!(super::offset_to_reveal(0.0, 400.0, 600.0, 160.0), 360.0);
+    assert_eq!(super::offset_to_reveal(700.0, 400.0, 600.0, 160.0), 600.0);
+    assert_eq!(super::offset_to_reveal(0.0, 400.0, 600.0, 800.0), 600.0);
+    assert_eq!(super::offset_to_reveal(300.0, 400.0, 400.0, 160.0), 300.0);
+}
+
+#[test]
+fn fitted_columns_keep_viewport_width() {
+    assert_eq!(required_width([100.0; 3], 400.0), 400.0);
 }
 
 #[test]
 fn manual_columns_overflow_instead_of_shrinking() {
-    let columns = [300.0, 170.0, 120.0, 100.0, 80.0];
-    assert_eq!(required_width(columns, 400.0, false, false, false), 698.0);
-    assert_eq!(required_width(columns, 900.0, false, false, false), 900.0);
+    let columns = [300.0, 170.0, 120.0, 100.0];
+    assert_eq!(required_width(columns, 400.0), 698.0);
+    assert_eq!(required_width(columns, 900.0), 900.0);
 }
 
 #[test]
 fn only_visible_columns_contribute_to_horizontal_overflow() {
-    let columns = [300.0, 170.0, 120.0, 100.0, 80.0];
-    assert_eq!(required_width(columns, 400.0, false, true, false), 578.0);
-    assert_eq!(required_width(columns, 400.0, false, true, true), 578.0);
-    assert_eq!(required_width(columns, 400.0, false, false, true), 778.0);
+    assert_eq!(required_width([300.0, 170.0, 100.0], 400.0), 578.0);
+    assert_eq!(
+        required_width([300.0, 170.0, 120.0, 100.0, 80.0], 400.0),
+        778.0
+    );
 }
 
 #[test]

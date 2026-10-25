@@ -47,20 +47,38 @@ pub(crate) fn format_date_with_format(timestamp: u64, date_format: DateFormat) -
     }
 
     if let Some(local_time) = unix_timestamp_to_local_system_time(timestamp) {
-        return format!(
-            "{} {:02}:{:02}",
-            date_format.format(
-                i64::from(local_time.wYear),
-                i64::from(local_time.wMonth),
-                i64::from(local_time.wDay)
-            ),
-            local_time.wHour,
-            local_time.wMinute
-        );
+        return format_system_time(&local_time, date_format);
     }
 
     // Fallback if Windows local-time conversion fails for any reason.
     format_date_utc(timestamp, date_format)
+}
+
+pub(crate) fn format_filetime_with_format(ticks: u64, format: DateFormat) -> String {
+    if ticks == 0 {
+        return t!("file_info.unknown_date").to_string();
+    }
+    let time = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    if let Some(local_time) = filetime_to_local_system_time(&time) {
+        return format_system_time(&local_time, format);
+    }
+    t!("file_info.unknown_date").to_string()
+}
+
+fn format_system_time(time: &SYSTEMTIME, format: DateFormat) -> String {
+    format!(
+        "{} {:02}:{:02}",
+        format.format(
+            i64::from(time.wYear),
+            i64::from(time.wMonth),
+            i64::from(time.wDay)
+        ),
+        time.wHour,
+        time.wMinute
+    )
 }
 
 fn unix_timestamp_to_local_system_time(timestamp: u64) -> Option<SYSTEMTIME> {
@@ -76,9 +94,13 @@ fn unix_timestamp_to_local_system_time(timestamp: u64) -> Option<SYSTEMTIME> {
         dwHighDateTime: (filetime_ticks >> 32) as u32,
     };
 
+    filetime_to_local_system_time(&file_time)
+}
+
+fn filetime_to_local_system_time(file_time: &FILETIME) -> Option<SYSTEMTIME> {
     let mut utc_system_time = SYSTEMTIME::default();
     unsafe {
-        FileTimeToSystemTime(&file_time, &mut utc_system_time).ok()?;
+        FileTimeToSystemTime(file_time, &mut utc_system_time).ok()?;
     }
 
     let mut local_system_time = SYSTEMTIME::default();
@@ -230,5 +252,36 @@ mod tests {
         assert_eq!(&s[5..6], "/");
         assert_eq!(&s[10..11], " ");
         assert_eq!(&s[13..14], ":");
+    }
+
+    #[test]
+    fn zero_and_invalid_native_filetimes_are_unknown() {
+        for ticks in [0, u64::MAX] {
+            assert_eq!(
+                super::format_filetime_with_format(ticks, DateFormat::YearMonthDay),
+                t!("file_info.unknown_date").to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn native_dates_before_the_unix_epoch_are_not_lost() {
+        use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows::Win32::System::Time::SystemTimeToFileTime;
+        let utc = SYSTEMTIME {
+            wYear: 1969,
+            wMonth: 7,
+            wDay: 1,
+            wHour: 12,
+            ..Default::default()
+        };
+        let mut time = FILETIME::default();
+        unsafe {
+            SystemTimeToFileTime(&utc, &mut time).unwrap();
+        }
+        let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+        let text = super::format_filetime_with_format(ticks, DateFormat::YearMonthDay);
+        assert!(text.starts_with("1969-07-"));
+        assert_eq!(text.len(), 16);
     }
 }

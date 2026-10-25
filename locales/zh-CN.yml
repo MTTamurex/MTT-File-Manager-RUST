@@ -1,3 +1,13 @@
+column_headers:
+  app_tags: "MTT 标签"
+  original_location: "原始位置"
+  status: "状态"
+  more_columns: "更多列…"
+  choose_columns: "选择列"
+  search: "搜索列…"
+  catalog_failed: "无法加载 Windows 属性目录。"
+  custom_sort: "列属性"
+  sorting: "正在加载排序属性…"
 updates:
   title: "更新"
   description: "选择 MTT 检查和安装新版本的方式。"
@@ -458,7 +468,7 @@ settings:
   miscellaneous: "杂项"
   file_browsing: "文件浏览"
   auto_resize_columns: "自动调整列宽"
-  auto_resize_columns_description: "根据可用空间调整列表列宽。关闭后保留手动列宽并使用水平滚动。"
+  auto_resize_columns_description: "根据内容调整列宽，必要时使用水平滚动。关闭后保留手动列宽。"
   hover_preview: "悬停时显示预览"
   hover_preview_description: "在列表、网格和全局搜索结果中悬停时显示缩略图及文件/文件夹信息。"
   show_quick_access_sidebar: "显示快速访问"

@@ -170,7 +170,7 @@ impl ImageViewerApp {
         visible[start..=end].to_vec()
     }
 
-    fn rebuild_computer_view_indices(&mut self) {
+    pub(crate) fn rebuild_computer_view_indices(&mut self) {
         if !self.navigation_state.is_computer_view {
             return;
         }

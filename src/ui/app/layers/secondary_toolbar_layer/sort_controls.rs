@@ -88,6 +88,19 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                 SortMode::DriveTotalSpace => t!("secondary_toolbar.sort_total_space"),
                 SortMode::DriveFreeSpace => t!("secondary_toolbar.sort_free_space"),
                 SortMode::DriveLetter => t!("secondary_toolbar.sort_drive_letter"),
+                SortMode::Column(crate::domain::list_columns::ColumnId::Tags) => {
+                    t!("column_headers.app_tags")
+                }
+                SortMode::Column(crate::domain::list_columns::ColumnId::OriginalLocation) => {
+                    t!("column_headers.original_location")
+                }
+                SortMode::Column(id) => app
+                    .columns
+                    .catalog
+                    .iter()
+                    .find(|column| column.id == id)
+                    .map(|column| column.label.clone().into())
+                    .unwrap_or_else(|| t!("column_headers.custom_sort")),
             })
             .show_ui(ui, |ui| {
                 if ui

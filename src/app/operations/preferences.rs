@@ -8,7 +8,7 @@
 use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::QuickAccessPlacement;
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::{FoldersPosition, ViewMode};
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
@@ -131,34 +131,15 @@ impl ImageViewerApp {
 
         // Always save the "normal" (unlocked) values so that locked-folder
         // overrides don't corrupt the persisted global preferences.
-        let sort_mode_str = match self.sort_mode_normal {
-            SortMode::Name => "name",
-            SortMode::Date => "date",
-            SortMode::Size => "size",
-            SortMode::Type => "type",
-            SortMode::DriveTotalSpace => "drive_total",
-            SortMode::DriveFreeSpace => "drive_free",
-            SortMode::DriveLetter => "drive_letter",
-        };
-        prefs.push(("sort_mode", sort_mode_str.to_string()));
-
-        let sort_mode_computer_str = match self.sort_mode_computer {
-            SortMode::Name => "name",
-            SortMode::DriveTotalSpace => "drive_total",
-            SortMode::DriveFreeSpace => "drive_free",
-            SortMode::DriveLetter => "drive_letter",
-            _ => "name", // Computer view only supports these 4
-        };
-        prefs.push(("sort_mode_computer", sort_mode_computer_str.to_string()));
-
-        let sort_mode_normal_str = match self.sort_mode_normal {
-            SortMode::Name => "name",
-            SortMode::Date => "date",
-            SortMode::Size => "size",
-            SortMode::Type => "type",
-            _ => "name", // Normal folders don't use drive modes
-        };
-        prefs.push(("sort_mode_normal", sort_mode_normal_str.to_string()));
+        prefs.push(("sort_mode", self.sort_mode_normal.preference_value()));
+        prefs.push((
+            "sort_mode_computer",
+            self.sort_mode_computer.preference_value(),
+        ));
+        prefs.push(("sort_mode_normal", self.sort_mode_normal.preference_value()));
+        if let Ok(columns) = serde_json::to_string(&self.columns.preferences) {
+            prefs.push(("list_columns", columns));
+        }
 
         prefs.push((
             "sort_descending",

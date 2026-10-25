@@ -923,6 +923,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     //    panel's bridge code doesn't cancel the drag when mouse is over
     //    the inactive panel. ──
     let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
+
     if app.is_item_dragging && !file_panel_input_blocked {
         let hover_pos = ui.input(|i| i.pointer.hover_pos());
         if let Some(pos) = hover_pos {
@@ -1050,6 +1051,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     use crate::domain::file_entry::ViewMode;
 
     let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
+    app.refresh_column_sort(ui.ctx());
 
     if app.is_loading_folder && app.items.is_empty() {
         ui.centered_and_justified(|ui| {
@@ -1078,7 +1080,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         }
     } else if app.folder_load_error.is_some() {
         super::folder_error::render(app, ui);
-    } else if app.items.is_empty() && !matches!(app.view_mode, ViewMode::Miller) {
+    } else if app.items.is_empty() && !matches!(app.view_mode, ViewMode::Miller | ViewMode::List) {
         let response = ui
             .centered_and_justified(|ui| {
                 ui.label(rust_i18n::t!("panels.empty_folder"));

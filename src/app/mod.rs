@@ -8,6 +8,7 @@
 
 pub mod batch_rename;
 pub mod cache_state;
+pub(crate) mod column_state;
 pub mod default_file_manager_state;
 pub mod disk_analysis_duplicates;
 pub mod disk_analysis_model;

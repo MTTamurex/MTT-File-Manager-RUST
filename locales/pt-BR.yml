@@ -1,3 +1,13 @@
+column_headers:
+  app_tags: "Tags do MTT"
+  original_location: "Local original"
+  status: "Status"
+  more_columns: "Mais colunas…"
+  choose_columns: "Escolher colunas"
+  search: "Pesquisar colunas…"
+  catalog_failed: "Não foi possível carregar o catálogo de propriedades do Windows."
+  custom_sort: "Propriedade da coluna"
+  sorting: "Carregando propriedades para ordenação…"
 updates:
   title: "Atualizações"
   description: "Escolha como o MTT verifica e instala novas versões."
@@ -458,7 +468,7 @@ settings:
   miscellaneous: "Diversos"
   file_browsing: "Navegação de arquivos"
   auto_resize_columns: "Redimensionar colunas automaticamente"
-  auto_resize_columns_description: "Ajusta as colunas da lista ao espaço disponível. Desative para manter larguras manuais e usar rolagem horizontal."
+  auto_resize_columns_description: "Ajusta as colunas ao conteúdo, com rolagem horizontal quando necessário. Desative para manter larguras manuais."
   hover_preview: "Mostrar prévia ao passar o mouse"
   hover_preview_description: "Mostra miniaturas e informações de arquivos/pastas ao passar o mouse em listas, grades e resultados da busca global."
   show_quick_access_sidebar: "Mostrar Acesso Rápido"

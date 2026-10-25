@@ -110,7 +110,14 @@ fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Err
                     0
                 };
 
-                entries.push((filename, attrs, size, modified));
+                let ft = find_data.ftCreationTime;
+                let created_ticks =
+                    ((ft.dwHighDateTime as u64) << 32) | u64::from(ft.dwLowDateTime);
+                let created = created_ticks
+                    .checked_sub(116444736000000000)
+                    .map(|ticks| ticks / 10_000_000)
+                    .filter(|&seconds| seconds > 0);
+                entries.push((filename, attrs, size, modified, created));
             }
 
             if FindNextFileW(handle, &mut find_data).is_err() {
@@ -122,4 +129,28 @@ fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Err
     }
 
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_enumeration_preserves_creation_dates_for_files_and_folders() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("file.txt"), b"data").unwrap();
+        std::fs::create_dir(root.path().join("folder")).unwrap();
+        let entries = read_directory_internal(root.path()).unwrap();
+        assert_eq!(entries.len(), 2);
+        for (name, _, _, _, created) in entries {
+            let expected = std::fs::metadata(root.path().join(name))
+                .unwrap()
+                .created()
+                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            assert_eq!(created, Some(expected));
+        }
+    }
 }
