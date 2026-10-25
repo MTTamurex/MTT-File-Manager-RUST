@@ -10,8 +10,9 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &t!("settings.auto_resize_columns"),
         &mut app.explorer_preferences.auto_resize_columns,
     );
-    if columns_changed && !app.explorer_preferences.auto_resize_columns {
-        app.explorer_preferences.remember_column_widths = true;
+    if columns_changed {
+        app.explorer_preferences.remember_column_widths =
+            !app.explorer_preferences.auto_resize_columns;
     }
     ui.label(t!("settings.auto_resize_columns_description"));
     ui.add_space(ui.text_style_height(&egui::TextStyle::Body));
