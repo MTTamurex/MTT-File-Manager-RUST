@@ -1,5 +1,6 @@
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_tag;
+use mtt_search_protocol::name_query::NameQuery;
 use rustc_hash::FxHashMap;
 
 /// Check if haystack contains needle (case-insensitive) using precomputed needle.
@@ -39,7 +40,18 @@ fn contains_ignore_case_precomputed(
 /// Multi-word queries use token-based matching (same strategy as global search):
 /// the query is split by whitespace and every token must appear as a
 /// case-insensitive substring of the filename.
+/// Wildcard terms (`*`, `?`) match the whole name; `;` separates alternatives.
 pub(super) fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntry>> {
+    if NameQuery::uses_masks_or_alternatives(query) {
+        let matcher = NameQuery::new(query);
+        return Some(
+            items
+                .iter()
+                .filter(|item| matcher.matches(&item.name))
+                .cloned()
+                .collect(),
+        );
+    }
     if query.is_empty() {
         return None;
     }
@@ -91,6 +103,21 @@ pub(super) fn filter_items_opt_with_tags(
     active_tag_filter: Option<i64>,
     tag_assignments: &FxHashMap<String, Vec<i64>>,
 ) -> Option<Vec<FileEntry>> {
+    if NameQuery::uses_masks_or_alternatives(query) {
+        let matcher = NameQuery::new(query);
+        return Some(
+            items
+                .iter()
+                .filter(|item| {
+                    matcher.matches(&item.name)
+                        && active_tag_filter.is_none_or(|tag_id| {
+                            file_tag::path_has_tag(tag_assignments, &item.path, tag_id)
+                        })
+                })
+                .cloned()
+                .collect(),
+        );
+    }
     let has_tag_filter = active_tag_filter.is_some();
     if query.is_empty() && !has_tag_filter {
         return None;
@@ -145,3 +172,7 @@ pub(super) fn filter_items_opt_with_tags(
 pub(super) fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
     filter_items_opt(items, query).unwrap_or_else(|| items.to_vec())
 }
+
+#[cfg(test)]
+#[path = "filtering_tests.rs"]
+mod tests;

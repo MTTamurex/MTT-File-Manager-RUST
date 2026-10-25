@@ -1,4 +1,5 @@
 use crate::app::global_search_state::GlobalSearchTagFilter;
+use mtt_search_protocol::name_query::NameQuery;
 use mtt_search_protocol::SearchResultItem;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
@@ -66,13 +67,8 @@ fn build_tagged_results(
         return None;
     }
 
-    let tokens: Vec<String> = request
-        .cache_key
-        .0
-        .to_lowercase()
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect();
+    let query_is_blank = request.cache_key.0.trim().is_empty();
+    let matcher = NameQuery::new(&request.cache_key.0);
     let mut seen_paths = request.excluded_paths;
     let mut items = Vec::new();
 
@@ -84,7 +80,7 @@ fn build_tagged_results(
             break;
         }
         if !tag_filter_matches_ids(&request.cache_key.1, tag_ids)
-            || !path_name_matches_query(path, &tokens)
+            || (!query_is_blank && !path_name_matches_query(path, &matcher))
         {
             continue;
         }
@@ -139,12 +135,11 @@ pub(crate) fn tag_filter_matches_ids(tag_filter: &GlobalSearchTagFilter, tag_ids
     }
 }
 
-pub(crate) fn path_name_matches_query(path: &Path, tokens: &[String]) -> bool {
+pub(crate) fn path_name_matches_query(path: &Path, matcher: &NameQuery) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    let name_lower = name.to_lowercase();
-    tokens.iter().all(|token| name_lower.contains(token))
+    matcher.matches(name)
 }
 
 pub(crate) fn normalize_search_path_key(path: &str) -> String {
@@ -169,6 +164,36 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+
+    #[test]
+    fn tagged_results_support_masks_alternatives_and_blank_queries() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut assignments = FxHashMap::default();
+        for name in ["file.EXE", "file.com", "file.exe.bak"] {
+            let path = temp.path().join(name);
+            std::fs::write(&path, b"test").unwrap();
+            assignments.insert(path, vec![5]);
+        }
+        let assignments = Arc::new(assignments);
+        for (query, expected) in [("*.exe;*.com", 2), ("*.exe;file*", 3), ("", 3), ("; ;", 0)] {
+            let response = build_tagged_results(
+                TaggedResultsRequest {
+                    request_id: 1,
+                    cache_key: (
+                        query.to_owned(),
+                        GlobalSearchTagFilter::Selected(vec![5]),
+                        0,
+                    ),
+                    tag_assignments: assignments.clone(),
+                    excluded_paths: HashSet::new(),
+                    limit: 10,
+                },
+                &AtomicU64::new(1),
+            )
+            .unwrap();
+            assert_eq!(response.items.len(), expected, "{query}");
+        }
+    }
 
     #[test]
     fn builds_existing_tagged_results_and_skips_missing_paths() {

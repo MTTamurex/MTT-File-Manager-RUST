@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 mod disk_analysis;
 mod drive_health;
+pub mod name_query;
 pub use disk_analysis::*;
 pub use drive_health::*;
 

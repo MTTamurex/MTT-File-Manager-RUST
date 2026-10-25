@@ -402,12 +402,11 @@ impl UserSessionSearchIndex {
             return 0;
         }
 
-        let query_lower = query.to_lowercase();
-        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
+        let matcher = mtt_search_protocol::name_query::NameQuery::new(query);
         let mut matched = 0usize;
 
         for volume in self.volumes.values() {
-            visit_volume_matches(volume, &tokens, |_item| {
+            visit_volume_query(volume, &matcher, |_item| {
                 matched = matched.saturating_add(1);
                 true
             });
@@ -426,14 +425,13 @@ impl UserSessionSearchIndex {
             return (Vec::new(), false);
         }
 
-        let query_lower = query.to_lowercase();
-        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
+        let matcher = mtt_search_protocol::name_query::NameQuery::new(query);
         let mut results = Vec::with_capacity(limit.min(128));
         let mut matched = 0usize;
 
         for volume in self.volumes.values() {
             let mut page_full = false;
-            visit_volume_matches(volume, &tokens, |item| {
+            visit_volume_query(volume, &matcher, |item| {
                 if matched < offset {
                     matched += 1;
                     return true;
@@ -588,9 +586,12 @@ fn record_rescan_event(
     journal.events.push(event);
 }
 
-fn item_matches_query(volume: &IndexedVolume, item: &IndexedItem, tokens: &[&str]) -> bool {
-    volume.live_paths.contains(&item.path_key)
-        && tokens.iter().all(|token| item.name_lower.contains(token))
+fn item_matches_query(
+    volume: &IndexedVolume,
+    item: &IndexedItem,
+    matcher: &mtt_search_protocol::name_query::NameQuery,
+) -> bool {
+    volume.live_paths.contains(&item.path_key) && matcher.matches_lowercase(&item.name_lower)
 }
 
 /// PERF-06: visits every matching item of a volume in items-vector order
@@ -598,31 +599,44 @@ fn item_matches_query(volume: &IndexedVolume, item: &IndexedItem, tokens: &[&str
 /// each one. `visit` returns `false` to stop early.
 ///
 /// When the volume has a trigram index, candidate item indices are narrowed
-/// per token and then filtered by the exact predicate — the match set is
-/// identical to the linear scan because trigram containment is necessary for
-/// `name_lower.contains(token)`. Without an index (or when all tokens are
-/// shorter than 3 chars) this degrades to the plain linear scan.
-fn visit_volume_matches<F>(volume: &IndexedVolume, tokens: &[&str], mut visit: F)
-where
+/// using necessary literal runs, then filtered by the exact predicate.
+/// Candidate sets are intersected within each alternative and unioned across
+/// alternatives. An alternative without indexable literals requires a scan.
+fn visit_volume_query<F>(
+    volume: &IndexedVolume,
+    matcher: &mtt_search_protocol::name_query::NameQuery,
+    mut visit: F,
+) where
     F: FnMut(&IndexedItem) -> bool,
 {
     let candidate_indices: Option<Vec<u32>> = volume.trigram_index.as_ref().and_then(|index| {
-        let mut acc: Option<Vec<u32>> = None;
-        for token in tokens {
-            // `None` = token too short to narrow; the exact predicate
-            // still applies to it during verification.
-            let Some(token_candidates) = index.candidates_for_token(token) else {
-                continue;
-            };
-            acc = Some(match acc {
-                None => token_candidates,
-                Some(prev) => intersect_sorted(prev, token_candidates),
-            });
-            if acc.as_ref().is_some_and(|candidates| candidates.is_empty()) {
-                break;
+        let mut union: Option<Vec<u32>> = None;
+        for literals in matcher.literal_alternatives() {
+            let mut acc: Option<Vec<u32>> = None;
+            for literal in literals {
+                let Some(candidates) = index.candidates_for_token(literal) else {
+                    continue;
+                };
+                acc = Some(match acc {
+                    None => candidates,
+                    Some(previous) => intersect_sorted(previous, candidates),
+                });
+                if acc.as_ref().is_some_and(|candidates| candidates.is_empty()) {
+                    break;
+                }
+            }
+            // One unconstrained alternative can match outside every posting.
+            let candidates = acc?;
+            match &mut union {
+                None => union = Some(candidates),
+                Some(union) => {
+                    union.extend(candidates);
+                    union.sort_unstable();
+                    union.dedup();
+                }
             }
         }
-        acc
+        Some(union.unwrap_or_default())
     });
 
     match candidate_indices {
@@ -631,14 +645,14 @@ where
                 let Some(item) = volume.items.get(idx as usize) else {
                     continue;
                 };
-                if item_matches_query(volume, item, tokens) && !visit(item) {
+                if item_matches_query(volume, item, matcher) && !visit(item) {
                     return;
                 }
             }
         }
         None => {
             for item in &volume.items {
-                if item_matches_query(volume, item, tokens) && !visit(item) {
+                if item_matches_query(volume, item, matcher) && !visit(item) {
                     return;
                 }
             }
@@ -659,6 +673,9 @@ impl Default for UserSessionSearchIndex {
 }
 
 #[cfg(test)]
+mod mask_tests;
+
+#[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
@@ -668,11 +685,11 @@ mod tests {
     use crate::infrastructure::drive_watcher::DriveWatcherEvent;
 
     use super::{
-        record_rescan_event, trigram, visit_volume_matches, IndexedItem, IndexedVolume,
+        record_rescan_event, trigram, visit_volume_query, IndexedItem, IndexedVolume,
         RescanDelivery, RescanEventJournal, UserSessionSearchIndex, MAX_RESCAN_JOURNAL_EVENTS,
     };
 
-    fn empty_index() -> UserSessionSearchIndex {
+    pub(super) fn empty_index() -> UserSessionSearchIndex {
         let (rescan_tx, rescan_rx) = std::sync::mpsc::channel();
         UserSessionSearchIndex {
             volumes: HashMap::new(),
@@ -692,7 +709,7 @@ mod tests {
 
     /// Builds a volume from plain names. `with_index` controls whether the
     /// trigram index is attached, so tests can compare both paths.
-    fn test_volume(names: &[&str], with_index: bool) -> IndexedVolume {
+    pub(super) fn test_volume(names: &[&str], with_index: bool) -> IndexedVolume {
         let mut items = Vec::new();
         let mut live_paths = std::collections::HashSet::new();
         for name in names {
@@ -741,7 +758,8 @@ mod tests {
 
     fn indexed_visit_matches(volume: &IndexedVolume, tokens: &[&str]) -> Vec<usize> {
         let mut matches = Vec::new();
-        visit_volume_matches(volume, tokens, |item| {
+        let matcher = mtt_search_protocol::name_query::NameQuery::new(&tokens.join(" "));
+        visit_volume_query(volume, &matcher, |item| {
             let idx = volume
                 .items
                 .iter()

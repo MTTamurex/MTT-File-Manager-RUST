@@ -726,11 +726,11 @@ impl ImageViewerApp {
         self.invalidate_and_schedule_items_rebuild();
         self.all_items_mut().push(entry.clone());
 
-        let should_show = self.search_query.is_empty()
-            || entry
-                .name
-                .to_lowercase()
-                .contains(&self.search_query.to_lowercase());
+        let should_show = crate::application::sorting::filter_items_opt(
+            std::slice::from_ref(&entry),
+            &self.search_query,
+        )
+        .is_none_or(|items| !items.is_empty());
 
         if should_show {
             Arc::make_mut(&mut self.items).push(entry);

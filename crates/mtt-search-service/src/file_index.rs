@@ -919,6 +919,8 @@ pub fn search_page(
     }
 
     let query_lower = query.to_lowercase();
+    let name_query = mtt_search_protocol::name_query::NameQuery::uses_masks_or_alternatives(query)
+        .then(|| mtt_search_protocol::name_query::NameQuery::new(query));
     let tokens: Vec<&str> = query_lower.split_whitespace().collect();
     if tokens.is_empty() {
         return SearchPage {
@@ -961,7 +963,18 @@ pub fn search_page(
             }
 
             let name = index.names.get(record.name_ref());
-            let matches = if tokens_are_ascii && name.is_ascii() {
+            let matches = if let Some(matcher) = &name_query {
+                if name.is_ascii() {
+                    lowercase_scratch.clear();
+                    lowercase_scratch.extend_from_slice(name.as_bytes());
+                    lowercase_scratch.make_ascii_lowercase();
+                    matcher.matches_lowercase(
+                        std::str::from_utf8(&lowercase_scratch).expect("ASCII filename"),
+                    )
+                } else {
+                    matcher.matches(name)
+                }
+            } else if tokens_are_ascii && name.is_ascii() {
                 lowercase_scratch.clear();
                 lowercase_scratch.extend_from_slice(name.as_bytes());
                 lowercase_scratch.make_ascii_lowercase();
@@ -1015,6 +1028,10 @@ pub fn search_page(
         },
     }
 }
+
+#[cfg(test)]
+#[path = "file_index_mask_tests.rs"]
+mod mask_tests;
 
 #[cfg(test)]
 mod tests {

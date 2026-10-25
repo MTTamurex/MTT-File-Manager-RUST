@@ -729,14 +729,14 @@ mod tests {
 
     #[test]
     fn tagged_path_query_uses_file_name_tokens() {
-        let tokens = vec!["emm".to_string(), "txt".to_string()];
+        let matcher = mtt_search_protocol::name_query::NameQuery::new("file txt");
         assert!(path_name_matches_query(
-            Path::new(r"C:\Docs\Emma Notes.txt"),
-            &tokens
+            Path::new(r"C:\Documents\file notes.txt"),
+            &matcher
         ));
         assert!(!path_name_matches_query(
-            Path::new(r"C:\Emma\Notes.txt"),
-            &tokens
+            Path::new(r"C:\Files\notes.txt"),
+            &matcher
         ));
     }
 
