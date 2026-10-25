@@ -27,6 +27,21 @@ pub fn render_list_view(
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
 ) -> Option<ListViewAction> {
+    if let Some(location) = &ctx.folder_width_location {
+        let defaults: Vec<_> = ctx
+            .columns
+            .preferences
+            .layout(columns::scope(ctx))
+            .columns
+            .iter()
+            .map(|column| (column.id, columns::width(ctx, column.id)))
+            .collect();
+        ctx.width_overrides = Some(
+            ctx.columns
+                .folder_widths
+                .frame(location, &defaults, ui.ctx()),
+        );
+    }
     crate::ui::components::inline_rename::clear_pending_name_click_outside(
         ui.ctx(),
         ctx.rename_click_scope,

@@ -10,7 +10,20 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &t!("settings.auto_resize_columns"),
         &mut app.explorer_preferences.auto_resize_columns,
     );
+    if columns_changed && !app.explorer_preferences.auto_resize_columns {
+        app.explorer_preferences.remember_column_widths = true;
+    }
     ui.label(t!("settings.auto_resize_columns_description"));
+    ui.add_space(ui.text_style_height(&egui::TextStyle::Body));
+    let remember_changed = settings_ui::toggle_row(
+        ui,
+        &t!("settings.remember_column_widths"),
+        &mut app.explorer_preferences.remember_column_widths,
+    );
+    if remember_changed && app.explorer_preferences.remember_column_widths {
+        app.explorer_preferences.auto_resize_columns = false;
+    }
+    ui.label(t!("settings.remember_column_widths_description"));
     ui.add_space(10.0);
     let preview_changed = settings_ui::toggle_row(
         ui,
@@ -24,7 +37,7 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             panel.pending_list_column_autofit = true;
         }
     }
-    if columns_changed || preview_changed {
+    if columns_changed || remember_changed || preview_changed {
         app.save_preferences();
         app.save_preferences_async();
     }

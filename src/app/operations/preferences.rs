@@ -33,6 +33,7 @@ impl ImageViewerApp {
     /// Flushes dirty preferences to SQLite if enough time has passed.
     /// Called once per frame from the update loop.
     pub fn flush_preferences_if_needed(&mut self) {
+        self.columns.folder_widths.poll_pending();
         if self
             .preference_writer
             .as_ref()
@@ -61,17 +62,24 @@ impl ImageViewerApp {
 
     /// Submits final preferences and waits at most 250 ms (for exit).
     pub fn force_save_preferences(&mut self) -> bool {
-        let Some(id) = self.enqueue_preferences() else {
-            return false;
-        };
-        let persisted = self
-            .preference_writer
-            .as_ref()
-            .is_some_and(|writer| writer.wait(id, FINAL_PREFERENCES_FLUSH_TIMEOUT));
+        let deadline = std::time::Instant::now() + FINAL_PREFERENCES_FLUSH_TIMEOUT;
+        let id = self.enqueue_preferences();
+        let persisted = id.is_some_and(|id| {
+            self.preference_writer.as_ref().is_some_and(|writer| {
+                writer.wait(
+                    id,
+                    deadline.saturating_duration_since(std::time::Instant::now()),
+                )
+            })
+        });
+        let widths_persisted = self
+            .columns
+            .folder_widths
+            .flush(deadline.saturating_duration_since(std::time::Instant::now()));
         if !persisted {
             self.preferences_dirty = true;
         }
-        persisted
+        persisted && widths_persisted
     }
 
     /// Immediate submission, not immediate disk I/O. Settings changes use this;

@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use super::db_utils;
 
 mod cleanup;
+mod column_widths;
 mod file_entry_cache;
 mod file_tags;
 mod folder_covers;
@@ -249,6 +250,14 @@ impl AppStateDb {
     }
 
     fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS folder_column_widths (
+            location TEXT NOT NULL,
+            column_id TEXT NOT NULL,
+            width REAL NOT NULL,
+            PRIMARY KEY(location, column_id)
+        ) WITHOUT ROWID;",
+        )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS user_preferences (
                 key TEXT PRIMARY KEY,

@@ -15,6 +15,7 @@ impl Fixture {
         let (catalog, catalog_receiver) = bounded(1);
         Self {
             state: ColumnState {
+                folder_widths: Default::default(),
                 content_revision: 0,
                 preferences: ColumnPreferences::default(),
                 catalog: Vec::new(),

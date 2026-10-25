@@ -52,7 +52,7 @@ fn project(
 
 pub(super) fn width(ctx: &ListViewContext, id: ColumnId) -> f32 {
     if let Some(width) = ctx
-        .autofit_widths
+        .width_overrides
         .as_ref()
         .and_then(|widths| widths.iter().find(|(column, _)| *column == id))
     {
@@ -80,11 +80,15 @@ pub(super) fn width(ctx: &ListViewContext, id: ColumnId) -> f32 {
 
 pub(super) fn set_width(ctx: &mut ListViewContext, id: ColumnId, width: f32) {
     if let Some(column) = ctx
-        .autofit_widths
+        .width_overrides
         .as_mut()
         .and_then(|widths| widths.iter_mut().find(|(column, _)| *column == id))
     {
         column.1 = width;
+    }
+    if ctx.folder_width_location.is_some() {
+        ctx.manual_width_changes.push((id, width));
+        return;
     }
     if set_legacy_width(ctx, id, width) {
         return;
@@ -119,7 +123,7 @@ fn set_legacy_width(ctx: &mut ListViewContext, id: ColumnId, width: f32) -> bool
 
 /// Automatic metadata widths belong to a physical pane, not the global manual-width preferences.
 pub(super) fn set_fitted_widths(ctx: &mut ListViewContext, widths: &[(ColumnId, f32)]) {
-    ctx.autofit_widths = Some(widths.to_vec());
+    ctx.width_overrides = Some(widths.to_vec());
     for &(id, width) in widths {
         set_legacy_width(ctx, id, width);
     }

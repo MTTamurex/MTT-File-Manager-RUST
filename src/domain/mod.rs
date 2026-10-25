@@ -1,6 +1,7 @@
 // Domain types and business logic
 
 pub mod cloud_root;
+pub(crate) mod column_widths;
 pub mod date_format;
 pub mod errors;
 pub mod file_entry;

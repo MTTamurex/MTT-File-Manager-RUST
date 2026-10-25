@@ -35,6 +35,7 @@ impl ImageViewerApp {
             || self.navigation_state.current_path.is_empty()
             || is_virtual_path(&self.navigation_state.current_path)
         {
+            self.clear_miller_column_groups();
             if self
                 .rectangle_selection_state
                 .as_ref()
@@ -89,6 +90,7 @@ impl ImageViewerApp {
 
         let chain = ancestor_chain(&current_path);
         if chain.len() <= 1 {
+            self.clear_miller_column_groups();
             // Drive root: nothing to the left, but Miller remains name-only.
             self.render_list_view_compact(ui);
             if let Some(target) = pending_nav {
@@ -136,22 +138,32 @@ impl ImageViewerApp {
             })
             .collect();
 
+        let metadata_projections = self.miller_metadata_projections(
+            ui.ctx(),
+            &chain[..focused_index],
+            ancestor_data.iter().map(|(items, _)| items.clone()),
+        );
         let ancestor_groups: Vec<_> = chain
             .iter()
             .zip(&ancestor_data)
             .take(focused_index)
-            .map(|(dir, (listing, _))| {
-                let projection = listing
-                    .as_ref()
-                    .map(|items| {
-                        self.miller_columns.grouping.projection(
-                            dir,
-                            items.clone(),
-                            self.group_mode,
-                            self.group_descending,
-                        )
-                    })
-                    .unwrap_or_default();
+            .enumerate()
+            .map(|(index, (dir, (listing, _)))| {
+                let projection = if let Some(metadata) = &metadata_projections {
+                    metadata[index].clone()
+                } else {
+                    listing
+                        .as_ref()
+                        .map(|items| {
+                            self.miller_columns.grouping.projection(
+                                dir,
+                                items.clone(),
+                                self.group_mode,
+                                self.group_descending,
+                            )
+                        })
+                        .unwrap_or_default()
+                };
                 let key = self.grouping_context_key_for_path(&dir.to_string_lossy());
                 let collapsed = self
                     .collapsed_groups_by_context

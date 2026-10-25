@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::application::grouping::{build_group_projection, local_grouping_day, GroupProjection};
 use crate::domain::file_entry::{FileEntry, GroupMode};
+mod metadata;
 
 #[derive(Clone)]
 struct CachedProjection {
@@ -17,7 +18,11 @@ struct CachedProjection {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ColumnGroupingCache(HashMap<PathBuf, CachedProjection>);
+pub(crate) struct ColumnGroupingCache(
+    HashMap<PathBuf, CachedProjection>,
+    HashMap<PathBuf, metadata::CachedMetadata>,
+    HashMap<PathBuf, metadata::CachedSource>,
+);
 
 impl ColumnGroupingCache {
     pub fn projection(
@@ -57,14 +62,20 @@ impl ColumnGroupingCache {
 
     pub fn retain(&mut self, keep: &std::collections::HashSet<PathBuf>) {
         self.0.retain(|path, _| keep.contains(path));
+        self.1.retain(|path, _| keep.contains(path));
+        self.2.retain(|path, _| keep.contains(path));
     }
 
     pub fn invalidate(&mut self, directory: &Path) {
         self.0.remove(directory);
+        self.1.remove(directory);
+        self.2.remove(directory);
     }
 
     pub fn clear(&mut self) {
         self.0.clear();
+        self.1.clear();
+        self.2.clear();
     }
 }
 

@@ -1,6 +1,7 @@
 //! Shared column preferences and bounded, asynchronous display-property cache.
 mod display_source;
 mod display_worker;
+pub(crate) mod folder_widths;
 mod grouping;
 mod grouping_worker;
 mod rank_order;
@@ -70,6 +71,7 @@ impl ValueKey {
 }
 
 pub struct ColumnState {
+    pub(crate) folder_widths: folder_widths::FolderWidths,
     pub(crate) content_revision: u64,
     pub preferences: ColumnPreferences,
     pub catalog: Vec<PropertyColumn>,
@@ -107,6 +109,7 @@ impl ColumnState {
         })
         .is_ok();
         Self {
+            folder_widths: Default::default(),
             content_revision: 0,
             preferences,
             catalog: Vec::new(),

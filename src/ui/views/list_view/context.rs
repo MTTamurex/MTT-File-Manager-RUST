@@ -14,7 +14,9 @@ pub(crate) struct ColumnWidths {
 pub struct ListViewContext<'a> {
     pub(crate) columns: &'a mut crate::app::column_state::ColumnState,
     pub(crate) autofit_requested: &'a mut bool,
-    pub(crate) autofit_widths: Option<Vec<(crate::domain::list_columns::ColumnId, f32)>>,
+    pub(crate) width_overrides: Option<Vec<(crate::domain::list_columns::ColumnId, f32)>>,
+    pub(crate) folder_width_location: Option<crate::domain::column_widths::WidthLocation>,
+    pub(crate) manual_width_changes: Vec<(crate::domain::list_columns::ColumnId, f32)>,
     pub(crate) autofit_visible_indices: Vec<usize>,
     pub(crate) items_revision: u64,
     pub(crate) tag_assignments_epoch: u64,

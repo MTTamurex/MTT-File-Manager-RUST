@@ -239,7 +239,7 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
         .unwrap_or_default();
     let scope = columns::scope(ctx);
     if !ctx.auto_resize_columns {
-        if state.active && state.scope == Some(scope) {
+        if ctx.folder_width_location.is_none() && state.active && state.scope == Some(scope) {
             // Switching off automatic sizing keeps the last displayed sizes as manual widths.
             for &(id, width) in &state.applied {
                 columns::set_width(ctx, id, width);
@@ -317,7 +317,7 @@ pub(super) fn remember_manual_widths(ui: &Ui, ctx: &ListViewContext) {
     let id = ui.id().with("list_content_fit");
     ui.data_mut(|data| {
         if let Some(mut state) = data.get_temp::<FitState>(id) {
-            if let Some(widths) = &ctx.autofit_widths {
+            if let Some(widths) = &ctx.width_overrides {
                 state.applied = widths.clone();
             }
             data.insert_temp(id, state);

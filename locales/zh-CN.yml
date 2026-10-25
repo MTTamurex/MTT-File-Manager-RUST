@@ -468,6 +468,8 @@ settings:
   miscellaneous: "杂项"
   file_browsing: "文件浏览"
   auto_resize_columns: "自动调整列宽"
+  remember_column_widths: "记住每个文件夹的列宽"
+  remember_column_widths_description: "关闭自动调整后，保存并恢复每个文件夹、此电脑和回收站的手动列宽。列的顺序和可见性仍为全局设置。"
   auto_resize_columns_description: "根据内容调整列宽，必要时使用水平滚动。关闭后保留手动列宽。"
   hover_preview: "悬停时显示预览"
   hover_preview_description: "在列表、网格和全局搜索结果中悬停时显示缩略图及文件/文件夹信息。"

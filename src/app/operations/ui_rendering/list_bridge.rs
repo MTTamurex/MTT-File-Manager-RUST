@@ -393,6 +393,21 @@ impl ImageViewerApp {
         });
 
         let scroll_interpolation_enabled = self.uses_scroll_interpolation();
+        let folder_width_location = (self.explorer_preferences.remember_column_widths
+            && !self.explorer_preferences.auto_resize_columns
+            && !compact
+            && !column_list)
+            .then(|| {
+                crate::domain::column_widths::WidthLocation::for_view(
+                    &self.navigation_state.current_path,
+                    self.navigation_state.is_computer_view,
+                    self.navigation_state.is_recycle_bin_view,
+                )
+            })
+            .flatten();
+        if folder_width_location.is_some() {
+            self.columns.folder_widths.start(self.app_state_db.clone());
+        }
         let widths_before_render =
             crate::app::dual_panel::PanelListColumnWidths::from_layout(&self.layout);
         let columns_before_render = self.columns.preferences.clone();
@@ -439,7 +454,9 @@ impl ImageViewerApp {
         let mut ctx = ListViewContext {
             columns: &mut self.columns,
             autofit_requested: &mut self.pending_list_column_autofit,
-            autofit_widths: None,
+            width_overrides: None,
+            folder_width_location,
+            manual_width_changes: Vec::new(),
             autofit_visible_indices: Vec::new(),
             items_revision: self.items_revision,
             tag_assignments_epoch: self.tag_assignments_epoch,
@@ -537,6 +554,11 @@ impl ImageViewerApp {
         let sort_mode = ctx.sort_mode;
         let sort_descending = ctx.sort_descending;
         let renaming_state = ctx.renaming_state.take();
+        if let Some(location) = &ctx.folder_width_location {
+            ctx.columns
+                .folder_widths
+                .edit(location, &ctx.manual_width_changes, ui.ctx());
+        }
         drop(ctx);
 
         // Update state

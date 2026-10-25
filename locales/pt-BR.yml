@@ -468,6 +468,8 @@ settings:
   miscellaneous: "Diversos"
   file_browsing: "Navegação de arquivos"
   auto_resize_columns: "Redimensionar colunas automaticamente"
+  remember_column_widths: "Lembrar larguras das colunas por pasta"
+  remember_column_widths_description: "Com o ajuste automático desligado, salva e restaura as larguras manuais de cada pasta, de Este Computador e da Lixeira. A ordem e a visibilidade das colunas continuam globais."
   auto_resize_columns_description: "Ajusta as colunas ao conteúdo, com rolagem horizontal quando necessário. Desative para manter larguras manuais."
   hover_preview: "Mostrar prévia ao passar o mouse"
   hover_preview_description: "Mostra miniaturas e informações de arquivos/pastas ao passar o mouse em listas, grades e resultados da busca global."
