@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 mod column_autofit;
+mod detach;
+pub(crate) use detach::{render_transfer_progress, transfer_pending};
 mod staleness;
 mod sync_to;
 

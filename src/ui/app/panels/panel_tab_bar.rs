@@ -27,6 +27,7 @@ pub(super) enum PanelTabAction {
     Select(ActivePanel, usize),
     Add(ActivePanel),
     Close(ActivePanel, usize),
+    Detach(ActivePanel, usize),
     Context(ActivePanel, usize, crate::tabs::actions::TabAction),
     Move {
         panel: ActivePanel,
@@ -342,7 +343,9 @@ pub(super) fn render_panel_tab_bar(
                                 }
                             });
                         }
-                        if let Some((from, gap)) = drag.finish(ui, scroll_rect) {
+                        if let Some(index) = drag.detach_source(ui) {
+                            action = Some(PanelTabAction::Detach(panel, index));
+                        } else if let Some((from, gap)) = drag.finish(ui, scroll_rect) {
                             action = Some(PanelTabAction::Move { panel, from, gap });
                         }
                     });

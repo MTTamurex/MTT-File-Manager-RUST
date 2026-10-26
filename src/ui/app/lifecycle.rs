@@ -108,8 +108,15 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 });
             }
 
+            // Special-view setup resets search/scroll state. Restore the moved
+            // browser only after both panels have gone through that setup.
+            crate::app::tab_transfer::restore_browser_state(app);
             app.sync_to_tab();
             app.run_post_startup_jobs(ctx);
+            if !crate::app::tab_transfer::confirm_startup(app) {
+                app.tray_exit_requested = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
             log::info!("[STARTUP] first visible startup frame completed");
         }
 

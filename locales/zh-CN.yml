@@ -1165,6 +1165,8 @@ notifications:
   initial_indexing_progress: "初始索引建立中，已处理%{count}个项目。"
   initial_indexing_completed: "初始索引完成。全局搜索及相关功能现已可用。"
 tabs:
+  detaching: "正在将标签页移至新窗口…"
+  detach_failed: "无法打开新窗口。标签页已保留在此窗口中。"
   close: "关闭标签页"
   duplicate: "复制标签页"
   close_left: "关闭左侧标签页"

@@ -231,6 +231,9 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::track_window_state(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
         self.ensure_window_handle(frame);
+        // Transfers must complete even when the source is occluded/minimized
+        // and eframe only runs logic, not its tab-bar UI.
+        self.poll_tab_transfer(ctx);
         self.handle_tray_and_close_events(ctx);
         // "Open in main app" requests from the disk analyzer (WM_COPYDATA
         // queue or DB fallback); no-op until startup completes.
@@ -245,6 +248,7 @@ impl eframe::App for ImageViewerApp {
         } else {
             self.run_deferred_post_load_visual_work();
         }
+        crate::app::tab_transfer::restore_ready_scroll(self);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {

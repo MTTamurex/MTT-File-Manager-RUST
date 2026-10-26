@@ -1035,6 +1035,9 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             PanelTabAction::Close(panel, index) => {
                 app.dual_panel_close_tab(panel, index);
             }
+            PanelTabAction::Detach(panel, index) => {
+                app.detach_panel_tab(panel, index);
+            }
             PanelTabAction::Context(panel, index, action) => {
                 app.panel_tab_action(panel, index, action)
             }

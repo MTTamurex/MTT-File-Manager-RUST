@@ -6,7 +6,7 @@ use crate::tabs::{TabManager, TabManagerSession};
 use std::sync::{atomic::AtomicUsize, Arc};
 use std::time::Instant;
 
-fn snapshot(path: &str) -> PanelSnapshot {
+pub(in crate::tabs) fn snapshot(path: &str) -> PanelSnapshot {
     PanelSnapshot {
         path: path.to_owned(),
         current_folder_modified_hint: None,

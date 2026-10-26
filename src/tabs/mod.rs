@@ -26,7 +26,9 @@ mod session;
 #[cfg(test)]
 mod session_pin_tests;
 mod session_restore;
+mod transfer;
 pub use session::TabManagerSession;
+pub(crate) use transfer::TabTransfer;
 
 fn tab_title_for_path(path: &str) -> String {
     Path::new(path)

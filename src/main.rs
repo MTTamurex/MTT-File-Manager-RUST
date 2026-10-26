@@ -474,6 +474,20 @@ fn main() -> eframe::Result<()> {
     let _exe = args.next();
     if let Some(flag) = args.next() {
         let flag_str = flag.to_string_lossy();
+        if flag_str.eq_ignore_ascii_case("--detach-tab") {
+            let port = args
+                .next()
+                .and_then(|value| value.to_str()?.parse::<u16>().ok());
+            let token = args.next();
+            let received = port.zip(token.as_ref()).is_some_and(|(port, token)| {
+                mtt_file_manager::app::tab_transfer::receive_startup(port, &token.to_string_lossy())
+                    .is_ok()
+            });
+            if !received {
+                log::error!("[TAB-TRANSFER] Invalid or expired transfer");
+                return Ok(());
+            }
+        }
         if flag_str.eq_ignore_ascii_case("--set-volume-label") {
             let Some(drive_path) = args.next() else {
                 log::error!("[VOLUME-RENAME] missing drive path argument");

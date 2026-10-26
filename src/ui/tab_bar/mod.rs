@@ -16,9 +16,11 @@ use eframe::egui::{self, Color32};
 pub(crate) mod context_menu;
 #[cfg(test)]
 mod context_menu_tests;
+pub(crate) mod detach;
 mod drag_dwell;
 mod icon_style;
 mod new_tab_area;
+mod reorder;
 mod tabs_renderer;
 mod window_controls;
 
@@ -32,6 +34,7 @@ pub enum TabBarAction {
     CloseTab(usize),
     Context(usize, crate::tabs::TabAction),
     MoveTab { from: usize, gap: usize },
+    DetachTab(usize),
     NewTab,
     CloseApp,
     ToggleMaximize,

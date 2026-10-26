@@ -8,6 +8,8 @@ pub(crate) fn render_tab_bar_layer(
 ) {
     let dark_mode = root_ui.visuals().dark_mode;
     let ctx = root_ui.ctx().clone();
+    crate::ui::tab_bar::detach::sample_pointer(&ctx, app.native_hwnd);
+    crate::app::operations::tabs::render_transfer_progress(&ctx);
     egui::Panel::top("tab_bar_panel")
         .show_separator_line(false)
         .exact_size(36.0)
@@ -74,6 +76,7 @@ pub(crate) fn render_tab_bar_layer(
                 TabBarAction::CloseTab(idx) => {
                     app.close_main_tab(idx);
                 }
+                TabBarAction::DetachTab(idx) => app.detach_main_tab(idx),
                 TabBarAction::Context(index, action) => app.main_tab_action(index, action),
                 TabBarAction::CloseApp => {
                     app.request_window_close(&ctx);

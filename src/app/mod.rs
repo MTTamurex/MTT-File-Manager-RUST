@@ -46,6 +46,7 @@ pub mod startup_location;
 mod startup_preferences_tests;
 pub mod state;
 pub mod tab_preferences;
+pub mod tab_transfer;
 pub mod ui_state;
 pub(crate) mod update_state;
 

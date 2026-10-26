@@ -118,6 +118,9 @@ fn handle_delete_permanently_shortcut(
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    if crate::app::operations::tabs::transfer_pending(ctx) {
+        return;
+    }
     let mut user_active = false;
     if app.renaming_state.is_none()
         && app.sidebar_renaming.is_none()

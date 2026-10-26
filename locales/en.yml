@@ -1169,6 +1169,8 @@ notifications:
   initial_indexing_completed: "Initial indexing completed. Global Search and related features are now available."
 
 tabs:
+  detaching: "Moving tab to a new window…"
+  detach_failed: "Could not open the new window. The tab was kept in this window."
   close: "Close tab"
   duplicate: "Duplicate tab"
   close_left: "Close tabs to the left"

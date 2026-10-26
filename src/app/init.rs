@@ -188,8 +188,13 @@ impl ImageViewerApp {
                 .ok()
         });
         let mut startup_preferences = startup_preferences;
-        let fixed_startup_path =
+        let mut fixed_startup_path =
             startup_preferences.prepare_fixed_startup(startup_folder_path.as_deref());
+        if let Some(session) = crate::app::tab_transfer::startup_session() {
+            startup_preferences.saved_tab_session = Some(session);
+            fixed_startup_path = None;
+            startup_folder_path = None;
+        }
         if fixed_startup_path.is_some() {
             startup_folder_path = None;
         }

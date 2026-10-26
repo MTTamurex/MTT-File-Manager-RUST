@@ -107,7 +107,7 @@ impl PanelTabSet {
 }
 
 #[cfg(test)]
-mod snapshot_sync_tests;
+pub(super) mod snapshot_sync_tests;
 
 #[derive(Clone, Default)]
 pub struct DualPanelTabs {

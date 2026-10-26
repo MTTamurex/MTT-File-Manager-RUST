@@ -12,11 +12,14 @@ pub(super) struct TabDrag {
 impl TabDrag {
     pub fn new(ctx: &egui::Context, workspace: usize, panel: ActivePanel, item_drag: bool) -> Self {
         let state_id = egui::Id::new(("panel_tab_reorder", workspace, panel));
+        let outside_release = crate::ui::tab_bar::detach::released_outside(ctx);
         let cancel = item_drag
             || ctx.input(|input| {
                 input.key_pressed(egui::Key::Escape)
                     || !input.focused
-                    || (!input.pointer.primary_down() && !input.pointer.primary_released())
+                    || (!input.pointer.primary_down()
+                        && !input.pointer.primary_released()
+                        && !outside_release)
             });
         if cancel {
             ctx.data_mut(|data| data.remove::<usize>(state_id));
@@ -69,6 +72,17 @@ impl TabDrag {
         self.source.is_some()
     }
 
+    pub fn detach_source(&self, ui: &egui::Ui) -> Option<usize> {
+        let source = self.source?;
+        if self.source_owns_drag && crate::ui::tab_bar::detach::released_outside(ui.ctx()) {
+            ui.ctx()
+                .data_mut(|data| data.remove::<usize>(self.state_id));
+            self.tabs.iter().position(|(id, _)| *id == source)
+        } else {
+            None
+        }
+    }
+
     pub fn finish(&self, ui: &egui::Ui, visible_strip: egui::Rect) -> Option<(usize, usize)> {
         let source = self.source?;
         let from = self.tabs.iter().position(|(id, _)| *id == source);
@@ -85,6 +99,11 @@ impl TabDrag {
         if !self.source_owns_drag {
             return None;
         }
+        // Outside the strip there may be no more winit pointer events. Keep
+        // sampling the native button until release instead of stopping here.
+        if !released {
+            ui.ctx().request_repaint();
+        }
         let from = from?;
         let pointer = pointer?;
         let gap = drop_gap(&self.tabs, visible_strip, pointer)?;
@@ -92,7 +111,6 @@ impl TabDrag {
             return Some((from, gap));
         }
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        ui.ctx().request_repaint();
         let x = self.tabs.get(gap).map_or_else(
             || self.tabs.last().unwrap().1.right(),
             |(_, rect)| rect.left(),
@@ -123,7 +141,15 @@ mod tests {
     use super::*;
 
     fn frame(ctx: &egui::Context, events: Vec<egui::Event>) -> Option<(usize, usize)> {
+        frame_with_detach(ctx, events).0
+    }
+
+    fn frame_with_detach(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> (Option<(usize, usize)>, Option<usize>) {
         let mut moved = None;
+        let mut detached = None;
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -151,13 +177,19 @@ mod tests {
                     );
                     drag.record_tab(ui, index, &response, close);
                 }
-                moved = drag.finish(
-                    ui,
-                    egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(400.0, 128.0)),
-                );
+                detached = drag.detach_source(ui);
+                if detached.is_none() {
+                    moved = drag.finish(
+                        ui,
+                        egui::Rect::from_min_max(
+                            egui::pos2(100.0, 100.0),
+                            egui::pos2(400.0, 128.0),
+                        ),
+                    );
+                }
             },
         );
-        moved
+        (moved, detached)
     }
 
     fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
@@ -179,6 +211,63 @@ mod tests {
         assert_eq!(frame(&ctx, vec![egui::Event::PointerMoved(end)]), None);
         assert_eq!(frame(&ctx, vec![button(end, false)]), Some((0, 3)));
         assert_eq!(frame(&ctx, vec![]), None);
+    }
+
+    #[test]
+    fn panel_tab_detaches_only_when_released_outside_the_window() {
+        let ctx = egui::Context::default();
+        let start = egui::pos2(120.0, 114.0);
+        let outside = egui::pos2(850.0, 114.0);
+        frame_with_detach(&ctx, vec![egui::Event::PointerMoved(start)]);
+        frame_with_detach(&ctx, vec![button(start, true)]);
+        assert_eq!(
+            frame_with_detach(&ctx, vec![egui::Event::PointerMoved(outside)]),
+            (None, None)
+        );
+        assert_eq!(
+            frame_with_detach(&ctx, vec![button(outside, false)]),
+            (None, Some(0))
+        );
+        assert_eq!(frame_with_detach(&ctx, vec![]), (None, None));
+    }
+
+    #[test]
+    fn native_release_detaches_without_an_egui_release_event() {
+        let ctx = egui::Context::default();
+        let start = egui::pos2(120.0, 114.0);
+        frame_with_detach(&ctx, vec![egui::Event::PointerMoved(start)]);
+        frame_with_detach(&ctx, vec![button(start, true)]);
+        frame_with_detach(
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(850.0, 114.0))],
+        );
+        crate::ui::tab_bar::detach::set_test_pointer(&ctx, true, false);
+        assert_eq!(frame_with_detach(&ctx, vec![]), (None, Some(0)));
+        assert_eq!(frame_with_detach(&ctx, vec![]), (None, None));
+    }
+
+    #[test]
+    fn escape_prevents_panel_detachment() {
+        let ctx = egui::Context::default();
+        let start = egui::pos2(120.0, 114.0);
+        let outside = egui::pos2(850.0, 114.0);
+        frame_with_detach(&ctx, vec![egui::Event::PointerMoved(start)]);
+        frame_with_detach(&ctx, vec![button(start, true)]);
+        frame_with_detach(&ctx, vec![egui::Event::PointerMoved(outside)]);
+        frame_with_detach(
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(
+            frame_with_detach(&ctx, vec![button(outside, false)]),
+            (None, None)
+        );
     }
 
     #[test]
