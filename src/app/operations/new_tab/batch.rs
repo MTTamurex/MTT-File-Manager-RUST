@@ -16,8 +16,8 @@ impl ImageViewerApp {
             .tab_preferences
             .location
             .resolve(current_path, &self.tab_preferences.custom_path);
-        let shift = self.ui_ctx.input(|input| input.modifiers.shift);
-        self.open_locations_in_new_tabs(panel, &[path], shift)
+        let ctrl = self.ui_ctx.input(|input| input.modifiers.ctrl);
+        self.open_locations_in_new_tabs(panel, &[path], ctrl)
     }
 
     /// Paths and modifiers must be captured before changing the source tab.
@@ -25,19 +25,19 @@ impl ImageViewerApp {
         &mut self,
         panel: ActivePanel,
         paths: &[String],
-        shift: bool,
+        ctrl: bool,
     ) -> bool {
         if paths.is_empty() {
             return false;
         }
         if self.dual_panel_enabled {
-            self.open_panel_tabs(panel, paths, shift)
+            self.open_panel_tabs(panel, paths, ctrl)
         } else {
-            self.open_main_tabs(paths, shift)
+            self.open_main_tabs(paths, ctrl)
         }
     }
 
-    pub(super) fn open_main_tabs(&mut self, paths: &[String], shift: bool) -> bool {
+    pub(super) fn open_main_tabs(&mut self, paths: &[String], ctrl: bool) -> bool {
         self.sync_to_tab();
         let mut first = None;
         for path in paths {
@@ -66,7 +66,7 @@ impl ImageViewerApp {
             first.get_or_insert(index);
         }
         if let Some(index) = first {
-            if self.tab_preferences.should_activate_new_tab(shift) {
+            if self.tab_preferences.should_activate_new_tab(ctrl) {
                 self.tab_manager.switch_to(index);
                 self.sync_from_tab();
                 self.sync_to_tab();
@@ -77,7 +77,7 @@ impl ImageViewerApp {
         first.is_some()
     }
 
-    fn open_panel_tabs(&mut self, panel: ActivePanel, paths: &[String], shift: bool) -> bool {
+    fn open_panel_tabs(&mut self, panel: ActivePanel, paths: &[String], ctrl: bool) -> bool {
         self.sync_to_tab();
         let mut first = None;
         for path in paths {
@@ -118,7 +118,7 @@ impl ImageViewerApp {
             }
         }
         if let Some(index) = first {
-            if self.tab_preferences.should_activate_new_tab(shift) {
+            if self.tab_preferences.should_activate_new_tab(ctrl) {
                 self.dual_panel_select_tab(panel, index);
             } else {
                 self.save_preferences();

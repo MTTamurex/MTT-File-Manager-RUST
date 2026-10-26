@@ -791,13 +791,13 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -20 | crate::application::context_menu::OPEN_IN_MTT_ID => {
-                    let shift = ctx.input(|input| input.modifiers.shift);
+                    let ctrl = ctx.input(|input| input.modifiers.ctrl);
                     if context_menu.target_paths.len() > 1
-                        || (shift
+                        || (ctrl
                             && primary_context_target(&context_menu)
                                 .is_some_and(|(_, directory)| directory))
                     {
-                        folder_tabs::open(app, &context_menu, shift);
+                        folder_tabs::open(app, &context_menu, ctrl);
                     } else if let Some((path, is_directory)) = primary_context_target(&context_menu)
                     {
                         let path = path.to_path_buf();
@@ -826,7 +826,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -21 => {
-                    folder_tabs::open(app, &context_menu, ctx.input(|input| input.modifiers.shift));
+                    folder_tabs::open(app, &context_menu, ctx.input(|input| input.modifiers.ctrl));
                 }
                 -24 => {
                     if let Some(path) = context_menu.target_paths.first() {

@@ -232,17 +232,19 @@ impl ImageViewerApp {
             }
 
             // Enter to open (only when not renaming)
-            if nav_result.enter_pressed && selected_is_visible {
+            if nav_result.enter_pressed && (selected_is_visible || self.multi_selection.len() > 1) {
                 if self.suppress_next_enter_open {
                     self.suppress_next_enter_open = false;
-                } else if let Some(selected) = self.selected_file.as_ref() {
-                    let selected_path = selected.path.clone();
-                    if selected.is_dir {
-                        let target = selected_path.to_string_lossy();
-                        self.activate_location(target.as_ref());
-                        return; // Exit early after navigation
-                    } else {
-                        open_with_shell(self, &selected_path);
+                } else if !self.queue_selected_folders_open(ui.ctx()) {
+                    if let Some(selected) = self.selected_file.as_ref() {
+                        let selected_path = selected.path.clone();
+                        if selected.is_dir {
+                            let target = selected_path.to_string_lossy();
+                            self.activate_location(target.as_ref());
+                            return; // Exit early after navigation
+                        } else {
+                            open_with_shell(self, &selected_path);
+                        }
                     }
                 }
             } else if self.suppress_next_enter_open {
@@ -505,7 +507,7 @@ impl ImageViewerApp {
                     }
 
                     if let Some(path) = path_to_navigate {
-                        if ui.input(|input| input.modifiers.shift) {
+                        if ui.input(|input| input.modifiers.ctrl) {
                             crate::ui::new_tab_request::queue(
                                 ui.ctx(),
                                 &path.to_string_lossy(),

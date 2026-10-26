@@ -6,8 +6,8 @@ use eframe::egui;
 #[derive(Clone)]
 pub(crate) struct NewTabRequest {
     pub panel: ActivePanel,
-    pub path: String,
-    pub shift: bool,
+    pub paths: Vec<String>,
+    pub ctrl: bool,
 }
 
 pub(crate) fn set_render_panel(ctx: &egui::Context, panel: ActivePanel, enabled: bool) {
@@ -34,11 +34,18 @@ pub(crate) fn item_middle_click(response: &egui::Response, item: &FileEntry, rec
     queue(
         &response.ctx,
         &item.path.to_string_lossy(),
-        response.ctx.input(|input| input.modifiers.shift),
+        response.ctx.input(|input| input.modifiers.ctrl),
     );
 }
 
-pub(crate) fn queue(ctx: &egui::Context, path: &str, shift: bool) {
+pub(crate) fn queue(ctx: &egui::Context, path: &str, ctrl: bool) {
+    queue_paths(ctx, vec![path.to_owned()], ctrl);
+}
+
+pub(crate) fn queue_paths(ctx: &egui::Context, paths: Vec<String>, ctrl: bool) {
+    if paths.is_empty() {
+        return;
+    }
     ctx.data_mut(|data| {
         if let Some(panel) = data
             .get_temp::<Option<ActivePanel>>(egui::Id::new("new_tab_render_panel"))
@@ -46,11 +53,7 @@ pub(crate) fn queue(ctx: &egui::Context, path: &str, shift: bool) {
         {
             data.insert_temp(
                 egui::Id::new("new_tab_request"),
-                NewTabRequest {
-                    panel,
-                    path: path.to_owned(),
-                    shift,
-                },
+                NewTabRequest { panel, paths, ctrl },
             );
         }
     });

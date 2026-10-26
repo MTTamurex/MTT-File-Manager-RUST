@@ -118,7 +118,7 @@ pub(super) fn apply_ancestor_interactions(
                                 false,
                             );
                         }
-                        if ui.input(|input| input.modifiers.shift) {
+                        if ui.input(|input| input.modifiers.ctrl) {
                             crate::ui::new_tab_request::queue(
                                 ui.ctx(),
                                 &entry.path.to_string_lossy(),

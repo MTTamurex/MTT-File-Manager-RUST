@@ -405,7 +405,7 @@ settings:
   new_tab_current: "Current location"
   archives_in_new_tab: "Open archives in a new tab"
   activate_new_tabs: "Automatically switch to new tabs"
-  activate_new_tabs_description: "When opening a folder in a new tab, switch to it automatically. Turn this off to stay in the current tab. Hold Shift when opening to reverse this behavior for that action."
+  activate_new_tabs_description: "When opening a folder in a new tab, switch to it automatically. Turn this off to stay in the current tab. Hold Ctrl when opening to reverse this behavior for that action."
   startup_location_description: "Continue your previous session or open only the chosen location. Folders opened from Windows take priority. Unavailable locations fall back to This PC."
   startup_previous_session: "Continue previous session"
   startup_computer: "This PC"

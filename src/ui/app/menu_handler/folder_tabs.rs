@@ -21,16 +21,16 @@ fn destinations(menu: &ContextMenuState) -> Vec<String> {
     vec![target.to_string_lossy().into_owned()]
 }
 
-pub(super) fn open(app: &mut ImageViewerApp, menu: &ContextMenuState, shift: bool) {
+pub(super) fn open(app: &mut ImageViewerApp, menu: &ContextMenuState, ctrl: bool) {
     let paths = destinations(menu);
     if paths.is_empty() {
         return;
     }
     let panel = context_origin_panel(menu.origin_panel_is_left, app.dual_panel_active);
-    let created = app.open_locations_in_new_tabs(panel, &paths, shift);
+    let created = app.open_locations_in_new_tabs(panel, &paths, ctrl);
     if created
         && menu.origin == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
-        && app.tab_preferences.should_activate_new_tab(shift)
+        && app.tab_preferences.should_activate_new_tab(ctrl)
     {
         app.close_global_search();
     }

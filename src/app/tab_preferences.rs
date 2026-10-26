@@ -64,8 +64,8 @@ impl Default for TabPreferences {
 }
 
 impl TabPreferences {
-    pub fn should_activate_new_tab(&self, shift: bool) -> bool {
-        self.activate_new_tabs != shift
+    pub fn should_activate_new_tab(&self, ctrl: bool) -> bool {
+        self.activate_new_tabs != ctrl
     }
 
     /// A candidate only: physical file classification happens off the UI thread.
@@ -99,7 +99,7 @@ mod tests {
     use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 
     #[test]
-    fn shift_reverses_focus_preference_and_existing_profiles_default_to_activation() {
+    fn ctrl_reverses_focus_preference_and_existing_profiles_default_to_activation() {
         assert!(TabPreferences::load(&HashMap::new()).activate_new_tabs);
         for enabled in [false, true] {
             let prefs = TabPreferences {

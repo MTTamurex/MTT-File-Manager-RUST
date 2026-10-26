@@ -6,6 +6,7 @@
 pub mod column_list_bridge;
 pub mod grid_bridge;
 pub mod item_slot_bridge;
+mod keyboard_open;
 pub mod list_bridge;
 pub mod list_folder_previews;
 pub mod miller_bridge;

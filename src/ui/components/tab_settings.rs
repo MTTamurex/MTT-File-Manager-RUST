@@ -52,8 +52,8 @@ pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
     );
     ui.label(
         egui::RichText::new(t!("settings.activate_new_tabs_description"))
-            .small()
-            .weak(),
+            .size(13.0)
+            .color(crate::ui::theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(12.0);
     changed |= settings_ui::toggle_row(

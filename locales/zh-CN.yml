@@ -405,7 +405,7 @@ settings:
   new_tab_current: "当前位置"
   archives_in_new_tab: "在新标签页中打开压缩文件"
   activate_new_tabs: "自动切换到新标签页"
-  activate_new_tabs_description: "在新标签页中打开文件夹时，自动切换到该标签页。关闭后将停留在当前标签页。打开时按住 Shift 可仅对此次操作反转此行为。"
+  activate_new_tabs_description: "在新标签页中打开文件夹时，自动切换到该标签页。关闭后将停留在当前标签页。打开时按住 Ctrl 可仅对此次操作反转此行为。"
   startup_location_description: "继续上次会话，或仅打开所选位置。从 Windows 打开的文件夹优先。如果位置不可用，则打开“此电脑”。"
   startup_previous_session: "继续上次会话"
   startup_computer: "此电脑"

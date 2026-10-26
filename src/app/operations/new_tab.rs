@@ -17,11 +17,15 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn create_default_tab(&mut self) {
+        if self.tab_navigation_blocked() {
+            return;
+        }
         let path = self.tab_preferences.location.resolve(
             &self.navigation_state.current_path,
             &self.tab_preferences.custom_path,
         );
-        self.open_location_in_new_tab(self.dual_panel_active, &path);
+        // Ctrl belongs to the New Tab shortcut itself, not to a focus override.
+        self.open_locations_in_new_tabs(self.dual_panel_active, &[path], false);
     }
 
     pub(crate) fn create_default_main_tab(&mut self) {
@@ -36,16 +40,16 @@ impl ImageViewerApp {
         if self.tab_navigation_blocked() {
             return;
         }
-        let shift = self.ui_ctx.input(|input| input.modifiers.shift);
-        self.open_locations_in_new_tabs(panel, &[path.to_owned()], shift);
+        let ctrl = self.ui_ctx.input(|input| input.modifiers.ctrl);
+        self.open_locations_in_new_tabs(panel, &[path.to_owned()], ctrl);
     }
 
     fn open_location_in_main_tab(&mut self, path: &str) {
         if self.tab_navigation_blocked() {
             return;
         }
-        let shift = self.ui_ctx.input(|input| input.modifiers.shift);
-        self.open_main_tabs(&[path.to_owned()], shift);
+        let ctrl = self.ui_ctx.input(|input| input.modifiers.ctrl);
+        self.open_main_tabs(&[path.to_owned()], ctrl);
     }
 
     pub(crate) fn tab_navigation_blocked(&self) -> bool {

@@ -47,7 +47,7 @@ pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &m
     content::render_central_panel_layout(app, root_ui);
     if let Some(request) = crate::ui::new_tab_request::take(&ctx) {
         if !app.tab_navigation_blocked() {
-            app.open_locations_in_new_tabs(request.panel, &[request.path], request.shift);
+            app.open_locations_in_new_tabs(request.panel, &request.paths, request.ctrl);
         }
     }
     app.process_pending_pinned_navigation();

@@ -8,6 +8,7 @@ use rust_i18n::t;
 const BACKDROP_ALPHA: u8 = 72;
 const SIDEBAR_WIDTH: f32 = 200.0;
 
+mod content_scroll;
 mod keyboard;
 mod title_bar;
 use keyboard::settings_escape_closes_window;
@@ -201,12 +202,7 @@ pub fn render_settings_window(
                             })
                             .show(ui, |ui| {
                                 let current_section = app.navigation_state.active_settings_section;
-                                egui::ScrollArea::vertical()
-                                    .id_salt("settings_window_content")
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| {
-                                        // Keep right-edge controls (switches) clear of the floating scrollbar.
-                                        ui.set_max_width(ui.available_width() - 14.0);
+                                content_scroll::show(ui, |ui| {
                                         match current_section {
                                         SettingsSection::General => {
                                             let general = crate::ui::components::general_settings::render_general_settings_section(ui, app);
