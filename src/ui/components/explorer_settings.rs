@@ -21,8 +21,9 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &t!("settings.remember_column_widths"),
         &mut app.explorer_preferences.remember_column_widths,
     );
-    if remember_changed && app.explorer_preferences.remember_column_widths {
-        app.explorer_preferences.auto_resize_columns = false;
+    if remember_changed {
+        app.explorer_preferences.auto_resize_columns =
+            !app.explorer_preferences.remember_column_widths;
     }
     ui.label(t!("settings.remember_column_widths_description"));
     ui.add_space(10.0);
@@ -42,7 +43,7 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     if sidebar_changed {
         ui.ctx().request_repaint();
     }
-    if columns_changed && app.explorer_preferences.auto_resize_columns {
+    if (columns_changed || remember_changed) && app.explorer_preferences.auto_resize_columns {
         app.pending_list_column_autofit = true;
         if let Some(panel) = app.dual_panel_inactive_state.as_mut() {
             panel.pending_list_column_autofit = true;
