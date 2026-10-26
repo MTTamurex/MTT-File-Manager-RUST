@@ -3,6 +3,16 @@ use eframe::egui;
 
 use super::validation::DragDropOperation;
 
+fn item_drag_cursor(has_valid_target: bool, has_hovered_folder: bool) -> egui::CursorIcon {
+    if !has_valid_target && has_hovered_folder {
+        egui::CursorIcon::NotAllowed
+    } else {
+        // Windows maps Grab/Grabbing to the four-way resize cursor.
+        // The preview already indicates Copy/Move, so keep the normal arrow.
+        egui::CursorIcon::Default
+    }
+}
+
 impl ImageViewerApp {
     /// Applies cursor feedback while dragging.
     pub fn apply_item_drag_cursor_feedback(&self, ctx: &egui::Context) {
@@ -10,16 +20,10 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.drag_target_folder.is_some() {
-            // Over a valid drop target → show Grab cursor
-            ctx.set_cursor_icon(egui::CursorIcon::Grab);
-        } else if self.drag_hovered_folder.is_some() {
-            // Hovering over a specific folder that was rejected → NotAllowed
-            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-        } else {
-            // Not over any folder (empty space, tab bar, files, etc.) → default cursor
-            ctx.set_cursor_icon(egui::CursorIcon::Default);
-        }
+        ctx.set_cursor_icon(item_drag_cursor(
+            self.drag_target_folder.is_some(),
+            self.drag_hovered_folder.is_some(),
+        ));
 
         ctx.request_repaint();
     }
@@ -178,5 +182,27 @@ impl ImageViewerApp {
             );
             painter.galley(op_pos, op_g, egui::Color32::from_rgb(24, 122, 255));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_drag_cursor;
+    use eframe::egui::CursorIcon;
+
+    #[test]
+    fn valid_folder_and_background_targets_keep_the_arrow() {
+        assert_eq!(item_drag_cursor(true, true), CursorIcon::Default);
+        assert_eq!(item_drag_cursor(true, false), CursorIcon::Default);
+    }
+
+    #[test]
+    fn no_target_keeps_the_arrow() {
+        assert_eq!(item_drag_cursor(false, false), CursorIcon::Default);
+    }
+
+    #[test]
+    fn rejected_folder_keeps_the_not_allowed_cursor() {
+        assert_eq!(item_drag_cursor(false, true), CursorIcon::NotAllowed);
     }
 }
