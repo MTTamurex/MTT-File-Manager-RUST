@@ -55,3 +55,18 @@ fn ordinary_files_and_blocked_panels_do_not_create_tabs() {
     let folder = FileEntry::from_path(r"C:\Folder".into(), true);
     assert!(click_item(ActivePanel::Right, &folder, false).is_none());
 }
+
+#[test]
+fn deferred_open_preserves_shift_and_origin_after_rendering_the_other_panel() {
+    let ctx = egui::Context::default();
+    set_render_panel(&ctx, ActivePanel::Right, true);
+    queue(&ctx, "C:\\", true);
+    set_render_panel(&ctx, ActivePanel::Left, false);
+    let request = take(&ctx).unwrap();
+    assert_eq!(request.panel, ActivePanel::Right);
+    assert!(request.shift);
+    assert_eq!(request.path, "C:\\");
+    assert!(take(&ctx).is_none());
+    queue(&ctx, "D:\\", true);
+    assert!(take(&ctx).is_none());
+}

@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+mod folder_targets;
+
 pub const EXTRACT_ALL_PENDING_ID: i32 = -203;
 pub const EXTRACT_ALL_PENDING_COMMAND: &str = "extract_all_pending";
 pub const OPEN_IN_MTT_ID: i32 = -87;
@@ -209,6 +211,8 @@ pub struct ContextMenuState {
     pub position: egui::Pos2,
     pub item_index: Option<usize>,
     pub target_paths: Vec<PathBuf>,
+    /// Directory classification captured from the source listing, without UI-thread I/O.
+    pub folder_targets: Vec<PathBuf>,
     pub operation_directory: Option<PathBuf>,
     pub is_empty_area: bool,
     pub origin: ContextMenuOrigin,
@@ -251,6 +255,7 @@ impl Default for ContextMenuState {
             position: egui::Pos2::ZERO,
             item_index: None,
             target_paths: Vec::new(),
+            folder_targets: Vec::new(),
             operation_directory: None,
             is_empty_area: false,
             origin: ContextMenuOrigin::FileView,
@@ -291,6 +296,7 @@ impl ContextMenuState {
         self.position = position;
         self.item_index = item_index;
         self.target_paths = target_paths;
+        self.folder_targets.clear();
         self.operation_directory = is_empty_area
             .then(|| self.target_paths.first().cloned())
             .flatten();
@@ -325,6 +331,7 @@ impl ContextMenuState {
         self.position = position;
         self.item_index = None;
         self.target_paths = target_paths;
+        self.folder_targets.clear();
         self.operation_directory = None;
         self.is_empty_area = false;
         self.selected_command_id = None;
@@ -343,6 +350,7 @@ impl ContextMenuState {
         self.is_open = false;
         self.item_index = None;
         self.target_paths.clear();
+        self.folder_targets.clear();
         self.operation_directory = None;
         self.is_empty_area = false;
         self.origin = ContextMenuOrigin::FileView;

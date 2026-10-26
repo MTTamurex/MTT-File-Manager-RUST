@@ -19,6 +19,8 @@ use windows::{
     },
 };
 
+mod folder_tabs;
+
 #[derive(Debug, PartialEq)]
 enum TerminalExecutable {
     WindowsTerminal(PathBuf),
@@ -789,7 +791,15 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -20 | crate::application::context_menu::OPEN_IN_MTT_ID => {
-                    if let Some((path, is_directory)) = primary_context_target(&context_menu) {
+                    let shift = ctx.input(|input| input.modifiers.shift);
+                    if context_menu.target_paths.len() > 1
+                        || (shift
+                            && primary_context_target(&context_menu)
+                                .is_some_and(|(_, directory)| directory))
+                    {
+                        folder_tabs::open(app, &context_menu, shift);
+                    } else if let Some((path, is_directory)) = primary_context_target(&context_menu)
+                    {
                         let path = path.to_path_buf();
                         if context_menu.origin
                             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
@@ -816,54 +826,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -21 => {
-                    if let Some((path, is_directory)) = primary_context_target(&context_menu) {
-                        let target = if is_directory {
-                            path.to_path_buf()
-                        } else {
-                            path.parent()
-                                .map(Path::to_path_buf)
-                                .unwrap_or_else(|| path.to_path_buf())
-                        };
-                        let target = app.resolve_network_location_path(&target);
-
-                        if app.dual_panel_enabled {
-                            let origin_panel = context_origin_panel(
-                                context_menu.origin_panel_is_left,
-                                app.dual_panel_active,
-                            );
-                            let target = target.to_string_lossy().into_owned();
-                            app.dual_panel_add_tab_at(origin_panel, &target);
-                        } else if !app.tab_manager.can_add_tab() {
-                            // PERF-05: enforce the outer-tab cap before touching tab state.
-                            app.notifications.warning(
-                                rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS)
-                                    .to_string(),
-                            );
-                        } else {
-                            let prev_view_mode = app.view_mode;
-                            let prev_sort_mode = app.sort_mode;
-                            let prev_sort_descending = app.sort_descending;
-                            let prev_folders_position = app.folders_position;
-                            app.sync_to_tab();
-                            let target_str = target.to_string_lossy();
-                            app.tab_manager.new_tab_at(target_str.as_ref());
-                            let active = app.tab_manager.active_mut();
-                            active.view_mode = prev_view_mode;
-                            active.sort_mode = prev_sort_mode;
-                            active.sort_descending = prev_sort_descending;
-                            active.folders_position = prev_folders_position;
-                            app.sync_from_tab();
-
-                            if app.navigation_state.is_computer_view {
-                                app.setup_computer_view();
-                            } else {
-                                app.watch_current_folder();
-                                app.load_folder(false);
-                            }
-                            app.sync_to_tab();
-                            app.save_preferences();
-                        }
-                    }
+                    folder_tabs::open(app, &context_menu, ctx.input(|input| input.modifiers.shift));
                 }
                 -24 => {
                     if let Some(path) = context_menu.target_paths.first() {

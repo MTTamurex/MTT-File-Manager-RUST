@@ -106,7 +106,15 @@ impl ImageViewerApp {
         let Some((source, count)) = source else {
             return;
         };
-        self.open_location_in_new_tab(panel, path);
+        if self.tab_navigation_blocked() {
+            return;
+        }
+        // Navigation redirected by a pinned tab must still reach its destination.
+        self.open_locations_in_new_tabs(
+            panel,
+            &[path.to_owned()],
+            !self.tab_preferences.activate_new_tabs,
+        );
         if self.dual_panel_enabled {
             if let Some(tabs) = self.tab_manager.active_mut().dual_panel_tabs.as_mut() {
                 let set = tabs.panel_mut(panel);

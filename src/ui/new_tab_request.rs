@@ -7,6 +7,7 @@ use eframe::egui;
 pub(crate) struct NewTabRequest {
     pub panel: ActivePanel,
     pub path: String,
+    pub shift: bool,
 }
 
 pub(crate) fn set_render_panel(ctx: &egui::Context, panel: ActivePanel, enabled: bool) {
@@ -30,7 +31,15 @@ pub(crate) fn item_middle_click(response: &egui::Response, item: &FileEntry, rec
     if recycle_bin || item.is_recycle_item() || !item.is_dir || !response.middle_clicked() {
         return;
     }
-    response.ctx.data_mut(|data| {
+    queue(
+        &response.ctx,
+        &item.path.to_string_lossy(),
+        response.ctx.input(|input| input.modifiers.shift),
+    );
+}
+
+pub(crate) fn queue(ctx: &egui::Context, path: &str, shift: bool) {
+    ctx.data_mut(|data| {
         if let Some(panel) = data
             .get_temp::<Option<ActivePanel>>(egui::Id::new("new_tab_render_panel"))
             .flatten()
@@ -39,7 +48,8 @@ pub(crate) fn item_middle_click(response: &egui::Response, item: &FileEntry, rec
                 egui::Id::new("new_tab_request"),
                 NewTabRequest {
                     panel,
-                    path: item.path.to_string_lossy().into_owned(),
+                    path: path.to_owned(),
+                    shift,
                 },
             );
         }

@@ -117,16 +117,19 @@ fn tab_preferences_load_independently_from_startup_location() {
     let defaults = StartupPreferences::load(&db);
     assert_eq!(defaults.tab_preferences.location, NewTabLocation::Current);
     assert!(!defaults.tab_preferences.archives_in_new_tab);
+    assert!(defaults.tab_preferences.activate_new_tabs);
     db.set_preference("startup_location", "documents").unwrap();
     db.set_preference("new_tab_location", "custom").unwrap();
     db.set_preference("new_tab_custom_path", r"D:\Documents\Project")
         .unwrap();
     db.set_preference("archives_in_new_tab", "true").unwrap();
+    db.set_preference("activate_new_tabs", "false").unwrap();
     let loaded = StartupPreferences::load(&db);
     assert_eq!(loaded.startup_location, StartupLocation::Documents);
     assert_eq!(loaded.tab_preferences.location, NewTabLocation::Custom);
     assert_eq!(loaded.tab_preferences.custom_path, r"D:\Documents\Project");
     assert!(loaded.tab_preferences.archives_in_new_tab);
+    assert!(!loaded.tab_preferences.activate_new_tabs);
     db.set_preference("new_tab_location", "invalid").unwrap();
     assert_eq!(
         StartupPreferences::load(&db).tab_preferences.location,

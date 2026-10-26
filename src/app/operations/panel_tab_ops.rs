@@ -193,10 +193,6 @@ impl ImageViewerApp {
         true
     }
 
-    pub fn dual_panel_add_tab(&mut self, panel: ActivePanel) -> bool {
-        self.dual_panel_add_tab_to_path(panel, None)
-    }
-
     pub(crate) fn dual_panel_move_tab(&mut self, panel: ActivePanel, from: usize, gap: usize) {
         if !self.dual_panel_enabled {
             return;
@@ -214,27 +210,21 @@ impl ImageViewerApp {
     }
 
     pub fn dual_panel_add_tab_at(&mut self, panel: ActivePanel, path: &str) -> bool {
-        self.dual_panel_add_tab_to_path(panel, Some(path))
+        self.dual_panel_add_tab_to_path(panel, path)
     }
 
-    fn dual_panel_add_tab_to_path(
-        &mut self,
-        panel: ActivePanel,
-        target_path: Option<&str>,
-    ) -> bool {
+    fn dual_panel_add_tab_to_path(&mut self, panel: ActivePanel, target_path: &str) -> bool {
         if !self.dual_panel_enabled {
             return false;
         }
 
         // The destination can belong to the other pane. Capture its source
         // metadata before changing focus and replacing the source listing.
-        let source_hints = target_path.map(|path| {
-            let path = std::path::Path::new(path);
-            (
-                self.resolve_destination_folder_modified_hint(path),
-                self.resolve_destination_folder_created_hint(path),
-            )
-        });
+        let source_path = std::path::Path::new(target_path);
+        let source_hints = (
+            self.resolve_destination_folder_modified_hint(source_path),
+            self.resolve_destination_folder_created_hint(source_path),
+        );
         self.sync_to_tab();
         self.focus_panel_for_tab_action(panel);
 
@@ -250,18 +240,11 @@ impl ImageViewerApp {
             return false;
         }
 
-        let path = target_path.map(str::to_owned).unwrap_or_else(|| {
-            self.tab_preferences.location.resolve(
-                &self.navigation_state.current_path,
-                &self.tab_preferences.custom_path,
-            )
-        });
-        let mut snapshot = self.new_panel_tab_snapshot(&path);
-        if let Some((modified, created)) = source_hints {
-            snapshot.current_folder_modified_hint =
-                modified.or(snapshot.current_folder_modified_hint);
-            snapshot.current_folder_created_hint = created.or(snapshot.current_folder_created_hint);
-        }
+        let mut snapshot = self.new_panel_tab_snapshot(target_path);
+        snapshot.current_folder_modified_hint =
+            source_hints.0.or(snapshot.current_folder_modified_hint);
+        snapshot.current_folder_created_hint =
+            source_hints.1.or(snapshot.current_folder_created_hint);
         let index = {
             let tabs = self
                 .tab_manager

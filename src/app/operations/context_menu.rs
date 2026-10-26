@@ -316,6 +316,13 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn capture_context_menu_panel_origin(&mut self) {
+        let folders = self
+            .items
+            .iter()
+            .chain(self.all_items.iter())
+            .filter(|item| (item.is_dir || item.drive_info.is_some()) && !item.is_recycle_item())
+            .map(|item| item.path.as_path());
+        self.context_menu.capture_folder_targets(folders);
         let panel = if self.in_inactive_panel_context {
             self.dual_panel_active.other()
         } else {

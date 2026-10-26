@@ -178,6 +178,16 @@ impl DualPanelTabs {
     }
 
     pub fn add_tab(&mut self, panel: ActivePanel, snapshot: PanelSnapshot) -> Option<usize> {
+        let index = self.add_background_tab(panel, snapshot)?;
+        self.panel_mut(panel).active_tab = index;
+        Some(index)
+    }
+
+    pub(crate) fn add_background_tab(
+        &mut self,
+        panel: ActivePanel,
+        snapshot: PanelSnapshot,
+    ) -> Option<usize> {
         if !self.can_add_tab() {
             return None;
         }
@@ -191,7 +201,6 @@ impl DualPanelTabs {
             pinned: false,
             snapshot,
         });
-        tabs.active_tab = insert_at;
         Some(insert_at)
     }
 

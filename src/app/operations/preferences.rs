@@ -131,6 +131,10 @@ impl ImageViewerApp {
             self.tab_preferences.archives_in_new_tab.to_string(),
         ));
         prefs.push((
+            "activate_new_tabs",
+            self.tab_preferences.activate_new_tabs.to_string(),
+        ));
+        prefs.push((
             "date_format",
             crate::domain::date_format::date_format()
                 .preference_value()

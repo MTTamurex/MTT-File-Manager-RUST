@@ -51,6 +51,13 @@ pub(super) fn handle_selection_and_context_menu(
     let pointer_pos = ctx.pointer_latest_pos().unwrap_or(row_rect.center());
     app.context_menu
         .open_for_global_search(pointer_pos, selected_paths.clone(), is_directory);
+    app.context_menu.capture_folder_targets(
+        app.global_search
+            .results
+            .iter()
+            .filter(|result| result.is_dir)
+            .map(|result| std::path::Path::new(&result.full_path)),
+    );
     app.populate_context_menu(ctx, &selected_paths, false, None);
 }
 

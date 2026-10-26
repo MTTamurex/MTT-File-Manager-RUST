@@ -118,7 +118,15 @@ pub(super) fn apply_ancestor_interactions(
                                 false,
                             );
                         }
-                        *pending_nav = Some(entry.path.to_string_lossy().to_string());
+                        if ui.input(|input| input.modifiers.shift) {
+                            crate::ui::new_tab_request::queue(
+                                ui.ctx(),
+                                &entry.path.to_string_lossy(),
+                                true,
+                            );
+                        } else {
+                            *pending_nav = Some(entry.path.to_string_lossy().to_string());
+                        }
                     } else {
                         if rename_committed_on_click_away {
                             app.select_ancestor_entry_for_preview(entry.clone());
@@ -149,6 +157,12 @@ pub(super) fn apply_ancestor_interactions(
                     app.context_menu.primary_is_directory = Some(entry.is_dir);
                     app.context_menu.operation_directory = Some(chain[*column_index].clone());
                     app.capture_context_menu_panel_origin();
+                    app.context_menu.capture_folder_targets(
+                        listing
+                            .iter()
+                            .filter(|item| item.is_dir)
+                            .map(|item| item.path.as_path()),
+                    );
                     app.populate_context_menu(ui.ctx(), &paths, false, None);
                 }
             }

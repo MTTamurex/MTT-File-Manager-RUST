@@ -4,7 +4,7 @@
 use super::registration::{owns, shell_key, state_key, Registry, RegistryValue};
 use std::path::Path;
 
-const VALUES: [(&str, &str, &str, &str); 4] = [
+const VALUES: [(&str, &str, &str, &str); 5] = [
     ("command", "", "OpenCommand", "HadOpenCommand"),
     (
         "command",
@@ -14,6 +14,7 @@ const VALUES: [(&str, &str, &str, &str); 4] = [
     ),
     ("", "Icon", "OpenIcon", "HadOpenIcon"),
     ("", "MultiSelectModel", "OpenSelection", "HadOpenSelection"),
+    ("", "Position", "OpenPosition", "HadOpenPosition"),
 ];
 
 fn value_key(class: &str, suffix: &str) -> String {
@@ -58,11 +59,16 @@ pub(super) fn enable(
 ) -> Result<(), String> {
     check_owner(reg, class, command)?;
     let state = state_key(class);
-    if !owns(
+    let already_owned = owns(
         reg.read(&value_key(class, "command"), "")?.as_deref(),
         command,
-    ) {
-        for (suffix, name, previous, had) in VALUES {
+    );
+    if already_owned && !owns(reg.read(&state, "OpenOwner")?.as_deref(), command) {
+        return Err("The native Open backup is missing; the command was left untouched.".into());
+    }
+    for (suffix, name, previous, had) in VALUES {
+        // Older installations have no Position backup yet.
+        if !already_owned || (name == "Position" && reg.read(&state, had)?.is_none()) {
             let value = reg.read_value(&value_key(class, suffix), name)?;
             reg.write(
                 &state,
@@ -80,15 +86,16 @@ pub(super) fn enable(
                 },
             )?;
         }
+    }
+    if !already_owned {
         reg.write(&state, "OpenOwner", command)?;
-    } else if !owns(reg.read(&state, "OpenOwner")?.as_deref(), command) {
-        return Err("The native Open backup is missing; the command was left untouched.".into());
     }
     reg.write(&value_key(class, "command"), "", command)?;
     // Disable the inherited COM delegate so the command line is actually used.
     reg.write(&value_key(class, "command"), "DelegateExecute", "")?;
     reg.write(&value_key(class, ""), "Icon", &executable.to_string_lossy())?;
-    reg.write(&value_key(class, ""), "MultiSelectModel", "Document")
+    reg.write(&value_key(class, ""), "MultiSelectModel", "Document")?;
+    reg.write(&value_key(class, ""), "Position", "Top")
 }
 
 pub(super) fn restore(
@@ -109,7 +116,7 @@ pub(super) fn restore(
         for ((suffix, name, previous, had), expected) in
             VALUES
                 .into_iter()
-                .zip([command, "", icon.as_ref(), "Document"])
+                .zip([command, "", icon.as_ref(), "Document", "Top"])
         {
             let key = value_key(class, suffix);
             if !owns(reg.read(&key, name)?.as_deref(), expected) {
@@ -136,6 +143,7 @@ pub(super) fn restore(
                     )?;
                 }
                 Some("0") => reg.delete(&key, name)?,
+                None if name == "Position" => continue,
                 _ => return Err("The native Open backup is incomplete.".into()),
             }
         }

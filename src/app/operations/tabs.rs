@@ -282,6 +282,10 @@ impl ImageViewerApp {
             ) {
                 self.setup_tag_view(tag_id);
                 needs_reload = false;
+            } else if self.navigation_state.is_recycle_bin_view {
+                // New background tabs have not loaded their virtual listing yet.
+                self.setup_recycle_bin_view();
+                needs_reload = false;
             }
         }
 

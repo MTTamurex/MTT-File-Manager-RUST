@@ -20,6 +20,10 @@ fn canonical_open_is_the_only_registered_opening_verb() {
             folder_command(Path::new(EXE))
         };
         assert!(native_open::is_active(&reg, class, &command));
+        assert_eq!(
+            reg.read(&open_key(class), "Position").unwrap().as_deref(),
+            Some("Top")
+        );
         assert_eq!(reg.read(&open_key(class), "").unwrap(), None);
         let menu = format!("{}\\{VERB}", shell_key(class));
         assert_eq!(reg.read(&menu, "ProgrammaticAccessOnly").unwrap(), None);
@@ -32,7 +36,7 @@ fn canonical_open_is_the_only_registered_opening_verb() {
 }
 
 #[test]
-fn repeated_enable_restores_native_command_delegate_icon_and_selection_exactly() {
+fn repeated_enable_restores_native_open_values_exactly() {
     for prior in [None, Some(""), Some("previous value")] {
         let mut reg = MemoryRegistry::default();
         if let Some(prior) = prior {
@@ -43,6 +47,7 @@ fn repeated_enable_restores_native_command_delegate_icon_and_selection_exactly()
                     .unwrap();
                 reg.write(&open, "Icon", prior).unwrap();
                 reg.write(&open, "MultiSelectModel", prior).unwrap();
+                reg.write(&open, "Position", prior).unwrap();
                 reg.write(&shell_key(class), "", "open").unwrap();
             }
         }
@@ -147,4 +152,38 @@ fn foreign_native_open_backup_is_not_overwritten() {
     assert!(apply(&mut reg, RegistryAction::EnableFolders, Path::new(EXE)).is_err());
     apply(&mut reg, RegistryAction::RestoreFolders, Path::new(EXE)).unwrap();
     assert_eq!(reg.0, before);
+}
+
+#[test]
+fn restore_preserves_position_changed_by_another_app() {
+    let mut reg = MemoryRegistry::default();
+    apply(&mut reg, RegistryAction::EnableFolders, Path::new(EXE)).unwrap();
+    reg.write(&open_key("Directory"), "Position", "Bottom")
+        .unwrap();
+    apply(&mut reg, RegistryAction::RestoreFolders, Path::new(EXE)).unwrap();
+    assert_eq!(
+        reg.read(&open_key("Directory"), "Position")
+            .unwrap()
+            .as_deref(),
+        Some("Bottom")
+    );
+}
+
+#[test]
+fn old_installations_can_restore_or_enable_position_without_a_prior_backup() {
+    for reenable in [false, true] {
+        let mut reg = MemoryRegistry::default();
+        apply(&mut reg, RegistryAction::EnableFolders, Path::new(EXE)).unwrap();
+        for class in CLASSES.into_iter().chain([NETWORK_LOCATION_CLASS]) {
+            reg.delete(&open_key(class), "Position").unwrap();
+            for name in ["OpenPosition", "HadOpenPosition", "TypeOpenPosition"] {
+                reg.delete(&state_key(class), name).unwrap();
+            }
+        }
+        if reenable {
+            apply(&mut reg, RegistryAction::EnableFolders, Path::new(EXE)).unwrap();
+        }
+        apply(&mut reg, RegistryAction::RestoreFolders, Path::new(EXE)).unwrap();
+        assert!(reg.0.is_empty());
+    }
 }

@@ -47,6 +47,17 @@ pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
     ui.add_space(12.0);
     changed |= settings_ui::toggle_row(
         ui,
+        &t!("settings.activate_new_tabs"),
+        &mut prefs.activate_new_tabs,
+    );
+    ui.label(
+        egui::RichText::new(t!("settings.activate_new_tabs_description"))
+            .small()
+            .weak(),
+    );
+    ui.add_space(12.0);
+    changed |= settings_ui::toggle_row(
+        ui,
         &t!("settings.archives_in_new_tab"),
         &mut prefs.archives_in_new_tab,
     );

@@ -71,6 +71,43 @@ fn snapshot(path: &str) -> PanelSnapshot {
 }
 
 #[test]
+fn background_panel_tabs_preserve_both_active_tabs_and_activate_only_the_first_on_request() {
+    for panel in [ActivePanel::Left, ActivePanel::Right] {
+        let mut tabs = DualPanelTabs::new(snapshot("C:\\"), snapshot("D:\\"));
+        let source_id = tabs.panel(panel).active().unwrap().id;
+        let other_id = tabs.panel(panel.other()).active().unwrap().id;
+        let first = tabs.add_background_tab(panel, snapshot("E:\\")).unwrap();
+        tabs.add_background_tab(panel, snapshot("F:\\")).unwrap();
+        assert_eq!(tabs.panel(panel).active().unwrap().id, source_id);
+        assert_eq!(tabs.panel(panel.other()).active().unwrap().id, other_id);
+        assert_eq!(
+            tabs.panel(panel).active().unwrap().snapshot.scroll_offset_y,
+            120.0
+        );
+        tabs.panel_mut(panel).select(first);
+        assert_eq!(tabs.panel(panel).active().unwrap().snapshot.path, "E:\\");
+    }
+}
+
+#[test]
+fn background_panel_tabs_respect_the_shared_limit_without_changing_selection() {
+    let mut tabs = DualPanelTabs::new(snapshot("C:\\"), snapshot("D:\\"));
+    for index in 2..MAX_PANEL_TABS {
+        let panel = if index % 2 == 0 {
+            ActivePanel::Left
+        } else {
+            ActivePanel::Right
+        };
+        assert!(tabs.add_background_tab(panel, snapshot("E:\\")).is_some());
+    }
+    assert!(tabs
+        .add_background_tab(ActivePanel::Left, snapshot("F:\\"))
+        .is_none());
+    assert_eq!(tabs.left.active_tab, 0);
+    assert_eq!(tabs.right.active_tab, 0);
+}
+
+#[test]
 fn batch_close_panel_tabs_keeps_target_focus_when_selected_tab_is_closed() {
     use crate::tabs::actions::{close_candidates, TabAction};
 

@@ -1,5 +1,7 @@
 use crate::app::{dual_panel::ActivePanel, ImageViewerApp};
 
+mod batch;
+
 impl ImageViewerApp {
     /// Apply the archive preference only to item activation, never to history,
     /// address-bar navigation or explicit requests for an existing tab.
@@ -31,64 +33,22 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn open_location_in_new_tab(&mut self, panel: ActivePanel, path: &str) {
-        let destination = self.resolve_network_location_path(std::path::Path::new(path));
-        let path = destination.to_string_lossy();
-        let path = path.as_ref();
         if self.tab_navigation_blocked() {
             return;
         }
-        if self.dual_panel_enabled {
-            self.dual_panel_add_tab_at(panel, path);
-            return;
-        }
-        self.open_location_in_main_tab(path);
+        let shift = self.ui_ctx.input(|input| input.modifiers.shift);
+        self.open_locations_in_new_tabs(panel, &[path.to_owned()], shift);
     }
 
     fn open_location_in_main_tab(&mut self, path: &str) {
-        let destination = self.resolve_network_location_path(std::path::Path::new(path));
-        let path = destination.to_string_lossy();
-        let path = path.as_ref();
         if self.tab_navigation_blocked() {
             return;
         }
-        if !self.tab_manager.can_add_tab() {
-            self.notifications.warning(
-                rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string(),
-            );
-            return;
-        }
-        self.sync_to_tab();
-        let view_mode = self.view_mode;
-        let sort_mode = self.sort_mode;
-        let sort_descending = self.sort_descending;
-        let folders_position = self.folders_position;
-        // Resolve while the source listing/selection is still available: the new
-        // tab has no items and its destination may never have been visited.
-        let destination_path = std::path::Path::new(path);
-        let modified_hint = self.resolve_destination_folder_modified_hint(destination_path);
-        let created_hint = self.resolve_destination_folder_created_hint(destination_path);
-        if !self.tab_manager.new_tab_at(path) {
-            return;
-        }
-        let active = self.tab_manager.active_mut();
-        active.view_mode = view_mode;
-        active.sort_mode = sort_mode;
-        active.sort_descending = sort_descending;
-        active.folders_position = folders_position;
-        active.current_folder_modified_hint = modified_hint;
-        active.current_folder_created_hint = created_hint;
-        self.sync_from_tab();
-        // sync_from_tab already prepares Computer/tag views and starts regular
-        // folder loads. An empty Recycle Bin tab needs its own virtual listing.
-        if self.navigation_state.is_recycle_bin_view {
-            self.setup_recycle_bin_view();
-        }
-        self.sync_to_tab();
-        self.update_video_visibility();
-        self.save_preferences();
+        let shift = self.ui_ctx.input(|input| input.modifiers.shift);
+        self.open_main_tabs(&[path.to_owned()], shift);
     }
 
-    pub(super) fn tab_navigation_blocked(&self) -> bool {
+    pub(crate) fn tab_navigation_blocked(&self) -> bool {
         self.navigation_state.show_settings_window
             || self.global_search.active
             || self.context_menu.is_open

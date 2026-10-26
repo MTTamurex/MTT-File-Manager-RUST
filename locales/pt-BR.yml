@@ -404,6 +404,8 @@ settings:
   new_tab_location: "Localização padrão de novas abas"
   new_tab_current: "Localização atual"
   archives_in_new_tab: "Abrir arquivos compactados em uma nova aba"
+  activate_new_tabs: "Mudar automaticamente para novas abas"
+  activate_new_tabs_description: "Ao abrir uma pasta em uma nova aba, muda o foco para ela. Desative para permanecer na aba atual. Segure Shift ao abrir para inverter esse comportamento apenas nessa ação."
   startup_location_description: "Continue a sessão anterior ou abra somente o local escolhido. Pastas abertas pelo Windows têm prioridade. Locais indisponíveis abrem Este Computador."
   startup_previous_session: "Continuar sessão anterior"
   startup_computer: "Este Computador"

@@ -714,7 +714,15 @@ impl ImageViewerApp {
                     }
 
                     if let Some(path) = path_to_navigate {
-                        self.activate_location(&path.to_string_lossy());
+                        if ui.input(|input| input.modifiers.shift) {
+                            crate::ui::new_tab_request::queue(
+                                ui.ctx(),
+                                &path.to_string_lossy(),
+                                true,
+                            );
+                        } else {
+                            self.activate_location(&path.to_string_lossy());
+                        }
                     }
                 }
                 Some(list_view::ListViewAction::SecondaryClick(idx)) if !is_renaming => {

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) mod actions;
+mod creation;
 mod panel_tabs;
 pub(crate) mod quick_access;
 mod reorder;
@@ -528,25 +529,6 @@ impl TabManager {
             return false;
         }
         let mut tab = TabState::new_at_computer(self.next_id);
-        let current = self.active();
-        tab.show_left_sidebar = current.show_left_sidebar;
-        tab.show_preview_panel = current.show_preview_panel;
-        tab.collapse_tags = current.collapse_tags;
-        tab.group_mode = current.group_mode;
-        tab.group_descending = current.group_descending;
-        self.next_id += 1;
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
-        true
-    }
-
-    /// Add a new tab at a specific path and switch to it.
-    /// Returns false when the tab cap is reached (no tab is created).
-    pub fn new_tab_at(&mut self, path: &str) -> bool {
-        if !self.can_add_tab() {
-            return false;
-        }
-        let mut tab = TabState::new_at_path(self.next_id, path);
         let current = self.active();
         tab.show_left_sidebar = current.show_left_sidebar;
         tab.show_preview_panel = current.show_preview_panel;

@@ -44,14 +44,30 @@ impl NewTabLocation {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TabPreferences {
     pub location: NewTabLocation,
     pub custom_path: String,
     pub archives_in_new_tab: bool,
+    pub activate_new_tabs: bool,
+}
+
+impl Default for TabPreferences {
+    fn default() -> Self {
+        Self {
+            location: NewTabLocation::default(),
+            custom_path: String::new(),
+            archives_in_new_tab: false,
+            activate_new_tabs: true,
+        }
+    }
 }
 
 impl TabPreferences {
+    pub fn should_activate_new_tab(&self, shift: bool) -> bool {
+        self.activate_new_tabs != shift
+    }
+
     /// A candidate only: physical file classification happens off the UI thread.
     pub fn archive_activation_candidate(&self, path: &str) -> bool {
         self.archives_in_new_tab && crate::domain::file_entry::is_archive_extension(path)
@@ -72,6 +88,7 @@ impl TabPreferences {
             archives_in_new_tab: prefs
                 .get("archives_in_new_tab")
                 .is_some_and(|v| v == "true"),
+            activate_new_tabs: prefs.get("activate_new_tabs").is_none_or(|v| v != "false"),
         }
     }
 }
@@ -80,6 +97,19 @@ impl TabPreferences {
 mod tests {
     use super::*;
     use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+
+    #[test]
+    fn shift_reverses_focus_preference_and_existing_profiles_default_to_activation() {
+        assert!(TabPreferences::load(&HashMap::new()).activate_new_tabs);
+        for enabled in [false, true] {
+            let prefs = TabPreferences {
+                activate_new_tabs: enabled,
+                ..Default::default()
+            };
+            assert_eq!(prefs.should_activate_new_tab(false), enabled);
+            assert_eq!(prefs.should_activate_new_tab(true), !enabled);
+        }
+    }
 
     #[test]
     fn destinations_preserve_virtual_locations_and_fall_back_for_missing_folders() {
