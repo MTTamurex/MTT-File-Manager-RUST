@@ -467,6 +467,8 @@ settings:
   interface_scale: "Text and interface size"
   miscellaneous: "Miscellaneous"
   file_browsing: "File browsing"
+  sidebar_unified_scroll: "Use a single scrollbar in the sidebar"
+  sidebar_unified_scroll_description: "Scroll all sidebar sections together. When disabled, each section scrolls independently."
   auto_resize_columns: "Automatically resize columns"
   remember_column_widths: "Remember column widths per folder"
   remember_column_widths_description: "When automatic sizing is off, save and restore manual widths for each folder, This PC, and Recycle Bin. Column order and visibility remain global."

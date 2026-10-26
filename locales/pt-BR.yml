@@ -467,6 +467,8 @@ settings:
   interface_scale: "Tamanho do texto e da interface"
   miscellaneous: "Diversos"
   file_browsing: "Navegação de arquivos"
+  sidebar_unified_scroll: "Usar rolagem única na barra lateral"
+  sidebar_unified_scroll_description: "Rola todas as seções da barra lateral juntas. Quando desativado, cada seção rola independentemente."
   auto_resize_columns: "Redimensionar colunas automaticamente"
   remember_column_widths: "Lembrar larguras das colunas por pasta"
   remember_column_widths_description: "Com o ajuste automático desligado, salva e restaura as larguras manuais de cada pasta, de Este Computador e da Lixeira. A ordem e a visibilidade das colunas continuam globais."

@@ -32,13 +32,23 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &mut app.explorer_preferences.hover_preview,
     );
     ui.label(t!("settings.hover_preview_description"));
+    ui.add_space(10.0);
+    let sidebar_changed = settings_ui::toggle_row(
+        ui,
+        &t!("settings.sidebar_unified_scroll"),
+        &mut app.explorer_preferences.sidebar_unified_scroll,
+    );
+    ui.label(t!("settings.sidebar_unified_scroll_description"));
+    if sidebar_changed {
+        ui.ctx().request_repaint();
+    }
     if columns_changed && app.explorer_preferences.auto_resize_columns {
         app.pending_list_column_autofit = true;
         if let Some(panel) = app.dual_panel_inactive_state.as_mut() {
             panel.pending_list_column_autofit = true;
         }
     }
-    if columns_changed || remember_changed || preview_changed {
+    if columns_changed || remember_changed || preview_changed || sidebar_changed {
         app.save_preferences();
         app.save_preferences_async();
     }

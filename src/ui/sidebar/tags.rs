@@ -8,7 +8,7 @@ const TAG_BOTTOM_PADDING_H: f32 = 8.0;
 const AUTO_SCROLL_MARGIN: f32 = 30.0;
 const AUTO_SCROLL_SPEED: f32 = 8.0;
 
-/// Renders the Tags section inside its independent sidebar `ScrollArea`.
+/// Renders Tags content inside the active sidebar layout.
 pub fn render_tags_section(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,

@@ -223,7 +223,7 @@ pub fn render_sidebar_this_pc(
     action
 }
 
-/// Renders Quick Access inside its independent sidebar `ScrollArea`.
+/// Renders Quick Access content inside the active sidebar layout.
 pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
     let mut action = None;
 
@@ -231,6 +231,7 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
         return action;
     }
     let quick_access_viewport = ui.clip_rect();
+    let section_top = ui.cursor().top();
     ui.add_space(8.0);
 
     // === QUICK ACCESS ===
@@ -384,10 +385,17 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
 
         // === Drag-to-pin drop zone ===
         if ctx.is_folder_dragging {
+            // In the unified layout the clip rect also contains drives and Tags.
+            // Only the visible Quick Access section is a valid pin target.
+            let drop_zone = Rect::from_min_max(
+                Pos2::new(quick_access_viewport.left(), section_top),
+                Pos2::new(quick_access_viewport.right(), ui.cursor().top() + 8.0),
+            )
+            .intersect(quick_access_viewport);
             let pointer_in_zone = ui
                 .ctx()
                 .input(|inp| inp.pointer.hover_pos())
-                .map(|p| quick_access_viewport.contains(p))
+                .map(|p| drop_zone.contains(p))
                 .unwrap_or(false);
 
             // No visual highlight on the QA zone — pinned folders already show
@@ -1138,6 +1146,7 @@ fn render_pinned_folders(
             viewport.top() <= end_y
                 && end_y <= viewport.bottom()
                 && pointer_y >= end_y - 14.0
+                && pointer_y <= end_y + 8.0
                 && hover_drop_idx.is_none()
                 && src < ctx.pinned_folders.len()
         }) {
