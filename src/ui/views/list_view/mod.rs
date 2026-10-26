@@ -72,7 +72,6 @@ pub fn render_list_view(
         }
         ui.ctx().request_repaint();
     }
-    autofit::remember_manual_widths(ui, ctx);
     let widths = if ctx.compact {
         ColumnWidths {
             name: (available - 8.0).max(50.0),

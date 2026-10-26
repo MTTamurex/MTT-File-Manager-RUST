@@ -2,7 +2,6 @@
 use super::{autofit_layout, cell_content, columns, name_cell, text_layout, ListViewContext};
 use crate::domain::list_columns::{ColumnId, ColumnScope};
 use eframe::egui::{Color32, FontId, Ui};
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,7 +74,6 @@ struct FitState {
     source: u64,
     natural: Vec<ColumnMeasurement>,
     planned: Vec<(ColumnId, f32)>,
-    applied: Vec<(ColumnId, f32)>,
     visible: Vec<usize>,
 }
 
@@ -101,15 +99,6 @@ impl FitState {
             }
         }
         if let Some(planned) = allocate(available, &measured) {
-            let previous: HashMap<_, _> = self.planned.iter().copied().collect();
-            if force
-                || previous.len() != planned.len()
-                || planned
-                    .iter()
-                    .any(|(id, width)| previous.get(id) != Some(width))
-            {
-                self.applied = planned.clone();
-            }
             self.planned = planned;
             self.natural = measured;
             self.input = input;
@@ -241,7 +230,7 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
     if !ctx.auto_resize_columns {
         if ctx.folder_width_location.is_none() && state.active && state.scope == Some(scope) {
             // Switching off automatic sizing keeps the last displayed sizes as manual widths.
-            for &(id, width) in &state.applied {
+            for &(id, width) in &state.planned {
                 columns::set_width(ctx, id, width);
             }
         }
@@ -259,12 +248,7 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
         || ctx.is_item_dragging
         || ctx.rectangle_selection_state.is_some()
         || ctx.renaming_state.is_some();
-    if !ctx.items.is_empty()
-        && available.is_finite()
-        && available > 8.0
-        && !busy
-        && (requested || input != state.input)
-    {
+    if available.is_finite() && available > 8.0 && !busy && (requested || input != state.input) {
         state.fit(
             input,
             source,
@@ -277,7 +261,7 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
         autofit_layout::record_fitted_width(ui);
     }
     if state.active && state.scope == Some(scope) {
-        columns::set_fitted_widths(ctx, &state.applied);
+        columns::set_fitted_widths(ctx, &state.planned);
     }
     ui.data_mut(|data| data.insert_temp(state_id, state));
 }
@@ -308,21 +292,6 @@ fn record_visible_rows(ui: &Ui, visible: &mut Vec<usize>) {
     if changed {
         ui.ctx().request_repaint();
     }
-}
-
-pub(super) fn remember_manual_widths(ui: &Ui, ctx: &ListViewContext) {
-    if !ctx.auto_resize_columns || ctx.compact {
-        return;
-    }
-    let id = ui.id().with("list_content_fit");
-    ui.data_mut(|data| {
-        if let Some(mut state) = data.get_temp::<FitState>(id) {
-            if let Some(widths) = &ctx.width_overrides {
-                state.applied = widths.clone();
-            }
-            data.insert_temp(id, state);
-        }
-    });
 }
 
 #[cfg(test)]
