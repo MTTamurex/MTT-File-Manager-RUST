@@ -75,6 +75,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
             let action = render_toolbar(
                 ui,
                 &app.navigation_state.current_path,
+                &app.drive_state.cloud_roots,
                 current_path_display_override.as_deref(),
                 &mut app.navigation_state.path_input,
                 &mut app.is_address_editing,

@@ -6,73 +6,9 @@ use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use rust_i18n::t;
-use std::cell::RefCell;
-use std::path::Component;
-
+mod breadcrumbs;
 mod navigation_buttons;
-
-// M-3: Cache breadcrumb segments — recomputed only when current_path changes.
-// Each entry is (display_label, navigation_target).
-thread_local! {
-    static BREADCRUMB_CACHE: RefCell<(String, Vec<(String, String)>)> =
-        const { RefCell::new((String::new(), Vec::new())) };
-}
-
-// Returns the pre-split breadcrumb segments for `current_path`.
-// On a cache hit (same path) the cached Vec is cloned; on a miss segments are
-// recomputed from Path::components() and the cache is updated.
-fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
-    if let Some(server) = crate::domain::network_path::unc_server_name(current_path) {
-        return vec![(server.to_string(), current_path.to_string())];
-    }
-    BREADCRUMB_CACHE.with(|cache| {
-        let mut c = cache.borrow_mut();
-        // Include locale in cache key so breadcrumbs refresh on language change
-        let current_locale = rust_i18n::locale().to_string();
-        let cache_key = format!("{}|{}", current_path, current_locale);
-        if c.0 == cache_key {
-            return c.1.clone();
-        }
-        // cache miss — recompute
-        let mut full = std::path::PathBuf::new();
-        let path = std::path::Path::new(current_path);
-        let components: Vec<_> = path.components().collect();
-        let mut segs = Vec::with_capacity(components.len());
-        for (i, comp) in components.iter().enumerate() {
-            full.push(comp.as_os_str());
-
-            if matches!(comp, Component::RootDir) {
-                continue;
-            }
-
-            let comp_str = comp.as_os_str().to_string_lossy();
-            let display_name = comp_str.trim_end_matches('\\');
-            if display_name.is_empty() && i > 0 {
-                continue;
-            }
-            let target = {
-                let mut p = full.to_string_lossy().into_owned();
-                if p.len() == 2 && p.ends_with(':') {
-                    p.push('\\');
-                }
-                p
-            };
-            // Use translated name for known special folders (Desktop, Documents, etc.)
-            let display = crate::infrastructure::onedrive::special_folder_display_name(&full)
-                .unwrap_or_else(|| {
-                    if display_name.is_empty() {
-                        comp_str.to_string()
-                    } else {
-                        display_name.to_string()
-                    }
-                });
-            segs.push((display, target));
-        }
-        c.0 = cache_key;
-        c.1 = segs.clone();
-        segs
-    })
-}
+use breadcrumbs::breadcrumb_segments;
 
 /// Measure the width of a text string using the given font.
 fn measure_text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
@@ -150,6 +86,7 @@ pub enum ToolbarAction {
 pub fn render_toolbar(
     ui: &mut egui::Ui,
     current_path: &str,
+    cloud_roots: &[crate::domain::cloud_root::CloudRoot],
     current_path_display_override: Option<&str>,
     path_input: &mut String,
     is_editing_path: &mut bool,
@@ -405,9 +342,19 @@ pub fn render_toolbar(
                     action = Some(ToolbarAction::CancelPathInput);
                 }
 
-                // Ctrl+L: focar o campo diretamente na response (cursor posicionado no fim)
+                // Select only on explicit activation, not on subsequent cursor clicks.
                 if *address_bar_focus_request {
                     edit_response.request_focus();
+                    let mut state =
+                        egui::TextEdit::load_state(ui.ctx(), edit_response.id).unwrap_or_default();
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(path_input.chars().count()),
+                        )));
+                    state.store(ui.ctx(), edit_response.id);
+                    ui.ctx().request_repaint();
                     *address_bar_focus_request = false;
                 }
 
@@ -514,8 +461,8 @@ pub fn render_toolbar(
                             .color(theme::text_color(addr_ui.ctx())),
                     );
                 } else {
-                    // M-3: use cached segments — only recomputed on path change
-                    let segments = breadcrumb_segments(current_path);
+                    // Cache also tracks locale and discovered cloud metadata.
+                    let segments = breadcrumb_segments(current_path, cloud_roots);
                     let seg_count = segments.len();
 
                     if seg_count == 0 {
@@ -850,134 +797,4 @@ pub fn render_toolbar(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use egui::{Event, PointerButton, Pos2, RawInput, Rect, Vec2};
-
-    #[test]
-    fn network_server_breadcrumb_preserves_the_unc_navigation_target() {
-        for path in [r"\\server", r"\\server\"] {
-            assert_eq!(
-                breadcrumb_segments(path),
-                vec![("server".into(), path.into())]
-            );
-        }
-    }
-
-    struct ToolbarTestState {
-        ctx: egui::Context,
-        path_input: String,
-        is_editing_path: bool,
-        show_address_history_menu: bool,
-        address_bar_focus_request: bool,
-        search_query: String,
-        recent_paths: Vec<(String, String)>,
-        svg_manager: SvgIconManager,
-    }
-
-    impl Default for ToolbarTestState {
-        fn default() -> Self {
-            Self {
-                ctx: egui::Context::default(),
-                path_input: String::new(),
-                is_editing_path: false,
-                show_address_history_menu: false,
-                address_bar_focus_request: false,
-                search_query: String::new(),
-                recent_paths: vec![("Folder".to_owned(), "C:\\Folder".to_owned())],
-                svg_manager: SvgIconManager::default(),
-            }
-        }
-    }
-
-    impl ToolbarTestState {
-        fn render(&mut self, events: Vec<Event>) -> Option<ToolbarAction> {
-            let Self {
-                ctx,
-                path_input,
-                is_editing_path,
-                show_address_history_menu,
-                address_bar_focus_request,
-                search_query,
-                recent_paths,
-                svg_manager,
-            } = self;
-            let mut action = None;
-            let _ = ctx.run_ui(
-                RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 120.0))),
-                    events,
-                    ..RawInput::default()
-                },
-                |ui| {
-                    let mut thumbnail_size = 100.0;
-                    action = render_toolbar(
-                        ui,
-                        "C:\\",
-                        None,
-                        path_input,
-                        is_editing_path,
-                        show_address_history_menu,
-                        address_bar_focus_request,
-                        search_query,
-                        recent_paths,
-                        false,
-                        false,
-                        true,
-                        ViewMode::Grid,
-                        SortMode::Name,
-                        false,
-                        &mut thumbnail_size,
-                        false,
-                        false,
-                        None,
-                        svg_manager,
-                        &crate::app::shortcuts::ShortcutBindings::default(),
-                    );
-                },
-            );
-            action
-        }
-    }
-
-    #[test]
-    fn clicking_empty_address_area_defers_focus_until_edit_field_is_rendered() {
-        let mut state = ToolbarTestState::default();
-        let click_pos = Pos2::new(500.0, 13.0);
-
-        state.render(Vec::new());
-        state.render(vec![Event::PointerMoved(click_pos)]);
-        state.render(vec![Event::PointerButton {
-            pos: click_pos,
-            button: PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-        let action = state.render(vec![Event::PointerButton {
-            pos: click_pos,
-            button: PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-
-        assert!(matches!(
-            action,
-            Some(ToolbarAction::StartAddressEditWithHistory)
-        ));
-        assert!(state.address_bar_focus_request);
-
-        state.path_input = crate::ui::address_bar::editable_path("C:\\", None);
-        state.is_editing_path = true;
-        state.show_address_history_menu = true;
-        state.render(Vec::new());
-
-        assert!(!state.address_bar_focus_request);
-        assert!(state.is_editing_path);
-        assert!(state.show_address_history_menu);
-
-        state.render(vec![Event::Text("x".to_owned())]);
-
-        assert!(state.path_input.contains('x'));
-        assert!(state.show_address_history_menu);
-    }
-}
+mod tests;

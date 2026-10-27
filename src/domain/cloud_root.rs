@@ -4,6 +4,10 @@ pub struct CloudRoot {
     /// Operational filesystem path used for navigation and file operations.
     pub path: String,
     pub label: String,
+    /// Provider label discovered from registered metadata, not the path name.
+    pub breadcrumb_provider: Option<String>,
+    /// Optional account or provider-root label supplied by discovery metadata.
+    pub breadcrumb_account: Option<String>,
     pub icon_resource: Option<String>,
     pub kind: CloudRootKind,
     /// Optional provider-facing path that should not be treated as a normal drive
@@ -24,6 +28,8 @@ impl CloudRoot {
         Self {
             path,
             label,
+            breadcrumb_provider: None,
+            breadcrumb_account: None,
             icon_resource,
             kind: CloudRootKind::WindowsCloudFiles,
             source_path: None,
@@ -39,6 +45,8 @@ impl CloudRoot {
         Self {
             path,
             label,
+            breadcrumb_provider: None,
+            breadcrumb_account: None,
             icon_resource,
             kind: CloudRootKind::GoogleDriveShortcut,
             source_path: Some(source_path),

@@ -14,6 +14,9 @@ use windows::Win32::System::Registry::{
     RRF_RT_REG_SZ,
 };
 
+mod account_labels;
+use account_labels::onedrive_account_display_name;
+
 const SYNC_ROOT_MANAGER_KEY: &str =
     "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager";
 const FILE_SUPPORTS_REMOTE_STORAGE: u32 = 0x0000_0100;
@@ -67,14 +70,19 @@ pub fn get_cloud_sync_roots() -> Vec<CloudRoot> {
                     continue;
                 }
 
-                roots.push(CloudRoot::windows_cloud_files(
+                let mut cloud_root = CloudRoot::windows_cloud_files(
                     normalized_path,
                     display_name
                         .clone()
                         .filter(|label| !label.trim().is_empty())
                         .unwrap_or_else(|| provider_display_name(&provider_key_name)),
                     icon_resource.clone().filter(|s| !s.trim().is_empty()),
-                ));
+                );
+                cloud_root.breadcrumb_provider = Some(provider_display_name(&provider_key_name));
+                if provider_key_name.split('!').next() == Some("OneDrive") {
+                    cloud_root.breadcrumb_account = onedrive_account_display_name(&cloud_root.path);
+                }
+                roots.push(cloud_root);
             }
         }
     }
@@ -206,12 +214,11 @@ fn push_google_drive_root(
         format!("Google Drive - {}", name.trim())
     };
 
-    roots.push(CloudRoot::google_drive_shortcut(
-        target_text,
-        display_name,
-        icon_resource,
-        source_path,
-    ));
+    let mut cloud_root =
+        CloudRoot::google_drive_shortcut(target_text, display_name, icon_resource, source_path);
+    cloud_root.breadcrumb_provider = Some("Google Drive".to_string());
+    cloud_root.breadcrumb_account = (!name.trim().is_empty()).then(|| name.trim().to_string());
+    roots.push(cloud_root);
 }
 
 fn is_google_drivefs_volume(drive_path: &str, drive_label: &str, label_unavailable: bool) -> bool {
