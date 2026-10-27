@@ -524,6 +524,11 @@ impl ImageViewerApp {
     ///
     /// Used when the current folder is deleted externally.
     pub fn navigate_to_nearest_valid_ancestor(&mut self) {
+        // Virtual views have no filesystem ancestor. In particular, a delayed
+        // folder probe must not bypass pin protection and replace a tag view.
+        if is_virtual_path(&self.navigation_state.current_path) {
+            return;
+        }
         let current = PathBuf::from(&self.navigation_state.current_path);
         log::warn!(
             "[NAV] Current folder no longer exists: {:?}  — searching for valid ancestor",

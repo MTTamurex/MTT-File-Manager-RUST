@@ -28,6 +28,7 @@ mod global_search_events;
 mod google_drive_events;
 mod helpers;
 mod panel_tab_cache;
+mod probe_paths;
 mod rebuild_events;
 mod thumbnail_events;
 mod thumbnail_rebuild;

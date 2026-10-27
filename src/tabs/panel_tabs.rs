@@ -108,6 +108,8 @@ impl PanelTabSet {
 
 #[cfg(test)]
 pub(super) mod snapshot_sync_tests;
+#[cfg(test)]
+mod tray_restore_tests;
 
 #[derive(Clone, Default)]
 pub struct DualPanelTabs {

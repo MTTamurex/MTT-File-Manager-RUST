@@ -1,3 +1,4 @@
+use super::probe_paths::is_filesystem_probe_target;
 use crate::app::init_workers::consistency_probe_worker::{
     ConsistencyProbeMode, ConsistencyProbeRequest, ConsistencyProbeResult,
 };
@@ -10,10 +11,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const INACTIVE_PANEL_PROBE_INTERVAL: Duration = Duration::from_secs(3);
-
-fn is_archive_namespace_path(path: &Path) -> bool {
-    crate::domain::file_entry::is_path_inside_archive(path)
-}
 
 pub(super) struct WatcherPerfMarks {
     pub(super) watcher_start: Instant,
@@ -122,11 +119,7 @@ impl ImageViewerApp {
         if !self.watcher_fallback_polling {
             return;
         }
-        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
-            || crate::domain::network_path::unc_server_name(&self.navigation_state.current_path)
-                .is_some()
-            || is_archive_namespace_path(Path::new(&self.navigation_state.current_path))
-        {
+        if !is_filesystem_probe_target(&self.navigation_state.current_path) {
             return;
         }
         if self.is_loading_folder
@@ -215,9 +208,7 @@ impl ImageViewerApp {
         if snapshot.is_loading_folder
             || snapshot.is_computer_view
             || snapshot.is_recycle_bin_view
-            || crate::domain::special_paths::is_virtual_path(&snapshot.path)
-            || crate::domain::network_path::unc_server_name(&snapshot.path).is_some()
-            || is_archive_namespace_path(Path::new(&snapshot.path))
+            || !is_filesystem_probe_target(&snapshot.path)
         {
             return;
         }
@@ -348,13 +339,7 @@ impl ImageViewerApp {
         reason: &str,
         reload_if_alive: bool,
     ) {
-        let active_is_filesystem =
-            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
-                && crate::domain::network_path::unc_server_name(
-                    &self.navigation_state.current_path,
-                )
-                .is_none()
-                && !is_archive_namespace_path(Path::new(&self.navigation_state.current_path));
+        let active_is_filesystem = is_filesystem_probe_target(&self.navigation_state.current_path);
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if active_is_filesystem {
             let should_send_active_probe =
@@ -393,8 +378,7 @@ impl ImageViewerApp {
         };
         if snapshot.is_computer_view
             || snapshot.is_recycle_bin_view
-            || crate::domain::network_path::unc_server_name(&snapshot.path).is_some()
-            || is_archive_namespace_path(Path::new(&snapshot.path))
+            || !is_filesystem_probe_target(&snapshot.path)
         {
             return;
         }
@@ -504,6 +488,11 @@ impl ImageViewerApp {
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
         while let Ok(result) = self.consistency_probe_rx.try_recv() {
+            // A result may arrive after its formerly inactive tab gained focus.
+            // Never apply a filesystem disappearance/reload to a virtual view.
+            if !is_filesystem_probe_target(&result.path.to_string_lossy()) {
+                continue;
+            }
             if result.mode == ConsistencyProbeMode::PathLiveness {
                 if self.handle_current_liveness_probe_result(result) {
                     continue;
