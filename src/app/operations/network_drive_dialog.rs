@@ -69,6 +69,9 @@ impl ImageViewerApp {
         let Some(result) = self.network_drive_dialog.poll() else {
             return;
         };
+        // Native dialogs run on a worker thread; closing them does not reliably
+        // reactivate the owner. Restore focus for success, cancellation and errors.
+        self.restore_app_focus();
         let disconnected = self.network_drive_dialog.disconnect_root.take();
         match result {
             Ok(DialogOutcome::Completed) => {

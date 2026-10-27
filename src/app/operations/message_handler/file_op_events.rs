@@ -903,7 +903,7 @@ impl ImageViewerApp {
         self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }
 
-    pub(super) fn restore_app_focus(&self) {
+    pub(in crate::app::operations) fn restore_app_focus(&self) {
         use crate::infrastructure::windows::window_subclass::{layout_phase, WindowLayoutPhase};
 
         // The native phase is updated by WM_SIZE before egui necessarily sees
