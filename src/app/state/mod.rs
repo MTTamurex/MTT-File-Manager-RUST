@@ -265,6 +265,8 @@ pub struct ImageViewerApp {
     pub folder_access: crate::app::operations::folder_access::FolderAccessState,
     pub(crate) network_location_wizard:
         crate::app::operations::network_location_wizard::NetworkLocationWizardState,
+    pub(crate) network_drive_dialog:
+        crate::app::operations::network_drive_dialog::NetworkDriveDialogState,
     pub is_loading_folder: bool,
     pub loading_started_at: Instant, // Track when loading started for timeout safety
 

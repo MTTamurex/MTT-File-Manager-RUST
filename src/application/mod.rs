@@ -3,6 +3,7 @@
 
 pub mod clipboard;
 pub mod context_menu;
+pub(crate) mod disk_analysis_policy;
 pub mod file_operations;
 pub mod grouping;
 pub mod navigation;

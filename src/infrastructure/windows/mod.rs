@@ -27,6 +27,7 @@ pub mod key_state;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
+pub(crate) mod network_drive_dialog;
 pub(crate) mod network_location_wizard;
 pub mod network_locations;
 pub mod network_shares;

@@ -22,6 +22,7 @@ pub(super) fn handle(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::NavigateToComputer => app.navigate_to_computer(),
         SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
         SidebarAction::OpenDriveContextMenu(_) => {}
+        SidebarAction::OpenComputerContextMenu => {}
         SidebarAction::OpenTreeContextMenu(_) => {}
         SidebarAction::TreeRenameChanged(name) => {
             if let Some(editing) = app.sidebar_folder_rename.as_mut() {

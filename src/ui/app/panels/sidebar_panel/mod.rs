@@ -54,6 +54,13 @@ pub(super) fn render(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Option
     app.sidebar_rename_focus = false;
     crate::ui::sidebar_tree::rename::finish_frame(&ctx, &mut app.sidebar_folder_rename);
     let action = match response.inner {
+        Some(SidebarAction::OpenComputerContextMenu) => {
+            app.open_sidebar_context_menu(
+                &ctx,
+                crate::domain::special_paths::COMPUTER_VIEW_ID.to_string(),
+            );
+            None
+        }
         Some(SidebarAction::OpenDriveContextMenu(path)) => {
             app.open_sidebar_context_menu(&ctx, path);
             None

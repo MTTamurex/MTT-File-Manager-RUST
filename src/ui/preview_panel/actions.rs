@@ -17,7 +17,7 @@ pub enum PreviewPanelAction {
     NavigateTo(PathBuf),
     /// User requested an on-demand SHA-256 calculation for the selected file.
     CalculateFileHash(PathBuf),
-    /// User requested the disk usage analyzer for an NTFS drive.
+    /// User requested the disk usage analyzer for a local NTFS drive.
     AnalyzeDrive(char),
 }
 

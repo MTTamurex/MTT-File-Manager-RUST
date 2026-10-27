@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 enum Section {
+    Computer,
     Cloud,
     Local,
     Tag,
@@ -14,6 +15,7 @@ enum Section {
 impl Section {
     fn label(self) -> &'static str {
         match self {
+            Self::Computer => "This PC",
             Self::Cloud => "Cloud Root",
             Self::Local => "Local Disk",
             Self::Tag => "Tag Name",
@@ -23,6 +25,7 @@ impl Section {
 
     fn destination(self) -> String {
         match self {
+            Self::Computer => crate::domain::special_paths::COMPUTER_VIEW_ID.to_string(),
             Self::Cloud => r"C:\Cloud".to_string(),
             Self::Local => "C:\\".to_string(),
             Self::Tag => crate::domain::special_paths::tag_view_path(7),
@@ -128,6 +131,7 @@ fn render_section_with_feedback(
             collapse_tags: false,
         };
         match section {
+            Section::Computer => render_sidebar_this_pc(ui, &mut sidebar),
             Section::Cloud | Section::Local | Section::NetworkLocation => {
                 render_sidebar_drives(ui, &mut sidebar, 260.0)
             }
@@ -201,6 +205,45 @@ fn render_section_with_feedback(
         }
     }
     (result, highlighted)
+}
+
+#[test]
+fn this_pc_secondary_click_opens_its_menu_without_navigation() {
+    assert!(matches!(
+        click_section(
+            Section::Computer,
+            egui::PointerButton::Secondary,
+            false,
+            false
+        ),
+        Some(SidebarAction::OpenComputerContextMenu)
+    ));
+    for (renaming, dragging) in [(true, false), (false, true)] {
+        assert!(click_section(
+            Section::Computer,
+            egui::PointerButton::Secondary,
+            renaming,
+            dragging,
+        )
+        .is_none());
+    }
+}
+
+#[test]
+fn this_pc_primary_and_middle_click_keep_their_navigation_behavior() {
+    assert!(matches!(
+        click_section(
+            Section::Computer,
+            egui::PointerButton::Primary,
+            false,
+            false
+        ),
+        Some(SidebarAction::NavigateToComputer)
+    ));
+    assert!(matches!(
+        click_section(Section::Computer, egui::PointerButton::Middle, false, false),
+        Some(SidebarAction::OpenInNewTab(path)) if path == Section::Computer.destination()
+    ));
 }
 
 #[test]

@@ -50,11 +50,26 @@ pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
         &t!("settings.activate_new_tabs"),
         &mut prefs.activate_new_tabs,
     );
-    ui.label(
-        egui::RichText::new(t!("settings.activate_new_tabs_description"))
-            .size(13.0)
-            .color(crate::ui::theme::secondary_text_color(ui.ctx())),
-    );
+    let mut description = egui::text::LayoutJob::default();
+    egui::RichText::new(t!("settings.activate_new_tabs_description"))
+        .size(13.0)
+        .color(crate::ui::theme::secondary_text_color(ui.ctx()))
+        .append_to(
+            &mut description,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::BOTTOM,
+        );
+    egui::RichText::new(format!("\n{}", t!("settings.activate_new_tabs_ctrl_hint")))
+        .size(13.0)
+        .strong()
+        .append_to(
+            &mut description,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::BOTTOM,
+        );
+    ui.label(description);
     ui.add_space(12.0);
     changed |= settings_ui::toggle_row(
         ui,
@@ -62,4 +77,19 @@ pub fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
         &mut prefs.archives_in_new_tab,
     );
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ctrl_hint_has_its_own_translation_in_every_supported_language() {
+        for locale in ["en", "pt-BR", "el", "ru", "zh-CN"] {
+            let description =
+                rust_i18n::t!("settings.activate_new_tabs_description", locale = locale);
+            let hint = rust_i18n::t!("settings.activate_new_tabs_ctrl_hint", locale = locale);
+            assert!(!description.contains("Ctrl"), "{locale}");
+            assert!(hint.contains("Ctrl"), "{locale}");
+            assert!(!hint.contains("activate_new_tabs_ctrl_hint"), "{locale}");
+        }
+    }
 }

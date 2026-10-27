@@ -606,6 +606,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.context_menu = context_menu;
                     return;
                 }
+                if command == "map_network_drive" || command == "disconnect_network_drive" {
+                    if command == "map_network_drive" {
+                        app.start_network_drive_dialog(None);
+                    } else if let Some(path) = context_menu.target_paths.first() {
+                        app.start_network_drive_dialog(Some(path.to_string_lossy().into_owned()));
+                    }
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
                 if let Some(handler_id) =
                     crate::infrastructure::open_with_worker::handler_id_from_command(command)
                 {

@@ -1023,6 +1023,11 @@ pub fn collect_drive_summaries() -> Vec<AnalyzerDriveSummary> {
         crate::infrastructure::windows::get_all_drives_with_label_status();
     let mut drives = Vec::new();
     for (path, label) in disks {
+        if !crate::application::disk_analysis_policy::is_local_volume(
+            crate::infrastructure::windows::detect_drive_type(&path),
+        ) {
+            continue;
+        }
         let Some(letter) = path.chars().next().filter(|c| c.is_ascii_alphabetic()) else {
             continue;
         };

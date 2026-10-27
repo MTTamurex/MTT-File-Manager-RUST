@@ -136,10 +136,14 @@ pub fn render_fallback(
         {
             paint_texture_centered(ui, icon.id(), icon.size_vec2(), icon_rect);
         }
-        // NTFS-only analyzer entry point: chart button on the icon's
+        // Local NTFS-only analyzer entry point: chart button on the icon's
         // bottom-right corner.
         if let Some(drive) = file.drive_info.as_ref() {
-            if drive.file_system.eq_ignore_ascii_case("NTFS") {
+            if crate::application::disk_analysis_policy::supports_disk_analysis(
+                &file.path,
+                drive.drive_type,
+                &drive.file_system,
+            ) {
                 if let Some(letter) = file
                     .path
                     .to_string_lossy()

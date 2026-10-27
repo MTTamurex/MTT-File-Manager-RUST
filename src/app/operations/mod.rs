@@ -47,6 +47,7 @@ pub mod image_conversion;
 pub mod message_handler;
 pub mod metadata;
 pub mod navigation;
+pub(crate) mod network_drive_dialog;
 pub(crate) mod network_location_wizard;
 pub(crate) mod network_locations;
 mod new_tab;

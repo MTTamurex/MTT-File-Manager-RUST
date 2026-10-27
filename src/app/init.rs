@@ -424,6 +424,7 @@ impl ImageViewerApp {
             folder_load_error: None,
             folder_access: Default::default(),
             network_location_wizard: Default::default(),
+            network_drive_dialog: Default::default(),
             is_loading_folder: false,
             loading_started_at: Instant::now(),
             items_rebuild_sender,

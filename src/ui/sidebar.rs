@@ -97,6 +97,7 @@ pub enum SidebarAction {
     NavigateTo(String),
     NavigateToComputer,
     NavigateToRecycleBin,
+    OpenComputerContextMenu,
     OpenDriveContextMenu(String),
     OpenTreeContextMenu(crate::application::sidebar_tree::SidebarFolderTarget),
     TreeRenameChanged(String),
@@ -215,6 +216,9 @@ pub fn render_sidebar_this_pc(
         action = Some(SidebarAction::OpenInNewTab(
             crate::domain::special_paths::COMPUTER_VIEW_ID.to_string(),
         ));
+    }
+    if header_response.secondary_clicked() && !ctx.is_renaming && !ctx.is_item_dragging {
+        action = Some(SidebarAction::OpenComputerContextMenu);
     }
 
     ui.add_space(4.0);

@@ -2,6 +2,7 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
+mod computer;
 mod local_open;
 mod new_submenu;
 
@@ -410,23 +411,27 @@ impl ImageViewerApp {
                     .any(|location| location.matches_shortcut_path(path))
             });
 
-        if uses_file_view_location
-            && is_empty_area
-            && (self.navigation_state.is_computer_view
-                || crate::domain::special_paths::tag_id_from_view_path(
-                    &self.navigation_state.current_path,
-                )
-                .is_some())
+        let sidebar_computer = computer::is_sidebar_computer(self.context_menu.origin, paths);
+        if sidebar_computer
+            || (uses_file_view_location
+                && is_empty_area
+                && (self.navigation_state.is_computer_view
+                    || crate::domain::special_paths::tag_id_from_view_path(
+                        &self.navigation_state.current_path,
+                    )
+                    .is_some()))
         {
-            items.push(grouping_menu_item(self));
-            if self.navigation_state.is_computer_view {
-                items.push(ContextMenuItem::separator());
-                items.push(
-                    ContextMenuItem::new(-84, t!("context_menu.add_network_location"))
-                        .with_command("add_network_location")
-                        .with_svg_icon("folder_new")
-                        .enabled(!self.network_location_wizard_pending()),
-                );
+            if !sidebar_computer {
+                items.push(grouping_menu_item(self));
+            }
+            if sidebar_computer || self.navigation_state.is_computer_view {
+                if !items.is_empty() {
+                    items.push(ContextMenuItem::separator());
+                }
+                items.extend(computer::network_items(
+                    self.network_drive_dialog_pending(),
+                    self.network_location_wizard_pending(),
+                ));
             }
             self.context_menu.items = items;
             self.context_menu.partition_items();
@@ -742,14 +747,33 @@ impl ImageViewerApp {
             );
         }
         // ========== SECONDARY ITEMS (App-specific) ==========
-        // Disk usage analyzer entry for NTFS drive roots.
-        if is_drive && !is_empty_area && paths.len() == 1 {
-            let is_ntfs = paths.first().is_some_and(|path| {
+        if !is_empty_area
+            && super::network_drive_dialog::can_disconnect_network_drive(
+                drive_target_path,
+                target_drive_type,
+            )
+        {
+            items.push(
+                ContextMenuItem::new(-88, t!("context_menu.disconnect_network_drive"))
+                    .with_command("disconnect_network_drive")
+                    .with_svg_icon("drive")
+                    .enabled(!self.network_drive_dialog_pending()),
+            );
+        }
+        // Remote servers can report NTFS, but the analyzer requires a local volume.
+        if is_drive && !is_empty_area && drive_target_path.is_some() {
+            let can_analyze = paths.first().is_some_and(|path| {
                 self.drive_state
                     .cached_drive_info(&path.to_string_lossy())
-                    .is_some_and(|info| info.file_system.eq_ignore_ascii_case("NTFS"))
+                    .is_some_and(|info| {
+                        crate::application::disk_analysis_policy::supports_disk_analysis(
+                            path,
+                            target_drive_type.unwrap_or(info.drive_type),
+                            &info.file_system,
+                        )
+                    })
             });
-            if is_ntfs {
+            if can_analyze {
                 items.push(
                     ContextMenuItem::new(-83, t!("context_menu.analyze_disk_usage"))
                         .with_svg_icon("drive"),
