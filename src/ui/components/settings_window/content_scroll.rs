@@ -2,15 +2,15 @@ use eframe::egui;
 
 const CONTROL_SCROLLBAR_GAP: f32 = 8.0;
 
-/// Reserve the scrollbar's actual width instead of letting it cover controls.
+/// Keep the floating appearance while reserving room for its expanded width.
 pub(super) fn show<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
     ui.scope(|ui| {
         let scroll = &mut ui.spacing_mut().scroll;
-        scroll.floating = false;
-        scroll.bar_inner_margin = CONTROL_SCROLLBAR_GAP;
+        scroll.floating = true;
+        scroll.floating_allocated_width = scroll.bar_width + CONTROL_SCROLLBAR_GAP;
         egui::ScrollArea::vertical()
             .id_salt("settings_window_content")
             .auto_shrink([false, false])
@@ -35,19 +35,27 @@ mod tests {
                         style.animation_time = 0.0;
                         style.spacing.scroll.bar_width = bar_width;
                     });
+                    let scrollbar_hover = std::cell::Cell::new(egui::Pos2::ZERO);
                     for frame in 0..3 {
                         let _ = ctx.run_ui(
                             egui::RawInput {
                                 screen_rect: Some(egui::Rect::from_min_size(
                                     egui::Pos2::ZERO, egui::vec2(width + 32.0, 240.0))),
                                 time: Some(frame as f64),
+                                events: vec![egui::Event::PointerMoved(scrollbar_hover.get())],
                                 ..Default::default()
                             },
                             |ui| {
                                 ui.set_max_size(egui::vec2(width, 180.0));
                                 let outer = ui.available_rect_before_wrap();
+                                scrollbar_hover.set(egui::pos2(outer.right() - 1.0, outer.center().y));
                                 let original_scroll = ui.spacing().scroll;
                                 let output = show(ui, |ui| {
+                                    let mut expected_scroll = original_scroll;
+                                    expected_scroll.floating = true;
+                                    expected_scroll.floating_allocated_width = bar_width + CONTROL_SCROLLBAR_GAP;
+                                    assert_eq!(ui.spacing().scroll, expected_scroll,
+                                        "keep the original floating scrollbar appearance and opacity settings");
                                     let mut enabled = true;
                                     settings_ui::toggle_row(ui, "Option", &mut enabled);
                                     let toggle_right = ui.min_rect().right();
