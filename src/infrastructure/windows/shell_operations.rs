@@ -4,6 +4,7 @@ mod context_menu;
 mod file_op;
 mod organizer_move;
 mod shfile_ops;
+mod working_directory;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HWND;

@@ -16,8 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 /// app-mode/dark theme used by the target application.
 pub fn open_with_shell(path: &Path, hwnd: Option<HWND>) -> Result<()> {
     unsafe {
-        let path_str = path.to_string_lossy().to_string();
-        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+        let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Supply a per-launch CWD, never change the file manager's process CWD.
+        let working_directory = super::working_directory::for_shell_open(path);
+        let working_directory_wide: Option<Vec<u16>> =
+            working_directory.map(|dir| dir.as_os_str().encode_wide().chain(Some(0)).collect());
 
         let mut exec_info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -26,7 +29,9 @@ pub fn open_with_shell(path: &Path, hwnd: Option<HWND>) -> Result<()> {
             lpVerb: PCWSTR::null(),
             lpFile: PCWSTR(path_wide.as_ptr()),
             lpParameters: PCWSTR::null(),
-            lpDirectory: PCWSTR::null(),
+            lpDirectory: working_directory_wide
+                .as_ref()
+                .map_or(PCWSTR::null(), |wide| PCWSTR(wide.as_ptr())),
             nShow: SW_SHOWNORMAL.0,
             hInstApp: HINSTANCE(std::ptr::null_mut()),
             lpIDList: std::ptr::null_mut(),
