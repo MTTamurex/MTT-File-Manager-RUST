@@ -90,18 +90,21 @@ fn register_main_window(hwnd: HWND) -> windows::core::Result<()> {
 }
 
 pub fn find_main_window() -> Option<HWND> {
+    main_windows().into_iter().next()
+}
+
+pub(crate) fn main_windows() -> Vec<HWND> {
     unsafe extern "system" fn find(hwnd: HWND, data: LPARAM) -> BOOL {
         if !unsafe { GetPropW(hwnd, w!("MTT.FileManager.MainWindow")) }.is_invalid() {
             unsafe {
-                *(data.0 as *mut Option<HWND>) = Some(hwnd);
+                (*(data.0 as *mut Vec<HWND>)).push(hwnd);
             }
-            return false.into();
         }
         true.into()
     }
-    let mut found = None;
+    let mut found = Vec::new();
     unsafe {
-        let _ = EnumWindows(Some(find), LPARAM(&mut found as *mut Option<HWND> as isize));
+        let _ = EnumWindows(Some(find), LPARAM(&mut found as *mut Vec<HWND> as isize));
     }
     found
 }

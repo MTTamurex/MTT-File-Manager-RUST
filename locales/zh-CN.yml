@@ -1279,4 +1279,11 @@ disk_analysis:
   dup_none: "没有找到重复文件。"
 tray:
   open: "打开"
-  exit: "退出"
+  exit: "退出应用程序"
+  exit_window: "关闭此窗口"
+  window: "窗口"
+  left_panel: "左侧面板"
+  right_panel: "右侧面板"
+  hidden_at: "隐藏到托盘："
+  command_failed: "无法确认命令。窗口可能正忙或以不同的权限运行。请重试。"
+  exit_failed: "无法确认所有窗口都已退出。部分窗口可能已经关闭。此实例将保持打开，以便您重试。"

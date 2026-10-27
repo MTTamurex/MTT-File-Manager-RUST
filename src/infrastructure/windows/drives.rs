@@ -170,9 +170,6 @@ pub fn restore_window_foreground(hwnd: HWND) {
         } else if was_hidden {
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
-        if was_hidden {
-            crate::infrastructure::windows::system_tray::remove_tray_icon(hwnd);
-        }
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
     }

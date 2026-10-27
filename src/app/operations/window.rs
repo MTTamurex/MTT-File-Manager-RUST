@@ -50,6 +50,8 @@ impl ImageViewerApp {
                     return;
                 }
 
+                crate::infrastructure::windows::system_tray::coordinator::initialize(hwnd);
+
                 // Create the invisible proxy window used as owner for Shell
                 // file-operation dialogs so the Shell cannot disable the app's
                 // main window during long or cancelled operations.

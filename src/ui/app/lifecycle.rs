@@ -422,7 +422,7 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
     if let Some(hwnd) = app.native_hwnd {
-        crate::infrastructure::windows::system_tray::remove_tray_icon(hwnd);
+        crate::infrastructure::windows::system_tray::coordinator::shutdown(hwnd);
     }
     // Prevent the incremental GC from starting another app-state DB write.
     crate::app::init_workers::stop_gc_worker();

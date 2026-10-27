@@ -1,36 +1,51 @@
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::mem::size_of;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+mod commands;
+pub(crate) mod coordinator;
+mod labels;
+mod menu;
+mod menu_text;
+pub(crate) mod model;
+mod ownership;
+mod protocol;
+#[cfg(test)]
+mod tests;
+mod window_ref;
+
+use windows::core::{GUID, PCWSTR};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, LoadIconW, PostMessageW,
-    RegisterWindowMessageW, SendMessageW, SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON,
-    ICON_SMALL, IDI_APPLICATION, MF_STRING, SW_HIDE, SW_RESTORE, SW_SHOW, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, WM_CLOSE, WM_GETICON, WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP,
+    LoadIconW, RegisterWindowMessageW, SendMessageW, SetForegroundWindow, ShowWindow, HICON,
+    ICON_SMALL, IDI_APPLICATION, SW_HIDE, SW_RESTORE, SW_SHOW, WM_GETICON, WM_LBUTTONUP,
+    WM_RBUTTONUP,
 };
 
 pub(crate) const TRAY_CALLBACK_MESSAGE: u32 = 0x8000 + 0x36;
 
 const TRAY_ICON_ID: u32 = 1;
-const MENU_OPEN_ID: usize = 1001;
-const MENU_EXIT_ID: usize = 1002;
-const ACTION_NONE: u8 = 0;
-const ACTION_OPEN: u8 = 1;
-const ACTION_EXIT: u8 = 2;
+// A stable shell identity lets a successor replace a crashed owner's icon,
+// rather than leaving an indistinguishable stale notification-area entry.
+const TRAY_GUID: GUID = GUID::from_u128(0x664bb25c_9eef_47ef_9459_15ad93815cd8);
 
 static TRAY_ICON_ADDED: AtomicBool = AtomicBool::new(false);
-static PENDING_ACTION: AtomicU8 = AtomicU8::new(ACTION_NONE);
+thread_local! {
+    static PENDING_ACTIONS: RefCell<VecDeque<TrayAction>> = const { RefCell::new(VecDeque::new()) };
+}
 static TASKBAR_CREATED_MESSAGE: OnceLock<u32> = OnceLock::new();
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TrayAction {
     Open,
     Exit,
+    Activate(model::Target),
 }
 
 pub(crate) fn add_tray_icon(hwnd: HWND) -> bool {
@@ -39,7 +54,16 @@ pub(crate) fn add_tray_icon(hwnd: HWND) -> bool {
     }
 
     let data = notify_icon_data(hwnd);
-    let added = unsafe { Shell_NotifyIconW(NIM_ADD, &data).as_bool() };
+    let added = unsafe {
+        if Shell_NotifyIconW(NIM_ADD, &data).as_bool() {
+            true
+        } else {
+            // Only the mutex holder reaches this path. Delete by GUID to
+            // discard any stale callback HWND before registering the new one.
+            let _ = Shell_NotifyIconW(NIM_DELETE, &data);
+            Shell_NotifyIconW(NIM_ADD, &data).as_bool()
+        }
+    };
     if added {
         TRAY_ICON_ADDED.store(true, Ordering::Release);
     }
@@ -57,11 +81,26 @@ pub(crate) fn remove_tray_icon(hwnd: HWND) {
 }
 
 pub(crate) fn take_action() -> Option<TrayAction> {
-    match PENDING_ACTION.swap(ACTION_NONE, Ordering::AcqRel) {
-        ACTION_OPEN => Some(TrayAction::Open),
-        ACTION_EXIT => Some(TrayAction::Exit),
-        _ => None,
-    }
+    PENDING_ACTIONS.with(|q| q.borrow_mut().pop_front())
+}
+
+fn queue_action(action: TrayAction) -> bool {
+    PENDING_ACTIONS.with(|q| {
+        let mut queue = q.borrow_mut();
+        if action == TrayAction::Exit {
+            queue.clear();
+            queue.push_back(action);
+        } else if queue.len() < 64 && !queue.contains(&TrayAction::Exit) {
+            queue.push_back(action);
+        } else {
+            return false;
+        }
+        true
+    })
+}
+
+pub(crate) unsafe fn receive_packet(sender: HWND, data: LPARAM) -> Option<bool> {
+    unsafe { protocol::receive(sender, data) }
 }
 
 pub(crate) fn taskbar_created_message() -> u32 {
@@ -82,23 +121,20 @@ pub(crate) fn restore_icon_after_taskbar_restart(hwnd: HWND) {
 
 pub(crate) fn handle_callback(hwnd: HWND, event: LPARAM) {
     match event.0 as u32 {
-        WM_LBUTTONDBLCLK => {
-            show_window(hwnd);
-            PENDING_ACTION.store(ACTION_OPEN, Ordering::Release);
-        }
-        WM_RBUTTONUP => show_context_menu(hwnd),
+        WM_LBUTTONUP | WM_RBUTTONUP => menu::show(hwnd),
         _ => {}
     }
 }
 
 pub(crate) fn hide_window(hwnd: HWND) {
+    coordinator::mark_hidden();
     unsafe {
         let _ = ShowWindow(hwnd, SW_HIDE);
     }
 }
 
 pub(crate) fn show_window(hwnd: HWND) {
-    remove_tray_icon(hwnd);
+    coordinator::mark_visible();
     unsafe {
         if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
@@ -111,7 +147,7 @@ pub(crate) fn show_window(hwnd: HWND) {
 
 pub(crate) fn request_open(hwnd: HWND) {
     show_window(hwnd);
-    PENDING_ACTION.store(ACTION_OPEN, Ordering::Release);
+    queue_action(TrayAction::Open);
 }
 
 fn notify_icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -119,7 +155,8 @@ fn notify_icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
         uID: TRAY_ICON_ID,
-        uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+        uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID,
+        guidItem: TRAY_GUID,
         uCallbackMessage: TRAY_CALLBACK_MESSAGE,
         hIcon: window_icon(hwnd),
         ..Default::default()
@@ -146,47 +183,4 @@ fn window_icon(hwnd: HWND) -> HICON {
         return HICON(response.0 as *mut _);
     }
     unsafe { LoadIconW(None, IDI_APPLICATION).unwrap_or_default() }
-}
-
-fn show_context_menu(hwnd: HWND) {
-    let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
-        return;
-    };
-    let open_label = wide(&rust_i18n::t!("tray.open"));
-    let exit_label = wide(&rust_i18n::t!("tray.exit"));
-    unsafe {
-        let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN_ID, PCWSTR(open_label.as_ptr()));
-        let _ = AppendMenuW(menu, MF_STRING, MENU_EXIT_ID, PCWSTR(exit_label.as_ptr()));
-        let _ = SetForegroundWindow(hwnd);
-        let mut point = POINT::default();
-        if GetCursorPos(&mut point).is_ok() {
-            let command = TrackPopupMenu(
-                menu,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON,
-                point.x,
-                point.y,
-                None,
-                hwnd,
-                None,
-            )
-            .0 as usize;
-            match command {
-                MENU_OPEN_ID => {
-                    show_window(hwnd);
-                    PENDING_ACTION.store(ACTION_OPEN, Ordering::Release);
-                }
-                MENU_EXIT_ID => {
-                    PENDING_ACTION.store(ACTION_EXIT, Ordering::Release);
-                    let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-                }
-                _ => {}
-            }
-        }
-        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-    }
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }

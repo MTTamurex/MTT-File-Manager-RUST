@@ -1289,4 +1289,11 @@ disk_analysis:
   dup_none: "No duplicate files found."
 tray:
   open: "Open"
-  exit: "Exit"
+  exit: "Exit application"
+  exit_window: "Exit this window"
+  window: "Window"
+  left_panel: "Left panel"
+  right_panel: "Right panel"
+  hidden_at: "Sent to tray:"
+  command_failed: "Could not confirm the command. The window may be busy or running with different permissions. Try again."
+  exit_failed: "Could not confirm exit for every window. Some windows may already have closed. This instance will remain open so you can retry."

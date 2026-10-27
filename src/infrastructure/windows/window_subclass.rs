@@ -299,6 +299,7 @@ extern "system" fn borderless_subclass_proc(
     _dw_ref_data: usize,
 ) -> LRESULT {
     if msg == WM_NCDESTROY {
+        super::system_tray::coordinator::shutdown(hwnd);
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
         SIZE_MOVE_STARTED.store(false, Ordering::SeqCst);
         redraw_suppression::reset_for_destroy();
@@ -308,6 +309,18 @@ extern "system" fn borderless_subclass_proc(
                 RemoveWindowSubclass(hwnd, Some(borderless_subclass_proc), BORDERLESS_SUBCLASS_ID);
             return DefSubclassProc(hwnd, msg, wparam, lparam);
         }
+    }
+
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER
+        && wparam.0 == super::system_tray::coordinator::TIMER_ID
+    {
+        super::system_tray::coordinator::tick(hwnd);
+        return LRESULT(0);
+    }
+    if msg == super::system_tray::coordinator::EXIT_MESSAGE {
+        return LRESULT(isize::from(super::system_tray::coordinator::request_exit(
+            hwnd,
+        )));
     }
 
     if msg == super::system_tray::taskbar_created_message() {
@@ -344,6 +357,11 @@ extern "system" fn borderless_subclass_proc(
     // "Open in main app" requests from child tools and the Explorer integration.
     // Only copy the payload and queue it; navigation happens in the UI loop.
     if msg == WM_COPYDATA {
+        if let Some(accepted) =
+            unsafe { super::system_tray::receive_packet(HWND(wparam.0 as *mut _), lparam) }
+        {
+            return LRESULT(isize::from(accepted));
+        }
         let copy_data = lparam.0 as *const COPYDATASTRUCT;
         if !copy_data.is_null() {
             unsafe {
