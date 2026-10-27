@@ -1,9 +1,10 @@
 //! Internal drag-and-drop for file/folder items (Explorer-like behavior).
 //!
 //! This module supports dragging selected items and dropping onto a folder item:
-//! - items from real folders are moved
+//! - real items are moved, copied with Ctrl, or linked with Alt (Alt takes priority)
 //! - items from inside archives are copied because Shell move is not supported
 
+mod completion;
 mod outbound;
 mod rendering;
 mod validation;
@@ -14,8 +15,7 @@ use std::path::{Path, PathBuf};
 
 use validation::{
     is_valid_drop_target_for_paths, normalize_path_for_compare,
-    should_block_file_panel_input_for_pending_confirmation, should_confirm_drag_move,
-    DragDropOperation,
+    should_block_file_panel_input_for_pending_confirmation,
 };
 
 impl ImageViewerApp {
@@ -180,9 +180,8 @@ impl ImageViewerApp {
         self.drag_hovered_folder = hovered_folder.clone();
 
         // If hovering over a specific folder, try that as the target.
-        // Otherwise, fall back to the current directory as the drop target,
-        // but only when we're NOT in the drag's source folder (to allow
-        // dropping onto the open folder of a different tab).
+        // Otherwise, try the current directory. Validation allows copies and
+        // shortcuts in the source directory but rejects no-op moves.
         let candidate = hovered_folder.or_else(|| {
             if self.navigation_state.current_path.is_empty() {
                 return None;
@@ -191,108 +190,11 @@ impl ImageViewerApp {
                 return None;
             }
             let cur = PathBuf::from(&self.navigation_state.current_path);
-            // Don't fall back to the source folder (items are already there)
-            if let Some(ref src) = self.drag_source_folder {
-                if normalize_path_for_compare(src) == normalize_path_for_compare(&cur) {
-                    return None;
-                }
-            }
+            // Operation-aware validation rejects no-op moves but allows copies and links.
             Some(cur)
         });
 
         self.drag_target_folder = candidate.filter(|target| self.is_valid_drop_target(target));
-    }
-
-    /// Completes an in-progress drag operation (drop).
-    pub fn complete_item_drag(&mut self, ctrl_pressed: bool, shift_pressed: bool) {
-        if self.file_panel_input_blocked_by_drag_move_confirmation() {
-            self.cancel_item_drag();
-            return;
-        }
-
-        if !self.is_item_dragging {
-            return;
-        }
-
-        let drag_origin = self.item_drag_origin;
-        let raw_cross_panel_target = self.drag_cross_panel_target.clone();
-        let cross_panel_target = raw_cross_panel_target.clone().filter(|target| {
-            !target
-                .to_str()
-                .is_some_and(crate::domain::special_paths::is_virtual_path)
-        });
-        let Some(dest_folder) = self.drag_target_folder.clone().or(cross_panel_target) else {
-            self.cancel_item_drag();
-            return;
-        };
-        let dest_folder = self.resolve_network_location_path(&dest_folder);
-
-        if !self.is_valid_drop_target(&dest_folder) {
-            self.cancel_item_drag();
-            return;
-        }
-
-        let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
-
-        let paths = std::mem::take(&mut self.drag_payload_paths);
-        if paths.is_empty() {
-            self.cancel_item_drag();
-            return;
-        }
-
-        let Some(source_folder) = self.drag_source_folder.clone() else {
-            self.cancel_item_drag();
-            return;
-        };
-
-        if should_confirm_drag_move(operation) {
-            self.pending_drag_move_confirmation = Some(
-                crate::app::drag_drop_state::PendingDragMoveConfirmation::new(
-                    paths,
-                    dest_folder,
-                    Some(source_folder.clone()),
-                    drag_origin,
-                ),
-            );
-            self.cancel_item_drag();
-            if drag_origin == ItemDragOrigin::GlobalSearch {
-                self.global_search.suspended_for_drag = true;
-            }
-            self.ui_ctx.request_repaint();
-            return;
-        }
-
-        let hwnd = self.shell_op_hwnd();
-        let request = match operation {
-            DragDropOperation::Copy => {
-                crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
-                    paths,
-                    dest_folder,
-                    hwnd,
-                )
-            }
-            DragDropOperation::Move => {
-                crate::workers::file_operation_worker::FileOperationRequest::move_batch(
-                    paths,
-                    dest_folder,
-                    hwnd,
-                )
-            }
-        };
-
-        if !self.dispatch_drag_file_operation(request) {
-            self.cancel_item_drag();
-            self.ui_ctx.request_repaint();
-            return;
-        }
-        if drag_origin == ItemDragOrigin::GlobalSearch {
-            self.cancel_item_drag();
-            self.close_global_search();
-        } else {
-            self.clear_selection_after_drag_file_operation(Some(source_folder.as_path()));
-        }
-
-        self.ui_ctx.request_repaint();
     }
 
     pub fn can_drop_drag_payload_to_recycle_bin(&self) -> bool {

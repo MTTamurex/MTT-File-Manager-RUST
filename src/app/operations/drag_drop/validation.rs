@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub(super) enum DragDropOperation {
     Copy,
     Move,
+    Link,
 }
 
 /// Returns true when any dragged path is a virtual entry inside an archive
@@ -47,9 +48,11 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn is_valid_drop_target(&self, target: &Path) -> bool {
-        is_valid_drop_target_for_paths(
+        let (ctrl, shift) = self.ui_ctx.input(|i| (i.modifiers.ctrl, i.modifiers.shift));
+        is_valid_drop_target_for_operation(
             &self.drag_payload_paths,
             &self.resolve_network_location_path(target),
+            self.resolve_drag_operation(target, ctrl, shift),
         )
     }
 
@@ -64,6 +67,7 @@ impl ImageViewerApp {
             dest_folder,
             ctrl_pressed,
             shift_pressed,
+            self.ui_ctx.input(|i| i.modifiers.alt),
         )
     }
 }
@@ -71,12 +75,17 @@ impl ImageViewerApp {
 fn resolve_drag_operation_for_paths(
     paths: &[PathBuf],
     _dest_folder: &Path,
-    _ctrl_pressed: bool,
+    ctrl_pressed: bool,
     _shift_pressed: bool,
+    alt_pressed: bool,
 ) -> DragDropOperation {
     // Items inside archives (virtual paths like `C:\foo.zip\bar.txt`)
-    // cannot be moved by the Shell. Every other internal drag is a move.
+    // cannot be moved or linked as filesystem items. Preserve extraction by copy.
     if drag_payload_inside_archive(paths) {
+        DragDropOperation::Copy
+    } else if alt_pressed {
+        DragDropOperation::Link
+    } else if ctrl_pressed {
         DragDropOperation::Copy
     } else {
         DragDropOperation::Move
@@ -84,6 +93,14 @@ fn resolve_drag_operation_for_paths(
 }
 
 pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -> bool {
+    is_valid_drop_target_for_operation(paths, target, DragDropOperation::Move)
+}
+
+fn is_valid_drop_target_for_operation(
+    paths: &[PathBuf],
+    target: &Path,
+    operation: DragDropOperation,
+) -> bool {
     if paths.is_empty() || paths.iter().any(|path| is_network_location_root(path)) {
         return false;
     }
@@ -97,21 +114,22 @@ pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -
     for source in paths {
         let source_norm = normalize_path_for_compare(source);
 
-        if source_norm == target_norm {
+        if operation != DragDropOperation::Link && source_norm == target_norm {
             return false;
         }
 
         let source_prefix = format!("{source_norm}\\");
-        if target_norm.starts_with(&source_prefix) {
+        if operation != DragDropOperation::Link && target_norm.starts_with(&source_prefix) {
             return false;
         }
     }
 
-    !paths.iter().any(|source| {
-        source
-            .parent()
-            .is_some_and(|p| normalize_path_for_compare(p) == target_norm)
-    })
+    operation != DragDropOperation::Move
+        || !paths.iter().any(|source| {
+            source
+                .parent()
+                .is_some_and(|p| normalize_path_for_compare(p) == target_norm)
+        })
 }
 
 pub(super) fn should_confirm_drag_move(operation: DragDropOperation) -> bool {
@@ -139,6 +157,9 @@ pub(super) fn normalize_path_for_compare(path: &Path) -> String {
         normalized
     }
 }
+
+#[cfg(test)]
+mod modifier_tests;
 
 #[cfg(test)]
 mod tests {
@@ -215,7 +236,7 @@ mod tests {
         let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
 
         assert_eq!(
-            resolve_drag_operation_for_paths(&paths, Path::new(r"G:\Dest"), false, false),
+            resolve_drag_operation_for_paths(&paths, Path::new(r"G:\Dest"), false, false, false),
             DragDropOperation::Move
         );
     }
@@ -225,18 +246,18 @@ mod tests {
         let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
 
         assert_eq!(
-            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), false, false),
+            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), false, false, false),
             DragDropOperation::Move
         );
     }
 
     #[test]
-    fn drag_operation_moves_regular_items_even_with_ctrl() {
+    fn drag_operation_copies_regular_items_with_ctrl() {
         let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
 
         assert_eq!(
-            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), true, false),
-            DragDropOperation::Move
+            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), true, false, false),
+            DragDropOperation::Copy
         );
     }
 
@@ -248,7 +269,7 @@ mod tests {
         let paths = vec![archive.join("inner").join("file.txt")];
 
         assert_eq!(
-            resolve_drag_operation_for_paths(&paths, dir.path(), false, true),
+            resolve_drag_operation_for_paths(&paths, dir.path(), false, true, false),
             DragDropOperation::Copy
         );
     }

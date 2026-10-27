@@ -9,6 +9,7 @@ use windows::Win32::Foundation::HWND;
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerConflictPolicy;
 mod handlers;
+mod shortcuts;
 
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::security::{
@@ -336,6 +337,10 @@ pub(crate) enum FileOperationRequest {
         dest_folder: PathBuf,
         hwnd: SendHwnd,
     },
+    CreateShortcuts {
+        paths: Vec<PathBuf>,
+        dest_folder: PathBuf,
+    },
     /// Batch move: all files in a single Shell operation (single progress dialog)
     MoveBatch {
         paths: Vec<PathBuf>,
@@ -535,6 +540,9 @@ impl FileOperationRequest {
                 clipboard_paste_token,
             },
             Self::RestoreFromRecycleBin { items } => Self::RestoreFromRecycleBin { items },
+            Self::CreateShortcuts { paths, dest_folder } => {
+                Self::CreateShortcuts { paths, dest_folder }
+            }
             Self::DeletePermanently { physical_paths, .. } => Self::DeletePermanently {
                 physical_paths,
                 hwnd,
@@ -840,6 +848,10 @@ fn run_file_operation_loop(
                             CompletionBehavior::NoFinished
                         }
                     };
+                }
+                FileOperationRequest::CreateShortcuts { paths, dest_folder } => {
+                    shortcuts::create_shortcuts(paths, dest_folder, &result_sender);
+                    return CompletionBehavior::SendFinishedNoRefresh;
                 }
                 FileOperationRequest::MoveBatch {
                     paths,

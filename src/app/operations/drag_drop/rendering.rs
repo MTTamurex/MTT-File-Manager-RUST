@@ -87,6 +87,7 @@ impl ImageViewerApp {
             match self.resolve_drag_operation(dest, ctrl_pressed, shift_pressed) {
                 DragDropOperation::Copy => rust_i18n::t!("drag_drop.copy"),
                 DragDropOperation::Move => rust_i18n::t!("drag_drop.move"),
+                DragDropOperation::Link => rust_i18n::t!("context_menu.create_shortcut"),
             }
         });
 

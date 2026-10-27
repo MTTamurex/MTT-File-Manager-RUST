@@ -178,15 +178,10 @@ pub fn empty_recycle_bin(hwnd: windows::Win32::Foundation::HWND) -> OpResult<()>
 }
 
 /// Creates a Windows shortcut (.lnk).
-pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
+pub fn create_shortcut(target: &Path, destination: &str) -> OpResult<PathBuf> {
     let valid_target = sanitize_operation_path(target)?;
 
-    let fallback_dir = PathBuf::from(current_path);
-    let raw_dest_dir = valid_target
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or(fallback_dir);
-    let dest_dir = sanitize_operation_path(&raw_dest_dir)?;
+    let dest_dir = sanitize_operation_path(Path::new(destination))?;
 
     let base_name = valid_target
         .file_name()
@@ -243,7 +238,9 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
-            let wide_workdir: Vec<u16> = dest_dir
+            let wide_workdir: Vec<u16> = valid_target
+                .parent()
+                .unwrap_or(&valid_target)
                 .as_os_str()
                 .encode_wide()
                 .chain(std::iter::once(0))

@@ -295,7 +295,7 @@ impl ImageViewerApp {
                                 self.render_list_view_compact(ui);
                             },
                         );
-                        if self.is_item_dragging {
+                        if self.is_item_dragging && column_drop_target.is_some() {
                             self.drag_target_folder = column_drop_target
                                 .as_ref()
                                 .filter(|target| self.is_valid_drop_target(target))

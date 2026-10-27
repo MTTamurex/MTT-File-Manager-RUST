@@ -3,6 +3,23 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Shell::*;
 
+/// Same-folder copies must create a new name rather than target the original.
+pub(super) fn copy_operation_flags(paths: &[PathBuf], destination: &Path) -> FILEOPERATION_FLAGS {
+    let destination =
+        std::fs::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
+    let same_folder = paths.iter().filter_map(|path| path.parent()).any(|parent| {
+        let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+        parent
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&destination.to_string_lossy())
+    });
+    if same_folder {
+        FOF_ALLOWUNDO | FOF_RENAMEONCOLLISION
+    } else {
+        FOF_ALLOWUNDO
+    }
+}
+
 /// Helper to create a double-null-terminated wide string (required by SHFileOperation).
 fn to_double_null_terminated(s: &str) -> Vec<u16> {
     s.encode_utf16()
@@ -168,7 +185,7 @@ pub fn copy_items_with_shell(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND) 
         wFunc: FO_COPY,
         pFrom: PCWSTR(from_vec.as_ptr()),
         pTo: PCWSTR(to_vec.as_ptr()),
-        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        fFlags: copy_operation_flags(paths, dest_folder).0 as u16,
         ..Default::default()
     };
 
@@ -217,7 +234,7 @@ pub fn copy_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool
         wFunc: FO_COPY,
         pFrom: PCWSTR(from_vec.as_ptr()),
         pTo: PCWSTR(to_vec.as_ptr()),
-        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        fFlags: copy_operation_flags(&[path.to_path_buf()], dest_folder).0 as u16,
         ..Default::default()
     };
 

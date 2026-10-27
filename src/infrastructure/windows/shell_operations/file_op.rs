@@ -6,8 +6,13 @@ use windows::Win32::System::Com::*;
 use windows::Win32::UI::Shell::*;
 
 use super::shfile_ops::{
-    copy_item_with_shell, copy_items_with_shell, move_item_with_shell, move_items_with_shell,
+    copy_item_with_shell, copy_items_with_shell, copy_operation_flags, move_item_with_shell,
+    move_items_with_shell,
 };
+
+#[cfg(test)]
+#[path = "copy_tests.rs"]
+mod copy_tests;
 
 /// RAII guard for balanced COM initialization in file operations.
 /// Previously, each function called CoInitializeEx without CoUninitialize,
@@ -50,7 +55,9 @@ pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
         };
 
         let _ = file_op.SetOwnerWindow(hwnd);
-        let _ = file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING);
+        let _ = file_op.SetOperationFlags(
+            copy_operation_flags(&[path.to_path_buf()], dest_folder) | FOF_WANTNUKEWARNING,
+        );
 
         let src_wide: Vec<u16> = path
             .as_os_str()
@@ -98,7 +105,8 @@ pub fn copy_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
         };
 
         let _ = file_op.SetOwnerWindow(hwnd);
-        let _ = file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING);
+        let _ = file_op
+            .SetOperationFlags(copy_operation_flags(paths, dest_folder) | FOF_WANTNUKEWARNING);
 
         // Get destination as IShellItem.
         let dest_wide: Vec<u16> = dest_folder
