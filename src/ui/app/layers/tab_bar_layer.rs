@@ -41,6 +41,7 @@ pub(crate) fn render_tab_bar_layer(
                 &app.tag_definitions,
                 &app.pinned_folders,
                 &app.navigation_state.current_path,
+                &app.sidebar_tree,
                 &mut app.svg_icon_manager,
                 frame,
                 app.cache_manager.computer_icon.as_ref(),

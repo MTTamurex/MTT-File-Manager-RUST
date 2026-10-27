@@ -108,6 +108,7 @@ pub fn render_cloud_roots(
             28.0,
             Sense::click(),
         );
+        crate::ui::sidebar_tree::reveal_row(ui, ctx.tree_state, root_path, root_path, rect);
         let is_selected =
             crate::ui::sidebar_selection::row_is_selected(
                 ctx.context_selection,

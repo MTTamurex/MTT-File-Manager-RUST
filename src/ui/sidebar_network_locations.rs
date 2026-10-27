@@ -79,6 +79,8 @@ pub(super) fn render_network_locations(
         let editing = ctx.folder_rename.filter(|editing| editing.matches(&target));
         let expanded = ctx.tree_state.is_expanded(Path::new(&location.path));
         let (rect, response) = allocate_sidebar_viewport_row(ui, width, 28.0, Sense::click());
+        let root_path = Path::new(&location.path);
+        crate::ui::sidebar_tree::reveal_row(ui, ctx.tree_state, root_path, root_path, rect);
         let navigation_selected = !ctx.is_computer_view
             && !ctx.is_recycle_bin_view
             && path_is_at_or_under(ctx.current_path, &location.path);

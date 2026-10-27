@@ -60,7 +60,7 @@ pub(super) fn drives_available_height(available: f32, tags_visible: bool, spacin
 
 /// Remember separate divider limits so resizing a collapsed layout does not
 /// overwrite the size used when those sections are expanded again.
-pub(super) fn restore_drives_height(
+pub(crate) fn restore_drives_height(
     previous: [bool; 4],
     current: [bool; 4],
     height_limit: &mut Option<f32>,
@@ -127,6 +127,24 @@ mod tests {
         assert_eq!(limit, Some(140.0));
         restore_drives_height(partial, expanded, &mut limit, &mut remembered);
         assert_eq!(limit, None);
+    }
+
+    #[test]
+    fn revealing_after_collapse_all_restores_the_saved_divider_limit() {
+        let mut layout = crate::app::layout_state::LayoutState {
+            sidebar_drives_height: Some(180.0),
+            ..Default::default()
+        };
+        layout.set_sidebar_sections_collapsed(true);
+        restore_drives_height(
+            [true; 4],
+            [true, false, true, true],
+            &mut layout.sidebar_drives_height,
+            &mut layout.sidebar_drives_heights,
+        );
+        layout.set_sidebar_sections_collapsed(false);
+        assert_eq!(layout.sidebar_drives_height, Some(180.0));
+        assert!(layout.sidebar_drives_height_before_collapse_all.is_none());
     }
 
     #[test]

@@ -15,6 +15,8 @@ const RIGHT_SIDEBAR_MIN: f32 = 250.0;
 const RIGHT_SIDEBAR_MAX: f32 = 500.0;
 const RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
+pub(crate) use sidebar_layout::restore_drives_height as restore_sidebar_drives_height;
+
 pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &mut eframe::Frame) {
     let ctx = root_ui.ctx().clone();
     let t_panels_start = std::time::Instant::now();

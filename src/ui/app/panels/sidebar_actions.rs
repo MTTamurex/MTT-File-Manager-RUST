@@ -3,6 +3,16 @@ use crate::app::ImageViewerApp;
 use crate::ui::sidebar::SidebarAction;
 
 pub(super) fn handle(app: &mut ImageViewerApp, action: SidebarAction) {
+    if matches!(
+        &action,
+        SidebarAction::SetAllSectionsCollapsed(_)
+            | SidebarAction::ToggleCloudDrives
+            | SidebarAction::ToggleLocalDisks
+            | SidebarAction::ToggleNetworkDrives
+            | SidebarAction::ToggleNetworkLocations
+    ) {
+        app.sidebar_tree.cancel_reveal();
+    }
     let sections_before = matches!(
         &action,
         SidebarAction::ToggleCloudDrives

@@ -32,6 +32,19 @@ impl ImageViewerApp {
             return;
         }
         match action {
+            TabAction::ExpandFolderTree | TabAction::CollapseFolderTree => {
+                let owner = crate::app::state::sidebar_tree_state::reveal::RevealOwner::workspace(
+                    self.tab_manager.tabs[index].id,
+                )
+                .in_sidebar(self.tab_manager.active().id);
+                let path = if index == self.tab_manager.active_tab {
+                    &self.navigation_state.current_path
+                } else {
+                    &self.tab_manager.tabs[index].path
+                }
+                .clone();
+                self.apply_tab_tree_action(owner, &path, action);
+            }
             TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
                 let path = if index == self.tab_manager.active_tab {
                     &self.navigation_state.current_path
@@ -92,6 +105,14 @@ impl ImageViewerApp {
             return;
         }
         match action {
+            TabAction::ExpandFolderTree | TabAction::CollapseFolderTree => {
+                let owner = crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(
+                    self.tab_manager.active().id,
+                    set.tabs[index].id,
+                );
+                let path = set.tabs[index].snapshot.path.clone();
+                self.apply_tab_tree_action(owner, &path, action);
+            }
             TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
                 let path = set.tabs[index].snapshot.path.clone();
                 self.apply_tab_quick_access_action(&path, action);

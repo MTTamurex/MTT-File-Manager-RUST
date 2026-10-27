@@ -50,6 +50,7 @@ pub(super) fn render_tabs(
     tag_definitions: &rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
     pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
     live_path: &str,
+    tree_state: &crate::app::state::sidebar_tree_state::SidebarTreeState,
     svg_icons: &mut SvgIconManager,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
@@ -377,6 +378,11 @@ pub(super) fn render_tabs(
                 crate::tabs::quick_access::tab_quick_access_action(
                     if is_active { live_path } else { &tab.path },
                     pinned_folders,
+                ),
+                tree_state.tab_tree_action(
+                    crate::app::state::sidebar_tree_state::reveal::RevealOwner::workspace(tab.id)
+                        .in_sidebar(tab_manager.active().id),
+                    if is_active { live_path } else { &tab.path },
                 ),
             ) {
                 action = TabBarAction::Context(idx, command);

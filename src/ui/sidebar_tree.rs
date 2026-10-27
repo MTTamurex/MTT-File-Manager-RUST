@@ -13,6 +13,8 @@ mod middle_click_tests;
 pub(crate) mod rename;
 #[cfg(test)]
 mod rename_lifecycle_tests;
+#[cfg(test)]
+mod reveal_tests;
 
 /// Shared context references needed for tree rendering.
 pub struct SidebarTreeContext<'a> {
@@ -32,6 +34,19 @@ const INDENT_PX: f32 = 16.0;
 const ARROW_WIDTH: f32 = 16.0;
 const ICON_SIZE: f32 = 16.0;
 const BASE_INDENT: f32 = 20.0; // Extra indent for tree nodes vs drive row
+
+pub(crate) fn reveal_row(
+    ui: &mut egui::Ui,
+    state: &SidebarTreeState,
+    root: &Path,
+    path: &Path,
+    rect: Rect,
+) {
+    if state.take_reveal_row(root, path) {
+        ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
+        ui.ctx().request_repaint();
+    }
+}
 
 /// Render the folder tree for a single drive root.
 /// Returns the first action triggered this frame (if any).
@@ -65,7 +80,7 @@ pub fn render_drive_tree(
                     context_selection: ctx.context_selection,
                     tree_id: ctx.tree_id,
                 };
-                render_tree_node(ui, node, 1, &mut node_ctx, &mut action);
+                render_tree_node(ui, root, node, 1, &mut node_ctx, &mut action);
             }
         }
     }
@@ -76,6 +91,7 @@ pub fn render_drive_tree(
 /// Render a single tree node and recurse into its expanded children.
 fn render_tree_node(
     ui: &mut egui::Ui,
+    root: &Path,
     node: &FolderNode,
     depth: usize,
     ctx: &mut SidebarTreeContext,
@@ -105,6 +121,12 @@ fn render_tree_node(
     let row_width = ui.available_width().max(content_min_width);
     let row_height = crate::ui::fonts::layout::row_height(ui, ROW_HEIGHT, 12.0, 6.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(row_width, row_height), Sense::click());
+    let name_left = rect.min.x + indent + ARROW_WIDTH + ICON_SIZE + 4.0;
+    let name_rect = Rect::from_min_max(
+        Pos2::new(name_left, rect.min.y),
+        Pos2::new(name_left + text_width, rect.max.y),
+    );
+    reveal_row(ui, ctx.tree_state, root, &node.path, name_rect);
     let is_selected =
         crate::ui::sidebar_selection::row_is_selected(
             ctx.context_selection,
@@ -326,7 +348,7 @@ fn render_tree_node(
                     context_selection: ctx.context_selection,
                     tree_id: ctx.tree_id,
                 };
-                render_tree_node(ui, child, depth + 1, &mut child_ctx, action);
+                render_tree_node(ui, root, child, depth + 1, &mut child_ctx, action);
             }
         }
     }

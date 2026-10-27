@@ -56,6 +56,7 @@ pub(super) fn render_panel_tab_bar(
     tag_definitions: &rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
     pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
     live_path: Option<&str>,
+    tree_state: &crate::app::state::sidebar_tree_state::SidebarTreeState,
     is_item_dragging: bool,
     can_add_tab: bool,
     computer_icon: Option<&egui::TextureHandle>,
@@ -334,6 +335,10 @@ pub(super) fn render_panel_tab_bar(
                                             crate::tabs::quick_access::tab_quick_access_action(
                                                 path,
                                                 pinned_folders,
+                                            ),
+                                            tree_state.tab_tree_action(
+                                                crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(workspace_id, tab.id),
+                                                path,
                                             ),
                                         )
                                     {

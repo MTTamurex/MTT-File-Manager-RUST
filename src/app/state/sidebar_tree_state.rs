@@ -6,6 +6,7 @@ use std::time::Instant;
 use crate::infrastructure::directory_cache::DirectoryCache;
 
 mod rename;
+pub(crate) mod reveal;
 
 /// A single folder node in the sidebar tree.
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +28,9 @@ struct LoadResult {
 
 /// State for the hierarchical folder tree displayed in the sidebar.
 pub struct SidebarTreeState {
+    reveal: std::cell::RefCell<Option<reveal::RevealRequest>>,
+    reveal_undo: HashMap<reveal::RevealOwner, reveal::RevealUndo>,
+    reveal_sidebar_workspace: Option<usize>,
     /// Paths the user has expanded (or that were auto-expanded by navigation sync).
     expanded: HashSet<PathBuf>,
     /// Cached children for each expanded directory.
@@ -67,6 +71,9 @@ impl SidebarTreeState {
     pub fn new(dir_cache: Arc<DirectoryCache>) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
+            reveal: Default::default(),
+            reveal_undo: Default::default(),
+            reveal_sidebar_workspace: None,
             expanded: HashSet::new(),
             children: HashMap::new(),
             loading: HashSet::new(),
@@ -114,6 +121,7 @@ impl SidebarTreeState {
     /// Children for newly expanded nodes are loaded on demand; children
     /// for nodes that are no longer expanded are kept in cache for reuse.
     pub fn restore_expanded(&mut self, expanded: HashSet<PathBuf>, scroll_y: f32) {
+        self.reveal.borrow_mut().take();
         self.expanded = expanded;
         self.scroll_target_y = scroll_y;
         self.scroll_visual_y = scroll_y;
@@ -155,6 +163,8 @@ impl SidebarTreeState {
 
     /// Toggle expand/collapse. If expanding and no cached children, starts loading.
     pub fn toggle_expand(&mut self, path: &Path) {
+        self.reveal.borrow_mut().take();
+        self.preserve_manual_expansion(path);
         if self.expanded.contains(path) {
             self.expanded.remove(path);
             self.prune_collapsed_children_cache();
@@ -177,6 +187,7 @@ impl SidebarTreeState {
 
     /// Remove all state for a given drive root (e.g. when a USB drive is removed).
     pub fn clear_drive(&mut self, drive_root: &Path) {
+        self.cancel_reveal_under(drive_root);
         let drive_prefix = drive_root.to_path_buf();
         self.expanded.retain(|p| !p.starts_with(&drive_prefix));
         self.children.retain(|p, _| !p.starts_with(&drive_prefix));
@@ -299,6 +310,7 @@ impl SidebarTreeState {
                     }
                 }
                 None => {
+                    self.cancel_reveal_on_load_failure(&result.parent);
                     // I/O error — collapse the node but don't mark has_subfolders=false
                     // so the arrow stays and the user can retry later.
                     self.expanded.remove(&result.parent);
@@ -310,6 +322,7 @@ impl SidebarTreeState {
 
         if any {
             self.prune_collapsed_children_cache();
+            self.advance_reveal();
         }
 
         any

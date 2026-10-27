@@ -1169,6 +1169,8 @@ notifications:
   initial_indexing_progress: "初始索引建立中，已处理%{count}个项目。"
   initial_indexing_completed: "初始索引完成。全局搜索及相关功能现已可用。"
 tabs:
+  expand_folder_tree: "展开文件夹目录树"
+  collapse_folder_tree: "折叠文件夹目录树"
   detaching: "正在将标签页移至新窗口…"
   detach_failed: "无法打开新窗口。标签页已保留在此窗口中。"
   close: "关闭标签页"

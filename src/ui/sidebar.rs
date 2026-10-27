@@ -25,7 +25,7 @@ static DRIVE_TYPE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, DriveType>>> 
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Get drive type from cache, only calling GetDriveTypeW on cache miss.
-fn get_cached_drive_type(disk_path: &str) -> DriveType {
+pub(crate) fn get_cached_drive_type(disk_path: &str) -> DriveType {
     let mut cache = DRIVE_TYPE_CACHE.lock();
     if let Some(&dt) = cache.get(disk_path) {
         return dt;
@@ -539,6 +539,7 @@ pub fn render_sidebar_drives(
 
             let (rect, response) =
                 allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 32.0, Sense::click());
+            super::sidebar_tree::reveal_row(ui, ctx.tree_state, root_path, root_path, rect);
             let is_selected =
                 crate::ui::sidebar_selection::row_is_selected(
                     ctx.context_selection,

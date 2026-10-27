@@ -169,6 +169,7 @@ impl ImageViewerApp {
         self.poll_drive_info();
         self.poll_drive_health();
         self.dispatch_drive_health_requests();
+        self.validate_tab_tree_reveals();
         if self.sidebar_tree.poll_loaded() {
             ctx.request_repaint();
         }

@@ -24,7 +24,14 @@ fn right_click(depth: usize, renaming: bool, dragging: bool) -> Option<SidebarTr
             context_selection: None,
             tree_id: egui::Id::new("drive_tree").with("C:\\"),
         };
-        render_tree_node(ui, &node, depth, &mut context, &mut action);
+        render_tree_node(
+            ui,
+            Path::new("C:\\"),
+            &node,
+            depth,
+            &mut context,
+            &mut action,
+        );
         action
     };
     let output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -118,7 +125,7 @@ fn sidebar_context_highlight_follows_the_exact_node_and_restores_navigation_afte
                     context_selection:
                         crate::ui::sidebar_selection::SidebarContextSelection::from_menu(menu),
                 };
-                render_tree_node(ui, &node, 1, &mut context, &mut None);
+                render_tree_node(ui, Path::new("C:\\"), &node, 1, &mut context, &mut None);
             }
         });
         let color = crate::ui::theme::selection_color(&ctx);

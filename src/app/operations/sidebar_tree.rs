@@ -4,6 +4,8 @@ use crate::app::ImageViewerApp;
 use crate::application::sidebar_tree::{SidebarFolderRename, SidebarFolderTarget};
 use std::path::{Path, PathBuf};
 
+mod reveal;
+
 impl ImageViewerApp {
     fn sidebar_folder_path_can_be_renamed(&self, path: &Path) -> bool {
         !crate::domain::network_path::is_network_location_root(path)

@@ -29,7 +29,7 @@ fn frame(ctx: &egui::Context, editing: &mut Option<SidebarFolderRename>, show_no
                     renaming: editing.as_ref(),
                     context_selection: None,
                 };
-                render_tree_node(ui, &node, 1, &mut context, &mut None);
+                render_tree_node(ui, Path::new("C:\\"), &node, 1, &mut context, &mut None);
             }
         }
         rename::finish_frame(ctx, editing);

@@ -1173,6 +1173,8 @@ notifications:
   initial_indexing_completed: "Indexação inicial concluída. A busca global e os recursos relacionados estão disponíveis."
 
 tabs:
+  expand_folder_tree: "Expandir árvore da pasta"
+  collapse_folder_tree: "Recolher árvore da pasta"
   detaching: "Movendo aba para uma nova janela…"
   detach_failed: "Não foi possível abrir a nova janela. A aba foi mantida nesta janela."
   close: "Fechar aba"

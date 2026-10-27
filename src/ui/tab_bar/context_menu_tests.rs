@@ -40,6 +40,16 @@ fn quick_access_commands_do_not_select_or_pin_the_tab() {
     }
 }
 
+#[test]
+fn folder_tree_commands_do_not_select_the_clicked_tab() {
+    for (action, label) in [
+        (TabAction::ExpandFolderTree, "tabs.expand_folder_tree"),
+        (TabAction::CollapseFolderTree, "tabs.collapse_folder_tree"),
+    ] {
+        click_command_without_selecting_tab(None, action, label, false);
+    }
+}
+
 fn click_command_without_selecting_tab(
     quick_access: Option<TabAction>,
     expected: TabAction,
@@ -66,9 +76,19 @@ fn click_command_without_selecting_tab(
         } else {
             response
         };
-        if let Some(command) =
-            tab_context_menu(&context_response, pinned, true, false, false, quick_access)
-        {
+        if let Some(command) = tab_context_menu(
+            &context_response,
+            pinned,
+            true,
+            false,
+            false,
+            quick_access,
+            matches!(
+                expected,
+                TabAction::ExpandFolderTree | TabAction::CollapseFolderTree
+            )
+            .then_some(expected),
+        ) {
             action = Some(command);
         }
     };

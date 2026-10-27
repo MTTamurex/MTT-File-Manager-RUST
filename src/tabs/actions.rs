@@ -10,6 +10,8 @@ pub enum TabAction {
     TogglePin,
     PinQuickAccess,
     UnpinQuickAccess,
+    ExpandFolderTree,
+    CollapseFolderTree,
 }
 
 pub(crate) fn close_candidates<T>(

@@ -222,6 +222,7 @@ impl ImageViewerApp {
             let active = self.tab_manager.active();
             let sidebar_expanded = active.sidebar_expanded.clone();
             let sidebar_scroll_y = active.sidebar_scroll_y;
+            self.sidebar_tree.set_reveal_sidebar_workspace(active.id);
             self.sidebar_tree
                 .restore_expanded(sidebar_expanded, sidebar_scroll_y);
         }

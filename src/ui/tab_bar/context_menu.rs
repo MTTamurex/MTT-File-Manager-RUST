@@ -10,6 +10,7 @@ pub(crate) fn tab_context_menu(
     can_close_left: bool,
     can_close_right: bool,
     quick_access_action: Option<TabAction>,
+    tree_action: Option<TabAction>,
 ) -> Option<TabAction> {
     let mut action = None;
     response.context_menu(|ui| {
@@ -36,6 +37,19 @@ pub(crate) fn tab_context_menu(
                 action = Some(command);
                 ui.close();
             }
+        }
+        ui.separator();
+        let tree_label = if tree_action == Some(TabAction::CollapseFolderTree) {
+            t!("tabs.collapse_folder_tree")
+        } else {
+            t!("tabs.expand_folder_tree")
+        };
+        if ui
+            .add_enabled(tree_action.is_some(), egui::Button::new(tree_label))
+            .clicked()
+        {
+            action = tree_action;
+            ui.close();
         }
         if let Some(command @ (TabAction::PinQuickAccess | TabAction::UnpinQuickAccess)) =
             quick_access_action

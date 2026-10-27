@@ -25,7 +25,7 @@ fn middle_click_on_a_folder_node_opens_it_without_toggling_the_tree() {
             context_selection: None,
             tree_id: egui::Id::new("drive_tree").with("C:\\"),
         };
-        render_tree_node(ui, &node, 1, &mut tree_ctx, &mut action);
+        render_tree_node(ui, Path::new("C:\\"), &node, 1, &mut tree_ctx, &mut action);
         action
     };
     let output = ctx.run_ui(egui::RawInput::default(), |ui| {
