@@ -4,6 +4,9 @@ use eframe::egui;
 use std::cell::RefCell;
 use std::path::Component;
 
+mod overflow_popup;
+use overflow_popup::render_overflow_popup;
+
 // M-3: Cache breadcrumb segments — recomputed only when path changes.
 // Each entry is (display_label, navigation_target).
 thread_local! {
@@ -391,126 +394,6 @@ fn render_visible_tail(
             resp.on_hover_text(&segments[seg_idx].0);
         }
     }
-}
-
-/// Renders the "…" overflow button and its popup. The popup lists the
-/// hidden segments in path order. Returns the `target_path` of the segment
-/// the user clicked in the popup, or `None`.
-fn render_overflow_popup(
-    ui: &mut egui::Ui,
-    segments: &[(String, String)],
-    hidden_indices: &[usize],
-    text_color: egui::Color32,
-) -> Option<String> {
-    let popup_id = egui::Id::new("details_breadcrumb_overflow_popup");
-    let mut show_overflow = ui
-        .ctx()
-        .memory(|m| m.data.get_temp::<bool>(popup_id).unwrap_or(false));
-
-    let font_id = egui::FontId::proportional(11.0);
-    let ellipsis_resp = ui
-        .scope(|ui| {
-            let hover_color = if ui.visuals().dark_mode {
-                theme::color_dark_hover()
-            } else {
-                theme::color_hover()
-            };
-
-            ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-
-            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
-
-            ui.visuals_mut().widgets.active.bg_fill = if ui.visuals().dark_mode {
-                theme::palette::border(ui.ctx(), egui::Color32::from_gray(70))
-            } else {
-                egui::Color32::from_gray(210)
-            };
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
-
-            ui.button(egui::RichText::new("…").color(text_color))
-        })
-        .inner;
-
-    if ellipsis_resp.clicked() {
-        show_overflow = !show_overflow;
-        ui.ctx()
-            .memory_mut(|m| m.data.insert_temp(popup_id, show_overflow));
-    }
-
-    if !show_overflow {
-        return None;
-    }
-
-    let mut selected_path: Option<String> = None;
-    let popup_response = egui::Area::new(popup_id)
-        .order(egui::Order::Foreground)
-        .fixed_pos(egui::pos2(
-            ellipsis_resp.rect.left(),
-            ellipsis_resp.rect.bottom() + 2.0,
-        ))
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_min_width(180.0);
-                ui.spacing_mut().item_spacing.y = 0.0;
-
-                for &idx in hidden_indices {
-                    let (display, actual_path) = segments[idx].clone();
-                    let item_size = egui::vec2(400.0, 28.0);
-                    let (item_rect, response) =
-                        ui.allocate_exact_size(item_size, egui::Sense::click());
-                    let visuals = ui.style().interact(&response);
-
-                    if response.hovered() || response.highlighted() {
-                        ui.painter().rect_filled(
-                            item_rect,
-                            visuals.corner_radius,
-                            visuals.weak_bg_fill,
-                        );
-                    }
-
-                    let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
-                    let truncated = truncate_text_to_fit(&display, text_rect.width(), &font_id, ui);
-                    ui.painter().text(
-                        egui::pos2(text_rect.left(), item_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        &truncated,
-                        font_id.clone(),
-                        text_color,
-                    );
-                    if truncated != display {
-                        let _ = response.clone().on_hover_text(display);
-                    }
-
-                    if response.clicked() {
-                        selected_path = Some(actual_path);
-                    }
-                }
-            });
-        });
-
-    if let Some(path) = selected_path {
-        ui.ctx()
-            .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
-        return Some(path);
-    }
-
-    // Auto-close when the user clicks anywhere outside the button and popup.
-    if ui.ctx().input(|i| i.pointer.any_pressed()) {
-        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.press_origin()) {
-            let clicked_ellipsis = ellipsis_resp.rect.contains(pointer_pos);
-            let clicked_popup = popup_response.response.rect.contains(pointer_pos);
-            if !clicked_ellipsis && !clicked_popup {
-                ui.ctx()
-                    .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
-            }
-        }
-    }
-
-    None
 }
 
 /// Estimates the natural (shrink-fit) width of the breadcrumb trail in
