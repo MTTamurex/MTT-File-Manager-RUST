@@ -92,6 +92,7 @@ fn update_with(
 }
 
 pub(crate) fn remove_tray_icon(hwnd: HWND) {
+    super::clicks::cancel(hwnd);
     let (added, icon) = STATE.with(|s| {
         let mut state = s.borrow_mut();
         let added = state.added;

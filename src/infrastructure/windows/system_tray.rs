@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::sync::OnceLock;
 
 mod badge;
+mod clicks;
 mod commands;
 pub(crate) mod coordinator;
 mod graphics;
@@ -23,7 +24,6 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     RegisterWindowMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOW,
-    WM_LBUTTONUP, WM_RBUTTONUP,
 };
 
 pub(crate) const TRAY_CALLBACK_MESSAGE: u32 = 0x8000 + 0x36;
@@ -77,10 +77,7 @@ pub(crate) fn taskbar_created_message() -> u32 {
 }
 
 pub(crate) fn handle_callback(hwnd: HWND, event: LPARAM) {
-    match event.0 as u32 {
-        WM_LBUTTONUP | WM_RBUTTONUP => menu::show(hwnd),
-        _ => {}
-    }
+    clicks::handle(hwnd, event.0 as u32);
 }
 
 pub(crate) fn hide_window(hwnd: HWND) {
