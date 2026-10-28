@@ -21,6 +21,7 @@ pub mod dual_panel;
 pub mod explorer_preferences;
 pub mod file_hash;
 pub mod file_operation_state;
+pub(crate) mod folder_export_state;
 pub mod folder_size_state;
 pub(crate) mod folder_timestamp_state;
 pub mod global_search_state;

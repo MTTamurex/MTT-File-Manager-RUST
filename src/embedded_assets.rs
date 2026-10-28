@@ -25,6 +25,7 @@ pub const ICON_DISK_ANALYSIS: &[u8] = include_bytes!("../assets/icons/disk_analy
 pub const ICON_EXTERNAL_LINK: &[u8] = include_bytes!("../assets/icons/external-link.svg");
 pub const ICON_EYE: &[u8] = include_bytes!("../assets/icons/eye.svg");
 pub const ICON_EXTRACT_ALL: &[u8] = include_bytes!("../assets/icons/extract_all.svg");
+pub const ICON_EXPORT_LISTING: &[u8] = include_bytes!("../assets/icons/export_listing.svg");
 pub const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
 pub const ICON_FOLDER_FILLED: &[u8] = include_bytes!("../assets/icons/folder_filled.svg");
 pub const ICON_FOLDER_NEW: &[u8] =
@@ -81,6 +82,7 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "disk_analysis" => Some(ICON_DISK_ANALYSIS),
         "eye" => Some(ICON_EYE),
         "extract_all" => Some(ICON_EXTRACT_ALL),
+        "export_listing" => Some(ICON_EXPORT_LISTING),
         "external-link" => Some(ICON_EXTERNAL_LINK),
         "folder" => Some(ICON_FOLDER),
         "folder_filled" => Some(ICON_FOLDER_FILLED),

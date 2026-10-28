@@ -54,6 +54,7 @@ impl ImageViewerApp {
 
     pub(crate) fn tab_navigation_blocked(&self) -> bool {
         self.navigation_state.show_settings_window
+            || self.folder_export.is_some()
             || self.global_search.active
             || self.context_menu.is_open
             || self.show_tag_manager

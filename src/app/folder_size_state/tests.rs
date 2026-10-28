@@ -39,6 +39,7 @@ fn test_state() -> FolderSizeState {
 mod selection_size_tests;
 mod size_sorting_tests;
 mod batch_progress_tests;
+mod export_snapshot_tests;
 
 #[test]
 fn panel_stale_summary_requires_complete_counts() {

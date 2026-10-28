@@ -75,9 +75,9 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: 
                 ui.add_space(toggle_gap);
 
                 let action_button_count = if app.navigation_state.is_recycle_bin_view {
-                    7.0
+                    8.0
                 } else {
-                    6.0
+                    7.0
                 };
                 let show_media_play_button = app.should_show_secondary_toolbar_media_play_button();
                 let separator_count = if show_media_play_button { 5.0 } else { 4.0 };

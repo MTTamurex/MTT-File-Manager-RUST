@@ -276,6 +276,9 @@ impl ImageViewerApp {
     }
 
     pub fn file_panel_input_blocked_by_drag_move_confirmation(&self) -> bool {
+        if self.folder_export.is_some() {
+            return true;
+        }
         should_block_file_panel_input_for_pending_confirmation(
             self.pending_drag_move_confirmation.is_some(),
         )

@@ -7,6 +7,45 @@ pub(super) const MAX_REQUESTS_PER_UPDATE: usize = 30;
 pub(super) const MAX_IN_FLIGHT_REQUESTS: usize = 120;
 
 impl FolderSizeState {
+    /// Completed values only: display caches can also contain in-flight totals.
+    pub(crate) fn export_size_snapshot(&self) -> std::collections::HashMap<String, u64> {
+        use crate::domain::file_tag::normalize_tag_path_key;
+        let now = std::time::Instant::now();
+        let unavailable: std::collections::HashSet<_> = self
+            .loading
+            .iter()
+            .chain(
+                self.failed_until
+                    .iter()
+                    .filter(|(_, until)| **until > now)
+                    .map(|(path, _)| path),
+            )
+            .map(|path| normalize_tag_path_key(path))
+            .collect();
+        let mut sizes: std::collections::HashMap<_, _> = self
+            .size_sorting
+            .sizes
+            .iter()
+            .map(|(path, size)| (normalize_tag_path_key(path), *size))
+            .collect();
+        for (path, size) in self.batch_cache.iter() {
+            let key = normalize_tag_path_key(path);
+            if !unavailable.contains(&key) {
+                sizes.entry(key).or_insert(*size);
+            }
+        }
+        for (path, summary) in self.cache.iter() {
+            let key = normalize_tag_path_key(path);
+            if !unavailable.contains(&key) {
+                sizes.entry(key).or_insert(summary.total_size);
+            }
+        }
+        for path in self.pending_revalidation.keys() {
+            sizes.remove(&normalize_tag_path_key(path));
+        }
+        sizes
+    }
+
     pub fn fail_batch_requests(&mut self) -> bool {
         let had_pending = !self.batch_loading.is_empty();
         self.batch_loading.clear();

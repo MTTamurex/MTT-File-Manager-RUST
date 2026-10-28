@@ -717,6 +717,8 @@ impl eframe::App for ImageViewerApp {
         crate::ui::fonts::selection::finish_preview_frame(ctx);
         crate::ui::fonts::selection::flush_font_updates(ctx);
 
+        crate::ui::components::folder_export::render(self, ctx);
+
         // 13. Batch Rename Modal
         if self.batch_rename_state.is_some() {
             crate::ui::components::batch_rename_modal::render_batch_rename_modal(self, ctx);

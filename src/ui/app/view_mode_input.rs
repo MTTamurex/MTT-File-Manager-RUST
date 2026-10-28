@@ -33,6 +33,7 @@ fn wheel_amount(unit: egui::MouseWheelUnit, y: f32) -> f32 {
 
 pub(super) fn handle_view_mode_input(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
     if app.context_menu.is_open
+        || app.folder_export.is_some()
         || app.show_tag_manager
         || app.batch_rename_state.is_some()
         || app.is_item_dragging

@@ -561,6 +561,7 @@ impl ImageViewerApp {
             renaming_state: None,
             focus_rename: false,
             batch_rename_state: None,
+            folder_export: None,
             sidebar_renaming: None,
             sidebar_rename_focus: false,
             sidebar_folder_rename: None,

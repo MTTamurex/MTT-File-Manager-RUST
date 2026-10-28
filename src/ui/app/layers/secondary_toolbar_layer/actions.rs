@@ -15,6 +15,7 @@ pub(super) enum SecAction {
     Paste,
     Rename,
     CreateFolder,
+    ExportListing,
     Delete { permanently: bool },
     EmptyRecycleBin,
 }
@@ -69,6 +70,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let can_create_folder = app.can_create_folder_in_current_location();
     let can_delete = has_selection && !in_archive_namespace && !selection_cannot_move;
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
+    let can_export = crate::app::folder_export_state::available(app);
 
     let icon_color = if ui.visuals().dark_mode {
         [220, 220, 220, 255]
@@ -157,6 +159,9 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         if render_btn("rename", can_rename, &t!("secondary_toolbar.rename")) {
             action = SecAction::Rename;
         }
+        if render_btn("export_listing", can_export, &t!("export_listing.title")) {
+            action = SecAction::ExportListing;
+        }
         if render_btn(
             "folder_new",
             can_create_folder,
@@ -200,6 +205,9 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
             }
         }
         SecAction::CreateFolder => app.create_new_folder(),
+        SecAction::ExportListing => {
+            app.folder_export = Some(crate::app::folder_export_state::FolderExportState::open(app));
+        }
         SecAction::Delete { permanently } => {
             let targets = delete_targets(
                 app.selected_file.as_ref().map(|item| &item.path),

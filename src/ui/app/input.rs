@@ -118,6 +118,9 @@ fn handle_delete_permanently_shortcut(
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    if app.folder_export.is_some() {
+        return;
+    }
     if crate::app::operations::tabs::transfer_pending(ctx) {
         return;
     }

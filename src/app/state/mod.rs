@@ -451,6 +451,7 @@ pub struct ImageViewerApp {
 
     // BATCH RENAME STATE
     pub batch_rename_state: Option<crate::app::batch_rename::BatchRenameState>,
+    pub(crate) folder_export: Option<crate::app::folder_export_state::FolderExportState>,
 
     // SIDEBAR RENAME (inline in sidebar, not in main view)
     /// (drive_path, editable_label) for the inline drive editor.
