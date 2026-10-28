@@ -48,12 +48,12 @@ pub(super) fn render(count: usize, size: u32) -> Option<Pixmap> {
             _ => "M.2 5C4 5 4 2 4 1.5C4-.6 0-.6 0 1.5C0 3.5 4 3.5 4 1.5",
         };
         let (shape, position, scale, plus) = if label == "9+" {
-            ("<rect x='.5' y='.5' width='31' height='22' rx='5'/>", "5 5", "2.8", "<path d='M25 8V16M21 12H29' stroke='white' stroke-width='2.2' stroke-linecap='round'/>")
+            ("<rect x='.5' y='.5' width='31' height='22' rx='5'/>", "5.8 6", "2.4", "<path d='M25 8.5V15.5M21.5 12H28.5' stroke='white' stroke-width='2' stroke-linecap='round'/>")
         } else {
             (
                 "<rect x='8.5' y='.5' width='23' height='22' rx='5'/>",
-                "14 4",
-                "3.0",
+                "15 5.25",
+                "2.5",
                 "",
             )
         };
