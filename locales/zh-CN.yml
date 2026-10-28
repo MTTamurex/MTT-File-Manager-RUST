@@ -1346,5 +1346,7 @@ tray:
   right_panel: "右侧面板"
   hidden_at: "隐藏到托盘："
   windows_count: "实例：%{count}"
+  restore_failed: "部分已保存的实例无法重新打开。已保留保存的会话，以供下次启动时恢复。"
+  restore_busy: "正在重新打开已保存的实例。请等待启动完成后重试。"
   command_failed: "无法确认命令。实例可能正忙或以不同的权限运行。请重试。"
   exit_failed: "无法确认所有实例都已退出。部分实例可能已经关闭。此实例将保持打开，以便您重试。"

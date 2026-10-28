@@ -32,6 +32,7 @@ mod init_preferences;
 mod init_state_builders;
 pub(crate) mod init_workers;
 pub(crate) mod initial_indexing_notice;
+pub mod instance_sessions;
 pub mod layout_state;
 pub(crate) mod live_file_size;
 pub mod miller_columns_state;

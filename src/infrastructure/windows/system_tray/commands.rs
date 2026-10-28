@@ -44,18 +44,11 @@ pub(super) fn exit_window(from: HWND, to: WindowRef) -> bool {
     }
 }
 
-pub(super) fn exit_all(from: HWND) -> bool {
-    let Some(owner) = WindowRef::capture(from) else {
-        return false;
-    };
-    let windows: Vec<_> = super::super::app_instances::main_windows()
-        .into_iter()
-        .filter_map(WindowRef::capture)
-        .collect();
-    exit_windows(owner, &windows, |window| exit_window(from, window))
+pub(super) fn exit_all(_from: HWND) -> bool {
+    super::session_exit::request_all()
 }
 
-fn exit_windows(
+pub(super) fn exit_windows(
     owner: WindowRef,
     windows: &[WindowRef],
     mut send: impl FnMut(WindowRef) -> bool,
@@ -73,12 +66,30 @@ fn exit_windows(
 
 pub(super) fn warn_failure(hwnd: HWND, global_exit: bool) {
     log::warn!("[TRAY] A user command was not acknowledged");
-    let message = if global_exit {
+    let message = if global_exit && crate::app::instance_sessions::restoring() {
+        rust_i18n::t!("tray.restore_busy")
+    } else if global_exit {
         rust_i18n::t!("tray.exit_failed")
     } else {
         rust_i18n::t!("tray.command_failed")
     };
     let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+    let title: Vec<u16> = "MTT File Manager".encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let _ = MessageBoxW(
+            Some(hwnd),
+            PCWSTR(message.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        );
+    }
+}
+
+pub(super) fn warn_restore_failure(hwnd: HWND) {
+    let message: Vec<u16> = rust_i18n::t!("tray.restore_failed")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
     let title: Vec<u16> = "MTT File Manager".encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = MessageBoxW(

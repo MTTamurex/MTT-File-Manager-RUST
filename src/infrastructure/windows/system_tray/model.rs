@@ -85,6 +85,19 @@ impl Snapshot {
 pub(super) enum Packet {
     Snapshot(Snapshot),
     Activate(Target),
+    RequestSession {
+        token: String,
+    },
+    SessionReply {
+        token: String,
+        session: crate::tabs::TabManagerSession,
+    },
+    ExitSessionGroup {
+        token: String,
+    },
+    SessionExitFailed {
+        token: String,
+    },
 }
 
 pub(super) fn menu_label(value: &str) -> String {

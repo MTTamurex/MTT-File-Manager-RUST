@@ -14,6 +14,7 @@ use super::db_utils;
 
 mod cleanup;
 mod column_widths;
+mod conditional_preferences;
 mod file_entry_cache;
 mod file_tags;
 mod folder_covers;

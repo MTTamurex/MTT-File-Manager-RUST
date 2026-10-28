@@ -190,7 +190,9 @@ impl ImageViewerApp {
         let mut startup_preferences = startup_preferences;
         let mut fixed_startup_path =
             startup_preferences.prepare_fixed_startup(startup_folder_path.as_deref());
-        if let Some(session) = crate::app::tab_transfer::startup_session() {
+        if let Some(session) = crate::app::tab_transfer::startup_session()
+            .or_else(crate::app::instance_sessions::startup_session)
+        {
             startup_preferences.saved_tab_session = Some(session);
             fixed_startup_path = None;
             startup_folder_path = None;
@@ -928,6 +930,11 @@ impl ImageViewerApp {
             background_memory_trim_last_stable_working_set_bytes: 0,
             background_memory_diagnostic_last_log: Instant::now(),
         };
+
+        crate::infrastructure::windows::system_tray::session_exit::initialize(
+            app.app_state_db.clone(),
+            ctx.clone(),
+        );
 
         // Spawn tooltip background worker for async metadata/thumbnail loading (P0-02/P0-03)
         app.global_search

@@ -15,7 +15,9 @@ pub(crate) mod model;
 mod native_popup;
 mod notification;
 mod ownership;
+mod popup;
 mod protocol;
+pub(crate) mod session_exit;
 #[cfg(test)]
 mod tests;
 mod window_ref;
@@ -31,6 +33,13 @@ pub(crate) const TRAY_CALLBACK_MESSAGE: u32 = 0x8000 + 0x36;
 pub(crate) use notification::{
     remove_tray_icon, restore_icon_after_taskbar_restart, update_tray_icon,
 };
+
+pub(crate) fn warn_exit_failure(hwnd: HWND) {
+    commands::warn_failure(hwnd, true);
+}
+pub(crate) fn warn_restore_failure(hwnd: HWND) {
+    commands::warn_restore_failure(hwnd);
+}
 thread_local! {
     static PENDING_ACTIONS: RefCell<VecDeque<TrayAction>> = const { RefCell::new(VecDeque::new()) };
 }
@@ -41,6 +50,13 @@ pub(crate) enum TrayAction {
     Open,
     Exit,
     Activate(model::Target),
+    ExitAll,
+    CaptureSession {
+        requester: usize,
+        process_id: u32,
+        token: String,
+    },
+    ExitFailed,
 }
 
 pub(crate) fn take_action() -> Option<TrayAction> {

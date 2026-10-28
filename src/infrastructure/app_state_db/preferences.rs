@@ -197,7 +197,7 @@ impl AppStateDb {
     }
 }
 
-fn is_sqlite_busy(error: &rusqlite::Error) -> bool {
+pub(super) fn is_sqlite_busy(error: &rusqlite::Error) -> bool {
     matches!(
         error,
         rusqlite::Error::SqliteFailure(sqlite_error, _)

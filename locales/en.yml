@@ -1356,5 +1356,7 @@ tray:
   right_panel: "Right panel"
   hidden_at: "Sent to tray:"
   windows_count: "Instances: %{count}"
+  restore_failed: "Some saved instances could not be reopened. The saved session was retained for a later restart."
+  restore_busy: "Saved instances are still being reopened. Wait for startup to finish, then try again."
   command_failed: "Could not confirm the command. The instance may be busy or running with different permissions. Try again."
   exit_failed: "Could not confirm exit for every instance. Some instances may already have closed. This instance will remain open so you can retry."

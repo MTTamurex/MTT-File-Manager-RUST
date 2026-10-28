@@ -35,23 +35,40 @@ pub(crate) fn restore_browser_state(app: &mut crate::app::ImageViewerApp) {
 /// Called by the CLI before starting the UI. Invalid transfers must not fall
 /// through to ordinary startup or restore an unrelated saved session.
 pub fn receive_startup(port: u16, token: &str) -> io::Result<()> {
+    let (stream, bytes) = receive_payload(port, token)?;
+    let transfer = std::str::from_utf8(&bytes)
+        .ok()
+        .and_then(TabTransfer::from_json)
+        .ok_or(io::ErrorKind::InvalidData)?;
+    STARTUP
+        .set(StartupTransfer {
+            transfer,
+            stream: Mutex::new(Some(stream)),
+        })
+        .map_err(|_| io::ErrorKind::AlreadyExists.into())
+}
+
+pub(crate) fn receive_payload(port: u16, token: &str) -> io::Result<(TcpStream, Vec<u8>)> {
     if token.len() != 32 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(io::ErrorKind::InvalidInput.into());
     }
     let mut stream = TcpStream::connect_timeout(&(Ipv4Addr::LOCALHOST, port).into(), TIMEOUT)?;
     stream.set_read_timeout(Some(TIMEOUT))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
-    let transfer = read_transfer(&mut stream, token)?;
-    STARTUP
-        .set(StartupTransfer {
-            transfer,
-            stream: Mutex::new(Some(stream)),
-        })
-        .map_err(|_| io::ErrorKind::AlreadyExists)?;
-    Ok(())
+    let bytes = read_payload(&mut stream, token)?;
+    Ok((stream, bytes))
 }
 
+#[cfg(test)]
 fn read_transfer(stream: &mut TcpStream, token: &str) -> io::Result<TabTransfer> {
+    let bytes = read_payload(stream, token)?;
+    std::str::from_utf8(&bytes)
+        .ok()
+        .and_then(TabTransfer::from_json)
+        .ok_or_else(|| io::ErrorKind::InvalidData.into())
+}
+
+fn read_payload(stream: &mut TcpStream, token: &str) -> io::Result<Vec<u8>> {
     stream.write_all(token.as_bytes())?;
     let mut size = [0; 4];
     stream.read_exact(&mut size)?;
@@ -61,10 +78,7 @@ fn read_transfer(stream: &mut TcpStream, token: &str) -> io::Result<TabTransfer>
     }
     let mut bytes = vec![0; size];
     stream.read_exact(&mut bytes)?;
-    std::str::from_utf8(&bytes)
-        .ok()
-        .and_then(TabTransfer::from_json)
-        .ok_or_else(|| io::ErrorKind::InvalidData.into())
+    Ok(bytes)
 }
 
 /// Acknowledge only after the native window and its requested session exist.
@@ -84,6 +98,10 @@ pub(crate) fn confirm_startup(app: &crate::app::ImageViewerApp) -> bool {
 
 pub(crate) fn launch(transfer: &TabTransfer) -> io::Result<()> {
     let bytes = serde_json::to_vec(transfer).map_err(io::Error::other)?;
+    launch_payload("--detach-tab", &bytes)
+}
+
+pub(crate) fn launch_payload(flag: &str, bytes: &[u8]) -> io::Result<()> {
     if bytes.len() > MAX_BYTES {
         return Err(io::ErrorKind::InvalidData.into());
     }
@@ -96,11 +114,11 @@ pub(crate) fn launch(transfer: &TabTransfer) -> io::Result<()> {
             .to_u128()
     );
     let mut child = Command::new(std::env::current_exe()?)
-        .arg("--detach-tab")
+        .arg(flag)
         .arg(listener.local_addr()?.port().to_string())
         .arg(&token)
         .spawn()?;
-    let result = send_session(&listener, &mut child, token.as_bytes(), &bytes);
+    let result = send_session(&listener, &mut child, token.as_bytes(), bytes);
     if result.is_err() {
         // This process was created exclusively for this transfer. Never leave
         // an unacknowledged duplicate alive after retaining the original tab.

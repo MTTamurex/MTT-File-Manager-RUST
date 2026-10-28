@@ -8,6 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TPM_RIGHTBUTTON, WM_NULL,
 };
 
+#[derive(Clone)]
 pub(super) enum Command {
     Open(WindowRef),
     Activate(WindowRef, Target),
@@ -16,6 +17,12 @@ pub(super) enum Command {
 }
 
 pub(super) fn show(hwnd: HWND) {
+    if !super::popup::show(hwnd) {
+        show_native(hwnd);
+    }
+}
+
+fn show_native(hwnd: HWND) {
     let mut point = POINT::default();
     if unsafe { GetCursorPos(&mut point) }.is_err() {
         return;
@@ -130,6 +137,10 @@ pub(super) fn show(hwnd: HWND) {
     let Some(command) = command.checked_sub(1).and_then(|i| commands.get(i)) else {
         return;
     };
+    execute(hwnd, command);
+}
+
+pub(super) fn execute(hwnd: HWND, command: &Command) {
     if let Command::Open(window) | Command::Activate(window, _) | Command::Exit(window) = command {
         if !window.is_current() {
             return;

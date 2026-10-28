@@ -10,6 +10,9 @@ pub(super) struct WindowRef {
 }
 
 impl WindowRef {
+    pub(super) fn process_id(self) -> u32 {
+        self.pid
+    }
     pub(super) fn capture(hwnd: HWND) -> Option<Self> {
         let mut pid = 0;
         unsafe {

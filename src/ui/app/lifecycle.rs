@@ -113,7 +113,9 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             crate::app::tab_transfer::restore_browser_state(app);
             app.sync_to_tab();
             app.run_post_startup_jobs(ctx);
-            if !crate::app::tab_transfer::confirm_startup(app) {
+            if !crate::app::tab_transfer::confirm_startup(app)
+                || !crate::app::instance_sessions::confirm_startup(app)
+            {
                 app.tray_exit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -421,6 +423,8 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    let exit_order =
+        crate::infrastructure::windows::system_tray::session_exit::individual_close_order();
     if let Some(hwnd) = app.native_hwnd {
         crate::infrastructure::windows::system_tray::coordinator::shutdown(hwnd);
     }
@@ -433,6 +437,12 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
         log::info!("[EXIT] Preferences saved.");
     } else {
         log::error!("[EXIT] Preferences could not be saved.");
+    }
+
+    if !crate::app::instance_sessions::save_individual(app, exit_order) {
+        log::error!(
+            "[EXIT] Restart session could not be saved; retaining the previous valid session"
+        );
     }
 
     // Arm the failsafe after final persistence and before teardown or FFI.

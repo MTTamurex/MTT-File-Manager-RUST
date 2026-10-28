@@ -73,6 +73,38 @@ fn source_waits_for_the_ready_acknowledgement() {
 }
 
 #[test]
+fn authenticated_transport_also_preserves_complete_multi_tab_sessions() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut manager = crate::tabs::TabManager::new_at_path(r"C:\Example");
+    manager.new_tab_at(r"D:\Other");
+    manager.tabs[0].pinned = true;
+    let expected = TabManagerSession::from_tab_manager(&manager);
+    let bytes = expected.to_json().unwrap().into_bytes();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        authenticate_stream(
+            &mut stream,
+            TOKEN.as_bytes(),
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        send_payload(&mut stream, &bytes, Duration::from_secs(2)).unwrap();
+    });
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let bytes = read_payload(&mut stream, TOKEN).unwrap();
+    assert_eq!(
+        TabManagerSession::from_json(std::str::from_utf8(&bytes).unwrap()).unwrap(),
+        expected
+    );
+    stream.write_all(b"READY").unwrap();
+    server.join().unwrap();
+}
+
+#[test]
 fn invalid_tokens_are_rejected_before_connecting() {
     assert!(receive_startup(0, "").is_err());
     assert!(receive_startup(0, "not-a-transfer-token").is_err());

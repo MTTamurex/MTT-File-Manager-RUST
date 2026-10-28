@@ -30,6 +30,15 @@ pub(super) fn test_snapshot() -> Snapshot {
     STATE.with(|s| s.borrow().local.clone())
 }
 
+#[cfg(test)]
+pub(super) fn test_set_local(hwnd: HWND) {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.hwnd = Some(hwnd);
+        state.exiting = false;
+    });
+}
+
 pub(crate) fn initialize(hwnd: HWND) {
     if initialize_with(
         hwnd,
@@ -215,6 +224,7 @@ fn request_exit_with(hwnd: HWND, post_close: impl FnOnce() -> bool) -> bool {
     if !post_close() {
         return false;
     }
+    super::session_exit::remember_individual_close();
     STATE.with(|s| s.borrow_mut().exiting = true);
     unsafe {
         let _ = SetPropW(

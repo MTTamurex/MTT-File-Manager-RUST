@@ -1356,5 +1356,7 @@ tray:
   right_panel: "Painel direito"
   hidden_at: "Enviada à bandeja:"
   windows_count: "Instâncias: %{count}"
+  restore_failed: "Algumas instâncias salvas não puderam ser reabertas. A sessão salva foi preservada para uma próxima inicialização."
+  restore_busy: "As instâncias salvas ainda estão sendo reabertas. Aguarde o término da inicialização e tente novamente."
   command_failed: "Não foi possível confirmar o comando. A instância pode estar ocupada ou executando com permissões diferentes. Tente novamente."
   exit_failed: "Não foi possível confirmar o encerramento de todas as instâncias. Algumas podem já ter sido encerradas. Esta instância permanecerá aberta para que você possa tentar novamente."

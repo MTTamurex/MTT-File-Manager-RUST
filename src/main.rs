@@ -474,14 +474,27 @@ fn main() -> eframe::Result<()> {
     let _exe = args.next();
     if let Some(flag) = args.next() {
         let flag_str = flag.to_string_lossy();
-        if flag_str.eq_ignore_ascii_case("--detach-tab") {
+        if flag_str.eq_ignore_ascii_case("--detach-tab")
+            || flag_str.eq_ignore_ascii_case("--restore-instance")
+        {
             let port = args
                 .next()
                 .and_then(|value| value.to_str()?.parse::<u16>().ok());
             let token = args.next();
             let received = port.zip(token.as_ref()).is_some_and(|(port, token)| {
-                mtt_file_manager::app::tab_transfer::receive_startup(port, &token.to_string_lossy())
+                if flag_str.eq_ignore_ascii_case("--restore-instance") {
+                    mtt_file_manager::app::instance_sessions::receive_startup(
+                        port,
+                        &token.to_string_lossy(),
+                    )
                     .is_ok()
+                } else {
+                    mtt_file_manager::app::tab_transfer::receive_startup(
+                        port,
+                        &token.to_string_lossy(),
+                    )
+                    .is_ok()
+                }
             });
             if !received {
                 log::error!("[TAB-TRANSFER] Invalid or expired transfer");
@@ -658,6 +671,8 @@ fn main() -> eframe::Result<()> {
     }
     let instance_prefs = read_early_preferences(&[
         mtt_file_manager::infrastructure::windows::app_instances::ALLOW_MULTIPLE_INSTANCES_KEY,
+        mtt_file_manager::app::instance_sessions::KEY,
+        "startup_location",
     ]);
     use mtt_file_manager::infrastructure::windows::app_instances;
     if !app_instances::allows_multiple_instances(
@@ -673,6 +688,19 @@ fn main() -> eframe::Result<()> {
             }
             return Ok(());
         }
+    }
+    if startup_folder.is_none() {
+        mtt_file_manager::app::instance_sessions::prepare_startup(
+            instance_prefs
+                .get(mtt_file_manager::app::instance_sessions::KEY)
+                .map(String::as_str),
+            instance_prefs.get("startup_location").map(String::as_str),
+            app_instances::allows_multiple_instances(
+                instance_prefs
+                    .get(app_instances::ALLOW_MULTIPLE_INSTANCES_KEY)
+                    .map(String::as_str),
+            ) && app_instances::find_main_window().is_none(),
+        );
     }
     startup_lock.hold_until_window_ready();
 

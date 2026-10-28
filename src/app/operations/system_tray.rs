@@ -14,12 +14,46 @@ impl ImageViewerApp {
         {
             return;
         }
+        crate::infrastructure::windows::system_tray::session_exit::remember_individual_close();
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
     pub(crate) fn handle_tray_and_close_events(&mut self, ctx: &egui::Context) {
+        use crate::infrastructure::windows::system_tray::{session_exit, TrayAction};
+        session_exit::bind(self.app_state_db.clone(), ctx.clone());
+        if crate::app::instance_sessions::poll_restore_failure() {
+            if let Some(hwnd) = self.native_hwnd {
+                crate::infrastructure::windows::system_tray::warn_restore_failure(hwnd);
+            }
+        }
         self.publish_tray_snapshot(false);
         match crate::infrastructure::windows::system_tray::take_action() {
+            Some(TrayAction::ExitAll) => {
+                self.sync_to_tab();
+                let session = crate::tabs::TabManagerSession::from_tab_manager(&self.tab_manager);
+                if !self
+                    .native_hwnd
+                    .is_some_and(|hwnd| session_exit::begin(hwnd, session))
+                {
+                    if let Some(hwnd) = self.native_hwnd {
+                        crate::infrastructure::windows::system_tray::warn_exit_failure(hwnd);
+                    }
+                }
+            }
+            Some(TrayAction::CaptureSession {
+                requester,
+                process_id,
+                token,
+            }) => {
+                self.sync_to_tab();
+                let session = crate::tabs::TabManagerSession::from_tab_manager(&self.tab_manager);
+                session_exit::reply(requester, process_id, token, session);
+            }
+            Some(TrayAction::ExitFailed) => {
+                if let Some(hwnd) = self.native_hwnd {
+                    crate::infrastructure::windows::system_tray::warn_exit_failure(hwnd);
+                }
+            }
             Some(crate::infrastructure::windows::system_tray::TrayAction::Open) => {
                 if let Some(hwnd) = self.native_hwnd {
                     crate::infrastructure::windows::system_tray::show_window(hwnd);
@@ -45,6 +79,10 @@ impl ImageViewerApp {
         }
 
         let close_requested = ctx.input(|input| input.viewport().close_requested());
+        if close_requested && !close_routes_to_tray(self.minimize_to_tray, self.tray_exit_requested)
+        {
+            session_exit::remember_individual_close();
+        }
         if close_requested && close_routes_to_tray(self.minimize_to_tray, self.tray_exit_requested)
         {
             self.hide_to_system_tray(ctx);

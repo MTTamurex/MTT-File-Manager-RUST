@@ -13,7 +13,7 @@ const COMMAND_TIMEOUT_MS: u32 = 2_000;
 pub(super) fn send(from: HWND, to: HWND, packet: &Packet) -> bool {
     let timeout = match packet {
         Packet::Snapshot(_) => SNAPSHOT_TIMEOUT_MS,
-        Packet::Activate(_) => COMMAND_TIMEOUT_MS,
+        _ => COMMAND_TIMEOUT_MS,
     };
     send_with_timeout(from, to, packet, timeout)
 }
@@ -81,6 +81,16 @@ pub(super) unsafe fn receive(sender: HWND, data: LPARAM) -> Option<bool> {
         return Some(false);
     };
     match packet {
+        Packet::RequestSession { token } => {
+            return Some(super::session_exit::request_capture(sender, token))
+        }
+        Packet::SessionReply { token, session } => {
+            return Some(super::session_exit::receive_reply(sender, &token, session))
+        }
+        Packet::ExitSessionGroup { token } => {
+            return Some(super::session_exit::close(sender, &token))
+        }
+        Packet::SessionExitFailed { token } => return Some(super::session_exit::finish(&token)),
         Packet::Snapshot(snapshot) => super::coordinator::receive_snapshot(sender, snapshot),
         Packet::Activate(target) => {
             if !super::queue_action(super::TrayAction::Activate(target)) {
