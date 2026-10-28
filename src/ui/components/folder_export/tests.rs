@@ -245,3 +245,42 @@ fn footer_stays_next_to_separator_instead_of_filling_remaining_height() {
         }
     }
 }
+
+#[test]
+fn footer_buttons_have_equal_dimensions_with_default_and_large_fonts() {
+    for font_size in [14.0, 32.0] {
+        for busy in [false, true] {
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(680.0);
+                ui.style_mut().text_styles.insert(
+                    egui::TextStyle::Button,
+                    egui::FontId::proportional(font_size),
+                );
+                footer::render(ui, busy, true);
+            });
+            let sizes: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.rect.width() >= 100.0
+                            && (35.0..80.0).contains(&rect.rect.height()) =>
+                    {
+                        Some(rect.rect.size())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(sizes.len(), 2, "expected both footer button backgrounds");
+            assert!(
+                (sizes[0].x - sizes[1].x).abs() < 1.0,
+                "footer button widths differ"
+            );
+            assert!(
+                (sizes[0].y - sizes[1].y).abs() < 1.0,
+                "footer button heights differ"
+            );
+        }
+    }
+}
