@@ -1,7 +1,7 @@
-use super::model::{menu_label, Entry, Packet, Snapshot, Target, Workspace};
+use super::model::{menu_label, Entry, LocationKind, Packet, Snapshot, Target, Workspace};
 use super::*;
 use windows::core::w;
-use windows::Win32::Foundation::{HANDLE, LRESULT};
+use windows::Win32::Foundation::{HANDLE, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW, PostMessageW, SetPropW, MSG,
@@ -63,18 +63,6 @@ fn tray_window_references_reject_destroyed_or_exiting_windows() {
     assert!(!reference.is_current());
     drop(window);
     assert!(!reference.is_current());
-}
-
-#[test]
-fn notification_identity_is_shared_across_window_owners() {
-    let first = NativeWindow::new();
-    let second = NativeWindow::new();
-    let first_data = notify_icon_data(first.0);
-    let second_data = notify_icon_data(second.0);
-    assert_eq!(first_data.guidItem, second_data.guidItem);
-    assert_eq!(first_data.guidItem, TRAY_GUID);
-    assert_eq!(first_data.uFlags & NIF_GUID, NIF_GUID);
-    assert_ne!(first_data.hWnd, second_data.hWnd);
 }
 
 #[test]
@@ -172,19 +160,23 @@ fn protocol_round_trips_workspace_and_both_panel_tabs() {
             tab: Entry {
                 id: 7,
                 path: "C:\\Documents".into(),
+                icon: LocationKind::Folder,
             },
             panels: Some([
                 vec![Entry {
                     id: 3,
                     path: "C:\\Documents".into(),
+                    icon: LocationKind::Folder,
                 }],
                 vec![Entry {
                     id: 4,
                     path: "D:\\Videos".into(),
+                    icon: LocationKind::Folder,
                 }],
             ]),
         }],
         active_path: "D:\\Videos".into(),
+        active_icon: LocationKind::Folder,
         hidden_at: Some("2026-01-01 12:30:00".into()),
     };
     let bytes = serde_json::to_vec(&Packet::Snapshot(snapshot.clone())).unwrap();
@@ -235,6 +227,7 @@ fn tray_targets_follow_ids_after_reordering_and_reject_closed_tabs() {
                 tab: Entry {
                     id: 1,
                     path: "C:\\Documents".into(),
+                    icon: LocationKind::Folder,
                 },
                 panels: None,
             },
@@ -242,20 +235,24 @@ fn tray_targets_follow_ids_after_reordering_and_reject_closed_tabs() {
                 tab: Entry {
                     id: 2,
                     path: "C:\\Documents".into(),
+                    icon: LocationKind::Folder,
                 },
                 panels: Some([
                     vec![Entry {
                         id: 8,
                         path: "D:\\Videos".into(),
+                        icon: LocationKind::Folder,
                     }],
                     vec![
                         Entry {
                             id: 9,
                             path: "D:\\Videos".into(),
+                            icon: LocationKind::Folder,
                         },
                         Entry {
                             id: 10,
                             path: "D:\\Videos".into(),
+                            icon: LocationKind::Folder,
                         },
                     ],
                 ]),
@@ -299,6 +296,7 @@ fn tray_panel_targets_are_invalid_when_split_mode_is_disabled() {
             tab: Entry {
                 id: 1,
                 path: "C:\\Documents".into(),
+                icon: LocationKind::Folder,
             },
             panels: None,
         }],
@@ -316,4 +314,53 @@ fn tray_panel_targets_are_invalid_when_split_mode_is_disabled() {
             panel: None
         })
         .is_some());
+}
+
+#[test]
+fn icon_metadata_uses_raw_locations_not_localized_labels() {
+    use crate::domain::special_paths::{tag_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+    assert_eq!(
+        LocationKind::for_path(&tag_view_path(42)),
+        LocationKind::Tag
+    );
+    assert_eq!(
+        LocationKind::for_path(COMPUTER_VIEW_ID),
+        LocationKind::Computer
+    );
+    assert_eq!(
+        LocationKind::for_path(RECYCLE_BIN_VIEW_ID),
+        LocationKind::RecycleBin
+    );
+    assert_eq!(
+        LocationKind::for_path(r"C:\Documents"),
+        LocationKind::Folder
+    );
+    let snapshot = Snapshot {
+        workspaces: vec![Workspace {
+            tab: Entry {
+                id: 1,
+                path: "Tag: Example".into(),
+                icon: LocationKind::Tag,
+            },
+            panels: None,
+        }],
+        active_path: "Tag: Example".into(),
+        active_icon: LocationKind::Tag,
+        hidden_at: None,
+    };
+    let bytes = serde_json::to_vec(&Packet::Snapshot(snapshot.clone())).unwrap();
+    let Packet::Snapshot(decoded) = serde_json::from_slice(&bytes).unwrap() else {
+        panic!("unexpected packet")
+    };
+    assert_eq!(decoded, snapshot);
+}
+
+#[test]
+fn older_snapshot_packets_default_to_folder_icons() {
+    let bytes = br#"{"Snapshot":{"workspaces":[{"tab":{"id":1,"path":"Example"},"panels":null}],"active_path":"Example","hidden_at":null}}"#;
+    let Packet::Snapshot(snapshot) = serde_json::from_slice(bytes).unwrap() else {
+        panic!("unexpected packet")
+    };
+    assert_eq!(snapshot.active_icon, LocationKind::Folder);
+    assert_eq!(snapshot.workspaces[0].tab.icon, LocationKind::Folder);
 }

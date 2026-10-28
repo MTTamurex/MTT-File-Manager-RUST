@@ -1,7 +1,7 @@
 use crate::app::{dual_panel::ActivePanel, state::ImageViewerApp};
 use crate::infrastructure::windows::system_tray::{
     coordinator,
-    model::{Entry, Snapshot, Target, Workspace},
+    model::{Entry, LocationKind, Snapshot, Target, Workspace},
 };
 use eframe::egui;
 use std::time::{Duration, Instant};
@@ -67,6 +67,7 @@ impl ImageViewerApp {
                                 Entry {
                                     id: entry.id,
                                     path: display_path(path),
+                                    icon: LocationKind::for_path(path),
                                 }
                             })
                             .collect()
@@ -76,6 +77,7 @@ impl ImageViewerApp {
                     tab: Entry {
                         id: tab.id,
                         path: display_path(path),
+                        icon: LocationKind::for_path(path),
                     },
                     panels,
                 }
@@ -84,6 +86,7 @@ impl ImageViewerApp {
         Snapshot {
             workspaces,
             active_path: display_path(&self.navigation_state.current_path),
+            active_icon: LocationKind::for_path(&self.navigation_state.current_path),
             hidden_at: None,
         }
     }

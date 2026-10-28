@@ -7,9 +7,12 @@ use windows::Win32::Graphics::Gdi::{
     MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::HiDpi::{
-    GetDpiForMonitor, GetDpiForWindow, SystemParametersInfoForDpi, MDT_EFFECTIVE_DPI,
+    GetDpiForMonitor, GetDpiForWindow, GetSystemMetricsForDpi, SystemParametersInfoForDpi,
+    MDT_EFFECTIVE_DPI,
 };
-use windows::Win32::UI::WindowsAndMessaging::{NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS};
+use windows::Win32::UI::WindowsAndMessaging::{
+    NONCLIENTMETRICSW, SM_CXSMICON, SPI_GETNONCLIENTMETRICS,
+};
 
 pub(super) struct MenuText {
     dc: HDC,
@@ -103,15 +106,14 @@ impl MenuText {
         })
     }
 
-    pub(super) fn caption(&self, prefix: &str, path: &str) -> String {
-        let shortened = labels::compact(path, self.budget - self.measure(prefix), &|s| {
+    pub(super) fn window_labels<'a>(&self, values: impl Iterator<Item = &'a str>) -> Vec<String> {
+        labels::windows(&values.collect::<Vec<_>>(), self.budget, &|s| {
             self.measure(s)
-        });
-        if shortened.is_empty() && !path.is_empty() {
-            self.fit(&format!("{prefix}{path}"))
-        } else {
-            self.fit(&format!("{prefix}{shortened}"))
-        }
+        })
+    }
+
+    pub(super) fn icon_size(&self) -> u32 {
+        unsafe { GetSystemMetricsForDpi(SM_CXSMICON, self.dpi) }.clamp(16, 128) as u32
     }
 }
 
@@ -152,13 +154,11 @@ mod tests {
     }
 
     #[test]
-    fn native_font_measurement_keeps_captions_and_labels_within_budget() {
+    fn native_font_measurement_keeps_labels_within_budget() {
         let text = MenuText::new(HWND::default(), POINT::default());
         let long = format!("D:\\Documents\\{}\\Folder", "Example".repeat(100));
         let label = text.fit(&long);
         assert!(text.measure(&label) <= text.budget);
-        let caption = text.caption("Window 1 — ", &long);
-        assert!(text.measure(&caption) <= text.budget);
-        assert!(caption.contains('…'));
+        assert!(label.contains('…'));
     }
 }

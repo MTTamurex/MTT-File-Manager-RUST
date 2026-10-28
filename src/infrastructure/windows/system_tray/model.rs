@@ -1,5 +1,33 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum LocationKind {
+    #[default]
+    Folder,
+    Tag,
+    Computer,
+    RecycleBin,
+}
+
+impl LocationKind {
+    pub(super) const ALL: [Self; 4] = [Self::Folder, Self::Tag, Self::Computer, Self::RecycleBin];
+
+    pub(crate) fn for_path(path: &str) -> Self {
+        use crate::domain::special_paths::{
+            is_tag_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID,
+        };
+        if is_tag_view_path(path) {
+            Self::Tag
+        } else if path == COMPUTER_VIEW_ID {
+            Self::Computer
+        } else if path == RECYCLE_BIN_VIEW_ID {
+            Self::RecycleBin
+        } else {
+            Self::Folder
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Target {
     pub workspace: usize,
@@ -10,6 +38,8 @@ pub(crate) struct Target {
 pub(crate) struct Entry {
     pub id: usize,
     pub path: String,
+    #[serde(default)]
+    pub icon: LocationKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +52,8 @@ pub(crate) struct Workspace {
 pub(crate) struct Snapshot {
     pub workspaces: Vec<Workspace>,
     pub active_path: String,
+    #[serde(default)]
+    pub active_icon: LocationKind,
     pub hidden_at: Option<String>,
 }
 

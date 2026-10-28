@@ -1,98 +1,18 @@
 use super::{
-    commands, coordinator,
-    menu_text::MenuText,
-    model::{menu_label, Target},
-    window_ref::WindowRef,
+    commands, coordinator, menu_icons::MenuIcons, menu_text::MenuText, model::Target,
+    native_popup::Menu, window_ref::WindowRef,
 };
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, PostMessageW, SetForegroundWindow,
-    TrackPopupMenu, HMENU, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, TPM_RETURNCMD,
+    GetCursorPos, PostMessageW, SetForegroundWindow, TrackPopupMenu, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, WM_NULL,
 };
 
-enum Command {
+pub(super) enum Command {
     Open(WindowRef),
     Activate(WindowRef, Target),
     Exit(WindowRef),
     ExitAll,
-}
-
-struct Menu<'a> {
-    handle: HMENU,
-    text: &'a MenuText,
-}
-impl<'a> Menu<'a> {
-    fn new(text: &'a MenuText) -> Option<Self> {
-        unsafe { CreatePopupMenu().ok().map(|handle| Self { handle, text }) }
-    }
-    fn item(&self, id: usize, label: &str) -> bool {
-        let label: Vec<u16> = menu_label(&self.text.fit(label))
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
-        unsafe { AppendMenuW(self.handle, MF_STRING, id, PCWSTR(label.as_ptr())).is_ok() }
-    }
-    fn information(&self, label: &str) {
-        let label: Vec<u16> = menu_label(&self.text.fit(label))
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
-        unsafe {
-            let _ = AppendMenuW(
-                self.handle,
-                MF_STRING | MF_GRAYED,
-                0,
-                PCWSTR(label.as_ptr()),
-            );
-        }
-    }
-    fn separator(&self) {
-        unsafe {
-            let _ = AppendMenuW(self.handle, MF_SEPARATOR, 0, PCWSTR::null());
-        }
-    }
-    fn submenu(&self, child: Self, label: &str) {
-        let label: Vec<u16> = menu_label(&self.text.fit(label))
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
-        if unsafe {
-            AppendMenuW(
-                self.handle,
-                MF_POPUP,
-                child.handle.0 as usize,
-                PCWSTR(label.as_ptr()),
-            )
-            .is_ok()
-        } {
-            // Destroying the parent also destroys attached children.
-            std::mem::forget(child);
-        }
-    }
-    fn command(&self, commands: &mut Vec<Command>, command: Command, label: &str) {
-        if self.item(commands.len() + 1, label) {
-            commands.push(command);
-        }
-    }
-    fn window_exit(&self, commands: &mut Vec<Command>, window: WindowRef, window_count: usize) {
-        if window_count > 1 {
-            self.separator();
-            self.command(
-                commands,
-                Command::Exit(window),
-                &rust_i18n::t!("tray.exit_window"),
-            );
-        }
-    }
-}
-impl Drop for Menu<'_> {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = DestroyMenu(self.handle);
-        }
-    }
 }
 
 pub(super) fn show(hwnd: HWND) {
@@ -101,14 +21,26 @@ pub(super) fn show(hwnd: HWND) {
         return;
     }
     let text = MenuText::new(hwnd, point);
-    let Some(root) = Menu::new(&text) else {
+    let icons = MenuIcons::new(text.icon_size());
+    let Some(root) = Menu::new(&text, &icons) else {
         return;
     };
     let mut commands = Vec::new();
     let windows = coordinator::windows();
     let window_count = windows.len();
-    for (index, (window, snapshot)) in windows.into_iter().enumerate() {
-        let Some(group) = Menu::new(&text) else {
+    let paths: Vec<_> = windows
+        .iter()
+        .map(|(_, snapshot)| {
+            if snapshot.active_path.is_empty() {
+                rust_i18n::t!("tray.window").into_owned()
+            } else {
+                snapshot.active_path.clone()
+            }
+        })
+        .collect();
+    let window_labels = text.window_labels(paths.iter().map(String::as_str));
+    for ((window, snapshot), window_label) in windows.into_iter().zip(window_labels) {
+        let Some(group) = Menu::new(&text, &icons) else {
             continue;
         };
         if let Some(time) = snapshot.hidden_at {
@@ -128,7 +60,7 @@ pub(super) fn show(hwnd: HWND) {
                 panel: None,
             };
             if let Some(panels) = workspace.panels {
-                let Some(outer) = Menu::new(&text) else {
+                let Some(outer) = Menu::new(&text, &icons) else {
                     continue;
                 };
                 outer.command(
@@ -137,12 +69,12 @@ pub(super) fn show(hwnd: HWND) {
                     &rust_i18n::t!("tray.open"),
                 );
                 for (right, entries) in panels.into_iter().enumerate() {
-                    let Some(panel) = Menu::new(&text) else {
+                    let Some(panel) = Menu::new(&text, &icons) else {
                         continue;
                     };
                     let labels = text.siblings(entries.iter().map(|entry| entry.path.as_str()));
                     for (entry, label) in entries.into_iter().zip(labels) {
-                        panel.command(
+                        panel.location_command(
                             &mut commands,
                             Command::Activate(
                                 window,
@@ -152,6 +84,7 @@ pub(super) fn show(hwnd: HWND) {
                                 },
                             ),
                             &label,
+                            entry.icon,
                         );
                     }
                     outer.submenu(
@@ -161,17 +94,21 @@ pub(super) fn show(hwnd: HWND) {
                         } else {
                             rust_i18n::t!("tray.right_panel")
                         },
+                        None,
                     );
                 }
-                group.submenu(outer, &label);
+                group.submenu(outer, &label, Some(workspace.tab.icon));
             } else {
-                group.command(&mut commands, Command::Activate(window, target), &label);
+                group.location_command(
+                    &mut commands,
+                    Command::Activate(window, target),
+                    &label,
+                    workspace.tab.icon,
+                );
             }
         }
         group.window_exit(&mut commands, window, window_count);
-        let prefix = format!("{} {} — ", rust_i18n::t!("tray.window"), index + 1);
-        let label = text.caption(&prefix, &snapshot.active_path);
-        root.submenu(group, &label);
+        root.submenu(group, &window_label, Some(snapshot.active_icon));
     }
     root.separator();
     root.command(&mut commands, Command::ExitAll, &rust_i18n::t!("tray.exit"));
@@ -216,13 +153,14 @@ mod tests {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuState, SetPropW,
-        MF_BYPOSITION, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
+        MF_BYPOSITION, MF_GRAYED, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
     };
 
     #[test]
     fn timestamp_information_is_disabled_and_does_not_shift_command_ids() {
         let text = MenuText::new(HWND::default(), POINT::default());
-        let menu = Menu::new(&text).unwrap();
+        let icons = MenuIcons::new(text.icon_size());
+        let menu = Menu::new(&text, &icons).unwrap();
         menu.information("Sent to tray: 2026-01-01 12:30:00");
         menu.separator();
         let mut commands = Vec::new();
@@ -272,8 +210,9 @@ mod tests {
         }
         let window = WindowRef::capture(native.0).unwrap();
         let text = MenuText::new(native.0, POINT::default());
+        let icons = MenuIcons::new(text.icon_size());
         for count in [1, 2, 3] {
-            let group = Menu::new(&text).unwrap();
+            let group = Menu::new(&text, &icons).unwrap();
             let mut commands = Vec::new();
             group.command(&mut commands, Command::Open(window), "Open");
             group.window_exit(&mut commands, window, count);
@@ -288,8 +227,8 @@ mod tests {
                 );
                 assert_eq!(unsafe { GetMenuItemID(group.handle, 2) }, 2);
             }
-            let root = Menu::new(&text).unwrap();
-            root.submenu(group, "Window");
+            let root = Menu::new(&text, &icons).unwrap();
+            root.submenu(group, "Window", None);
             root.command(&mut commands, Command::ExitAll, "Exit application");
             assert!(matches!(commands.last(), Some(Command::ExitAll)));
             assert_eq!(unsafe { GetMenuItemCount(Some(root.handle)) }, 2);

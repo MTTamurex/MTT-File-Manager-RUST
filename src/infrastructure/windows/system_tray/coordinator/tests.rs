@@ -101,3 +101,21 @@ fn acknowledged_exit_posts_close_and_only_marks_the_receiving_window() {
         "duplicate exit must be idempotent"
     )));
 }
+
+#[test]
+fn counter_counts_all_live_main_windows_but_not_exiting_ones() {
+    let first = NativeWindow::new();
+    let hidden = NativeWindow::new();
+    assert_eq!(count_windows(&[first.0, hidden.0]), 2);
+    // Both fixtures are hidden: visibility must not affect the counter.
+    unsafe {
+        SetPropW(
+            hidden.0,
+            w!("MTT.FileManager.Exiting"),
+            Some(HANDLE(std::ptr::dangling_mut::<u8>().cast())),
+        )
+        .unwrap();
+    }
+    assert_eq!(count_windows(&[first.0, hidden.0]), 1);
+    assert_eq!(count_windows(&[]), 0);
+}

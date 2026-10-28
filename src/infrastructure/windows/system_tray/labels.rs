@@ -169,5 +169,41 @@ fn collisions(values: &[&str], labels: &[String]) -> Vec<Vec<usize>> {
         .collect()
 }
 
+/// Window groups also need to distinguish separate windows at the exact same
+/// location. Ordinary duplicate tabs intentionally keep their existing labels.
+pub(super) fn windows(values: &[&str], budget: i32, measure: &impl Fn(&str) -> i32) -> Vec<String> {
+    let mut labels = siblings(values, budget, measure);
+    let duplicates = |labels: &[String]| {
+        let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (index, label) in labels.iter().enumerate() {
+            groups.entry(label).or_default().push(index);
+        }
+        groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .collect::<Vec<_>>()
+    };
+    let mark = |label: &str, index: usize| {
+        let suffix = format!(" [{}]", index + 1);
+        let label = compact(label, budget - measure(&suffix), measure);
+        compact(&format!("{label}{suffix}"), budget, measure)
+    };
+    for group in duplicates(&labels) {
+        for index in group {
+            labels[index] = mark(&labels[index], index);
+        }
+    }
+    // A literal location ending in an ordinal can collide with a newly marked
+    // duplicate. Only then use unique ordinals for every window in this popup.
+    if !duplicates(&labels).is_empty() {
+        labels = labels
+            .iter()
+            .enumerate()
+            .map(|(index, label)| mark(label, index))
+            .collect();
+    }
+    labels
+}
+
 #[cfg(test)]
 mod tests;

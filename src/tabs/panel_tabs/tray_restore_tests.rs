@@ -3,7 +3,9 @@ use crate::app::init_workers::consistency_probe_worker::{
     spawn_consistency_probe_worker, ConsistencyProbeMode, ConsistencyProbeRequest,
 };
 use crate::domain::special_paths::tag_view_path;
-use crate::infrastructure::windows::system_tray::model::{Entry, Snapshot, Target, Workspace};
+use crate::infrastructure::windows::system_tray::model::{
+    Entry, LocationKind, Snapshot, Target, Workspace,
+};
 use crate::tabs::{TabManager, TabManagerSession};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -62,6 +64,7 @@ fn four_pinned_tag_tabs_survive_tray_selection_and_a_delayed_liveness_probe() {
                 tab: Entry {
                     id: workspace.id,
                     path: workspace.path.clone(),
+                    icon: LocationKind::Tag,
                 },
                 panels: Some([ActivePanel::Left, ActivePanel::Right].map(|panel| {
                     panels
@@ -71,11 +74,13 @@ fn four_pinned_tag_tabs_survive_tray_selection_and_a_delayed_liveness_probe() {
                         .map(|tab| Entry {
                             id: tab.id,
                             path: tab.snapshot.path.clone(),
+                            icon: LocationKind::Tag,
                         })
                         .collect()
                 })),
             }],
             active_path: tag_view_path(5),
+            active_icon: LocationKind::Tag,
             hidden_at: None,
         };
         let resolved = menu

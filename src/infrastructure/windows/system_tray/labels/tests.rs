@@ -131,3 +131,24 @@ fn every_budget_bounds_drive_unc_and_generic_labels() {
             .all(|s| width(s) <= budget));
     }
 }
+
+#[test]
+fn window_labels_omit_prefixes_and_only_distinguish_ambiguous_groups() {
+    let distinct = [r"C:\Documents", r"D:\Videos"];
+    assert_eq!(windows(&distinct, 40, &width), distinct);
+    let repeated = [r"C:\Documents", r"C:\Documents", r"D:\Videos"];
+    let labels = windows(&repeated, 40, &width);
+    assert_eq!(
+        labels,
+        [r"C:\Documents [1]", r"C:\Documents [2]", r"D:\Videos"]
+    );
+    let literal_ordinal = ["Example", "Example", "Example [1]"];
+    let labels = windows(&literal_ordinal, 40, &width);
+    let unique = labels.iter().collect::<std::collections::HashSet<_>>();
+    assert_eq!(unique.len(), labels.len());
+    for budget in 0..40 {
+        assert!(windows(&repeated, budget, &width)
+            .iter()
+            .all(|s| width(s) <= budget));
+    }
+}

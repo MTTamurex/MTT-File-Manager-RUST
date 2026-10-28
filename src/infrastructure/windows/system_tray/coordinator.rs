@@ -127,7 +127,7 @@ pub(crate) fn tick(hwnd: HWND) {
     });
     if owner {
         unsafe {
-            if super::add_tray_icon(hwnd) {
+            if super::update_tray_icon(hwnd, window_count()) {
                 let _ = SetPropW(
                     hwnd,
                     w!("MTT.FileManager.TrayOwner"),
@@ -149,6 +149,21 @@ pub(crate) fn tick(hwnd: HWND) {
         let snapshot = STATE.with(|s| s.borrow().local.clone());
         super::protocol::send(hwnd, owner, &Packet::Snapshot(snapshot));
     }
+}
+
+pub(super) fn owns_icon(hwnd: HWND) -> bool {
+    ready(hwnd) && STATE.with(|s| s.borrow().owner)
+}
+
+pub(super) fn window_count() -> usize {
+    count_windows(&app_instances::main_windows())
+}
+
+fn count_windows(windows: &[HWND]) -> usize {
+    windows
+        .iter()
+        .filter(|&&hwnd| WindowRef::capture(hwnd).is_some())
+        .count()
 }
 
 pub(crate) fn available(hwnd: HWND) -> bool {
