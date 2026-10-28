@@ -29,6 +29,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 pub(crate) const TRAY_CALLBACK_MESSAGE: u32 = 0x8000 + 0x36;
+pub(crate) const POPUP_CONTINUE_MESSAGE: u32 = 0x8000 + 0x39;
+
+pub(crate) fn continue_popup(hwnd: HWND) {
+    popup::handoff::show_pending(hwnd);
+}
 
 pub(crate) use notification::{
     remove_tray_icon, restore_icon_after_taskbar_restart, update_tray_icon,

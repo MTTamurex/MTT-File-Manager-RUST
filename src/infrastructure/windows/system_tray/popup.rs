@@ -1,4 +1,6 @@
 //! A standalone tool-window popup using the tray owner's application palette.
+mod closing;
+pub(super) mod handoff;
 mod input;
 mod layout;
 mod model;
@@ -44,6 +46,14 @@ struct State {
 
 /// False means creation failed: the caller can use the existing native menu.
 pub(super) fn show(owner: HWND) -> bool {
+    let mut anchor = POINT::default();
+    if unsafe { GetCursorPos(&mut anchor) }.is_err() {
+        return false;
+    }
+    show_at(owner, Model::new(coordinator::windows()), anchor)
+}
+
+fn show_at(owner: HWND, mut model: Model, anchor: POINT) -> bool {
     if ACTIVE.with(|active| active.replace(true)) {
         return true;
     }
@@ -51,14 +61,10 @@ pub(super) fn show(owner: HWND) -> bool {
     let Some(reference) = WindowRef::capture(owner) else {
         return true;
     };
-    let mut anchor = POINT::default();
-    if unsafe { GetCursorPos(&mut anchor) }.is_err() {
-        return false;
-    }
-    let model = Model::new(coordinator::windows());
     let Some(layout) = Layout::new(owner, anchor, model.content_height()) else {
         return false;
     };
+    model.reveal_selection(layout.viewport());
     let Some(resources) = Resources::new(layout.dpi) else {
         return false;
     };
@@ -101,6 +107,12 @@ pub(super) fn show(owner: HWND) -> bool {
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        // Execute after the native input callback releases its mutable borrow:
+        // synchronous IPC can dispatch messages back into this popup.
+        if let Some(plan) = closing::take_plan(&mut state) {
+            let result = closing::execute(plan);
+            closing::apply(&mut state, result);
+        }
         if state.resize && !state.done {
             state.resize = false;
             if let Some(layout) =
@@ -121,6 +133,11 @@ pub(super) fn show(owner: HWND) -> bool {
                     );
                 }
                 round_corners(hwnd, &state.layout);
+                // The viewport can stay at its capped size after removing a
+                // row. Repaint even when SetWindowPos did not resize anything.
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
             }
         }
     }

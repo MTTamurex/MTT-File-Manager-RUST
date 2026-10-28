@@ -1337,6 +1337,7 @@ disk_analysis:
   dup_hardlink_note: "%{groups} ομάδα(ες) είναι hardlinks ενός φυσικού αρχείου"
   dup_none: "Δεν βρέθηκαν διπλότυπα αρχεία."
 tray:
+  restore_all: "Επαναφορά όλων των διεργασιών"
   open: "Άνοιγμα"
   exit: "Έξοδος από την εφαρμογή"
   exit_window: "Κλείσιμο αυτής της διεργασίας"

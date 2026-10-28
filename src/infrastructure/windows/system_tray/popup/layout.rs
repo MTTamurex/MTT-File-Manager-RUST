@@ -7,7 +7,8 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE
 
 pub(super) const WIDTH: i32 = 340;
 pub(super) const HEADER: i32 = 52;
-pub(super) const FOOTER: i32 = 36;
+pub(super) const FOOTER_ITEM_HEIGHT: i32 = 24;
+pub(super) const FOOTER: i32 = 2 * FOOTER_ITEM_HEIGHT;
 
 pub(super) struct Layout {
     pub dpi: u32,
@@ -107,7 +108,7 @@ mod tests {
         for dpi in [96, 144, 192] {
             let collapsed = Layout::within(work, point, dpi, 52);
             assert_eq!(collapsed.width, 340);
-            assert_eq!(collapsed.height, 140);
+            assert_eq!(collapsed.height, 152);
             let expanded = Layout::within(work, point, dpi, 10000);
             assert_eq!(expanded.height, 480);
         }

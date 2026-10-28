@@ -55,7 +55,7 @@ impl Model {
         model
     }
 
-    fn rebuild(&mut self) {
+    pub(super) fn rebuild(&mut self) {
         self.rows.clear();
         for (index, (window, snapshot)) in self.windows.iter().enumerate() {
             let expandable = snapshot.workspaces.len() > 1
@@ -162,6 +162,18 @@ impl Model {
         self.selected = Some(index.min(self.rows.len().saturating_sub(1)));
     }
 
+    pub(super) fn remove_window(&mut self, closed: WindowRef) {
+        self.windows
+            .retain(|(window, _)| *window != closed && window.is_current());
+        self.expanded.retain(|id| {
+            self.windows
+                .iter()
+                .any(|(window, _)| window.hwnd.0 as usize == *id)
+        });
+        self.selected = None;
+        self.rebuild();
+    }
+
     pub fn navigate(&mut self, direction: i32) {
         let mut selectable: Vec<_> = self
             .rows
@@ -170,8 +182,8 @@ impl Model {
             .filter(|(_, row)| row.selectable())
             .map(|(index, _)| index)
             .collect();
-        // The final selectable item is the pinned global-exit footer.
-        selectable.push(self.rows.len());
+        // Both global commands remain selectable in the pinned footer.
+        selectable.extend([self.rows.len(), self.rows.len() + 1]);
         let position = self
             .selected
             .and_then(|index| selectable.iter().position(|&row| row == index));

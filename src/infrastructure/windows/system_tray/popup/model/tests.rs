@@ -204,7 +204,7 @@ fn keyboard_navigation_skips_information_wraps_and_keeps_selection_visible() {
             assert!(top >= model.scroll);
         }
     }
-    model.selected = Some(model.rows.len());
+    model.selected = Some(model.rows.len() + 1);
     model.navigate(1);
     assert_eq!(model.selected, Some(0));
     assert_eq!(model.row_at(-1), None);

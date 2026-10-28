@@ -1,6 +1,6 @@
 use super::super::menu::Command;
 use super::{
-    layout::{FOOTER, HEADER},
+    layout::{FOOTER, FOOTER_ITEM_HEIGHT, HEADER},
     model::Action,
     State,
 };
@@ -58,7 +58,6 @@ impl State {
     fn close_instance(&mut self, index: usize) {
         if let Some(window) = self.model.rows.get(index).and_then(|row| row.instance()) {
             self.command = Some(Command::Exit(window));
-            self.done = true;
         }
     }
 
@@ -71,7 +70,10 @@ impl State {
             return None;
         }
         if point.y >= self.layout.height - FOOTER {
-            return Some(self.model.rows.len());
+            return Some(
+                self.model.rows.len()
+                    + ((point.y - (self.layout.height - FOOTER)) / FOOTER_ITEM_HEIGHT) as usize,
+            );
         }
         self.model
             .row_at(point.y - HEADER + self.model.scroll)
@@ -79,8 +81,12 @@ impl State {
     }
 
     pub(super) fn activate(&mut self, index: usize, expand: bool) {
-        if index == self.model.rows.len() {
-            self.command = Some(Command::ExitAll);
+        if index >= self.model.rows.len() {
+            self.command = Some(match index - self.model.rows.len() {
+                0 => Command::RestoreAll,
+                1 => Command::ExitAll,
+                _ => return,
+            });
             self.done = true;
         } else if expand
             && self
@@ -113,7 +119,7 @@ impl State {
                 self.model.selected = None;
                 self.model.navigate(1);
             }
-            VK_END => self.model.selected = Some(self.model.rows.len()),
+            VK_END => self.model.selected = Some(self.model.rows.len() + 1),
             VK_DELETE => {
                 if let Some(index) = self.model.selected {
                     self.close_instance(index);

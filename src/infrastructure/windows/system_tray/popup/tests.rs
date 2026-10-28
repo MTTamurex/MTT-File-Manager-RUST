@@ -120,11 +120,11 @@ fn footer_is_fixed_and_expansion_click_does_not_restore_the_instance() {
             y: state.layout.height - 20,
         })
         .unwrap();
-    assert_eq!(index, state.model.rows.len());
+    assert_eq!(index, state.model.rows.len() + 1);
     state.activate(0, true);
     assert!(!state.done);
     assert!(state.command.is_none());
-    state.activate(state.model.rows.len(), false);
+    state.activate(state.model.rows.len() + 1, false);
     assert!(matches!(state.command, Some(menu::Command::ExitAll)));
 }
 

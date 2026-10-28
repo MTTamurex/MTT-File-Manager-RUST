@@ -1348,6 +1348,7 @@ disk_analysis:
   dup_hardlink_note: "%{groups} group(s) are hardlinks of one physical file"
   dup_none: "No duplicate files found."
 tray:
+  restore_all: "Restore all instances"
   open: "Open"
   exit: "Exit application"
   exit_window: "Close this instance"

@@ -13,6 +13,7 @@ pub(super) enum Command {
     Open(WindowRef),
     Activate(WindowRef, Target),
     Exit(WindowRef),
+    RestoreAll,
     ExitAll,
 }
 
@@ -118,6 +119,11 @@ fn show_native(hwnd: HWND) {
         root.submenu(group, &window_label, Some(snapshot.active_icon));
     }
     root.separator();
+    root.command(
+        &mut commands,
+        Command::RestoreAll,
+        &rust_i18n::t!("tray.restore_all"),
+    );
     root.command(&mut commands, Command::ExitAll, &rust_i18n::t!("tray.exit"));
     let command = unsafe {
         let _ = SetForegroundWindow(hwnd);
@@ -150,6 +156,7 @@ pub(super) fn execute(hwnd: HWND, command: &Command) {
         Command::Open(window) => super::super::app_instances::restore_main_window(window.hwnd),
         Command::Activate(window, target) => commands::activate(hwnd, *window, target.clone()),
         Command::Exit(window) => commands::exit_window(hwnd, *window),
+        Command::RestoreAll => commands::restore_all(),
         Command::ExitAll => commands::exit_all(hwnd),
     };
     if !accepted {
@@ -240,9 +247,14 @@ mod tests {
             }
             let root = Menu::new(&text, &icons).unwrap();
             root.submenu(group, "Window", None);
+            root.command(&mut commands, Command::RestoreAll, "Restore all instances");
+            let restore_id = commands.len() as u32;
             root.command(&mut commands, Command::ExitAll, "Exit application");
+            assert!(matches!(commands[commands.len() - 2], Command::RestoreAll));
             assert!(matches!(commands.last(), Some(Command::ExitAll)));
-            assert_eq!(unsafe { GetMenuItemCount(Some(root.handle)) }, 2);
+            assert_eq!(unsafe { GetMenuItemCount(Some(root.handle)) }, 3);
+            assert_eq!(unsafe { GetMenuItemID(root.handle, 1) }, restore_id);
+            assert_eq!(unsafe { GetMenuItemID(root.handle, 2) }, restore_id + 1);
         }
     }
 }

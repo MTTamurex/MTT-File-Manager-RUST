@@ -56,7 +56,7 @@ fn close_button_has_its_own_hit_area_and_does_not_expand_or_restore() {
     let hit = state.mouse_hit(point).unwrap();
     assert_eq!(hit.part, Part::Close);
     state.click(hit);
-    assert!(state.done);
+    assert!(!state.done);
     assert!(matches!(state.command, Some(menu::Command::Exit(window)) if window.hwnd == owner.0));
     assert_eq!(state.model.rows[0].expanded, Some(false));
 }
@@ -130,5 +130,70 @@ fn scrolling_or_keyboard_navigation_cancels_a_pending_close_click() {
         assert!(state.pressed.is_none());
         assert!(!state.done);
         assert!(state.command.is_none());
+    }
+}
+
+#[test]
+fn restore_all_and_exit_have_separate_fixed_footer_hit_areas() {
+    let owner = NativeWindow::new();
+    for scroll in [0, 300] {
+        for restore in [true, false] {
+            let mut state = tests::state(owner.0);
+            state.model.scroll = scroll;
+            let y = state.layout.height - layout::FOOTER
+                + if restore {
+                    layout::FOOTER_ITEM_HEIGHT / 2
+                } else {
+                    layout::FOOTER_ITEM_HEIGHT + layout::FOOTER_ITEM_HEIGHT / 2
+                };
+            let hit = state.mouse_hit(POINT { x: 60, y }).unwrap();
+            assert_eq!(hit.part, Part::Body);
+            assert_eq!(hit.index, state.model.rows.len() + usize::from(!restore));
+            state.click(hit);
+            assert!(state.done);
+            if restore {
+                assert!(matches!(state.command, Some(menu::Command::RestoreAll)));
+            } else {
+                assert!(matches!(state.command, Some(menu::Command::ExitAll)));
+            }
+        }
+    }
+}
+
+#[test]
+fn compact_footer_actions_meet_without_overlapping_click_regions() {
+    let owner = NativeWindow::new();
+    let state = tests::state(owner.0);
+    let boundary = state.layout.height - layout::FOOTER_ITEM_HEIGHT;
+    let restore = state
+        .mouse_hit(POINT {
+            x: 60,
+            y: boundary - 1,
+        })
+        .unwrap();
+    let exit = state.mouse_hit(POINT { x: 60, y: boundary }).unwrap();
+    assert_eq!(restore.index, state.model.rows.len());
+    assert_eq!(exit.index, state.model.rows.len() + 1);
+    assert_eq!(restore.part, Part::Body);
+    assert_eq!(exit.part, Part::Body);
+}
+
+#[test]
+fn keyboard_can_select_restore_all_without_triggering_exit_or_changing_tabs() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_END, VK_RETURN, VK_SPACE, VK_UP};
+    let owner = NativeWindow::new();
+    for key in [VK_RETURN, VK_SPACE] {
+        let mut state = tests::state(owner.0);
+        let original = state.model.windows[0].1.clone();
+        state.key(VK_END);
+        assert_eq!(state.model.selected, Some(state.model.rows.len() + 1));
+        state.key(VK_UP);
+        assert_eq!(state.model.selected, Some(state.model.rows.len()));
+        state.key(VK_DELETE);
+        assert!(state.command.is_none() && !state.done);
+        state.key(key);
+        assert!(state.done);
+        assert!(matches!(state.command, Some(menu::Command::RestoreAll)));
+        assert_eq!(state.model.windows[0].1, original);
     }
 }

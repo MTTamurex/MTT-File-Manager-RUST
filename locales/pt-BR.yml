@@ -1348,6 +1348,7 @@ disk_analysis:
   dup_hardlink_note: "%{groups} grupo(s) são hardlinks do mesmo arquivo físico"
   dup_none: "Nenhum arquivo duplicado encontrado."
 tray:
+  restore_all: "Restaurar todas as instâncias"
   open: "Abrir"
   exit: "Sair do aplicativo"
   exit_window: "Fechar esta instância"

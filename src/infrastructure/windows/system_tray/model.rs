@@ -82,9 +82,25 @@ impl Snapshot {
 }
 
 #[derive(Serialize, Deserialize)]
+pub(crate) struct PopupContinuation {
+    pub anchor: [i32; 2],
+    pub scroll: i32,
+    pub windows: Vec<PopupInstance>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PopupInstance {
+    pub handle: usize,
+    pub process_id: u32,
+    pub snapshot: Snapshot,
+    pub expanded: bool,
+}
+
+#[derive(Serialize, Deserialize)]
 pub(super) enum Packet {
     Snapshot(Snapshot),
     Activate(Target),
+    ContinuePopup(PopupContinuation),
     RequestSession {
         token: String,
     },

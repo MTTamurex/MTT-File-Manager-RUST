@@ -81,6 +81,9 @@ pub(super) unsafe fn receive(sender: HWND, data: LPARAM) -> Option<bool> {
         return Some(false);
     };
     match packet {
+        Packet::ContinuePopup(continuation) => {
+            return Some(super::popup::handoff::receive(sender, continuation))
+        }
         Packet::RequestSession { token } => {
             return Some(super::session_exit::request_capture(sender, token))
         }

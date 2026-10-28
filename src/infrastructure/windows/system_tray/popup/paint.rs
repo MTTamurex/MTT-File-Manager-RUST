@@ -1,6 +1,6 @@
 use super::super::{graphics::Bitmap, labels};
 use super::{
-    layout::{FOOTER, HEADER},
+    layout::{FOOTER, FOOTER_ITEM_HEIGHT, HEADER},
     State,
 };
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
@@ -216,36 +216,45 @@ pub(super) fn paint(dc: HDC, state: &State) {
     }
     let footer_y = l.height - FOOTER;
     fill(dc, rect(12, footer_y, width - 24, 1), c.border);
-    let selected = state.model.selected == Some(state.model.rows.len());
-    if selected {
-        rounded(
+    for (offset, (icon, label)) in [
+        ("↗", rust_i18n::t!("tray.restore_all")),
+        ("×", rust_i18n::t!("tray.exit")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = footer_y + offset as i32 * FOOTER_ITEM_HEIGHT;
+        let selected = state.model.selected == Some(state.model.rows.len() + offset);
+        if selected {
+            rounded(
+                dc,
+                rect(8, y + 3, width - 16, FOOTER_ITEM_HEIGHT - 6),
+                l.px(8),
+                c.hover,
+            );
+        }
+        let color = if selected && c.hover == c.accent {
+            c.accent_text
+        } else {
+            c.text
+        };
+        text(
             dc,
-            rect(8, footer_y + 5, width - 16, FOOTER - 12),
-            l.px(8),
-            c.hover,
+            icon,
+            rect(14, y, 20, FOOTER_ITEM_HEIGHT),
+            r.bold.0,
+            color,
+            DT_CENTER,
+        );
+        text(
+            dc,
+            &label,
+            rect(50, y, width - 66, FOOTER_ITEM_HEIGHT),
+            r.font.0,
+            color,
+            DT_LEFT,
         );
     }
-    let color = if selected && c.hover == c.accent {
-        c.accent_text
-    } else {
-        c.text
-    };
-    text(
-        dc,
-        "×",
-        rect(14, footer_y, 20, FOOTER),
-        r.bold.0,
-        color,
-        DT_CENTER,
-    );
-    text(
-        dc,
-        &rust_i18n::t!("tray.exit"),
-        rect(50, footer_y, width - 66, FOOTER),
-        r.font.0,
-        color,
-        DT_LEFT,
-    );
 }
 
 pub(super) fn repaint(hwnd: windows::Win32::Foundation::HWND, state: &State) {

@@ -323,6 +323,11 @@ extern "system" fn borderless_subclass_proc(
         )));
     }
 
+    if msg == super::system_tray::POPUP_CONTINUE_MESSAGE {
+        super::system_tray::continue_popup(hwnd);
+        return LRESULT(0);
+    }
+
     if msg == super::system_tray::taskbar_created_message() {
         super::system_tray::restore_icon_after_taskbar_restart(hwnd);
         return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };

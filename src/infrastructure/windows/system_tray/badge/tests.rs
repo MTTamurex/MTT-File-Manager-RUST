@@ -36,12 +36,12 @@ fn rendering_preserves_the_base_and_uses_valid_premultiplied_alpha() {
 }
 
 #[test]
-fn enlarged_digits_remain_visible_at_notification_area_size() {
+fn compact_digits_remain_visible_at_notification_area_size() {
     for count in 2..=10 {
         let pixels = render(count, 16).unwrap();
-        // The larger numeral must reach below the old five-pixel-high artwork.
-        let white_pixels = (7..11)
-            .flat_map(|y| (5..14).map(move |x| (y * 16 + x) * 4))
+        // Inspect the interior, excluding the white border of the badge.
+        let white_pixels = (3..9)
+            .flat_map(|y| (7..14).map(move |x| (y * 16 + x) * 4))
             .filter(|&index| {
                 let pixel = &pixels.data()[index..index + 4];
                 pixel[..3].iter().all(|&channel| channel > 200) && pixel[3] > 240

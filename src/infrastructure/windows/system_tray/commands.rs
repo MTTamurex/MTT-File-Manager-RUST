@@ -48,6 +48,27 @@ pub(super) fn exit_all(_from: HWND) -> bool {
     super::session_exit::request_all()
 }
 
+pub(super) fn restore_all() -> bool {
+    let windows: Vec<_> = super::super::app_instances::main_windows()
+        .into_iter()
+        .filter_map(WindowRef::capture)
+        .collect();
+    restore_windows(&windows, |window| {
+        super::super::app_instances::restore_main_window(window.hwnd)
+    })
+}
+
+fn restore_windows(windows: &[WindowRef], mut restore: impl FnMut(WindowRef) -> bool) -> bool {
+    let mut succeeded = true;
+    for &window in windows {
+        // A blocked instance must not prevent restoration of the remaining ones.
+        if window.is_current() && !restore(window) && window.is_current() {
+            succeeded = false;
+        }
+    }
+    succeeded
+}
+
 pub(super) fn exit_windows(
     owner: WindowRef,
     windows: &[WindowRef],
