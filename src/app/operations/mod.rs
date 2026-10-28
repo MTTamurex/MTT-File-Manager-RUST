@@ -23,6 +23,7 @@
 //! - `trait_impls`: Implementation of UI traits for App
 
 mod archive_activation;
+mod batch_rename_selection;
 pub mod clipboard_ops;
 pub mod compression;
 pub mod context_menu;

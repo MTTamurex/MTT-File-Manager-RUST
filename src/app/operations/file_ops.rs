@@ -487,28 +487,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let current_path = Path::new(&self.navigation_state.current_path);
-        let ancestor_listing = self
-            .selected_file
-            .as_ref()
-            .and_then(|item| item.path.parent())
-            .filter(|parent| *parent != current_path)
-            .and_then(|parent| self.miller_columns.get_arc(parent));
-        let items = ancestor_listing
-            .as_deref()
-            .map(Vec::as_slice)
-            .unwrap_or_else(|| self.items.as_slice());
-        let sources: Vec<PathBuf> = items
-            .iter()
-            .filter(|item| {
-                // Skip drives – cannot batch-rename volume labels
-                item.drive_info.is_none()
-                    && !self.path_is_network_operation_root(&item.path)
-                    && !crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
-                    && self.multi_selection.contains(&item.path)
-            })
-            .map(|item| item.path.clone())
-            .collect();
+        let sources: Vec<PathBuf> = self.batch_rename_sources().collect();
 
         if sources.len() < 2 {
             return;

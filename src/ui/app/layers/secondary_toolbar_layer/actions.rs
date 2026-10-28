@@ -61,11 +61,13 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             .is_some_and(|item| app.path_is_network_operation_root(&item.path));
     let can_copy =
         has_selection && app.can_copy_from_current_location() && !selection_has_network_location;
-    let can_rename = app.multi_selection.len() <= 1
-        && app
-            .selected_file
+    let can_rename = if app.multi_selection.len() > 1 {
+        app.can_batch_rename()
+    } else {
+        app.selected_file
             .as_ref()
-            .is_some_and(|item| app.can_rename_path(&item.path));
+            .is_some_and(|item| app.can_rename_path(&item.path))
+    };
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder = app.can_create_folder_in_current_location();
     let can_delete = has_selection && !in_archive_namespace && !selection_cannot_move;
@@ -198,7 +200,9 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
         SecAction::Copy => app.command_copy(app.selected_item),
         SecAction::Paste => app.command_paste(None),
         SecAction::Rename => {
-            if let Some(idx) = app.selected_item {
+            if app.multi_selection.len() > 1 {
+                app.begin_batch_rename();
+            } else if let Some(idx) = app.selected_item {
                 app.begin_rename_item(idx);
             } else if let Some(path) = app.selected_file.as_ref().map(|item| item.path.clone()) {
                 app.begin_rename_path(&path);
@@ -206,7 +210,9 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
         }
         SecAction::CreateFolder => app.create_new_folder(),
         SecAction::ExportListing => {
-            app.folder_export = Some(crate::app::folder_export_state::FolderExportState::open(app));
+            app.folder_export = Some(crate::app::folder_export_state::FolderExportState::open(
+                app,
+            ));
         }
         SecAction::Delete { permanently } => {
             let targets = delete_targets(
