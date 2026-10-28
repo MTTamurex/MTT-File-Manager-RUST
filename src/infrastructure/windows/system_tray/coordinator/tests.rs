@@ -119,3 +119,46 @@ fn counter_counts_all_live_main_windows_but_not_exiting_ones() {
     assert_eq!(count_windows(&[first.0, hidden.0]), 1);
     assert_eq!(count_windows(&[]), 0);
 }
+
+#[test]
+fn the_menu_keeps_instance_number_order_across_z_order_and_tray_owner_changes() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+    reset();
+    let first = NativeWindow::new();
+    let second = NativeWindow::new();
+    for (window, number) in [(&first, 1usize), (&second, 2usize)] {
+        unsafe {
+            SetPropW(
+                window.0,
+                w!("MTT.FileManager.InstanceNumber"),
+                Some(HANDLE(number as *mut _)),
+            )
+            .unwrap();
+        }
+    }
+    let ordered = || {
+        windows()
+            .into_iter()
+            .map(|(window, _)| window.hwnd)
+            .filter(|&hwnd| hwnd == first.0 || hwnd == second.0)
+            .collect::<Vec<_>>()
+    };
+    for local in [first.0, second.0] {
+        test_set_local(local);
+        unsafe {
+            SetWindowPos(
+                second.0,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            )
+            .unwrap();
+        }
+        assert_eq!(ordered(), [first.0, second.0]);
+    }
+}

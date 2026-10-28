@@ -101,6 +101,36 @@ fn separate_instances_expand_independently_and_expose_their_own_window() {
 }
 
 #[test]
+fn instance_titles_follow_window_identity_instead_of_list_position() {
+    use windows::core::w;
+    use windows::Win32::{Foundation::HANDLE, UI::WindowsAndMessaging::SetPropW};
+    let first = NativeWindow::new();
+    let second = NativeWindow::new();
+    for (window, number) in [(&first, 1usize), (&second, 2usize)] {
+        unsafe {
+            SetPropW(
+                window.0,
+                w!("MTT.FileManager.InstanceNumber"),
+                Some(HANDLE(number as *mut _)),
+            )
+            .unwrap();
+        }
+    }
+    let first = WindowRef::capture(first.0).unwrap();
+    let second = WindowRef::capture(second.0).unwrap();
+    let title = |number| format!("{} {number}", rust_i18n::t!("tray.window"));
+    let mut model = Model::new(vec![(second, snapshot()), (first, snapshot())]);
+    assert_eq!(model.rows[0].title, title(2));
+    model.toggle(0);
+    assert_eq!(model.rows[0].title, title(2));
+    assert!(
+        matches!(model.rows[0].action, Action::Command(Command::Open(window)) if window == second)
+    );
+    let remaining = Model::new(vec![(second, snapshot())]);
+    assert_eq!(remaining.rows[0].title, title(2));
+}
+
+#[test]
 fn a_single_non_split_tab_has_no_expansion_or_duplicate_location() {
     let native = NativeWindow::new();
     let mut snapshot = snapshot();

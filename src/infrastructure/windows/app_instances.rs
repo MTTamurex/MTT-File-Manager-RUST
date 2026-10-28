@@ -10,6 +10,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SMTO_ERRORONEXIT,
 };
 
+mod instance_number;
+pub(crate) use instance_number::get as instance_number;
+
 pub const ALLOW_MULTIPLE_INSTANCES_KEY: &str = "allow_multiple_instances";
 pub(crate) const RESTORE_MESSAGE: u32 = 0x8000 + 0x37;
 
@@ -80,6 +83,7 @@ fn finish_startup(
 
 /// Call only after the main window's message receiver has been installed.
 fn register_main_window(hwnd: HWND) -> windows::core::Result<()> {
+    instance_number::assign(hwnd, &main_windows())?;
     unsafe {
         SetPropW(
             hwnd,

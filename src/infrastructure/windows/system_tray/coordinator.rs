@@ -187,7 +187,7 @@ pub(crate) fn available(hwnd: HWND) -> bool {
 
 pub(super) fn windows() -> Vec<(WindowRef, Snapshot)> {
     let windows = app_instances::main_windows();
-    STATE.with(|s| {
+    let mut windows: Vec<_> = STATE.with(|s| {
         let state = s.borrow();
         windows
             .into_iter()
@@ -206,7 +206,11 @@ pub(super) fn windows() -> Vec<(WindowRef, Snapshot)> {
                 (w, snapshot)
             })
             .collect()
-    })
+    });
+    windows.sort_by_key(|(window, _)| {
+        app_instances::instance_number(window.hwnd).unwrap_or(usize::MAX)
+    });
+    windows
 }
 
 pub(crate) fn request_exit(hwnd: HWND) -> bool {

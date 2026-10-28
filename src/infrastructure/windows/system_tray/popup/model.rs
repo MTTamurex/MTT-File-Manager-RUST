@@ -65,7 +65,12 @@ impl Model {
                     .any(|workspace| workspace.panels.is_some());
             let expanded = expandable && self.expanded.contains(&(window.hwnd.0 as usize));
             self.rows.push(Row {
-                title: format!("{} {}", rust_i18n::t!("tray.window"), index + 1),
+                title: format!(
+                    "{} {}",
+                    rust_i18n::t!("tray.window"),
+                    crate::infrastructure::windows::app_instances::instance_number(window.hwnd)
+                        .unwrap_or(index + 1)
+                ),
                 subtitle: snapshot.active_path.clone(),
                 sent_at: snapshot.hidden_at.clone(),
                 icon: Some(snapshot.active_icon),
