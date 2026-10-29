@@ -1,4 +1,5 @@
 use super::super::{
+    labels,
     menu::Command,
     model::{LocationKind, Snapshot, Target},
     window_ref::WindowRef,
@@ -8,9 +9,12 @@ use std::collections::HashSet;
 pub(super) enum Action {
     Command(Command),
     Information,
+    Separator,
 }
 
 pub(super) struct Row {
+    // One-based bar position for display only; activation always uses stable tab IDs.
+    pub tab_number: Option<usize>,
     pub title: String,
     pub subtitle: String,
     pub sent_at: Option<String>,
@@ -30,7 +34,7 @@ impl Row {
     }
 
     pub fn selectable(&self) -> bool {
-        !matches!(self.action, Action::Information)
+        matches!(self.action, Action::Command(_))
     }
 }
 
@@ -65,6 +69,10 @@ impl Model {
                     .any(|workspace| workspace.panels.is_some());
             let expanded = expandable && self.expanded.contains(&(window.hwnd.0 as usize));
             self.rows.push(Row {
+                // A sole normal tab is represented by the instance subtitle, not a duplicate row.
+                tab_number: (snapshot.workspaces.len() == 1
+                    && snapshot.workspaces[0].panels.is_none())
+                .then_some(1),
                 title: format!(
                     "{} {}",
                     rust_i18n::t!("tray.window"),
@@ -82,11 +90,25 @@ impl Model {
             if !expanded {
                 continue;
             }
-            for workspace in &snapshot.workspaces {
+            for (workspace_index, workspace) in snapshot.workspaces.iter().enumerate() {
+                if workspace_index > 0 {
+                    self.rows.push(Row {
+                        tab_number: None,
+                        title: String::new(),
+                        subtitle: String::new(),
+                        sent_at: None,
+                        icon: None,
+                        indent: 1,
+                        height: 8,
+                        expanded: None,
+                        action: Action::Separator,
+                    });
+                }
                 // Split workspaces expose their panel tabs directly. Their outer
                 // title mirrors the focused panel and would duplicate that entry.
                 if workspace.panels.is_none() && snapshot.workspaces.len() > 1 {
                     self.rows.push(Row {
+                        tab_number: Some(workspace_index + 1),
                         title: workspace.tab.path.clone(),
                         subtitle: String::new(),
                         sent_at: None,
@@ -104,8 +126,20 @@ impl Model {
                     });
                 }
                 if let Some(panels) = &workspace.panels {
+                    self.rows.push(Row {
+                        tab_number: Some(workspace_index + 1),
+                        title: labels::tab_label(workspace_index + 1),
+                        subtitle: String::new(),
+                        sent_at: None,
+                        icon: None,
+                        indent: 1,
+                        height: 24,
+                        expanded: None,
+                        action: Action::Information,
+                    });
                     for (right, entries) in panels.iter().enumerate() {
                         self.rows.push(Row {
+                            tab_number: None,
                             title: if right == 0 {
                                 rust_i18n::t!("tray.left_panel")
                             } else {
@@ -122,11 +156,12 @@ impl Model {
                         });
                         for entry in entries {
                             self.rows.push(Row {
+                                tab_number: None,
                                 title: entry.path.clone(),
                                 subtitle: String::new(),
                                 sent_at: None,
                                 icon: Some(entry.icon),
-                                indent: 1,
+                                indent: 2,
                                 height: 28,
                                 expanded: None,
                                 action: Action::Command(Command::Activate(
@@ -229,3 +264,9 @@ impl Model {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod hierarchy_tests;
+
+#[cfg(test)]
+mod numbering_tests;

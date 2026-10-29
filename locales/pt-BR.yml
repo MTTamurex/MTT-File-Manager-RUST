@@ -1353,6 +1353,7 @@ tray:
   exit: "Sair do aplicativo"
   exit_window: "Fechar esta instância"
   window: "Instância"
+  tab_number: "Aba %{number}"
   left_panel: "Painel esquerdo"
   right_panel: "Painel direito"
   hidden_at: "Enviada à bandeja:"

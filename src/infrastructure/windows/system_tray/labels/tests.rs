@@ -152,3 +152,43 @@ fn window_labels_omit_prefixes_and_only_distinguish_ambiguous_groups() {
             .all(|s| width(s) <= budget));
     }
 }
+
+#[test]
+fn numbered_locations_keep_the_identifier_when_shortening_long_paths() {
+    for number in [1, 12, 123] {
+        let prefix = tab_prefix(number);
+        for value in [
+            r"C:\Documents\Example\Archive\VeryLongFolderName",
+            "Tag: Example very long label",
+        ] {
+            for budget in 0..80 {
+                let label = numbered_location(value, number, budget, &width);
+                assert!(width(&label) <= budget);
+                if budget > width(&prefix) {
+                    assert!(label.starts_with(&prefix));
+                }
+            }
+        }
+        let value = "Example";
+        assert_eq!(
+            numbered_location(value, number, 80, &width),
+            format!("{prefix}{value}")
+        );
+    }
+}
+
+#[test]
+fn tab_identifiers_are_localized_in_all_supported_languages() {
+    for (locale, expected) in [
+        ("en", "Tab 2"),
+        ("pt-BR", "Aba 2"),
+        ("ru", "Вкладка 2"),
+        ("el", "Καρτέλα 2"),
+        ("zh-CN", "标签页 2"),
+    ] {
+        assert_eq!(
+            rust_i18n::t!("tray.tab_number", locale = locale, number = 2),
+            expected
+        );
+    }
+}

@@ -1343,6 +1343,7 @@ tray:
   exit: "退出应用程序"
   exit_window: "关闭此实例"
   window: "实例"
+  tab_number: "标签页 %{number}"
   left_panel: "左侧面板"
   right_panel: "右侧面板"
   hidden_at: "隐藏到托盘："

@@ -76,9 +76,23 @@ fn row_titles(dc: HDC, state: &State) -> Vec<String> {
             .layout
             .px(state.layout.width - (12 + indent * 12 + 28) - 16)
             - 1;
-        let labels = labels::siblings(&values, budget, &|value| measure(dc, value));
+        // Shorten only the location, reserving the complete tab identifier first.
+        let prefix_width = group
+            .iter()
+            .filter_map(|(index, _)| state.model.rows[*index].tab_number)
+            .map(|number| measure(dc, &labels::tab_prefix(number)))
+            .max()
+            .unwrap_or(0);
+        let labels = labels::siblings(&values, (budget - prefix_width).max(0), &|value| {
+            measure(dc, value)
+        });
         for ((index, _), label) in group.into_iter().zip(labels) {
-            titles[index] = label;
+            titles[index] = match state.model.rows[index].tab_number {
+                Some(number) => {
+                    labels::numbered_location(&label, number, budget, &|value| measure(dc, value))
+                }
+                None => label,
+            };
         }
     }
     unsafe {

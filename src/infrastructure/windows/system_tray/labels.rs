@@ -3,6 +3,30 @@ use std::collections::HashMap;
 
 const ELLIPSIS: &str = "…";
 
+pub(super) fn tab_label(number: usize) -> String {
+    rust_i18n::t!("tray.tab_number", number = number).into_owned()
+}
+
+pub(super) fn tab_prefix(number: usize) -> String {
+    format!("{} — ", tab_label(number))
+}
+
+pub(super) fn numbered_location(
+    value: &str,
+    number: usize,
+    budget: i32,
+    measure: &impl Fn(&str) -> i32,
+) -> String {
+    let prefix = tab_prefix(number);
+    if measure(&prefix) >= budget {
+        return compact(&tab_label(number), budget, measure);
+    }
+    format!(
+        "{prefix}{}",
+        compact(value, budget - measure(&prefix), measure)
+    )
+}
+
 pub(super) fn compact(value: &str, budget: i32, measure: &impl Fn(&str) -> i32) -> String {
     let value = value.replace(['\t', '\r', '\n', '\0'], " ");
     if measure(&value) <= budget {

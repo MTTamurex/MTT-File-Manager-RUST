@@ -1353,6 +1353,7 @@ tray:
   exit: "Exit application"
   exit_window: "Close this instance"
   window: "Instance"
+  tab_number: "Tab %{number}"
   left_panel: "Left panel"
   right_panel: "Right panel"
   hidden_at: "Sent to tray:"

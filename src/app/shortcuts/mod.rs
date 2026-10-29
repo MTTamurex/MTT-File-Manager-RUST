@@ -162,15 +162,16 @@ impl ShortcutBindings {
         ctx.input(|i| {
             i.events
                 .iter()
-                .any(|event| binding_from_event(event) == Some(binding))
+                .any(|event| binding_from_event(event, i.modifiers) == Some(binding))
         })
     }
     pub fn consume_triggered(&self, action: ShortcutAction, ctx: &egui::Context) -> bool {
         let binding = self.get(action);
         ctx.input_mut(|input| {
             let mut consumed = false;
+            let modifiers = input.modifiers;
             input.events.retain(|event| {
-                let matches = binding_from_event(event) == Some(binding);
+                let matches = binding_from_event(event, modifiers) == Some(binding);
                 consumed |= matches;
                 !matches
             });
@@ -220,16 +221,17 @@ pub fn capture_shortcut(ctx: &egui::Context) -> Option<ShortcutCapture> {
             {
                 return Some(ShortcutCapture::Cancelled);
             }
-            if let Some(binding) = binding_from_event(event) { return Some(ShortcutCapture::Binding(binding)); }
+            if let Some(binding) = binding_from_event(event, i.modifiers) { return Some(ShortcutCapture::Binding(binding)); }
         }
         None
     });
     if let Some(ShortcutCapture::Binding(binding)) = capture {
         if binding.is_scroll() {
             ctx.input_mut(|input| {
+                let modifiers = input.modifiers;
                 input
                     .events
-                    .retain(|event| binding_from_event(event) != Some(binding));
+                    .retain(|event| binding_from_event(event, modifiers) != Some(binding));
                 clear_scroll(input);
             });
         }
@@ -239,3 +241,6 @@ pub fn capture_shortcut(ctx: &egui::Context) -> Option<ShortcutCapture> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, target_os = "windows"))]
+mod clipboard_shortcut_tests;

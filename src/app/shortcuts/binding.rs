@@ -132,9 +132,21 @@ impl std::fmt::Display for ShortcutBinding {
     }
 }
 
-pub(super) fn binding_from_event(event: &egui::Event) -> Option<ShortcutBinding> {
+pub(super) fn binding_from_event(
+    event: &egui::Event,
+    modifiers: egui::Modifiers,
+) -> Option<ShortcutBinding> {
     match event {
         egui::Event::Copy => Some(ShortcutBinding::ctrl(egui::Key::C)),
+        // On Windows egui-winit emits Cut instead of a key-down event for
+        // Shift+Delete. File commands must retain its distinct shortcut identity.
+        // Do not rewrite the event itself: text edits still need native Cut semantics.
+        egui::Event::Cut if cfg!(target_os = "windows") && modifiers.shift && !modifiers.ctrl => {
+            Some(ShortcutBinding::from_modifiers(
+                egui::Key::Delete,
+                modifiers,
+            ))
+        }
         egui::Event::Cut => Some(ShortcutBinding::ctrl(egui::Key::X)),
         egui::Event::Paste(_) => Some(ShortcutBinding::ctrl(egui::Key::V)),
         egui::Event::Key {

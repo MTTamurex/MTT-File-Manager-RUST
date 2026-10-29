@@ -197,3 +197,68 @@ fn keyboard_can_select_restore_all_without_triggering_exit_or_changing_tabs() {
         assert_eq!(state.model.windows[0].1, original);
     }
 }
+
+#[test]
+fn workspace_separators_ignore_input_and_regular_tabs_keep_their_own_target() {
+    use super::model::Action;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_RETURN};
+    let owner = NativeWindow::new();
+    for keyboard in [false, true] {
+        let mut state = tests::state(owner.0);
+        let mut regular = state.model.windows[0].1.workspaces[0].clone();
+        regular.tab.id = 8;
+        regular.tab.path = "Other".into();
+        regular.panels = None;
+        state.model.windows[0].1.workspaces.push(regular);
+        state.model.toggle(0);
+        state.layout = Layout::new(owner.0, state.anchor, state.model.content_height()).unwrap();
+        let separator = state
+            .model
+            .rows
+            .iter()
+            .position(|row| matches!(row.action, Action::Separator))
+            .unwrap();
+        let top: i32 = state.model.rows[..separator]
+            .iter()
+            .map(|row| row.height)
+            .sum();
+        let point = POINT {
+            x: 60,
+            y: layout::HEADER + top + state.model.rows[separator].height / 2,
+        };
+        assert_eq!(state.mouse_hit(point), None);
+        state.pointer_move(point);
+        assert_eq!(state.model.selected, None);
+        state.activate(separator, false);
+        assert!(state.command.is_none() && !state.done);
+        if keyboard {
+            state.model.selected = state.model.rows[..separator]
+                .iter()
+                .rposition(|row| row.selectable());
+            state.key(VK_DOWN);
+            assert_eq!(state.model.selected, Some(separator + 1));
+            state.key(VK_RETURN);
+        } else {
+            let point = POINT {
+                x: 60,
+                y: layout::HEADER
+                    + top
+                    + state.model.rows[separator].height
+                    + state.model.rows[separator + 1].height / 2,
+            };
+            let hit = state.mouse_hit(point).unwrap();
+            assert_eq!(hit.index, separator + 1);
+            state.click(hit);
+        }
+        assert!(matches!(
+            state.command,
+            Some(menu::Command::Activate(
+                _,
+                super::super::model::Target {
+                    workspace: 8,
+                    panel: None,
+                }
+            ))
+        ));
+    }
+}

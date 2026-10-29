@@ -3,11 +3,12 @@ use super::super::{
     model::{Entry, LocationKind, Snapshot, Workspace},
     tests::NativeWindow,
 };
+use super::model::Action;
 use super::*;
 use crate::app::navigation_state::ThemeMode;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, GdiFlush, SelectObject, BITMAPINFO,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, GdiFlush, GetPixel, SelectObject, BITMAPINFO,
     BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
 };
 
@@ -64,7 +65,17 @@ fn offscreen_paint_renders_all_application_palettes_at_multiple_dpi_scales() {
                                             }],
                                         ]
                                     }),
-                                }],
+                                }]
+                                .into_iter()
+                                .chain((icon == LocationKind::Folder).then(|| Workspace {
+                                    tab: Entry {
+                                        id: 4,
+                                        path: "Other".into(),
+                                        icon: LocationKind::Folder,
+                                    },
+                                    panels: None,
+                                }))
+                                .collect(),
                             },
                         )
                     })
@@ -125,6 +136,23 @@ fn offscreen_paint_renders_all_application_palettes_at_multiple_dpi_scales() {
                 let previous = SelectObject(dc, bitmap.0.into());
                 paint::paint(dc, &state);
                 let _ = GdiFlush();
+                let mut y = layout::HEADER - state.model.scroll;
+                for row in &state.model.rows {
+                    if matches!(row.action, Action::Separator) {
+                        for x in [24, layout::WIDTH / 2, layout::WIDTH - 17] {
+                            assert_eq!(
+                                GetPixel(
+                                    dc,
+                                    state.layout.px(x),
+                                    state.layout.px(y + row.height / 2)
+                                ),
+                                state.resources.colors.border,
+                                "workspace separator must be painted at every DPI"
+                            );
+                        }
+                    }
+                    y += row.height;
+                }
                 SelectObject(dc, previous);
                 let _ = DeleteDC(dc);
             }

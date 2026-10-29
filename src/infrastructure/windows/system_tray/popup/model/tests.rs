@@ -4,7 +4,7 @@ use super::super::super::{
 };
 use super::*;
 
-fn snapshot() -> Snapshot {
+pub(super) fn snapshot() -> Snapshot {
     Snapshot {
         workspaces: vec![Workspace {
             tab: Entry {
@@ -162,7 +162,7 @@ fn multiple_non_split_tabs_keep_all_activation_targets_without_timestamp_rows() 
     assert_eq!(model.rows[0].expanded, Some(false));
     assert!(model.rows[0].sent_at.is_none());
     model.toggle(0);
-    assert_eq!(model.rows.len(), 3);
+    assert_eq!(model.rows.len(), 4);
     let targets: Vec<_> = model
         .rows
         .iter()
@@ -231,25 +231,38 @@ fn mixed_workspaces_expose_panel_groups_directly_and_preserve_regular_tabs() {
         .rows
         .iter()
         .skip(1)
+        .filter(|row| !matches!(row.action, Action::Separator))
         .map(|row| row.title.as_str())
         .collect();
     let left = rust_i18n::t!("tray.left_panel");
     let right = rust_i18n::t!("tray.right_panel");
+    let first_tab = labels::tab_label(1);
+    let third_tab = labels::tab_label(3);
     assert_eq!(
         titles,
         [
+            first_tab.as_str(),
             left.as_ref(),
             "Left",
             right.as_ref(),
             "Tag: Example",
             "Other",
+            third_tab.as_str(),
             left.as_ref(),
             "Left",
             right.as_ref(),
             "Tag: Example"
         ]
     );
-    assert!(model.rows.iter().skip(1).all(|row| row.indent == 1));
+    assert!(model.rows.iter().skip(1).all(|row| row.indent
+        == if matches!(
+            row.action,
+            Action::Command(Command::Activate(_, Target { panel: Some(_), .. }))
+        ) {
+            2
+        } else {
+            1
+        }));
     assert!(model.rows.iter().skip(1).all(|row| row.sent_at.is_none()));
 
     let targets: Vec<_> = model
@@ -306,16 +319,16 @@ fn mixed_workspaces_expose_panel_groups_directly_and_preserve_regular_tabs() {
             assert!(resolved.panel.is_none());
         }
     }
-    let information: Vec<_> = model
+    let non_selectable: Vec<_> = model
         .rows
         .iter()
         .enumerate()
-        .filter_map(|(index, row)| matches!(row.action, Action::Information).then_some(index))
+        .filter_map(|(index, row)| (!row.selectable()).then_some(index))
         .collect();
-    assert_eq!(information.len(), 4);
+    assert_eq!(non_selectable.len(), 8);
     for _ in 0..model.rows.len() + 2 {
         model.navigate(1);
-        assert!(!information.contains(&model.selected.unwrap()));
+        assert!(!non_selectable.contains(&model.selected.unwrap()));
     }
     model.toggle(0);
     assert_eq!(model.rows.len(), 1);
@@ -331,7 +344,7 @@ fn split_groups_repeat_in_workspace_order_even_with_an_empty_panel() {
     snapshot.workspaces.push(second);
     let mut model = Model::new(vec![(WindowRef::capture(native.0).unwrap(), snapshot)]);
     model.toggle(0);
-    assert_eq!(model.rows.len(), 8);
+    assert_eq!(model.rows.len(), 11);
     let targets: Vec<_> = model
         .rows
         .iter()
@@ -360,7 +373,7 @@ fn split_groups_repeat_in_workspace_order_even_with_an_empty_panel() {
     let groups: Vec<_> = model
         .rows
         .iter()
-        .filter(|row| matches!(row.action, Action::Information))
+        .filter(|row| matches!(row.action, Action::Information) && row.tab_number.is_none())
         .map(|row| row.title.as_str())
         .collect();
     let left = rust_i18n::t!("tray.left_panel");
@@ -369,5 +382,9 @@ fn split_groups_repeat_in_workspace_order_even_with_an_empty_panel() {
         groups,
         [left.as_ref(), right.as_ref(), left.as_ref(), right.as_ref()]
     );
-    assert!(model.rows.iter().skip(1).all(|row| row.indent == 1));
+    assert!(model
+        .rows
+        .iter()
+        .skip(1)
+        .all(|row| row.indent == if row.selectable() { 2 } else { 1 }));
 }

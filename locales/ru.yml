@@ -1343,6 +1343,7 @@ tray:
   exit: "Выйти из приложения"
   exit_window: "Закрыть этот экземпляр"
   window: "Экземпляр"
+  tab_number: "Вкладка %{number}"
   left_panel: "Левая панель"
   right_panel: "Правая панель"
   hidden_at: "Свёрнуто в трей:"
