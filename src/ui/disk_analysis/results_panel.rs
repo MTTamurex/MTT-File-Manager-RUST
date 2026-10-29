@@ -1,10 +1,10 @@
 //! Bottom results panel of the disk analyzer: resizable, collapsible and
-//! tabbed (Largest / Efficiency / Duplicates — plan section 8).
+//! tabbed (Largest / Duplicates — plan section 8).
 //!
 //! Tables are projections over `Vec<u32>` node indices; names/paths are
 //! materialized only for rows actually painted this frame.
 
-use super::{duplicates, efficiency, largest_items};
+use super::{duplicates, largest_items};
 use crate::app::disk_analysis_state::{DiskAnalysisState, ResultsTab};
 use eframe::egui;
 use rust_i18n::t;
@@ -60,7 +60,6 @@ pub fn render_results_panel(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     ui.spacing_mut().item_spacing.y = item_spacing_y;
                     match state.results_tab {
                         ResultsTab::Largest => largest_items::render(state, ui),
-                        ResultsTab::Efficiency => efficiency::render(state, ui),
                         ResultsTab::Duplicates => duplicates::render(state, ui),
                     }
                 });
@@ -110,7 +109,6 @@ fn render_panel_chrome(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             ui.spacing_mut().item_spacing.x = 6.0;
             for (tab, label) in [
                 (ResultsTab::Largest, t!("disk_analysis.tab_largest")),
-                (ResultsTab::Efficiency, t!("disk_analysis.tab_efficiency")),
                 (ResultsTab::Duplicates, t!("disk_analysis.tab_duplicates")),
             ] {
                 if ui
@@ -137,7 +135,7 @@ fn render_panel_chrome(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared cell painting used by the Largest and Efficiency tables.
+// Cell painting for result tables.
 // ---------------------------------------------------------------------------
 
 /// Paints one truncated table cell starting at `*x` with the given slot

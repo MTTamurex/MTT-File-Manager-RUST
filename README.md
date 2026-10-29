@@ -90,7 +90,7 @@
 - **Standalone NTFS analysis** — Launch **Analyze disk usage** from a local NTFS drive's context menu to open an independent analyzer window backed by a full-volume snapshot from the `mtt-search-service` index
 - **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
-- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ; Largest Items supports file-count ranking, filter-adjusted values, and multi-column sorting with Shift-click
+- **Largest items report** — List the largest files and folders with file-count ranking and filter-adjusted values; visible controls independently select folders/files first, the sort column, and ascending or descending order, synchronized with clickable headers
 - **Duplicate detection** — Run an on-demand, cancelable two-stage scan that groups candidates by size and confirms matches with full BLAKE3 hashes; configurable size limits, hardlink awareness, and recoverable-space totals keep the report accurate
 
 ### Global Search

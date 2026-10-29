@@ -1,6 +1,5 @@
 //! Query engine shared by the disk analyzer views: size metrics, combined
-//! filters, largest-items top-K, subtree search and logical-vs-allocated
-//! efficiency analysis.
+//! filters, largest-items top-K and subtree search.
 //!
 //! Everything here is a pure function over [`DiskAnalysisModel`] so it can
 //! run off the UI thread (worker jobs) and be tested without egui. Traversals
@@ -166,7 +165,7 @@ pub struct FilteredWeights {
     pub root: u32,
     pub weights: Vec<u64>,
     /// Membership is independent of weight so zero-byte matched files remain
-    /// searchable and eligible for efficiency analysis.
+    /// searchable.
     pub matches: Vec<bool>,
 }
 
@@ -437,133 +436,6 @@ fn finish_largest_heap(heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>>) -> Vec<(u
     rows
 }
 
-/// One efficiency finding: a file whose logical size and physical allocation
-/// diverge. The sign lives in the group membership, never in arithmetic on
-/// unsigned sizes (no u64 subtraction without a guard).
-#[derive(Clone, Copy, Debug)]
-pub struct EfficiencyRow {
-    pub idx: u32,
-    pub logical: u64,
-    pub allocated: u64,
-    pub absolute_difference: u64,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct EfficiencyResult {
-    /// Sparse/compressed/resident-like files: logical > allocated.
-    pub logical_greater: Vec<EfficiencyRow>,
-    /// Cluster slack / ADS-like files: allocated > logical.
-    pub allocated_greater: Vec<EfficiencyRow>,
-    pub logical_greater_total: u64,
-    pub allocated_greater_total: u64,
-    /// True when either list was cut at its limit.
-    pub truncated: bool,
-}
-
-/// Scan `root`'s files for logical-vs-allocated divergence, keeping the
-/// biggest absolute differences per group (bounded heaps) plus full-subtree
-/// totals. Directories are ignored; filters apply via `matches`.
-pub fn efficiency_scan(
-    model: &DiskAnalysisModel,
-    root: u32,
-    matches: Option<&[bool]>,
-    limit_per_group: usize,
-    is_cancelled: impl Fn() -> bool,
-) -> EfficiencyResult {
-    let mut result = EfficiencyResult::default();
-    let mut logical_heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
-    let mut allocated_heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
-
-    let mut stack = vec![root];
-    while let Some(idx) = stack.pop() {
-        if is_cancelled() {
-            result.truncated = true;
-            return result;
-        }
-        let node = &model.nodes[idx as usize];
-        if node.is_dir {
-            if !node.is_reparse {
-                for &child in model.children(idx) {
-                    stack.push(child);
-                }
-            }
-            continue;
-        }
-        if !matches.is_none_or(|m| m.get(idx as usize).copied().unwrap_or(false)) {
-            continue;
-        }
-        let (logical, allocated) = (node.size, node.allocated_size);
-        let diff = match logical.abs_diff(allocated) {
-            0 => continue,
-            d => d,
-        };
-        if logical > allocated {
-            result.logical_greater_total = result.logical_greater_total.saturating_add(diff);
-            push_bounded(
-                &mut logical_heap,
-                (diff, idx),
-                limit_per_group,
-                &mut result.truncated,
-            );
-        } else {
-            result.allocated_greater_total = result.allocated_greater_total.saturating_add(diff);
-            push_bounded(
-                &mut allocated_heap,
-                (diff, idx),
-                limit_per_group,
-                &mut result.truncated,
-            );
-        }
-    }
-
-    result.logical_greater = drain_sorted(model, &logical_heap);
-    result.allocated_greater = drain_sorted(model, &allocated_heap);
-    result
-}
-
-fn push_bounded(
-    heap: &mut BinaryHeap<Reverse<(u64, u32)>>,
-    entry: (u64, u32),
-    limit: usize,
-    truncated: &mut bool,
-) {
-    if limit == 0 {
-        *truncated = true;
-        return;
-    }
-    if heap.len() < limit {
-        heap.push(Reverse(entry));
-    } else if let Some(&Reverse(smallest)) = heap.peek() {
-        if entry > smallest {
-            *truncated = true;
-            heap.pop();
-            heap.push(Reverse(entry));
-        } else {
-            *truncated = true;
-        }
-    }
-}
-
-fn drain_sorted(
-    model: &DiskAnalysisModel,
-    heap: &BinaryHeap<Reverse<(u64, u32)>>,
-) -> Vec<EfficiencyRow> {
-    let mut rows: Vec<(u64, u32)> = heap.iter().map(|Reverse(v)| *v).collect();
-    // Heaviest difference first; deterministic tie-break by ascending index.
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    rows.into_iter()
-        .map(|(diff, idx)| {
-            let node = &model.nodes[idx as usize];
-            EfficiencyRow {
-                idx,
-                logical: node.size,
-                allocated: node.allocated_size,
-                absolute_difference: diff,
-            }
-        })
-        .collect()
-}
-
 /// Case-insensitive subtree search by name, or by full path when the query
 /// contains a path separator. Returns up to `limit` indices in traversal
 /// (record) order, so the output is deterministic. Filters apply via `matches`.
@@ -788,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_weight_matches_remain_searchable_and_visible_to_efficiency() {
+    fn zero_weight_matches_remain_searchable() {
         let model = build(vec![
             rec(5, 5, "", 0, 0, true),
             rec(10, 5, "resident.bin", 100, 0, false),
@@ -816,8 +688,6 @@ mod tests {
             ),
             vec![file]
         );
-        let efficiency = efficiency_scan(&model, model.root, Some(&filtered.matches), 10, || false);
-        assert_eq!(efficiency.logical_greater[0].idx, file);
     }
 
     #[test]
@@ -987,48 +857,6 @@ mod tests {
     }
 
     #[test]
-    fn efficiency_scan_splits_groups_and_totals_without_overflow() {
-        let sparse = rec(11, 5, "sparse.bin", 1 << 62, 8_192, false);
-        let model = build(vec![
-            rec(5, 5, "", 0, 0, true),
-            sparse,
-            rec(12, 5, "slack.bin", 10, 1 << 40, false),
-            rec(13, 5, "even.bin", 100, 100, false),
-        ]);
-        let result = efficiency_scan(&model, model.root, None, 100, || false);
-        assert_eq!(result.logical_greater.len(), 1);
-        assert_eq!(
-            result.logical_greater[0].absolute_difference,
-            (1u64 << 62) - 8_192
-        );
-        assert_eq!(result.logical_greater_total, (1u64 << 62) - 8_192);
-        assert_eq!(result.allocated_greater.len(), 1);
-        assert_eq!(
-            result.allocated_greater[0].absolute_difference,
-            (1u64 << 40) - 10
-        );
-        // even.bin appears in neither group.
-        assert!(result.logical_greater_total > 0);
-    }
-
-    #[test]
-    fn efficiency_limit_marks_truncation_but_keeps_totals() {
-        let records: Vec<DiskAnalysisRecord> = (0..20)
-            .map(|i| rec(10 + i, 5, &format!("f{i}.bin"), i * 100, i, false))
-            .chain(vec![rec(5, 5, "", 0, 0, true)])
-            .collect();
-        let model = build(records);
-        let result = efficiency_scan(&model, model.root, None, 5, || false);
-        assert_eq!(result.logical_greater.len(), 5);
-        assert!(result.truncated);
-        // Total covers all 19 divergent files regardless of the row limit:
-        // diff(i) = i*100 - i for i in 1..20 (f0 has zero difference).
-        let expected: u64 = (1..20u64).map(|i| i * 100 - i).sum();
-        assert_eq!(result.logical_greater_total, expected);
-        assert_eq!(result.allocated_greater_total, 0);
-    }
-
-    #[test]
     fn search_matches_names_case_insensitively_and_paths_with_separator() {
         let model = sample_model();
 
@@ -1074,9 +902,6 @@ mod tests {
             || true,
         )
         .is_empty());
-        assert!(efficiency_scan(&model, model.root, None, 10, || true,)
-            .logical_greater
-            .is_empty());
         assert!(compute_filtered_weights_cancellable(
             &model,
             model.root,

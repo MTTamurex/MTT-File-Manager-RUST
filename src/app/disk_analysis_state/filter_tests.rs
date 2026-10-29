@@ -23,7 +23,7 @@ fn state_with_queries() -> DiskAnalysisState {
 #[test]
 fn unchanged_filter_reschedules_cleared_queries() {
     let mut state = state_with_queries();
-    let old_jobs = (state.largest_job, state.efficiency_job, state.search_job);
+    let old_jobs = (state.largest_job, state.search_job);
 
     // Both Clear with default inputs and All with every category selected
     // notify the state even though the effective filter is unchanged.
@@ -32,10 +32,8 @@ fn unchanged_filter_reschedules_cleared_queries() {
 
     assert!(!state.filter.is_active());
     assert!(state.largest_job > old_jobs.0);
-    assert!(state.efficiency_job > old_jobs.1);
-    assert!(state.search_job > old_jobs.2);
+    assert!(state.search_job > old_jobs.1);
     assert!(state.largest_pending);
-    assert!(state.efficiency_pending);
     assert!(state.search_worker_pending);
 }
 
@@ -56,7 +54,6 @@ fn clearing_filter_before_weights_finish_reschedules_unfiltered_queries() {
     assert!(!state.filter.is_active());
     assert!(!state.weights_pending);
     assert!(state.largest_pending);
-    assert!(state.efficiency_pending);
     assert!(state.search_worker_pending);
     assert!(!state.apply_query_message(QueryMessage::Weights {
         job: old_filter_job,

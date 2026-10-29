@@ -8,10 +8,10 @@
 //! so it gets an independent taskbar button and minimize/restore lifecycle.
 
 mod duplicates;
-mod efficiency;
 mod largest_items;
 mod results_panel;
 mod sidebar;
+mod sort_controls;
 pub(crate) mod toolbar;
 pub(crate) mod treemap;
 

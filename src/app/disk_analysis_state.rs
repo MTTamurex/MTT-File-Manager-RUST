@@ -3,15 +3,15 @@
 //! Owns dedicated background workers:
 //! - the fetch worker that pulls the volume snapshot from the search service
 //!   and builds the immutable [`DiskAnalysisModel`] off the UI thread;
-//! - a fast query worker running filter rollups, top-K lists, subtree search
-//!   and efficiency scans (all pure walks over the model).
+//! - a fast query worker running filter rollups, top-K lists and subtree search
+//!   (all pure walks over the model).
 //!
 //! Every job carries a generation id so stale results (drive switch / model
 //! change / newer edit) are discarded on arrival instead of being applied.
 
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use crate::app::disk_analysis_query::{
-    ActiveWeights, DiskAnalysisFilter, EfficiencyResult, FilterSizeBase, SizeMetric,
+    ActiveWeights, DiskAnalysisFilter, FilterSizeBase, SizeMetric,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -72,14 +72,6 @@ pub enum QueryRequest {
         metric: SizeMetric,
         weights: Option<Arc<Vec<u64>>>,
     },
-    /// Efficiency scan (logical vs allocated) over `root`.
-    Efficiency {
-        job: u64,
-        cancel: Arc<AtomicU64>,
-        model: Arc<DiskAnalysisModel>,
-        root: u32,
-        matches: Option<Arc<Vec<bool>>>,
-    },
     /// Case-insensitive name/path search under `root`.
     Search {
         job: u64,
@@ -103,10 +95,6 @@ pub enum QueryMessage {
         job: u64,
         rows: Arc<Vec<u32>>,
     },
-    Efficiency {
-        job: u64,
-        result: Arc<EfficiencyResult>,
-    },
     Search {
         job: u64,
         hits: Arc<Vec<u32>>,
@@ -126,13 +114,10 @@ pub enum DiskAnalysisPhase {
 pub enum ResultsTab {
     #[default]
     Largest,
-    Efficiency,
     Duplicates,
 }
 
-pub use crate::app::disk_analysis_sorting::{
-    LargestColumn, LargestSortCriterion, MAX_LARGEST_SORT_CRITERIA,
-};
+pub use crate::app::disk_analysis_sorting::{LargestColumn, LargestSort};
 
 pub struct DiskAnalysisState {
     pub drive_letter: Option<char>,
@@ -179,10 +164,6 @@ pub struct DiskAnalysisState {
     largest_sig: Option<(usize, u32, u64, SizeMetric)>,
     largest_job: u64,
     largest_pending: bool,
-    /// Signature of the efficiency job currently queued/attached.
-    efficiency_sig: Option<(usize, u32, u64)>,
-    efficiency_job: u64,
-    efficiency_pending: bool,
     /// Signature of the search job currently queued (model, root, weights,
     /// normalized query).
     search_sig: Option<(usize, u32, u64, String)>,
@@ -192,11 +173,10 @@ pub struct DiskAnalysisState {
     pub results_height: f32,
     pub results_collapsed: bool,
     pub largest_rows: Arc<Vec<u32>>,
-    /// Sort criteria ordered from primary to final tie-breaker (at most two).
-    pub largest_sort_criteria: Vec<LargestSortCriterion>,
+    /// Independent file/folder grouping and value ordering.
+    pub largest_sort: LargestSort,
     /// One-shot scroll request: scroll the Largest table to this row index.
     pub largest_scroll_to_row: Option<usize>,
-    pub efficiency_result: Option<Arc<EfficiencyResult>>,
 
     // ---- Search --------------------------------------------------------
     pub search_text: String,
@@ -232,7 +212,6 @@ pub struct DiskAnalysisState {
     query_context: Option<(usize, u32, SizeMetric)>,
     weights_generation: Arc<AtomicU64>,
     largest_generation: Arc<AtomicU64>,
-    efficiency_generation: Arc<AtomicU64>,
     search_generation: Arc<AtomicU64>,
 }
 
@@ -245,7 +224,6 @@ impl DiskAnalysisState {
         let active_generation = Arc::new(AtomicU64::new(0));
         let weights_generation = Arc::new(AtomicU64::new(0));
         let largest_generation = Arc::new(AtomicU64::new(0));
-        let efficiency_generation = Arc::new(AtomicU64::new(0));
         let search_generation = Arc::new(AtomicU64::new(0));
         let worker_generation = active_generation.clone();
         std::thread::Builder::new()
@@ -285,20 +263,13 @@ impl DiskAnalysisState {
             largest_sig: None,
             largest_job: 0,
             largest_pending: false,
-            efficiency_sig: None,
-            efficiency_job: 0,
-            efficiency_pending: false,
             search_sig: None,
             results_tab: ResultsTab::default(),
             results_height: 240.0,
             results_collapsed: false,
             largest_rows: Arc::new(Vec::new()),
-            largest_sort_criteria: vec![LargestSortCriterion {
-                column: LargestColumn::Allocated,
-                ascending: false,
-            }],
+            largest_sort: LargestSort::default(),
             largest_scroll_to_row: None,
-            efficiency_result: None,
             search_text: String::new(),
             search_pending_at: None,
             search_job: 0,
@@ -324,7 +295,6 @@ impl DiskAnalysisState {
             query_context: None,
             weights_generation,
             largest_generation,
-            efficiency_generation,
             search_generation,
         }
     }
@@ -370,14 +340,12 @@ impl DiskAnalysisState {
         self.search_results = Arc::new(Vec::new());
         self.search_selected = 0;
         self.largest_rows = Arc::new(Vec::new());
-        self.efficiency_result = None;
         self.largest_scroll_to_row = None;
         self.duplicates.invalidate();
         self.active_weights = None;
         self.filter_pending_at = None;
         self.filter_scheduled_sig = None;
         self.largest_sig = None;
-        self.efficiency_sig = None;
         self.search_sig = None;
         self.query_context = None;
         if drop_model {
@@ -568,32 +536,12 @@ impl DiskAnalysisState {
                     model: model.clone(),
                     root,
                     metric: self.metric,
-                    weights: weights_for_jobs.clone(),
+                    weights: weights_for_jobs,
                 })
                 .is_ok();
         }
 
-        // 3. Efficiency scan.
-        let eff_sig = (Arc::as_ptr(&model) as usize, root, weights_id);
-        if self.efficiency_sig != Some(eff_sig) {
-            self.efficiency_sig = Some(eff_sig);
-            let job = self.alloc_job();
-            self.efficiency_job = job;
-            self.efficiency_generation.store(job, Ordering::Release);
-            self.efficiency_result = None;
-            self.efficiency_pending = self
-                .query_sender
-                .send(QueryRequest::Efficiency {
-                    job,
-                    cancel: self.efficiency_generation.clone(),
-                    model: model.clone(),
-                    root,
-                    matches: self.active_weights.as_ref().map(|w| w.matches.clone()),
-                })
-                .is_ok();
-        }
-
-        // 4. Search (debounced on its own).
+        // 3. Search (debounced on its own).
         let trimmed = self.search_text.trim().to_string();
         if trimmed.is_empty() {
             if !self.search_results.is_empty() || self.search_open {
@@ -657,21 +605,15 @@ impl DiskAnalysisState {
         self.largest_generation.store(job, Ordering::Release);
         self.largest_pending = false;
         let job = self.alloc_job();
-        self.efficiency_job = job;
-        self.efficiency_generation.store(job, Ordering::Release);
-        self.efficiency_pending = false;
-        let job = self.alloc_job();
         self.search_job = job;
         self.search_generation.store(job, Ordering::Release);
         self.search_worker_pending = false;
         self.largest_sig = None;
-        self.efficiency_sig = None;
         self.search_sig = None;
     }
 
     fn clear_query_results(&mut self) {
         self.largest_rows = Arc::new(Vec::new());
-        self.efficiency_result = None;
         self.search_results = Arc::new(Vec::new());
     }
 
@@ -689,7 +631,6 @@ impl DiskAnalysisState {
         self.phase == DiskAnalysisPhase::Fetching
             || self.weights_pending
             || self.largest_pending
-            || self.efficiency_pending
             || self.search_worker_pending
             || self.duplicates.is_running()
     }
@@ -737,7 +678,6 @@ impl DiskAnalysisState {
                 self.fetch_elapsed = Some(fetch_elapsed);
                 self.phase = DiskAnalysisPhase::Ready;
                 self.largest_sig = None;
-                self.efficiency_sig = None;
                 self.search_sig = None;
                 self.filter_scheduled_sig = None;
                 self.filter_pending_at = Some(Instant::now());
@@ -751,7 +691,6 @@ impl DiskAnalysisState {
                 self.error = Some(error);
                 self.reset_view_state(true);
                 self.largest_sig = None;
-                self.efficiency_sig = None;
                 self.search_sig = None;
                 true
             }
@@ -779,7 +718,6 @@ impl DiskAnalysisState {
                     matches,
                 });
                 self.largest_sig = None;
-                self.efficiency_sig = None;
                 self.search_sig = None;
                 true
             }
@@ -790,14 +728,6 @@ impl DiskAnalysisState {
                 self.largest_pending = false;
                 self.largest_rows = rows;
                 self.sort_largest_rows();
-                true
-            }
-            QueryMessage::Efficiency { job, result } => {
-                if job != self.efficiency_job {
-                    return false;
-                }
-                self.efficiency_pending = false;
-                self.efficiency_result = Some(result);
                 true
             }
             QueryMessage::Search { job, hits } => {
@@ -935,26 +865,6 @@ fn query_worker_loop(req_receiver: Receiver<QueryRequest>, res_sender: Sender<Qu
                     });
                 }
             }
-            QueryRequest::Efficiency {
-                model,
-                root,
-                matches,
-                ..
-            } => {
-                let result = crate::app::disk_analysis_query::efficiency_scan(
-                    &model,
-                    root,
-                    matches.as_deref().map(|v| v.as_slice()),
-                    EFFICIENCY_LIMIT,
-                    is_cancelled,
-                );
-                if !is_cancelled() {
-                    let _ = res_sender.send(QueryMessage::Efficiency {
-                        job,
-                        result: Arc::new(result),
-                    });
-                }
-            }
             QueryRequest::Search {
                 model,
                 root,
@@ -996,7 +906,6 @@ impl QueryRequest {
         match self {
             QueryRequest::Weights { job, .. }
             | QueryRequest::Largest { job, .. }
-            | QueryRequest::Efficiency { job, .. }
             | QueryRequest::Search { job, .. } => *job,
         }
     }
@@ -1005,7 +914,6 @@ impl QueryRequest {
         match self {
             QueryRequest::Weights { cancel, .. }
             | QueryRequest::Largest { cancel, .. }
-            | QueryRequest::Efficiency { cancel, .. }
             | QueryRequest::Search { cancel, .. } => cancel,
         }
     }
@@ -1013,8 +921,6 @@ impl QueryRequest {
 
 /// Top-K cap for each item kind in FileCount mode and total cap otherwise.
 const LARGEST_LIMIT_PER_KIND: usize = 100;
-/// Rows kept per efficiency group (full totals are computed regardless).
-const EFFICIENCY_LIMIT: usize = 200;
 /// Initial cap for search results (plan section 5).
 const SEARCH_LIMIT: usize = 200;
 
@@ -1243,13 +1149,11 @@ mod tests {
         state.model = Some(model);
         state.query_context = Some((usize::MAX, u32::MAX, SizeMetric::Logical));
         state.largest_rows = Arc::new(vec![77]);
-        state.efficiency_result = Some(Arc::new(EfficiencyResult::default()));
         state.search_results = Arc::new(vec![88]);
 
         state.sync_query_jobs();
 
         assert!(state.largest_rows.is_empty());
-        assert!(state.efficiency_result.is_none());
         assert!(state.search_results.is_empty());
     }
 
