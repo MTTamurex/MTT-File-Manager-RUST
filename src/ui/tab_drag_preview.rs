@@ -2,6 +2,15 @@
 //! Hit testing and committed order stay unchanged.
 use eframe::egui::{self, layers::ShapeIdx};
 
+mod compositing;
+mod floating;
+
+pub(crate) use compositing::paint_root_background;
+
+pub(crate) fn finish_frame(ctx: &egui::Context) {
+    floating::finish_frame(ctx);
+}
+
 #[derive(Default)]
 pub(crate) struct TabDragPreview {
     tabs: Vec<(egui::Rect, ShapeIdx, ShapeIdx)>,
@@ -36,6 +45,24 @@ impl TabDragPreview {
                     .position(|(rect, _, _)| pos.x < rect.center().x)
                     .unwrap_or(self.tabs.len())
             });
+        if let Some(index) = source.filter(|&index| index < self.tabs.len()) {
+            let native = crate::ui::tab_bar::detach::pointer(ui.ctx());
+            let outside_row = native.is_some_and(|pointer| pointer.outside)
+                || !pointer.zip(row).is_some_and(|(pos, row)| row.contains(pos));
+            if outside_row && floating::show(ui, self.tabs[index], native) {
+                self.paint_at_gap(ui, id, None, strip, None);
+                let (_, start, end) = self.tabs[index];
+                ui.ctx().graphics_mut(|graphics| {
+                    let list = graphics.entry(ui.layer_id());
+                    for index in start.0..end.0 {
+                        list.reset_shape(ShapeIdx(index));
+                    }
+                });
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+                ui.ctx().request_repaint();
+                return;
+            }
+        }
         self.paint_at_gap(ui, id, source, strip, gap);
     }
 

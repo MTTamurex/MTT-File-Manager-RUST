@@ -731,6 +731,9 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_min_inner_size([800.0, 520.0])
         .with_title("MTT File Manager")
+        // eframe selects an alpha-capable GPU config once, shared by child viewports.
+        // The main UI remains opaque; only floating tab previews use transparency.
+        .with_transparent(true)
         .with_app_id(APP_ID)
         .with_decorations(false) // Borderless window - resize handled by native subclass
         .with_resizable(true); // Enable resize (handled by WM_NCHITTEST subclass)

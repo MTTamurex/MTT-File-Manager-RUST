@@ -221,6 +221,12 @@ impl ImageViewerApp {
 }
 
 impl eframe::App for ImageViewerApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // Floating tabs need a genuinely transparent backbuffer on both WGPU and Glow.
+        // The main UI paints its original opaque background separately.
+        [0.0; 4]
+    }
+
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let _diagnostic_logic = crate::infrastructure::diagnostic_logger::SlowScope::new("logic");
         self.poll_default_file_manager_action();
@@ -253,6 +259,7 @@ impl eframe::App for ImageViewerApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        crate::ui::tab_drag_preview::paint_root_background(ui);
         if is_minimized_for_updates(
             self.layout.saved_is_minimized,
             layout_phase() == WindowLayoutPhase::Minimized,
@@ -825,6 +832,7 @@ impl eframe::App for ImageViewerApp {
             preview.set_overlay_rects(&video_overlay_rects, ctx.pixels_per_point());
         }
         crate::ui::video_overlay::finish_frame(ctx);
+        crate::ui::tab_drag_preview::finish_frame(ctx);
 
         diagnostic_frame.checkpoint("frame_overlays_and_actions");
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
