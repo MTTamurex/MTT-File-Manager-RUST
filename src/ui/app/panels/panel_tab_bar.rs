@@ -136,8 +136,10 @@ pub(super) fn render_panel_tab_bar(
                     scroll_ui.set_min_height(TAB_HEIGHT);
                     scroll_ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
+                        let mut preview = crate::ui::tab_drag_preview::TabDragPreview::default();
                         for (index, tab) in tabs.tabs.iter().enumerate() {
                             ui.push_id((workspace_id, panel, tab.id), |ui| {
+                                let paint_start = crate::ui::tab_drag_preview::TabDragPreview::begin(ui);
                                 let path = if index == tabs.active_tab {
                                     live_path.unwrap_or(&tab.snapshot.path)
                                 } else {
@@ -346,8 +348,10 @@ pub(super) fn render_panel_tab_bar(
                                             Some(PanelTabAction::Context(panel, index, command));
                                     }
                                 }
+                                preview.record(ui, tab_rect, paint_start);
                             });
                         }
+                        preview.paint(ui, ui.id().with(("tab_preview", workspace_id, panel)), drag.preview_source(ui), scroll_rect);
                         if let Some(index) = drag.detach_source(ui) {
                             action = Some(PanelTabAction::Detach(panel, index));
                         } else if let Some((from, gap)) = drag.finish(ui, scroll_rect) {
@@ -383,21 +387,4 @@ pub(super) fn render_panel_tab_bar(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::tab_tooltip_text;
-
-    #[test]
-    fn virtual_tab_tooltips_use_the_display_title() {
-        let tag_path = crate::domain::special_paths::tag_view_path(2);
-        assert_eq!(tab_tooltip_text(&tag_path, "Tag: Movies"), "Tag: Movies");
-        assert_eq!(
-            tab_tooltip_text(crate::domain::special_paths::COMPUTER_VIEW_ID, "Computer"),
-            "Computer"
-        );
-    }
-
-    #[test]
-    fn filesystem_tab_tooltips_keep_the_full_path() {
-        assert_eq!(tab_tooltip_text("folder", "folder"), "folder");
-    }
-}
+mod tests;

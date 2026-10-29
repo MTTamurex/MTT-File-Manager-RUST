@@ -57,19 +57,21 @@ impl TabDrag {
         if self.source == Some(id) {
             self.source_owns_drag =
                 response.dragged_by(primary) || response.drag_stopped_by(primary);
-            if self.source_owns_drag {
-                ui.painter().rect_filled(
-                    response.rect,
-                    egui::CornerRadius::same(7),
-                    egui::Color32::from_rgba_unmultiplied(100, 120, 215, 60),
-                );
-            }
         }
         started
     }
 
     pub fn active(&self) -> bool {
         self.source.is_some()
+    }
+
+    pub fn preview_source(&self, ui: &egui::Ui) -> Option<usize> {
+        if !self.source_owns_drag || crate::ui::tab_bar::detach::released_outside(ui.ctx()) {
+            return None;
+        }
+        self.tabs
+            .iter()
+            .position(|(id, _)| Some(*id) == self.source)
     }
 
     pub fn detach_source(&self, ui: &egui::Ui) -> Option<usize> {
@@ -110,16 +112,6 @@ impl TabDrag {
         if released {
             return Some((from, gap));
         }
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        let x = self.tabs.get(gap).map_or_else(
-            || self.tabs.last().unwrap().1.right(),
-            |(_, rect)| rect.left(),
-        );
-        ui.painter().vline(
-            x,
-            self.tabs[0].1.y_range(),
-            egui::Stroke::new(2.0, crate::ui::theme::accent_color(ui.ctx())),
-        );
         None
     }
 }

@@ -13,6 +13,7 @@ use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32};
 
+mod appearance;
 pub(crate) mod context_menu;
 #[cfg(test)]
 mod context_menu_tests;

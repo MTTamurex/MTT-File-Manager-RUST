@@ -1,47 +1,11 @@
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
-use crate::infrastructure::onedrive::special_folder_display_name;
+use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 use crate::tabs::TabManager;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
-use eframe::egui::{self, Color32, CornerRadius, Vec2};
-use rust_i18n::t;
-use std::path::Path;
+use eframe::egui::{self, Color32, Vec2};
 
+use super::appearance::{display_title_for_tab_path, paint_tab_background};
 use super::{drag_dwell, tab_icon_style, TabBarAction};
-
-const TAB_CORNER_RADIUS: u8 = 8;
-
-fn display_title_for_tab_path(path: &str, fallback_title: &str) -> String {
-    if path == COMPUTER_VIEW_ID {
-        t!("nav.computer").to_string()
-    } else if path == RECYCLE_BIN_VIEW_ID {
-        t!("nav.recycle_bin").to_string()
-    } else {
-        special_folder_display_name(Path::new(path)).unwrap_or_else(|| fallback_title.to_string())
-    }
-}
-
-#[inline]
-fn paint_tab_background(ui: &mut egui::Ui, rect: egui::Rect, color: Color32) {
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius {
-            nw: TAB_CORNER_RADIUS,
-            ne: TAB_CORNER_RADIUS,
-            sw: 0,
-            se: 0,
-        },
-        color,
-    );
-
-    // Second pass only for opaque fills. For translucent colors this would double-blend
-    // and create a visible horizontal tone seam.
-    if color.a() == u8::MAX {
-        let body_top = (rect.min.y + TAB_CORNER_RADIUS as f32 - 1.0).min(rect.max.y);
-        let body = egui::Rect::from_min_max(egui::pos2(rect.min.x, body_top), rect.max);
-        ui.painter().rect_filled(body, 0.0, color);
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_tabs(
@@ -96,8 +60,10 @@ pub(super) fn render_tabs(
     });
     let mut tab_rects = Vec::with_capacity(tab_manager.tabs.len());
     let mut source_owns_drag = false;
+    let mut preview = crate::ui::tab_drag_preview::TabDragPreview::default();
 
     for (idx, tab) in tab_manager.tabs.iter().enumerate() {
+        let paint_start = crate::ui::tab_drag_preview::TabDragPreview::begin(ui);
         let is_active = idx == tab_manager.active_tab;
 
         let (rect, response) = ui.allocate_exact_size(
@@ -139,13 +105,6 @@ pub(super) fn render_tabs(
         };
 
         paint_tab_background(ui, rect, bg_color);
-        if drag_src == Some(idx) {
-            ui.painter().rect_filled(
-                rect,
-                CornerRadius::same(TAB_CORNER_RADIUS),
-                Color32::from_rgba_unmultiplied(100, 120, 215, 60),
-            );
-        }
 
         let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
 
@@ -388,8 +347,18 @@ pub(super) fn render_tabs(
                 action = TabBarAction::Context(idx, command);
             }
         }
+        preview.record(ui, rect, paint_start);
     }
 
+    if let (Some(first), Some(last)) = (tab_rects.first(), tab_rects.last()) {
+        let source = drag_src.filter(|_| !cancel_drag && source_owns_drag && !outside_release);
+        preview.paint(
+            ui,
+            drag_id.with("preview"),
+            source,
+            first.union(*last).intersect(ui.clip_rect()),
+        );
+    }
     let drop_action = super::reorder::finish_drag(
         ui,
         drag_src,

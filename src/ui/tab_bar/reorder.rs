@@ -1,5 +1,5 @@
 use super::TabBarAction;
-use eframe::egui::{self, Color32, Stroke};
+use eframe::egui;
 
 pub(super) fn finish_drag(
     ui: &egui::Ui,
@@ -45,14 +45,6 @@ pub(super) fn finish_drag(
         }
     } else {
         ui.ctx().request_repaint();
-        if in_row {
-            let x = rects.get(gap).map_or(row.right(), |rect| rect.left());
-            ui.painter().vline(
-                x,
-                row.y_range(),
-                Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-            );
-        }
     }
     TabBarAction::None
 }

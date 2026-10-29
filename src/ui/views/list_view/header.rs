@@ -2,6 +2,7 @@
 use super::{column_picker, columns, truncate_text_for_column, ListViewContext};
 use crate::domain::file_entry::SortMode;
 use crate::domain::list_columns::{ColumnId, ColumnLayout};
+use crate::ui::tab_drag_preview::TabDragPreview;
 use eframe::egui::{self, Color32, FontId, Sense, Ui};
 
 struct HeaderResponse {
@@ -39,11 +40,13 @@ fn draw_header(
                 .is_some_and(|pos| body.contains(pos))
         });
     if ui.is_rect_visible(rect) {
-        if hovered {
+        let lifted = response.dragged_by(egui::PointerButton::Primary)
+            || response.drag_stopped_by(egui::PointerButton::Primary);
+        if hovered || lifted {
             ui.painter()
                 .rect_filled(rect, 2.0, crate::ui::theme::header_active_bg(ui.ctx()));
         }
-        let color = if hovered {
+        let color = if hovered || lifted {
             crate::ui::theme::text_color(ui.ctx())
         } else {
             crate::ui::theme::secondary_text_color(ui.ctx())
@@ -146,9 +149,15 @@ fn render_row(
     descending: bool,
 ) -> HeaderRow {
     let drag_id = ui.id().with("column_header_drag");
-    let cancelled = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let cancelled = ui.input(|input| {
+        input.key_pressed(egui::Key::Escape)
+            || !input.focused
+            || (!input.pointer.primary_down() && !input.pointer.primary_released())
+    });
     if cancelled {
-        ui.ctx().stop_dragging();
+        if ui.data(|data| data.get_temp::<ColumnId>(drag_id)).is_some() {
+            ui.ctx().stop_dragging();
+        }
         ui.data_mut(|data| data.remove::<ColumnId>(drag_id));
     }
     let total: f32 = headers.iter().map(|header| header.cell.width).sum();
@@ -161,9 +170,12 @@ fn render_row(
     let mut stopped = false;
     let mut responses = vec![bar_response];
     let mut resized = Vec::new();
+    let mut preview = TabDragPreview::default();
+    let mut owner = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for HeaderSpec { cell, label, mode } in headers {
+            let paint_start = TabDragPreview::begin(ui);
             let mut width = cell.width;
             let response = ui
                 .push_id(cell.id, |ui| {
@@ -192,36 +204,40 @@ fn render_row(
             }
             if response.dragging && !cancelled {
                 ui.data_mut(|data| data.insert_temp(drag_id, cell.id));
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+            if response.dragging || response.stopped {
+                owner = Some(cell.id);
             }
             stopped |= response.stopped;
+            preview.record(ui, response.rect, paint_start);
             responses.push(response.response);
             responses.push(response.handle_response);
             rects.push((cell.id, response.rect));
         }
     });
-    let pointer = ui.input(|input| input.pointer.hover_pos());
-    if let Some(source) = ui.data(|data| data.get_temp::<ColumnId>(drag_id)) {
-        if let Some(pointer) = pointer {
-            let target = rects.iter().find(|(_, rect)| pointer.x < rect.center().x);
-            let x = target.map(|(_, rect)| rect.left()).unwrap_or_else(|| {
-                rects
-                    .last()
-                    .map(|(_, rect)| rect.right())
-                    .unwrap_or(start.x)
-            });
-            ui.painter().line_segment(
-                [egui::pos2(x, start.y), egui::pos2(x, start.y + 22.0)],
-                egui::Stroke::new(2.0, crate::ui::theme::accent_color(ui.ctx())),
-            );
-            if stopped && bar.intersect(ui.clip_rect()).contains(pointer) {
-                layout.move_before(source, target.map(|(id, _)| *id));
-            }
+    let pointer = ui.input(|input| input.pointer.interact_pos());
+    let strip = bar.intersect(ui.clip_rect());
+    let source = ui
+        .data(|data| data.get_temp::<ColumnId>(drag_id))
+        .filter(|source| Some(*source) == owner);
+    let gap = pointer.filter(|pos| strip.contains(*pos)).map(|pos| {
+        rects
+            .iter()
+            .position(|(_, rect)| pos.x < rect.center().x)
+            .unwrap_or(rects.len())
+    });
+    let source_index = source.and_then(|source| rects.iter().position(|(id, _)| *id == source));
+    preview.paint_at_gap(ui, drag_id.with("preview"), source_index, strip, gap);
+    if let Some(source) = source {
+        if let Some(gap) = gap.filter(|_| stopped) {
+            layout.move_before(source, rects.get(gap).map(|(id, _)| *id));
         }
         if stopped || !ui.input(|input| input.pointer.primary_down()) {
             ui.data_mut(|data| data.remove::<ColumnId>(drag_id));
         }
         sort = None;
+    } else {
+        ui.data_mut(|data| data.remove::<ColumnId>(drag_id));
     }
     HeaderRow {
         sort,
@@ -278,3 +294,7 @@ mod tests;
 #[cfg(test)]
 #[path = "header_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "header_drag_preview_tests.rs"]
+mod drag_preview_tests;
