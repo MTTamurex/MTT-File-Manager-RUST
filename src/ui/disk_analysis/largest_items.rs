@@ -26,15 +26,19 @@ pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     if state.largest_rows.is_empty() {
         ui.centered_and_justified(|ui| {
             ui.label(
-                egui::RichText::new(t!("disk_analysis.largest_empty").to_string())
-                    .color(panel_secondary_text_color(ui)),
+                egui::RichText::new(if state.largest_is_updating() {
+                    t!("disk_analysis.scanning").to_string()
+                } else {
+                    t!("disk_analysis.largest_empty").to_string()
+                })
+                .color(panel_secondary_text_color(ui)),
             );
         });
         return;
     }
 
     let total_w = ui.available_width();
-    let widths = column_widths(total_w);
+    let widths = column_widths(ui, total_w);
 
     paint_header(ui, total_w, widths, state);
     let rows = state.largest_rows.clone();
@@ -111,14 +115,28 @@ pub(crate) fn row_background(
 }
 
 /// Name | Path | Type | Logical | Allocated | Difference | Files
-fn column_widths(total_w: f32) -> [f32; 7] {
+fn column_widths(ui: &egui::Ui, total_w: f32) -> [f32; 7] {
     let type_w = 56.0;
-    let numeric = 88.0;
+    let header_width = |text: String| {
+        (ui.painter()
+            .layout_no_wrap(
+                format!("{text} ↓"),
+                egui::FontId::proportional(12.0),
+                analyzer_text_color(ui),
+            )
+            .size()
+            .x
+            + 12.0)
+            .max(88.0)
+    };
+    let logical = header_width(t!("disk_analysis.logical_size_short").to_string());
+    let allocated = header_width(t!("disk_analysis.allocated_size").to_string());
+    let difference = header_width(t!("disk_analysis.col_difference").to_string());
     let files_w = 64.0;
-    let flex = (total_w - type_w - numeric * 3.0 - files_w).max(220.0);
+    let flex = (total_w - type_w - logical - allocated - difference - files_w).max(220.0);
     let name = (flex * 0.42).clamp(120.0, 320.0);
     let path = (flex - name).max(80.0);
-    [name, path, type_w, numeric, numeric, numeric, files_w]
+    [name, path, type_w, logical, allocated, difference, files_w]
 }
 
 fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut DiskAnalysisState) {
@@ -220,6 +238,7 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
                 .on_hover_text(hint.to_string());
             if resp.clicked() {
                 state.update_largest_sort(column);
+                state.sync_query_jobs();
             }
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

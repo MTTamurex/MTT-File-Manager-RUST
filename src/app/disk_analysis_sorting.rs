@@ -92,48 +92,58 @@ impl DiskAnalysisState {
         let Some(model) = self.model.clone() else {
             return;
         };
-        let sort = self.largest_sort;
-        let filtered = self.active_weights.clone();
         let mut rows = self.largest_rows.as_ref().clone();
         rows.sort_by(|&a, &b| {
-            let type_order = model.nodes[b as usize]
-                .is_dir
-                .cmp(&model.nodes[a as usize].is_dir);
-            let group_order = match sort.grouping {
-                LargestGrouping::Mixed => SortOrdering::Equal,
-                LargestGrouping::FoldersFirst => type_order,
-                LargestGrouping::FilesFirst => type_order.reverse(),
-            };
-            group_order.then_with(|| {
-                let order = compare_largest_column(
-                    &model,
-                    a,
-                    b,
-                    sort.column,
-                    self.metric,
-                    filtered.as_ref(),
-                );
-                let order = if sort.ascending {
-                    order
-                } else {
-                    order.reverse()
-                };
-                // Individual files all have count 1; retain useful size ranking.
-                order
-                    .then_with(|| {
-                        if sort.column == LargestColumn::Files {
-                            model.nodes[b as usize]
-                                .subtree_size
-                                .cmp(&model.nodes[a as usize].subtree_size)
-                        } else {
-                            SortOrdering::Equal
-                        }
-                    })
-                    .then_with(|| a.cmp(&b))
-            })
+            compare_largest_rows(
+                &model,
+                a,
+                b,
+                self.largest_sort,
+                self.metric,
+                self.active_weights.as_ref(),
+            )
         });
         self.largest_rows = Arc::new(rows);
     }
+}
+
+/// Shared by bounded candidate selection and the displayed table, so the
+/// selected rows are exactly those that come first under the visible ordering.
+pub(crate) fn compare_largest_rows(
+    model: &DiskAnalysisModel,
+    a: u32,
+    b: u32,
+    sort: LargestSort,
+    metric: SizeMetric,
+    filtered: Option<&ActiveWeights>,
+) -> SortOrdering {
+    let type_order = model.nodes[b as usize]
+        .is_dir
+        .cmp(&model.nodes[a as usize].is_dir);
+    let group_order = match sort.grouping {
+        LargestGrouping::Mixed => SortOrdering::Equal,
+        LargestGrouping::FoldersFirst => type_order,
+        LargestGrouping::FilesFirst => type_order.reverse(),
+    };
+    group_order.then_with(|| {
+        let order = compare_largest_column(model, a, b, sort.column, metric, filtered);
+        let order = if sort.ascending {
+            order
+        } else {
+            order.reverse()
+        };
+        order
+            .then_with(|| {
+                if sort.column == LargestColumn::Files {
+                    model.nodes[b as usize]
+                        .subtree_size
+                        .cmp(&model.nodes[a as usize].subtree_size)
+                } else {
+                    SortOrdering::Equal
+                }
+            })
+            .then_with(|| a.cmp(&b))
+    })
 }
 
 fn compare_largest_column(

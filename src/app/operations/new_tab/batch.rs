@@ -39,6 +39,7 @@ impl ImageViewerApp {
 
     pub(super) fn open_main_tabs(&mut self, paths: &[String], ctrl: bool) -> bool {
         self.sync_to_tab();
+        let view_mode = self.new_tab_view_mode();
         let mut first = None;
         for path in paths {
             if !self.tab_manager.can_add_tab() {
@@ -57,7 +58,7 @@ impl ImageViewerApp {
                 break;
             };
             let tab = &mut self.tab_manager.tabs[index];
-            tab.view_mode = self.view_mode;
+            tab.view_mode = view_mode;
             tab.sort_mode = self.sort_mode;
             tab.sort_descending = self.sort_descending;
             tab.folders_position = self.folders_position;

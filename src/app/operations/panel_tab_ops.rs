@@ -8,6 +8,10 @@ use std::sync::Arc;
 impl ImageViewerApp {
     pub(crate) fn new_panel_tab_snapshot(&mut self, path: &str) -> PanelSnapshot {
         let mut snapshot = PanelSnapshot::from_app(self);
+        snapshot.view_mode = self.new_tab_view_mode();
+        // The source lock does not describe this new destination. Its own lock
+        // will be resolved by restore_panel_tab_snapshot when activated.
+        snapshot.current_folder_locked = false;
         let path = path.to_owned();
 
         snapshot.path_input = path.clone();

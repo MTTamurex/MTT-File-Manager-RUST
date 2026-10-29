@@ -140,7 +140,7 @@ impl ImageViewerApp {
             return false;
         }
 
-        let view_mode = self.view_mode;
+        let view_mode = self.new_tab_view_mode();
         let sort_mode = self.sort_mode;
         let sort_descending = self.sort_descending;
         let folders_position = self.folders_position;

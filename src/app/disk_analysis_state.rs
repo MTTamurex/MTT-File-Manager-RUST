@@ -63,14 +63,15 @@ pub enum QueryRequest {
         filter: DiskAnalysisFilter,
         metric: SizeMetric,
     },
-    /// Top-K heaviest descendants of `root`.
+    /// Bounded descendants of `root` selected using the table's ordering.
     Largest {
         job: u64,
         cancel: Arc<AtomicU64>,
         model: Arc<DiskAnalysisModel>,
         root: u32,
         metric: SizeMetric,
-        weights: Option<Arc<Vec<u64>>>,
+        sort: LargestSort,
+        filtered: Option<ActiveWeights>,
     },
     /// Case-insensitive name/path search under `root`.
     Search {
@@ -161,7 +162,7 @@ pub struct DiskAnalysisState {
     /// Latest computed filtered weights (id == matching `filter_gen`+root).
     pub(crate) active_weights: Option<ActiveWeights>,
     /// Signature of the largest-items job currently queued/attached.
-    largest_sig: Option<(usize, u32, u64, SizeMetric)>,
+    largest_sig: Option<(usize, u32, u64, SizeMetric, LargestSort)>,
     largest_job: u64,
     largest_pending: bool,
     /// Signature of the search job currently queued (model, root, weights,
@@ -514,14 +515,15 @@ impl DiskAnalysisState {
             return;
         }
         let weights_id = self.active_weights.as_ref().map(|w| w.id).unwrap_or(0);
-        let weights_for_jobs = if weights_valid {
-            self.active_weights.as_ref().map(|w| w.weights.clone())
-        } else {
-            None
-        };
 
         // 2. Largest top-K.
-        let largest_sig = (Arc::as_ptr(&model) as usize, root, weights_id, self.metric);
+        let largest_sig = (
+            Arc::as_ptr(&model) as usize,
+            root,
+            weights_id,
+            self.metric,
+            self.largest_sort,
+        );
         if self.largest_sig != Some(largest_sig) {
             self.largest_sig = Some(largest_sig);
             let job = self.alloc_job();
@@ -536,7 +538,8 @@ impl DiskAnalysisState {
                     model: model.clone(),
                     root,
                     metric: self.metric,
-                    weights: weights_for_jobs,
+                    sort: self.largest_sort,
+                    filtered: self.active_weights.clone(),
                 })
                 .is_ok();
         }
@@ -641,6 +644,10 @@ impl DiskAnalysisState {
 
     pub fn filter_is_updating(&self) -> bool {
         self.filter.is_active() && self.active_weights.is_none()
+    }
+
+    pub fn largest_is_updating(&self) -> bool {
+        self.largest_pending || self.filter_is_updating()
     }
 
     /// Drain worker messages (fetch + queries + duplicates). Returns true
@@ -847,14 +854,16 @@ fn query_worker_loop(req_receiver: Receiver<QueryRequest>, res_sender: Sender<Qu
                 model,
                 root,
                 metric,
-                weights,
+                sort,
+                filtered,
                 ..
             } => {
-                let basis = basis_of(metric, weights.as_deref().map(|v| v.as_slice()));
                 let rows = crate::app::disk_analysis_query::largest_items(
                     &model,
                     root,
-                    basis,
+                    sort,
+                    metric,
+                    filtered.as_ref(),
                     LARGEST_LIMIT_PER_KIND,
                     is_cancelled,
                 );
@@ -891,16 +900,6 @@ fn query_worker_loop(req_receiver: Receiver<QueryRequest>, res_sender: Sender<Qu
     }
 }
 
-fn basis_of<'a>(
-    metric: SizeMetric,
-    weights: Option<&'a [u64]>,
-) -> crate::app::disk_analysis_query::WeightBasis<'a> {
-    match weights {
-        Some(weights) => crate::app::disk_analysis_query::WeightBasis::Filtered { metric, weights },
-        None => crate::app::disk_analysis_query::WeightBasis::Metric(metric),
-    }
-}
-
 impl QueryRequest {
     fn job(&self) -> u64 {
         match self {
@@ -919,7 +918,7 @@ impl QueryRequest {
     }
 }
 
-/// Top-K cap for each item kind in FileCount mode and total cap otherwise.
+/// Top-K cap per kind when grouped/by file count, and total cap when mixed.
 const LARGEST_LIMIT_PER_KIND: usize = 100;
 /// Initial cap for search results (plan section 5).
 const SEARCH_LIMIT: usize = 200;

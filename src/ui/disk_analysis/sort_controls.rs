@@ -128,7 +128,7 @@ pub(super) fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         });
     });
     if state.largest_sort != before {
-        state.sort_largest_rows();
+        state.sync_query_jobs();
     }
     ui.add_space(4.0);
 }

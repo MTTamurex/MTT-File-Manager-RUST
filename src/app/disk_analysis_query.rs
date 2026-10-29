@@ -7,9 +7,10 @@
 //! ignore unreachable components (cycles/orphans outside the walked tree).
 
 use crate::app::disk_analysis_model::{AnalysisNode, DiskAnalysisModel};
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::sync::Arc;
+
+mod largest;
+pub use largest::largest_items;
 
 /// Which quantity drives the treemap, tables and charts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -265,18 +266,6 @@ fn collect_subtree_values(
     }
 }
 
-/// Weight basis for top-K / search inclusion checks.
-#[derive(Clone, Copy)]
-pub enum WeightBasis<'a> {
-    /// Plain metric read from the model.
-    Metric(SizeMetric),
-    /// Precomputed filtered weights; zero hides the node.
-    Filtered {
-        metric: SizeMetric,
-        weights: &'a [u64],
-    },
-}
-
 /// Filtered per-node weights currently attached to the treemap/list views.
 /// `id` identifies this snapshot in cache keys; `root` records which subtree
 /// produced it.
@@ -287,153 +276,6 @@ pub struct ActiveWeights {
     pub metric: SizeMetric,
     pub weights: Arc<Vec<u64>>,
     pub matches: Arc<Vec<bool>>,
-}
-
-impl WeightBasis<'_> {
-    fn subtree_value(self, model: &DiskAnalysisModel, idx: u32) -> u64 {
-        match self {
-            WeightBasis::Metric(m) => m.subtree(&model.nodes[idx as usize]),
-            WeightBasis::Filtered { weights, .. } => {
-                weights.get(idx as usize).copied().unwrap_or(0)
-            }
-        }
-    }
-
-    fn metric(self) -> SizeMetric {
-        match self {
-            WeightBasis::Metric(metric) | WeightBasis::Filtered { metric, .. } => metric,
-        }
-    }
-
-    fn includes(self, model: &DiskAnalysisModel, idx: u32) -> bool {
-        self.subtree_value(model, idx) > 0
-    }
-}
-
-/// One projected row of the "Largest items" table: just the node index; all
-/// displayed numbers are read straight from the model at paint time.
-pub type LargestProjection = Vec<u32>;
-
-/// Top-K descendants of `root` (root itself excluded), computed with bounded
-/// heaps so millions of nodes never get sorted. For byte metrics, this returns
-/// the K heaviest items. For file count, it returns the K folders with the
-/// most descendant files plus the K largest files by logical size. Ties break
-/// by lower index, making the output deterministic.
-pub fn largest_items(
-    model: &DiskAnalysisModel,
-    root: u32,
-    basis: WeightBasis<'_>,
-    k: usize,
-    is_cancelled: impl Fn() -> bool,
-) -> LargestProjection {
-    if k == 0 {
-        return Vec::new();
-    }
-    if basis.metric() == SizeMetric::FileCount {
-        return largest_file_count_items(model, root, basis, k, is_cancelled);
-    }
-
-    // The heap root is the worst retained entry: lowest weight and, on a
-    // tie, highest index. This preserves the documented lower-index tie-break.
-    let mut heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>> = BinaryHeap::with_capacity(k.min(1024));
-    let mut stack = vec![root];
-    while let Some(idx) = stack.pop() {
-        if is_cancelled() {
-            return Vec::new();
-        }
-        let node = &model.nodes[idx as usize];
-        if node.is_dir && !node.is_reparse {
-            for &child in model.children(idx) {
-                stack.push(child);
-            }
-        }
-        if idx == root || !basis.includes(model, idx) {
-            continue;
-        }
-        let weight = basis.subtree_value(model, idx);
-        retain_largest(&mut heap, idx, weight, k);
-    }
-    finish_largest_heap(heap)
-        .into_iter()
-        .map(|(_, idx)| idx)
-        .collect()
-}
-
-fn largest_file_count_items(
-    model: &DiskAnalysisModel,
-    root: u32,
-    basis: WeightBasis<'_>,
-    k: usize,
-    is_cancelled: impl Fn() -> bool,
-) -> LargestProjection {
-    let mut folders = BinaryHeap::with_capacity(k.min(1024));
-    let mut files = BinaryHeap::with_capacity(k.min(1024));
-    let mut stack = vec![root];
-    while let Some(idx) = stack.pop() {
-        if is_cancelled() {
-            return Vec::new();
-        }
-        let node = &model.nodes[idx as usize];
-        if node.is_dir && !node.is_reparse {
-            for &child in model.children(idx) {
-                stack.push(child);
-            }
-        }
-        if idx == root || !basis.includes(model, idx) {
-            continue;
-        }
-        if node.is_dir {
-            retain_largest(&mut folders, idx, basis.subtree_value(model, idx), k);
-        } else {
-            // A file contributes one to the file-count metric, so use logical
-            // size to choose which files to show when folders are ranked by
-            // their descendant file counts.
-            retain_largest(&mut files, idx, node.subtree_size, k);
-        }
-    }
-
-    let mut rows: Vec<(u64, u64, u32)> = finish_largest_heap(folders)
-        .into_iter()
-        .map(|(count, idx)| (count, model.nodes[idx as usize].subtree_size, idx))
-        .collect();
-    rows.extend(finish_largest_heap(files).into_iter().map(|(_, idx)| {
-        (
-            basis.subtree_value(model, idx),
-            model.nodes[idx as usize].subtree_size,
-            idx,
-        )
-    }));
-    // Match the Files / Logical default table order: folder file-count first,
-    // then logical size, then node index for a stable tie-break.
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
-    rows.into_iter().map(|(_, _, idx)| idx).collect()
-}
-
-fn retain_largest(
-    heap: &mut BinaryHeap<Reverse<(u64, Reverse<u32>)>>,
-    idx: u32,
-    weight: u64,
-    k: usize,
-) {
-    let key = (weight, Reverse(idx));
-    if heap.len() < k {
-        heap.push(Reverse(key));
-    } else if let Some(&Reverse(smallest)) = heap.peek() {
-        if key > smallest {
-            heap.pop();
-            heap.push(Reverse(key));
-        }
-    }
-}
-
-fn finish_largest_heap(heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>>) -> Vec<(u64, u32)> {
-    let mut rows: Vec<(u64, u32)> = heap
-        .into_iter()
-        .map(|Reverse((weight, Reverse(idx)))| (weight, idx))
-        .collect();
-    // Heaviest first; deterministic tie-break by ascending index.
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    rows
 }
 
 /// Case-insensitive subtree search by name, or by full path when the query
@@ -488,6 +330,18 @@ pub fn search_nodes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::disk_analysis_sorting::{LargestColumn, LargestSort};
+
+    fn metric_sort(metric: SizeMetric) -> LargestSort {
+        LargestSort {
+            column: match metric {
+                SizeMetric::Logical => LargestColumn::Logical,
+                SizeMetric::Allocated => LargestColumn::Allocated,
+                SizeMetric::FileCount => LargestColumn::Files,
+            },
+            ..LargestSort::default()
+        }
+    }
     use crate::app::disk_analysis_model::FileCategory;
     use mtt_search_protocol::{DiskAnalysisRecord, DiskAnalysisSnapshot};
 
@@ -719,7 +573,9 @@ mod tests {
         let rows = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             10,
             || false,
         );
@@ -735,7 +591,9 @@ mod tests {
         let rows = largest_items(
             &model,
             docs,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             10,
             || false,
         );
@@ -752,7 +610,9 @@ mod tests {
         let rows = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Allocated),
+            metric_sort(SizeMetric::Allocated),
+            SizeMetric::Allocated,
+            None,
             2,
             || false,
         );
@@ -775,7 +635,9 @@ mod tests {
         let rows = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::FileCount),
+            metric_sort(SizeMetric::FileCount),
+            SizeMetric::FileCount,
+            None,
             1,
             || false,
         );
@@ -804,13 +666,20 @@ mod tests {
         };
         let weights = compute_filtered_weights(&model, model.root, &filter, SizeMetric::FileCount);
 
+        let active = ActiveWeights {
+            id: 1,
+            root: model.root,
+            metric: SizeMetric::FileCount,
+            weights: Arc::new(weights.weights),
+            matches: Arc::new(weights.matches),
+        };
+
         let rows = largest_items(
             &model,
             model.root,
-            WeightBasis::Filtered {
-                metric: SizeMetric::FileCount,
-                weights: &weights.weights,
-            },
+            metric_sort(SizeMetric::FileCount),
+            SizeMetric::FileCount,
+            Some(&active),
             1,
             || false,
         );
@@ -832,14 +701,18 @@ mod tests {
         let first = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             10,
             || false,
         );
         let second = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             10,
             || false,
         );
@@ -849,7 +722,9 @@ mod tests {
         let one = largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             1,
             || false,
         );
@@ -897,7 +772,9 @@ mod tests {
         assert!(largest_items(
             &model,
             model.root,
-            WeightBasis::Metric(SizeMetric::Logical),
+            metric_sort(SizeMetric::Logical),
+            SizeMetric::Logical,
+            None,
             10,
             || true,
         )
