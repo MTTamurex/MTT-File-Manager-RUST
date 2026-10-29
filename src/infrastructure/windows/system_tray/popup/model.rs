@@ -83,9 +83,9 @@ impl Model {
                 continue;
             }
             for workspace in &snapshot.workspaces {
-                // A sole dual-panel workspace is already represented by the
-                // instance row. Multiple workspaces still need distinct targets.
-                if snapshot.workspaces.len() > 1 {
+                // Split workspaces expose their panel tabs directly. Their outer
+                // title mirrors the focused panel and would duplicate that entry.
+                if workspace.panels.is_none() && snapshot.workspaces.len() > 1 {
                     self.rows.push(Row {
                         title: workspace.tab.path.clone(),
                         subtitle: String::new(),
@@ -104,7 +104,6 @@ impl Model {
                     });
                 }
                 if let Some(panels) = &workspace.panels {
-                    let indent = if snapshot.workspaces.len() > 1 { 2 } else { 1 };
                     for (right, entries) in panels.iter().enumerate() {
                         self.rows.push(Row {
                             title: if right == 0 {
@@ -116,7 +115,7 @@ impl Model {
                             subtitle: String::new(),
                             sent_at: None,
                             icon: None,
-                            indent,
+                            indent: 1,
                             height: 22,
                             expanded: None,
                             action: Action::Information,
@@ -127,7 +126,7 @@ impl Model {
                                 subtitle: String::new(),
                                 sent_at: None,
                                 icon: Some(entry.icon),
-                                indent,
+                                indent: 1,
                                 height: 28,
                                 expanded: None,
                                 action: Action::Command(Command::Activate(

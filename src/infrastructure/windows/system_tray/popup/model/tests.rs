@@ -210,3 +210,164 @@ fn keyboard_navigation_skips_information_wraps_and_keeps_selection_visible() {
     assert_eq!(model.row_at(-1), None);
     assert_eq!(model.row_at(model.content_height()), None);
 }
+
+#[test]
+fn mixed_workspaces_expose_panel_groups_directly_and_preserve_regular_tabs() {
+    let native = NativeWindow::new();
+    let window = WindowRef::capture(native.0).unwrap();
+    let mut snapshot = snapshot();
+    let mut regular = snapshot.workspaces[0].clone();
+    regular.tab.id = 8;
+    regular.tab.path = "Other".into();
+    regular.panels = None;
+    let mut second_split = snapshot.workspaces[0].clone();
+    second_split.tab.id = 9;
+    // Identical labels and panel tab IDs across workspaces must remain distinct destinations.
+    snapshot.workspaces.extend([regular, second_split]);
+    let mut model = Model::new(vec![(window, snapshot.clone())]);
+    model.toggle(0);
+
+    let titles: Vec<_> = model
+        .rows
+        .iter()
+        .skip(1)
+        .map(|row| row.title.as_str())
+        .collect();
+    let left = rust_i18n::t!("tray.left_panel");
+    let right = rust_i18n::t!("tray.right_panel");
+    assert_eq!(
+        titles,
+        [
+            left.as_ref(),
+            "Left",
+            right.as_ref(),
+            "Tag: Example",
+            "Other",
+            left.as_ref(),
+            "Left",
+            right.as_ref(),
+            "Tag: Example"
+        ]
+    );
+    assert!(model.rows.iter().skip(1).all(|row| row.indent == 1));
+    assert!(model.rows.iter().skip(1).all(|row| row.sent_at.is_none()));
+
+    let targets: Vec<_> = model
+        .rows
+        .iter()
+        .filter_map(|row| match &row.action {
+            Action::Command(Command::Activate(destination, target)) => {
+                assert_eq!(*destination, window);
+                Some(target.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            Target {
+                workspace: 7,
+                panel: Some((false, 11))
+            },
+            Target {
+                workspace: 7,
+                panel: Some((true, 12))
+            },
+            Target {
+                workspace: 8,
+                panel: None
+            },
+            Target {
+                workspace: 9,
+                panel: Some((false, 11))
+            },
+            Target {
+                workspace: 9,
+                panel: Some((true, 12))
+            },
+        ]
+    );
+    for target in targets {
+        let resolved = snapshot.resolve(&target).unwrap();
+        assert_eq!(
+            snapshot.workspaces[resolved.workspace_index].tab.id,
+            target.workspace
+        );
+        if let Some((right, id)) = target.panel {
+            let (resolved_right, index) = resolved.panel.unwrap();
+            assert_eq!(resolved_right, right);
+            let panels = snapshot.workspaces[resolved.workspace_index]
+                .panels
+                .as_ref()
+                .unwrap();
+            assert_eq!(panels[usize::from(right)][index].id, id);
+        } else {
+            assert!(resolved.panel.is_none());
+        }
+    }
+    let information: Vec<_> = model
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| matches!(row.action, Action::Information).then_some(index))
+        .collect();
+    assert_eq!(information.len(), 4);
+    for _ in 0..model.rows.len() + 2 {
+        model.navigate(1);
+        assert!(!information.contains(&model.selected.unwrap()));
+    }
+    model.toggle(0);
+    assert_eq!(model.rows.len(), 1);
+}
+
+#[test]
+fn split_groups_repeat_in_workspace_order_even_with_an_empty_panel() {
+    let native = NativeWindow::new();
+    let mut snapshot = snapshot();
+    let mut second = snapshot.workspaces[0].clone();
+    second.tab.id = 8;
+    second.panels.as_mut().unwrap()[0].clear();
+    snapshot.workspaces.push(second);
+    let mut model = Model::new(vec![(WindowRef::capture(native.0).unwrap(), snapshot)]);
+    model.toggle(0);
+    assert_eq!(model.rows.len(), 8);
+    let targets: Vec<_> = model
+        .rows
+        .iter()
+        .filter_map(|row| match &row.action {
+            Action::Command(Command::Activate(_, target)) => Some(target.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            Target {
+                workspace: 7,
+                panel: Some((false, 11))
+            },
+            Target {
+                workspace: 7,
+                panel: Some((true, 12))
+            },
+            Target {
+                workspace: 8,
+                panel: Some((true, 12))
+            },
+        ]
+    );
+    let groups: Vec<_> = model
+        .rows
+        .iter()
+        .filter(|row| matches!(row.action, Action::Information))
+        .map(|row| row.title.as_str())
+        .collect();
+    let left = rust_i18n::t!("tray.left_panel");
+    let right = rust_i18n::t!("tray.right_panel");
+    assert_eq!(
+        groups,
+        [left.as_ref(), right.as_ref(), left.as_ref(), right.as_ref()]
+    );
+    assert!(model.rows.iter().skip(1).all(|row| row.indent == 1));
+}
