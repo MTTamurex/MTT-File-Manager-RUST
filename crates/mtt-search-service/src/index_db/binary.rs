@@ -37,6 +37,10 @@ const LEGACY_V4_MAGIC: &[u8; 8] = b"MTTIDX04";
 const LEGACY_V3_MAGIC: &[u8; 8] = b"MTTIDX03";
 const LEGACY_V2_MAGIC: &[u8; 8] = b"MTTIDX02";
 const VERSION: u32 = 7;
+// Additive v7 completeness bit: older caches may contain zero or stale metrics
+// from passing normalized IDs to OpenFileById. Keep their names/records, but
+// reload sizes through the existing background MFT pass once after upgrading.
+const SEQUENCE_AWARE_METRICS: u64 = 1 << 3;
 const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
 const MMAP_ARENA_MIN_BYTES: usize = 64 * 1024 * 1024;
 /// Minimum records-section size to memory-map instead of reading into private
@@ -68,7 +72,7 @@ struct Header {
     arena_size: u64,
     hardlink_entry_count: u64,
     reparse_count: u64,
-    /// Bits 0-2: completeness flags; bits 32-63: filesystem serial number.
+    /// Bits 0-3: completeness flags; bits 32-63: filesystem serial number.
     flags: u64,
     /// On-disk compressed arena size in bytes. Equal to arena_size when uncompressed.
     compressed_arena_size: u64,
@@ -380,7 +384,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         flags |= 2;
     }
     if index.sizes_loaded {
-        flags |= 4;
+        flags |= 4 | SEQUENCE_AWARE_METRICS;
     }
     flags |= (index.volume_serial as u64) << 32;
 
@@ -874,7 +878,7 @@ fn load_v7(
     index.last_usn = h_last_usn;
     index.hardlink_data_complete = h_flags & 1 != 0;
     index.reparse_data_complete = h_flags & 2 != 0;
-    index.sizes_loaded = h_flags & 4 != 0;
+    restore_size_state(&mut index, h_flags);
 
     // Rebuild the children reverse index from loaded records + hardlinks.
     index.rebuild_children();
@@ -907,6 +911,13 @@ fn load_v7(
     );
 
     Ok(Some((index, state)))
+}
+
+fn restore_size_state(index: &mut VolumeIndex, flags: u64) {
+    index.sizes_loaded = flags & 4 != 0 && flags & SEQUENCE_AWARE_METRICS != 0;
+    // This is not an index reset: existing records, paths, journal cursor and
+    // allocation values remain available until the size-only pass completes.
+    index.binary_dirty |= flags & 4 != 0 && flags & SEQUENCE_AWARE_METRICS == 0;
 }
 
 /// Read the records section into an owned RecordStore. Used as a fallback when
@@ -1237,9 +1248,25 @@ mod tests {
         assert!(state.has_hardlink_parent_data);
         assert!(state.has_reparse_point_data);
         assert_matches_sample(&loaded, drive);
+        assert!(loaded.sizes_loaded);
+        assert!(!loaded.binary_dirty);
 
         assert_eq!(&read_file_magic(&path).unwrap(), MAGIC);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_v7_metrics_are_repaired_without_discarding_records_or_checkpoints() {
+        let mut index = sample_index('R');
+        restore_size_state(&mut index, 1 | 2 | 4);
+        assert!(!index.sizes_loaded);
+        assert!(index.binary_dirty);
+        assert_matches_sample(&index, 'R');
+        assert_eq!((index.journal_id, index.last_usn), (7, 8));
+        index.binary_dirty = false;
+        restore_size_state(&mut index, 1 | 2 | 4 | SEQUENCE_AWARE_METRICS);
+        assert!(index.sizes_loaded);
+        assert!(!index.binary_dirty);
     }
 
     #[test]

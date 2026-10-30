@@ -99,6 +99,7 @@ Deletion validation and the native, path-based Windows operation are not an atom
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
+- **Live NTFS size updates** — Refresh logical size and stream allocation using complete NTFS file references, including after growth or truncation. Older binary caches retain their records and receive a one-time background size refresh after upgrading; no manual index deletion is required
 - **Background service** — Dedicated Windows Service for continuous indexing
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
 - **Paginated results** — Offset/limit pagination with incremental loading

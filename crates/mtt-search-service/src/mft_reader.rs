@@ -15,6 +15,10 @@ use windows::Win32::System::IO::DeviceIoControl;
 
 use crate::file_index::{FileMetrics, VolumeIndex};
 
+mod file_metrics;
+#[cfg(test)]
+mod size_scan_tests;
+
 // ── FSCTL codes ─────────────────────────────────────────────────────────────
 
 /// FSCTL_GET_NTFS_VOLUME_DATA — returns NTFS_VOLUME_DATA_BUFFER with MFT geometry.
@@ -638,7 +642,7 @@ fn resolve_file_size_with_fallbacks(
                 }
             }
 
-            size_by_file_id(volume, frn)
+            size_by_file_id(volume, frn, record_size)
         }
     }
 }
@@ -663,147 +667,18 @@ fn stat_file_size_fallback(
     }
 }
 
-/// Open a file directly by FRN and query every data stream. `FileStreamInfo`
-/// reports allocation after NTFS compression/sparse handling and includes ADS.
-fn metrics_by_file_id(volume: HANDLE, frn: u64) -> Option<FileMetrics> {
-    // FILE_ID_DESCRIPTOR layout for FileIdType (8-byte NTFS FRN):
-    //   Offset 0:  dwSize (u32) = 24
-    //   Offset 4:  Type   (u32) = 0 (FileIdType)
-    //   Offset 8:  FileId (i64)
-    //   Offset 16: padding (8 bytes — union extends to 16 for FILE_ID_128)
-    #[repr(C)]
-    struct FileIdDescriptor {
-        dw_size: u32,
-        id_type: u32,
-        file_id: i64,
-        _pad: [u8; 8],
-    }
-
-    extern "system" {
-        fn OpenFileById(
-            h_volume_hint: *mut std::ffi::c_void,
-            lp_file_id: *const FileIdDescriptor,
-            dw_desired_access: u32,
-            dw_share_mode: u32,
-            lp_security_attributes: *const std::ffi::c_void,
-            dw_flags_and_attributes: u32,
-        ) -> *mut std::ffi::c_void;
-
-        fn GetFileSizeEx(h_file: *mut std::ffi::c_void, lp_file_size: *mut i64) -> i32;
-        fn GetFileInformationByHandleEx(
-            h_file: *mut std::ffi::c_void,
-            file_information_class: i32,
-            file_information: *mut std::ffi::c_void,
-            buffer_size: u32,
-        ) -> i32;
-    }
-
-    let desc = FileIdDescriptor {
-        dw_size: 24,
-        id_type: 0, // FileIdType
-        file_id: frn as i64,
-        _pad: [0; 8],
-    };
-
-    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
-    const FILE_SHARE_ALL: u32 = 0x07; // READ | WRITE | DELETE
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-
-    let raw_handle = unsafe {
-        OpenFileById(
-            volume.0,
-            &desc,
-            FILE_READ_ATTRIBUTES,
-            FILE_SHARE_ALL,
-            std::ptr::null(),
-            FILE_FLAG_BACKUP_SEMANTICS,
-        )
-    };
-
-    let invalid = -1isize as *mut std::ffi::c_void;
-    if raw_handle.is_null() || raw_handle == invalid {
-        return None;
-    }
-
-    let handle = HandleGuard::new(HANDLE(raw_handle))?;
-    let mut fallback_logical: i64 = 0;
-    if unsafe { GetFileSizeEx(handle.as_raw().0, &mut fallback_logical) } == 0
-        || fallback_logical < 0
-    {
-        fallback_logical = 0;
-    }
-
-    const FILE_STREAM_INFO_CLASS: i32 = 7;
-    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-    const ERROR_MORE_DATA: u32 = 234;
-    const MAX_STREAM_INFO_BYTES: usize = 16 * 1024 * 1024;
-
-    let mut words = vec![0u64; 8192];
-    loop {
-        let buffer_bytes = words.len().saturating_mul(std::mem::size_of::<u64>());
-        let ok = unsafe {
-            GetFileInformationByHandleEx(
-                handle.as_raw().0,
-                FILE_STREAM_INFO_CLASS,
-                words.as_mut_ptr() as *mut std::ffi::c_void,
-                buffer_bytes as u32,
-            )
-        };
-        if ok != 0 {
-            let bytes =
-                unsafe { std::slice::from_raw_parts(words.as_ptr() as *const u8, buffer_bytes) };
-            let mut offset = 0usize;
-            let mut logical_size = fallback_logical as u64;
-            let mut allocated_size = 0u64;
-            loop {
-                if offset + 24 > bytes.len() {
-                    return None;
-                }
-                let next = read_u32_le(bytes, offset)? as usize;
-                let name_bytes = read_u32_le(bytes, offset + 4)? as usize;
-                let stream_size = read_i64_le(bytes, offset + 8)?;
-                let stream_allocated = read_i64_le(bytes, offset + 16)?;
-                let name_end = offset.checked_add(24)?.checked_add(name_bytes)?;
-                if !name_bytes.is_multiple_of(2) || name_end > bytes.len() {
-                    return None;
-                }
-                let name_utf16: Vec<u16> = bytes[offset + 24..name_end]
-                    .chunks_exact(2)
-                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                    .collect();
-                let stream_name = String::from_utf16_lossy(&name_utf16);
-                if stream_name.eq_ignore_ascii_case("::$DATA") && stream_size >= 0 {
-                    logical_size = stream_size as u64;
-                }
-                if stream_allocated >= 0 {
-                    allocated_size = allocated_size.saturating_add(stream_allocated as u64);
-                }
-                if next == 0 {
-                    return Some(FileMetrics {
-                        logical_size,
-                        allocated_size,
-                    });
-                }
-                if next < 24 || offset.checked_add(next)? >= bytes.len() {
-                    return None;
-                }
-                offset += next;
-            }
-        }
-
-        let error = unsafe { GetLastError() }.0;
-        if !matches!(error, ERROR_INSUFFICIENT_BUFFER | ERROR_MORE_DATA)
-            || buffer_bytes >= MAX_STREAM_INFO_BYTES
-        {
-            return None;
-        }
-        let next_bytes = buffer_bytes.saturating_mul(2).min(MAX_STREAM_INFO_BYTES);
-        words.resize(next_bytes.div_ceil(std::mem::size_of::<u64>()), 0);
-    }
+fn metrics_by_file_id(volume: HANDLE, frn: u64, record_size: usize) -> Option<FileMetrics> {
+    // Index keys intentionally omit the NTFS sequence. OpenFileById does not:
+    // reconstruct the complete current reference from the matching base record.
+    let mut buffer = vec![0u8; OUTPUT_HEADER + record_size];
+    let len = fetch_mft_record(volume, frn, record_size, &mut buffer).ok()??;
+    let reference =
+        file_metrics::reference_from_record(frn, &buffer[OUTPUT_HEADER..OUTPUT_HEADER + len])?;
+    file_metrics::read_by_reference(volume, reference)
 }
 
-fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
-    metrics_by_file_id(volume, frn).map(|metrics| metrics.logical_size)
+fn size_by_file_id(volume: HANDLE, frn: u64, record_size: usize) -> Option<u64> {
+    metrics_by_file_id(volume, frn, record_size).map(|metrics| metrics.logical_size)
 }
 
 /// Read the size of a single file by FRN using FSCTL_GET_NTFS_FILE_RECORD.
@@ -817,12 +692,8 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
 }
 
 /// Read logical and physical stream metrics for an incremental update.
-pub fn read_single_file_metrics(
-    volume: HANDLE,
-    frn: u64,
-    _record_size: u32,
-) -> Option<FileMetrics> {
-    metrics_by_file_id(volume, frn)
+pub fn read_single_file_metrics(volume: HANDLE, frn: u64, record_size: u32) -> Option<FileMetrics> {
+    metrics_by_file_id(volume, frn, record_size as usize)
 }
 
 /// Public wrapper to query the MFT record size for a volume.
@@ -1552,6 +1423,9 @@ where
     on_progress(0, total_records);
 
     for &(lcn, cluster_count) in data_runs {
+        if frn >= total_records {
+            break;
+        }
         if should_stop() {
             return Err("MFT size scan cancelled by volume removal".to_string());
         }
@@ -1561,12 +1435,7 @@ where
         let seek_result =
             unsafe { SetFilePointerEx(handle, run_byte_offset as i64, None, FILE_BEGIN) };
         if seek_result.is_err() {
-            eprintln!(
-                "[MFT-SIZE] {}:\\ Seek to LCN {} (offset {}) failed, skipping run",
-                drive_letter, lcn, run_byte_offset
-            );
-            frn += run_bytes / record_size as u64;
-            continue;
+            return Err("MFT size scan seek failed; incomplete sizes must not be committed".into());
         }
 
         let mut bytes_remaining = run_bytes;
@@ -1590,14 +1459,8 @@ where
                 )
             };
 
-            if read_result.is_err() || bytes_read_out == 0 {
-                let skip_records = bytes_remaining / record_size as u64;
-                frn += skip_records;
-                eprintln!(
-                    "[MFT-SIZE] {}:\\ ReadFile failed at FRN {}, skipping {} records",
-                    drive_letter, frn, skip_records
-                );
-                break;
+            if read_result.is_err() || bytes_read_out as usize != to_read {
+                return Err("MFT size scan read failed or was short; incomplete sizes must not be committed".into());
             }
 
             let bytes_read = bytes_read_out as usize;
@@ -1634,6 +1497,10 @@ where
         }
     }
 
+    if frn < total_records {
+        return Err("MFT size scan ended before all expected records were read".into());
+    }
+
     let mut ext_applied = 0u64;
     for (base_frn, metrics) in extension_sizes {
         if should_stop() {
@@ -1659,7 +1526,7 @@ where
             if should_stop() {
                 return Err("MFT size scan cancelled by volume removal".to_string());
             }
-            if let Some(metrics) = metrics_by_file_id(handle, frn) {
+            if let Some(metrics) = metrics_by_file_id(handle, frn, record_size) {
                 precise_file_id += 1;
                 match size_updates.binary_search_by_key(&frn, |(record_frn, _)| *record_frn) {
                     Ok(pos) => size_updates[pos].1 = metrics,
@@ -1916,7 +1783,7 @@ where
                 continue;
             }
 
-            if let Some(metrics) = metrics_by_file_id(handle, frn) {
+            if let Some(metrics) = metrics_by_file_id(handle, frn, record_size) {
                 if let Some(rec) = index.records.get_mut(&frn) {
                     rec.size = metrics.logical_size;
                     rec.allocated_size = metrics.allocated_size;

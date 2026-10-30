@@ -1,6 +1,40 @@
 use super::{apply_incremental_records, next_journal_poll_delay};
 use crate::volume_indexers::test_support::{index, usn_record};
 
+#[test]
+fn measured_live_metrics_fix_new_files_and_invalidate_folder_totals() {
+    use crate::file_index::FileMetrics;
+    let mut index = index();
+    assert!(index.insert_record(5, "", 5, true, false));
+    assert!(index.insert_record(10, "folder", 5, true, false));
+    assert!(index.insert_record(20, "file.bin", 10, false, false));
+    index.size_refresh_in_progress = true;
+    super::apply_metrics(
+        &mut index,
+        &[(
+            20,
+            FileMetrics {
+                logical_size: 100,
+                allocated_size: 4096,
+            },
+        )],
+        vec![],
+    );
+    assert_eq!(index.records.get(&20).unwrap().size, 100);
+    assert_eq!(index.folder_tree_summary(5).0, 100);
+    assert!(!index.size_refresh_in_progress);
+    assert!(index.binary_dirty);
+    assert!(index.dir_modified_at.contains_key(&5));
+    assert!(index.dir_modified_at.contains_key(&10));
+    super::apply_metrics(&mut index, &[(20, FileMetrics::default())], vec![20, 99]);
+    assert_eq!(index.folder_tree_summary(5).0, 0);
+    assert!(index.pending_size_refresh.contains(&20));
+    assert!(
+        !index.pending_size_refresh.contains(&99),
+        "deleted records must not be retried forever"
+    );
+}
+
 fn named(frn: u64, parent: u64, reason: u32, name: &str) -> Vec<u8> {
     usn_record(
         frn,

@@ -6,6 +6,8 @@ use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
 use crate::record_store::RecordStore;
 
+mod metrics;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FileMetrics {
     /// Logical length of the unnamed data stream.
@@ -119,7 +121,7 @@ pub struct VolumeIndex {
     pub dir_modified_at: HashMap<u64, std::time::Instant>,
     /// FRNs of files whose size may have changed (detected via USN journal).
     /// The volume indexer drains this set periodically and refreshes sizes
-    /// via `FSCTL_GET_NTFS_FILE_RECORD`.
+    /// via live stream queries using complete NTFS file references.
     pub pending_size_refresh: HashSet<u64>,
     /// Whether the volume indexer is currently refreshing a drained batch.
     pub size_refresh_in_progress: bool,

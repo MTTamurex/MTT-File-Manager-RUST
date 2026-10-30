@@ -42,6 +42,20 @@ fn apply_incremental_records(
     Ok(())
 }
 
+fn apply_metrics(
+    index: &mut crate::file_index::VolumeIndex,
+    updates: &[(u64, crate::file_index::FileMetrics)],
+    mut unresolved: Vec<u64>,
+) {
+    let now = std::time::Instant::now();
+    for (frn, metrics) in updates {
+        index.update_file_metrics(*frn, *metrics, now);
+    }
+    unresolved.retain(|frn| index.records.get(frn).is_some());
+    index.pending_size_refresh.extend(unresolved);
+    index.size_refresh_in_progress = false;
+}
+
 pub(super) fn run_incremental(
     drive_letter: char,
     mut current_usn: i64,
@@ -193,7 +207,7 @@ pub(super) fn run_incremental(
                         }
                         Ok((size_updates, unresolved_frns))
                     });
-                if let Ok((size_updates, mut unresolved_frns)) = metrics {
+                if let Ok((size_updates, unresolved_frns)) = metrics {
                     if shutdown.is_stopped() {
                         let mut vol = handle.write();
                         vol.pending_size_refresh
@@ -207,24 +221,7 @@ pub(super) fn run_incremental(
                         if let Some(mut vol) =
                             handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
                         {
-                            let mut changed = false;
-                            for (frn, metrics) in &size_updates {
-                                if let Some(rec) = vol.records.get_mut(frn) {
-                                    if (rec.size, rec.allocated_size)
-                                        != (metrics.logical_size, metrics.allocated_size)
-                                    {
-                                        rec.size = metrics.logical_size;
-                                        rec.allocated_size = metrics.allocated_size;
-                                        changed = true;
-                                    }
-                                }
-                            }
-                            unresolved_frns.retain(|frn| vol.records.get(frn).is_some());
-                            vol.pending_size_refresh.extend(unresolved_frns);
-                            vol.size_refresh_in_progress = false;
-                            if changed {
-                                vol.binary_dirty = true;
-                            }
+                            apply_metrics(&mut vol, &size_updates, unresolved_frns);
                             applied_updates = true;
                         }
 

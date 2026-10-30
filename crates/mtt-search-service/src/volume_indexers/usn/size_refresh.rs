@@ -5,6 +5,35 @@ use crate::indexing_progress::IndexingProgress;
 use crate::volume_indices::VolumeIndexHandle;
 use crate::volume_lifecycle::VolumeStopSignal;
 
+fn apply_sizes(
+    index: &mut crate::file_index::VolumeIndex,
+    updates: &[(u64, crate::file_index::FileMetrics)],
+    should_stop: impl Fn() -> bool,
+) -> Option<u64> {
+    let mut applied = 0;
+    let now = std::time::Instant::now();
+    for (position, (frn, metrics)) in updates.iter().enumerate() {
+        if position.is_multiple_of(1024) && should_stop() {
+            return None;
+        }
+        // The journal may have observed a write/create while the raw MFT pass
+        // was running. Its pending live query must win over this older sample.
+        if index.pending_size_refresh.contains(frn) {
+            continue;
+        }
+        applied += u64::from(index.update_file_metrics(*frn, *metrics, now));
+    }
+    if should_stop() {
+        return None;
+    }
+    index.binary_dirty |= !index.sizes_loaded;
+    index.sizes_loaded = true;
+    Some(applied)
+}
+
+#[cfg(test)]
+mod tests;
+
 pub(super) fn spawn_background_size_refresh(
     drive_letter: char,
     bg_handle: VolumeIndexHandle,
@@ -58,30 +87,12 @@ pub(super) fn spawn_background_size_refresh(
                 if let Some(mut vol) =
                     bg_handle.try_write_for(std::time::Duration::from_millis(250))
                 {
-                    let mut changed = false;
                     vol.records.prepare_bulk_mutation(size_updates.len());
-                    for (position, (frn, metrics)) in size_updates.iter().enumerate() {
-                        if position.is_multiple_of(1024) && stop.is_stopped() {
-                            return;
-                        }
-                        if let Some(rec) = vol.records.get_mut(frn) {
-                            let new_size = rec.size.max(metrics.logical_size);
-                            let new_allocated = rec.allocated_size.max(metrics.allocated_size);
-                            if (rec.size, rec.allocated_size) != (new_size, new_allocated) {
-                                rec.size = new_size;
-                                rec.allocated_size = new_allocated;
-                                applied += 1;
-                                changed = true;
-                            }
-                        }
-                    }
-                    if !vol.sizes_loaded {
-                        changed = true;
-                    }
-                    vol.sizes_loaded = true;
-                    if changed {
-                        vol.binary_dirty = true;
-                    }
+                    let Some(count) = apply_sizes(&mut vol, &size_updates, || stop.is_stopped())
+                    else {
+                        return;
+                    };
+                    applied += count;
                     sizes_marked = true;
                 }
                 if !sizes_marked {
@@ -92,31 +103,13 @@ pub(super) fn spawn_background_size_refresh(
                         if let Some(mut vol) =
                             bg_handle.try_write_for(std::time::Duration::from_millis(250))
                         {
-                            let mut changed = false;
                             vol.records.prepare_bulk_mutation(size_updates.len());
-                            for (position, (frn, metrics)) in size_updates.iter().enumerate() {
-                                if position.is_multiple_of(1024) && stop.is_stopped() {
-                                    return;
-                                }
-                                if let Some(rec) = vol.records.get_mut(frn) {
-                                    let new_size = rec.size.max(metrics.logical_size);
-                                    let new_allocated =
-                                        rec.allocated_size.max(metrics.allocated_size);
-                                    if (rec.size, rec.allocated_size) != (new_size, new_allocated) {
-                                        rec.size = new_size;
-                                        rec.allocated_size = new_allocated;
-                                        applied += 1;
-                                        changed = true;
-                                    }
-                                }
-                            }
-                            if !vol.sizes_loaded {
-                                changed = true;
-                            }
-                            vol.sizes_loaded = true;
-                            if changed {
-                                vol.binary_dirty = true;
-                            }
+                            let Some(count) =
+                                apply_sizes(&mut vol, &size_updates, || stop.is_stopped())
+                            else {
+                                return;
+                            };
+                            applied += count;
                             break;
                         }
                     }
