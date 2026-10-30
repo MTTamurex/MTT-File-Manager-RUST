@@ -144,12 +144,15 @@ impl FolderSizeState {
                     && requested < MAX_REQUESTS_PER_UPDATE
                     && self.batch_loading.len() < MAX_IN_FLIGHT_REQUESTS
                 {
-                    if self.enqueue_batch_size(item.path.clone()).is_ok() {
-                        requested += 1;
-                        value = FolderSize::Pending;
-                    } else {
-                        self.selection_size.worker_disconnected = true;
-                        value = FolderSize::Unavailable;
+                    match self.enqueue_batch_size(item.path.clone()) {
+                        Ok(sent) => {
+                            requested += usize::from(sent);
+                            value = FolderSize::Pending;
+                        }
+                        Err(_) => {
+                            self.selection_size.worker_disconnected = true;
+                            value = FolderSize::Unavailable;
+                        }
                     }
                 }
             }

@@ -521,6 +521,7 @@ impl ImageViewerApp {
             show_preview_panel: self.show_preview_panel,
             thumbnail_requests_this_frame: 0,
             folder_size_cache: &self.folder_size_state.batch_cache,
+            folder_size_display_cache: &self.folder_size_state.display_size_cache,
             folder_size_progress: &self.folder_size_state.batch_progress,
             folder_sort_sizes: &self.folder_size_state.size_sorting.sizes,
             folder_size_batch_loading: &self.folder_size_state.batch_loading,
@@ -603,12 +604,17 @@ impl ImageViewerApp {
         // ── Send batch folder-size requests (capped per frame) ──
         {
             const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
-            for path in folder_size_requests
-                .into_iter()
-                .take(MAX_BATCH_REQUESTS_PER_FRAME)
-            {
-                if !self.folder_size_state.batch_loading.contains(&path) {
-                    let _ = self.folder_size_state.enqueue_batch_size(path);
+            let mut sent = 0;
+            for path in folder_size_requests {
+                if sent >= MAX_BATCH_REQUESTS_PER_FRAME {
+                    break;
+                }
+                // Deferred/duplicate paths must not consume the frame budget
+                // and starve later visible folders that are ready to refresh.
+                match self.folder_size_state.enqueue_batch_size(path) {
+                    Ok(true) => sent += 1,
+                    Ok(false) => {}
+                    Err(_) => break,
                 }
             }
         }

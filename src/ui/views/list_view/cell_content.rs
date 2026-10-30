@@ -8,8 +8,9 @@ use eframe::egui::{self, Color32, FontId, Pos2, Rect, Ui};
 /// The same cache-only size is used by painting and automatic-width invalidation.
 pub(super) fn cached_size(item: &FileEntry, ctx: &ListViewContext) -> Option<u64> {
     if item.is_dir && !item.is_archive() {
-        ctx.folder_size_progress
-            .get(&item.path)
+        ctx.folder_size_display_cache
+            .peek(&item.path)
+            .or_else(|| ctx.folder_size_progress.get(&item.path))
             .or_else(|| ctx.folder_size_cache.peek(&item.path))
             .or_else(|| ctx.folder_sort_sizes.get(&item.path))
             .copied()
@@ -82,12 +83,17 @@ pub(super) fn text(
         }
         ColumnId::Status => String::new(),
         ColumnId::Size if item.is_dir && !item.is_archive() => {
+            // A display-only old value must never suppress a fresh request.
+            if enqueue
+                && !ctx.folder_size_cache.contains(&item.path)
+                && !ctx.folder_sort_sizes.contains_key(&item.path)
+                && !ctx.folder_size_batch_loading.contains(&item.path)
+            {
+                ctx.folder_size_requests.push(item.path.clone());
+            }
             if let Some(size) = cached_size(item, ctx) {
                 format_size(size)
             } else {
-                if enqueue && !ctx.folder_size_batch_loading.contains(&item.path) {
-                    ctx.folder_size_requests.push(item.path.clone());
-                }
                 String::new()
             }
         }

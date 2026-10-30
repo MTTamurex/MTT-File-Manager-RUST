@@ -144,6 +144,8 @@ pub struct FolderSizeState {
     pub batch_request_epochs: HashMap<PathBuf, u64>,
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
     pub batch_cache: LruCache<PathBuf, u64>,
+    /// Last confirmed totals, display only; survive invalidation and partial scans.
+    pub display_size_cache: LruCache<PathBuf, u64>,
     /// Paths scheduled for one deferred re-invalidation.
     ///
     /// Handles the race condition where the search service's 2 s USN journal

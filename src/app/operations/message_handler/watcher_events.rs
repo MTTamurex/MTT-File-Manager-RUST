@@ -299,6 +299,13 @@ impl ImageViewerApp {
             self.invalidate_directory_listing_caches(folder_path);
         }
 
+        // Content changes still invalidate child sizes/listings, but do not
+        // require reloading an unchanged parent listing in the inactive panel.
+        if inactive_signature == Some(result.disk_signature) {
+            self.ui_ctx.request_repaint();
+            return;
+        }
+
         self.directory_dirty_registry.mark_dirty(&result.path);
         self.directory_cache.invalidate(&result.path);
         let path_norm = Self::normalize_for_match(&result.path);

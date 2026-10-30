@@ -15,6 +15,7 @@ fn test_state() -> FolderSizeState {
         cancel: Arc::new(AtomicBool::new(false)),
         latest_request_id: Arc::new(AtomicU64::new(0)),
         cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
+        display_size_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         loading: FxHashSet::default(),
         active_requests: HashMap::new(),
         next_request_id: 0,
@@ -36,10 +37,11 @@ fn test_state() -> FolderSizeState {
     }
 }
 
+mod batch_progress_tests;
+mod display_size_tests;
+mod export_snapshot_tests;
 mod selection_size_tests;
 mod size_sorting_tests;
-mod batch_progress_tests;
-mod export_snapshot_tests;
 
 #[test]
 fn panel_stale_summary_requires_complete_counts() {

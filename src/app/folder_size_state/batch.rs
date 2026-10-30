@@ -57,6 +57,7 @@ impl FolderSizeState {
     }
 
     pub fn cache_completed_folder_size(&mut self, path: PathBuf, size: u64) {
+        self.display_size_cache.put(path.clone(), size);
         self.batch_progress.remove(&path);
         self.batch_cache.put(path.clone(), size);
         self.size_sorting.complete(&path, size);
@@ -70,10 +71,20 @@ impl FolderSizeState {
         self.selection_size.invalidate(path);
     }
 
+    /// Returns false when already pending or temporarily deferred/capacity-limited.
     pub fn enqueue_batch_size(
         &mut self,
         path: PathBuf,
-    ) -> Result<(), std::sync::mpsc::SendError<BatchSizeRequest>> {
+    ) -> Result<bool, std::sync::mpsc::SendError<BatchSizeRequest>> {
+        // All producers share the same bound. Deferred revalidation keeps its
+        // first deadline, so continuous notifications cannot postpone retries.
+        if self.batch_loading.contains(&path)
+            || self.loading.contains(&path)
+            || self.pending_revalidation.contains_key(&path)
+            || self.batch_loading.len() >= MAX_IN_FLIGHT_REQUESTS
+        {
+            return Ok(false);
+        }
         let generation = self.batch_generation.load(Ordering::Acquire);
         let epoch = self
             .batch_invalidation_epoch
@@ -84,7 +95,7 @@ impl FolderSizeState {
             .send((path.clone(), generation, epoch))?;
         self.batch_loading.insert(path.clone());
         self.batch_request_epochs.insert(path, epoch);
-        Ok(())
+        Ok(true)
     }
 
     /// Apply display-only progress or release a terminal request.

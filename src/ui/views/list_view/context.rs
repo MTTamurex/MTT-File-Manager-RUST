@@ -79,6 +79,7 @@ pub struct ListViewContext<'a> {
     pub show_preview_panel: bool,
     pub thumbnail_requests_this_frame: usize,
     pub folder_size_cache: &'a lru::LruCache<PathBuf, u64>,
+    pub folder_size_display_cache: &'a lru::LruCache<PathBuf, u64>,
     pub folder_size_progress: &'a std::collections::HashMap<PathBuf, u64>,
     pub folder_sort_sizes: &'a std::collections::HashMap<PathBuf, u64>,
     pub folder_size_batch_loading: &'a FxHashSet<PathBuf>,
