@@ -4,7 +4,7 @@
 
 use super::{
     analyzer_text_color, attach_row_menu, paint_cell, panel_secondary_text_color, sort_controls,
-    HEADER_ROW_H, ROW_HEIGHT,
+    HEADER_ROW_H, ROW_HEIGHT, TABLE_FONT_SIZE,
 };
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use crate::app::disk_analysis_query::SizeMetric;
@@ -116,23 +116,23 @@ pub(crate) fn row_background(
 
 /// Name | Path | Type | Logical | Allocated | Difference | Files
 fn column_widths(ui: &egui::Ui, total_w: f32) -> [f32; 7] {
-    let type_w = 56.0;
-    let header_width = |text: String| {
+    let header_width = |text: String, minimum: f32| {
         (ui.painter()
             .layout_no_wrap(
                 format!("{text} ↓"),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(TABLE_FONT_SIZE),
                 analyzer_text_color(ui),
             )
             .size()
             .x
             + 12.0)
-            .max(88.0)
+            .max(minimum)
     };
-    let logical = header_width(t!("disk_analysis.logical_size_short").to_string());
-    let allocated = header_width(t!("disk_analysis.allocated_size").to_string());
-    let difference = header_width(t!("disk_analysis.col_difference").to_string());
-    let files_w = 64.0;
+    let type_w = header_width(t!("disk_analysis.col_type").to_string(), 56.0);
+    let logical = header_width(t!("disk_analysis.logical_size_short").to_string(), 88.0);
+    let allocated = header_width(t!("disk_analysis.allocated_size").to_string(), 88.0);
+    let difference = header_width(t!("disk_analysis.col_difference").to_string(), 88.0);
+    let files_w = header_width(t!("disk_analysis.col_files").to_string(), 64.0);
     let flex = (total_w - type_w - logical - allocated - difference - files_w).max(220.0);
     let name = (flex * 0.42).clamp(120.0, 320.0);
     let path = (flex - name).max(80.0);
@@ -223,7 +223,7 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
             pos,
             align2,
             format!("{label}{sort_suffix}"),
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(TABLE_FONT_SIZE),
             color,
         );
 

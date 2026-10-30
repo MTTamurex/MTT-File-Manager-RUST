@@ -15,9 +15,23 @@ const RESIZE_HANDLE_H: f32 = 7.0;
 /// Tab strip + collapse chrome height while collapsed.
 pub const PANEL_CHROME_H: f32 = 40.0;
 /// Default row height of every virtualized table here.
-pub const ROW_HEIGHT: f32 = 22.0;
+pub const ROW_HEIGHT: f32 = 24.0;
 /// Header row height of sortable tables.
-pub const HEADER_ROW_H: f32 = 24.0;
+pub const HEADER_ROW_H: f32 = 26.0;
+pub const TABLE_FONT_SIZE: f32 = 14.0;
+
+fn increase_results_font(ui: &mut egui::Ui) {
+    for style in [
+        egui::TextStyle::Body,
+        egui::TextStyle::Button,
+        egui::TextStyle::Monospace,
+        egui::TextStyle::Small,
+    ] {
+        if let Some(font) = ui.style_mut().text_styles.get_mut(&style) {
+            font.size += 1.0;
+        }
+    }
+}
 
 fn panel_id(collapsed: bool) -> egui::Id {
     egui::Id::new(if collapsed {
@@ -57,6 +71,7 @@ pub fn render_results_panel(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 4))
                 .show(ui, |ui| {
+                    increase_results_font(ui);
                     ui.spacing_mut().item_spacing.y = item_spacing_y;
                     match state.results_tab {
                         ResultsTab::Largest => largest_items::render(state, ui),
@@ -158,7 +173,7 @@ pub(crate) fn paint_cell(
     }
     // Character-count approximation keeps per-cell cost trivial; exact
     // measurement would allocate a galley per candidate width.
-    const CHAR_W: f32 = 7.0;
+    const CHAR_W: f32 = 7.0 * TABLE_FONT_SIZE / 12.5;
     let max_chars = ((max_w / CHAR_W).floor() as usize).max(2);
     let count = text.chars().count();
     let display: String = if count <= max_chars {
@@ -173,7 +188,7 @@ pub(crate) fn paint_cell(
         s
     };
 
-    let font_id = egui::FontId::proportional(12.5);
+    let font_id = egui::FontId::proportional(TABLE_FONT_SIZE);
     let galley = painter.layout_no_wrap(display, font_id, color);
     let pos = if align_right {
         egui::pos2(
@@ -183,7 +198,13 @@ pub(crate) fn paint_cell(
     } else {
         egui::pos2(*x + PAD, row_rect.center().y - galley.size().y / 2.0)
     };
-    painter.galley(pos, galley, color);
+    let cell = egui::Rect::from_min_size(
+        egui::pos2(*x, row_rect.top()),
+        egui::vec2(width, row_rect.height()),
+    );
+    painter
+        .with_clip_rect(painter.clip_rect().intersect(cell))
+        .galley(pos, galley, color);
     *x += width;
 }
 
@@ -249,5 +270,23 @@ mod tests {
     fn collapsed_panel_does_not_overwrite_expanded_geometry() {
         assert_ne!(panel_id(false), panel_id(true));
         assert_eq!(panel_id(false), panel_id(false));
+    }
+
+    #[test]
+    fn larger_result_fonts_are_local_to_the_result_content() {
+        let ctx = eframe::egui::Context::default();
+        let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let before = ui.style().text_styles.clone();
+            ui.scope(|ui| {
+                super::increase_results_font(ui);
+                assert_eq!(
+                    ui.style().text_styles[&eframe::egui::TextStyle::Body].size,
+                    before[&eframe::egui::TextStyle::Body].size + 1.0
+                );
+            });
+            assert_eq!(ui.style().text_styles, before);
+        });
+        assert!(super::TABLE_FONT_SIZE > 12.5);
+        assert!(super::ROW_HEIGHT >= super::TABLE_FONT_SIZE + 8.0);
     }
 }

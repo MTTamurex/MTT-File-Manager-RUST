@@ -91,7 +91,7 @@
 - **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
 - **Largest items report** — List the largest files and folders with file-count ranking and filter-adjusted values; visible controls independently select folders/files first, the sort column, and ascending or descending order, synchronized with clickable headers
-- **Duplicate detection** — Run an on-demand, cancelable two-stage scan that groups candidates by size and confirms matches with full BLAKE3 hashes; configurable size limits, hardlink awareness, and recoverable-space totals keep the report accurate
+- **Duplicate detection** — Run an on-demand, cancelable scan: exact size, validated 64 KiB prefix, then full BLAKE3 confirmation; short files are not read twice. Per-stage progress and actual bytes read, conservative or opt-in bounded parallel readers, cloud-placeholder protection, and hardlink-aware recoverable-space totals
 
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes

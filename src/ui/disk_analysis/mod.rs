@@ -15,7 +15,9 @@ mod sort_controls;
 pub(crate) mod toolbar;
 pub(crate) mod treemap;
 
-pub(crate) use results_panel::{attach_row_menu, paint_cell, HEADER_ROW_H, ROW_HEIGHT};
+pub(crate) use results_panel::{
+    attach_row_menu, paint_cell, HEADER_ROW_H, ROW_HEIGHT, TABLE_FONT_SIZE,
+};
 
 use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_query::SizeMetric;

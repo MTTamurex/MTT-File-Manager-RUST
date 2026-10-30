@@ -8,13 +8,17 @@ use super::{
     analyzer_text_color, attach_row_menu, largest_items::weak_text, paint_cell,
     panel_secondary_text_color, ROW_HEIGHT,
 };
-use crate::app::disk_analysis_duplicates::{DuplicatePhase, DuplicateReport};
+use crate::app::disk_analysis_duplicates::{DuplicateReadMode, DuplicateReport};
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use crate::app::disk_analysis_state::DiskAnalysisState;
 use crate::infrastructure::windows::formatting::format_size;
 use eframe::egui;
 use rust_i18n::t;
 use std::sync::Arc;
+
+mod details;
+mod progress;
+use progress::{phase_label, render_progress};
 
 pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let Some(model) = state.model.clone() else {
@@ -53,7 +57,49 @@ fn render_controls(
     model: &Arc<DiskAnalysisModel>,
 ) {
     let running = state.duplicates.is_running();
-    ui.horizontal(|ui| {
+    if running {
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button(t!("disk_analysis.dup_cancel").to_string())
+                .clicked()
+            {
+                state.duplicates.cancel();
+                ui.ctx().request_repaint();
+            }
+            phase_label(ui, state.duplicates.phase);
+        });
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(t!("disk_analysis.dup_read_mode").to_string());
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt("duplicate_read_mode")
+                .selected_text(
+                    match state.duplicates.read_mode {
+                        DuplicateReadMode::Conservative => {
+                            t!("disk_analysis.dup_read_conservative")
+                        }
+                        DuplicateReadMode::Parallel => t!("disk_analysis.dup_read_parallel"),
+                    }
+                    .to_string(),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut state.duplicates.read_mode,
+                        DuplicateReadMode::Conservative,
+                        t!("disk_analysis.dup_read_conservative").to_string(),
+                    );
+                    ui.selectable_value(
+                        &mut state.duplicates.read_mode,
+                        DuplicateReadMode::Parallel,
+                        t!("disk_analysis.dup_read_parallel").to_string(),
+                    );
+                })
+                .response
+                .on_hover_text(t!("disk_analysis.dup_read_hint").to_string());
+        });
+    });
+    ui.horizontal_wrapped(|ui| {
         ui.label(t!("disk_analysis.dup_min_size").to_string());
         ui.add_enabled(
             !running,
@@ -64,22 +110,13 @@ fn render_controls(
         if !running && !valid_min_size {
             ui.label(
                 egui::RichText::new(t!("disk_analysis.dup_invalid_min_size").to_string())
-                    .small()
                     .color(ui.visuals().error_fg_color),
             );
         }
 
         // Capture drive/model/subtree at start time (plan section 7).
         let root = state.current_root().unwrap_or(model.root);
-        if running {
-            if ui
-                .button(t!("disk_analysis.dup_cancel").to_string())
-                .clicked()
-            {
-                state.duplicates.cancel();
-                ui.ctx().request_repaint();
-            }
-        } else if ui
+        if ui
             .add_enabled(
                 valid_min_size,
                 egui::Button::new(t!("disk_analysis.dup_start").to_string()),
@@ -90,101 +127,8 @@ fn render_controls(
             ui.ctx().request_repaint();
         }
 
-        phase_label(ui, state.duplicates.phase);
-    });
-}
-
-fn phase_label(ui: &mut egui::Ui, phase: DuplicatePhase) {
-    let text = match phase {
-        DuplicatePhase::Collecting => t!("disk_analysis.dup_phase_collecting").to_string(),
-        DuplicatePhase::Hashing => t!("disk_analysis.dup_phase_hashing").to_string(),
-        DuplicatePhase::Finalizing => t!("disk_analysis.dup_phase_finalizing").to_string(),
-        DuplicatePhase::Partial => t!("disk_analysis.dup_phase_partial").to_string(),
-        DuplicatePhase::Cancelled => t!("disk_analysis.dup_phase_cancelled").to_string(),
-        DuplicatePhase::Failed => t!("disk_analysis.dup_phase_failed").to_string(),
-        DuplicatePhase::Complete | DuplicatePhase::Idle => return,
-    };
-    ui.label(
-        egui::RichText::new(text)
-            .small()
-            .color(panel_secondary_text_color(ui)),
-    );
-}
-
-fn render_progress(
-    state: &mut DiskAnalysisState,
-    ui: &mut egui::Ui,
-    model: &Arc<DiskAnalysisModel>,
-) {
-    let progress = state.duplicates.progress.clone();
-    let fraction = if progress.total_candidates > 0 {
-        (progress.processed_files as f32 / progress.total_candidates as f32).clamp(0.02, 1.0)
-    } else {
-        0.02
-    };
-    ui.add(egui::ProgressBar::new(fraction).show_percentage());
-    ui.horizontal_wrapped(|ui| {
-        ui.label(format!(
-            "{} {} / {}",
-            t!("disk_analysis.dup_processed"),
-            progress.processed_files,
-            progress.total_candidates
-        ));
-        ui.separator();
-        ui.label(format_size(progress.hashed_bytes));
-        if let Some(idx) = progress.current_idx {
-            ui.separator();
-            ui.label(
-                egui::RichText::new(model.path_of(idx))
-                    .small()
-                    .color(panel_secondary_text_color(ui)),
-            );
-        }
-    });
-    counters_line(
-        ui,
-        progress.inaccessible,
-        progress.changed_during_read,
-        progress.skipped_unavailable,
-        progress.skipped_by_limit,
-    );
-}
-
-fn counters_line(
-    ui: &mut egui::Ui,
-    inaccessible: u64,
-    changed: u64,
-    skipped: u64,
-    skipped_by_limit: u64,
-) {
-    ui.horizontal_wrapped(|ui| {
-        if inaccessible > 0 {
-            ui.label(
-                egui::RichText::new(
-                    t!("disk_analysis.dup_inaccessible", count = inaccessible).to_string(),
-                )
-                .small(),
-            );
-        }
-        if changed > 0 {
-            ui.label(
-                egui::RichText::new(t!("disk_analysis.dup_changed", count = changed).to_string())
-                    .small(),
-            );
-        }
-        if skipped > 0 {
-            ui.label(
-                egui::RichText::new(t!("disk_analysis.dup_skipped", count = skipped).to_string())
-                    .small(),
-            );
-        }
-        if skipped_by_limit > 0 {
-            ui.label(
-                egui::RichText::new(
-                    t!("disk_analysis.dup_skipped_limit", count = skipped_by_limit).to_string(),
-                )
-                .small(),
-            );
+        if state.duplicates.report.is_none() {
+            phase_label(ui, state.duplicates.phase);
         }
     });
 }
@@ -208,50 +152,23 @@ fn render_report(
             )
             .strong(),
         );
-        if stats.hardlink_only_groups > 0 {
-            ui.label(
-                egui::RichText::new(
-                    t!(
-                        "disk_analysis.dup_hardlink_note",
-                        groups = stats.hardlink_only_groups
-                    )
-                    .to_string(),
-                )
-                .small()
-                .color(panel_secondary_text_color(ui)),
-            );
-        }
     });
-    ui.label(
-        egui::RichText::new(
-            t!(
-                "disk_analysis.dup_report_stats",
-                processed = stats.processed_files,
-                candidates = stats.total_candidates,
-                bytes = format_size(stats.hashed_bytes)
-            )
-            .to_string(),
-        )
-        .small()
-        .color(panel_secondary_text_color(ui)),
-    );
-    counters_line(
+    details::warnings(
         ui,
         stats.inaccessible,
         stats.changed_during_read,
         stats.skipped_unavailable,
-        stats.skipped_by_limit,
     );
-
-    if report.groups.is_empty() {
-        ui.label(t!("disk_analysis.dup_none").to_string());
-        return;
-    }
 
     egui::ScrollArea::vertical()
         .id_salt("disk_analysis_dup_report_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            details::render(ui, &stats, None, true);
+            if report.groups.is_empty() {
+                ui.label(t!("disk_analysis.dup_none").to_string());
+                return;
+            }
             for group in &report.groups {
                 let header_id = egui::Id::new("dup_group")
                     .with(group.logical_size)
