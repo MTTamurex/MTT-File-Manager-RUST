@@ -277,7 +277,7 @@ mod tests {
             });
             assert_eq!(ui.style().text_styles, before);
         });
-        assert!(super::TABLE_FONT_SIZE > 12.5);
-        assert!(super::ROW_HEIGHT >= super::TABLE_FONT_SIZE + 8.0);
+        const { assert!(super::TABLE_FONT_SIZE > 12.5) };
+        const { assert!(super::ROW_HEIGHT >= super::TABLE_FONT_SIZE + 8.0) };
     }
 }

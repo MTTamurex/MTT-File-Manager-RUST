@@ -171,7 +171,8 @@ fn viewer_font_cell() -> &'static Arc<Mutex<ViewerFontState>> {
                     fonts = crate::ui::fonts::selection::LoadedFonts::load(fonts, selected.clone())
                         .into_definitions();
                 }
-                let scale = read_pref_readonly(&crate::ui::fonts::sizing::preference_key(&selected));
+                let scale =
+                    read_pref_readonly(&crate::ui::fonts::sizing::preference_key(&selected));
                 crate::ui::fonts::sizing::apply(
                     &mut fonts,
                     crate::ui::fonts::sizing::from_preference(scale.as_deref()),

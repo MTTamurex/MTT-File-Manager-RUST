@@ -34,11 +34,7 @@ fn project(
         .iter()
         .filter(|column| column.visible && (column.id != ColumnId::Status || cloud))
         .map(|column| {
-            let width = width(column.id).max(if column.id == ColumnId::Name {
-                100.0
-            } else {
-                80.0
-            });
+            let width = width(column.id).max(super::fit_panel::min_width(column.id));
             let cell = ColumnCell {
                 id: column.id,
                 offset,

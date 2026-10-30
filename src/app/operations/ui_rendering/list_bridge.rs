@@ -395,8 +395,8 @@ impl ImageViewerApp {
         });
 
         let scroll_interpolation_enabled = self.uses_scroll_interpolation();
-        let folder_width_location = (self.explorer_preferences.remember_column_widths
-            && !self.explorer_preferences.auto_resize_columns
+        let folder_width_location = (self.explorer_preferences.column_size_mode
+            == crate::app::explorer_preferences::ListColumnSizeMode::RememberPerFolder
             && !compact
             && !column_list)
             .then(|| {
@@ -482,7 +482,7 @@ impl ImageViewerApp {
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             is_onedrive_folder,
             global_search_active: self.global_search.active,
-            auto_resize_columns: self.explorer_preferences.auto_resize_columns,
+            column_size_mode: self.explorer_preferences.column_size_mode,
             hover_preview: self.explorer_preferences.hover_preview,
             texture_cache: &mut self.cache_manager.texture_cache,
             attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,

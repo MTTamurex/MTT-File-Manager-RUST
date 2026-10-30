@@ -40,7 +40,7 @@ pub struct ListViewContext<'a> {
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
     pub global_search_active: bool,
-    pub auto_resize_columns: bool,
+    pub column_size_mode: crate::app::explorer_preferences::ListColumnSizeMode,
     pub hover_preview: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub attempted_thumbnail_bucket: &'a lru::LruCache<PathBuf, u32>,

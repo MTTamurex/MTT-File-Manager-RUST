@@ -6,6 +6,7 @@ mod column_choices;
 mod column_picker;
 mod columns;
 mod context;
+mod fit_panel;
 mod header;
 mod helpers;
 mod horizontal;

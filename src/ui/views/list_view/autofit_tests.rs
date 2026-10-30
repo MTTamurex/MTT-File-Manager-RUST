@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::explorer_preferences::ListColumnSizeMode;
 use crate::infrastructure::windows::column_properties::DATE_CREATED;
 
 fn natural() -> Vec<ColumnMeasurement> {
@@ -6,10 +7,12 @@ fn natural() -> Vec<ColumnMeasurement> {
         ColumnMeasurement {
             id: ColumnId::Name,
             width: 140.0,
+            content: 110.0,
         },
         ColumnMeasurement {
             id: ColumnId::Property(DATE_CREATED),
             width: 120.0,
+            content: 90.0,
         },
     ]
 }
@@ -156,6 +159,100 @@ fn reordering_columns_keeps_content_widths_instead_of_manual_widths() {
             .1,
         120.0
     );
+}
+
+#[test]
+fn fit_to_panel_fills_the_viewport_with_every_visible_column() {
+    let mut state = FitState {
+        mode: ListColumnSizeMode::FitToPanel,
+        ..Default::default()
+    };
+    // natural() measures 140 + 120 = 260 inside a 408px pane.
+    state.fit(1, 1, 408.0, natural(), false);
+    let total: f32 = state.planned.iter().map(|(_, width)| *width).sum();
+    assert!((total - 400.0).abs() < 0.01);
+    for (measured, (_, width)) in natural().iter().zip(&state.planned) {
+        assert!(*width >= measured.width, "{width} compressed its content");
+    }
+}
+
+#[test]
+fn fit_to_panel_compresses_up_to_the_minimums_before_overflowing() {
+    let mut state = FitState {
+        mode: ListColumnSizeMode::FitToPanel,
+        ..Default::default()
+    };
+    // Budget 180: the name lands on its 100px minimum and the other column
+    // compresses down to the 64px fixed floor.
+    state.fit(1, 1, 188.0, natural(), false);
+    let planned: Vec<_> = state.planned.iter().map(|(_, width)| *width).collect();
+    assert!(
+        (planned[0] - 100.0).abs() < 0.01 && (planned[1] - 80.0).abs() < 0.01,
+        "unexpected compression result: {planned:?}"
+    );
+    // Later metadata growth must not widen anything beyond the minimums.
+    let longer = vec![
+        ColumnMeasurement {
+            id: ColumnId::Name,
+            width: 140.0,
+            content: 110.0,
+        },
+        ColumnMeasurement {
+            id: ColumnId::Property(DATE_CREATED),
+            width: 520.0,
+            content: 490.0,
+        },
+    ];
+    state.fit(1, 1, 188.0, longer, false);
+    let planned: Vec<_> = state.planned.iter().map(|(_, width)| *width).collect();
+    assert!(
+        (planned[0] - 100.0).abs() < 0.01 && (planned[1] - 80.0).abs() < 0.01,
+        "unexpected compression result: {planned:?}"
+    );
+}
+
+#[test]
+fn dragged_weights_survive_content_growth_until_a_new_listing() {
+    let mut state = FitState {
+        mode: ListColumnSizeMode::FitToPanel,
+        ..Default::default()
+    };
+    state.fit(1, 1, 408.0, natural(), false);
+    // The user shrank the name column, as on_header_resize would record it.
+    state.dragged = vec![(ColumnId::Name, 100.0)];
+    let longer = vec![
+        ColumnMeasurement {
+            id: ColumnId::Name,
+            width: 520.0,
+            content: 490.0,
+        },
+        ColumnMeasurement {
+            id: ColumnId::Property(DATE_CREATED),
+            width: 520.0,
+            content: 490.0,
+        },
+    ];
+    state.fit(2, 1, 408.0, longer.clone(), false);
+    let name = state
+        .planned
+        .iter()
+        .find(|(id, _)| *id == ColumnId::Name)
+        .map(|(_, width)| *width)
+        .unwrap();
+    // Content growth cannot undo the drag-shrink; the panel totals stay fitted.
+    assert_eq!(name, 100.0);
+    let total: f32 = state.planned.iter().map(|(_, width)| *width).sum();
+    assert!((total - 400.0).abs() < 0.01);
+    // A new listing drops the dragged weight and reopens the width to the
+    // measured content (the name column takes the spare space again).
+    state.fit(3, 2, 408.0, natural(), false);
+    let name = state
+        .planned
+        .iter()
+        .find(|(id, _)| *id == ColumnId::Name)
+        .map(|(_, width)| *width)
+        .unwrap();
+    assert!(name > 100.0, "re-measured listing ignored the rebuild");
 }
 
 #[test]

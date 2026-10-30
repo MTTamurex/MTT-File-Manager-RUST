@@ -28,7 +28,8 @@ pub(crate) fn valid_width(column: ColumnId, width: f32) -> bool {
             >= if column == ColumnId::Name {
                 100.0
             } else {
-                80.0
+                // Matches the display clamp in the list view (fit_panel::min_width).
+                64.0
             }
 }
 

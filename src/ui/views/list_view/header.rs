@@ -1,5 +1,8 @@
 //! Sortable, resizable, movable column headers and their context menu.
-use super::{column_picker, columns, truncate_text_for_column, ListViewContext};
+use super::{
+    autofit, column_picker, columns, fit_panel, truncate_text_for_column, ListViewContext,
+};
+use crate::app::explorer_preferences::ListColumnSizeMode;
 use crate::domain::file_entry::SortMode;
 use crate::domain::list_columns::{ColumnId, ColumnLayout};
 use crate::ui::tab_drag_preview::TabDragPreview;
@@ -184,11 +187,7 @@ fn render_row(
                         &label,
                         &mut width,
                         mode,
-                        if cell.id == ColumnId::Name {
-                            100.0
-                        } else {
-                            80.0
-                        },
+                        fit_panel::min_width(cell.id),
                         total - cell.width,
                         sort_mode,
                         descending,
@@ -272,7 +271,11 @@ pub(super) fn render_list_header(
         ctx.sort_descending,
     );
     for (id, width) in row.resized {
-        columns::set_width(ctx, id, width);
+        if ctx.column_size_mode == ListColumnSizeMode::FitToPanel {
+            autofit::on_header_resize(ui, ctx, id, width);
+        } else {
+            columns::set_width(ctx, id, width);
+        }
     }
     let owner = ctx.rename_click_scope;
     for response in row.responses {

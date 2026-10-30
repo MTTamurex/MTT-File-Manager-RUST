@@ -1,5 +1,8 @@
 //! Content-sized columns with pane-local widths and cache-only metadata measurement.
-use super::{autofit_layout, cell_content, columns, name_cell, text_layout, ListViewContext};
+use super::{
+    autofit_layout, cell_content, columns, fit_panel, name_cell, text_layout, ListViewContext,
+};
+use crate::app::explorer_preferences::ListColumnSizeMode;
 use crate::domain::list_columns::{ColumnId, ColumnScope};
 use eframe::egui::{Color32, FontId, Ui};
 use std::hash::{Hash, Hasher};
@@ -8,6 +11,8 @@ use std::hash::{Hash, Hasher};
 pub(crate) struct ColumnMeasurement {
     pub id: ColumnId,
     pub width: f32,
+    /// Widest measured cell text without padding; floors the fit-to-panel compression.
+    pub content: f32,
 }
 
 impl ColumnMeasurement {
@@ -20,7 +25,8 @@ impl ColumnMeasurement {
         );
         Self {
             id,
-            width: (width + 30.0).max(if id == ColumnId::Name { 100.0 } else { 80.0 }),
+            width: (width + 30.0).max(fit_panel::min_width(id)),
+            content: 0.0,
         }
     }
 
@@ -35,6 +41,7 @@ impl ColumnMeasurement {
             ui,
         );
         self.width = self.width.max(width + padding);
+        self.content = self.content.max(width);
     }
 }
 
@@ -68,6 +75,7 @@ pub(crate) fn allocate(
 
 #[derive(Clone, Default)]
 struct FitState {
+    mode: ListColumnSizeMode,
     active: bool,
     scope: Option<ColumnScope>,
     input: u64,
@@ -75,6 +83,10 @@ struct FitState {
     natural: Vec<ColumnMeasurement>,
     planned: Vec<(ColumnId, f32)>,
     visible: Vec<usize>,
+    /// Widths the user dragged in the fit-to-panel mode. They act as absolute
+    /// weights for their column until a new listing clears them, so content
+    /// growth cannot undo a drag-shrink, and drag-growth keeps the column wide.
+    dragged: Vec<(ColumnId, f32)>,
 }
 
 impl FitState {
@@ -98,7 +110,23 @@ impl FitState {
                 }
             }
         }
-        if let Some(planned) = allocate(available, &measured) {
+        if self.source != source {
+            // The dragged weights belonged to the previous listing geometry.
+            self.dragged.clear();
+        }
+        for &(dragged_id, dragged_width) in &self.dragged {
+            if let Some(column) = measured.iter_mut().find(|column| column.id == dragged_id) {
+                column.width = dragged_width;
+            }
+        }
+        let planned = match self.mode {
+            ListColumnSizeMode::FitToPanel => {
+                fit_panel::allocate_fit_to_panel(available, &measured).map(|(widths, _)| widths)
+            }
+            ListColumnSizeMode::AutoFit => allocate(available, &measured),
+            ListColumnSizeMode::RememberPerFolder => None,
+        };
+        if let Some(planned) = planned {
             self.planned = planned;
             self.natural = measured;
             self.input = input;
@@ -226,8 +254,11 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
     let mut state = ui
         .data_mut(|data| data.get_temp::<FitState>(state_id))
         .unwrap_or_default();
+    if state.mode != ctx.column_size_mode {
+        state = FitState::default();
+    }
     let scope = columns::scope(ctx);
-    if !ctx.auto_resize_columns {
+    if ctx.column_size_mode == ListColumnSizeMode::RememberPerFolder {
         if ctx.folder_width_location.is_none() && state.active && state.scope == Some(scope) {
             // Switching off automatic sizing keeps the last displayed sizes as manual widths.
             for &(id, width) in &state.planned {
@@ -249,6 +280,7 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
         || ctx.rectangle_selection_state.is_some()
         || ctx.renaming_state.is_some();
     if available.is_finite() && available > 8.0 && !busy && (requested || input != state.input) {
+        state.mode = ctx.column_size_mode;
         state.fit(
             input,
             source,
@@ -266,9 +298,72 @@ pub(super) fn update(ui: &Ui, ctx: &mut ListViewContext) {
     ui.data_mut(|data| data.insert_temp(state_id, state));
 }
 
+/// Dragging a separator while fitting the panel keeps the total inside the panel:
+/// the dragged column takes its new width and the other columns redistribute
+/// proportionally around it. The dragged width is recorded as the column's weight,
+/// so later refits distribute the panel around what the user chose instead of
+/// rebuilding the column back from its measured content. Neighbours never drop
+/// below their content-complete floor (`fit_panel::shrink_floor`).
+pub(super) fn on_header_resize(ui: &Ui, ctx: &mut ListViewContext, id: ColumnId, width: f32) {
+    let state_id = ui.id().with("list_content_fit");
+    let mut state = ui
+        .data_mut(|data| data.get_temp::<FitState>(state_id))
+        .unwrap_or_default();
+    if !state.active || state.mode != ListColumnSizeMode::FitToPanel {
+        columns::set_width(ctx, id, width);
+        return;
+    }
+    let available = ui.available_width();
+    if !available.is_finite() {
+        columns::set_width(ctx, id, width);
+        return;
+    }
+    let budget = (available - 8.0).max(0.0);
+    let anchor_minimum = fit_panel::min_width(id);
+    let anchor = width.max(anchor_minimum);
+    let others: Vec<_> = state
+        .natural
+        .iter()
+        .filter(|column| column.id != id)
+        .cloned()
+        .collect();
+    let others_minimum = others.iter().map(fit_panel::shrink_floor).sum::<f32>();
+    // The anchor may not starve the neighbours below their minimums.
+    let anchor = anchor.min((budget - others_minimum).max(anchor_minimum));
+    let remaining = (budget - anchor).max(0.0) + 8.0;
+    let (redistributed, _overflow) = fit_panel::allocate_fit_to_panel(remaining, &others)
+        .unwrap_or_else(|| {
+            (
+                others
+                    .iter()
+                    .map(|column| (column.id, fit_panel::min_width(column.id)))
+                    .collect(),
+                true,
+            )
+        });
+    let mut planned: Vec<_> = state
+        .natural
+        .iter()
+        .map(|column| (column.id, if column.id == id { anchor } else { 0.0 }))
+        .collect();
+    for (other, width) in redistributed {
+        if let Some(entry) = planned.iter_mut().find(|(planned, _)| *planned == other) {
+            entry.1 = width;
+        }
+    }
+    if let Some(dragged) = state.dragged.iter_mut().find(|(dragged, _)| *dragged == id) {
+        dragged.1 = anchor;
+    } else {
+        state.dragged.push((id, anchor));
+    }
+    state.planned = planned.clone();
+    ui.data_mut(|data| data.insert_temp(state_id, state));
+    columns::set_fitted_widths(ctx, &planned);
+}
+
 /// Keep the actual visible item indices, including discontinuous grouped rows.
 pub(super) fn remember_visible_rows(ui: &Ui, ctx: &mut ListViewContext) {
-    if ctx.compact || !ctx.auto_resize_columns {
+    if ctx.compact || ctx.column_size_mode == ListColumnSizeMode::RememberPerFolder {
         return;
     }
     record_visible_rows(ui, &mut ctx.autofit_visible_indices);

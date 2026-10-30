@@ -99,12 +99,11 @@ fn recursive_progress_includes_pending_ancestors_without_double_counting() {
         std::fs::write(current.join(format!("file-{index}.txt")), [0u8; 1]).unwrap();
     }
     let progress = Mutex::new(Vec::new());
-    let result = calculate_folder_size_parallel(
-        root.path(),
-        &Arc::new(AtomicBool::new(false)),
-        |size| progress.lock().unwrap().push(size),
-    )
-    .unwrap();
+    let result =
+        calculate_folder_size_parallel(root.path(), &Arc::new(AtomicBool::new(false)), |size| {
+            progress.lock().unwrap().push(size)
+        })
+        .unwrap();
 
     assert_eq!(result.total_size, 640);
     assert_eq!(result.file_count, 604);

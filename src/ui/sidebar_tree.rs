@@ -114,13 +114,18 @@ fn render_tree_node(
     // Use the active font metrics so larger text also expands horizontal scrolling.
     let text_width = ui
         .painter()
-        .layout_no_wrap(node.name.clone(), egui::FontId::proportional(11.0), egui::Color32::WHITE)
+        .layout_no_wrap(
+            node.name.clone(),
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        )
         .size()
         .x;
     let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0 + text_width + 8.0; // right padding
     let row_width = ui.available_width().max(content_min_width);
     let row_height = crate::ui::fonts::layout::row_height(ui, ROW_HEIGHT, 12.0, 6.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(row_width, row_height), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(row_width, row_height), Sense::click());
     let name_left = rect.min.x + indent + ARROW_WIDTH + ICON_SIZE + 4.0;
     let name_rect = Rect::from_min_max(
         Pos2::new(name_left, rect.min.y),
@@ -358,9 +363,8 @@ fn render_tree_node(
 fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
     let indent = BASE_INDENT + (depth as f32) * INDENT_PX + ARROW_WIDTH;
     let row_height = crate::ui::fonts::layout::row_height(ui, ROW_HEIGHT, 12.0, 6.0);
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), row_height), Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), Sense::hover());
 
     if ui.is_rect_visible(rect) {
         ui.painter().text(

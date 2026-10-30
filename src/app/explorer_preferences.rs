@@ -1,9 +1,39 @@
 use std::collections::HashMap;
 
+/// How the detailed list decides column widths.
+/// `AutoFit`: sizes columns to content, spare space goes to the name column.
+/// `RememberPerFolder`: manual widths edited by the user, saved per folder.
+/// `FitToPanel`: scales every visible column so they all fit in the panel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListColumnSizeMode {
+    #[default]
+    AutoFit,
+    RememberPerFolder,
+    FitToPanel,
+}
+
+impl ListColumnSizeMode {
+    fn persisted_value(self) -> &'static str {
+        match self {
+            Self::AutoFit => "auto",
+            Self::RememberPerFolder => "remember",
+            Self::FitToPanel => "fit_panel",
+        }
+    }
+
+    fn from_persisted_value(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(Self::AutoFit),
+            "remember" => Some(Self::RememberPerFolder),
+            "fit_panel" => Some(Self::FitToPanel),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExplorerPreferences {
-    pub auto_resize_columns: bool,
-    pub remember_column_widths: bool,
+    pub column_size_mode: ListColumnSizeMode,
     pub hover_preview: bool,
     pub sidebar_unified_scroll: bool,
 }
@@ -11,8 +41,7 @@ pub struct ExplorerPreferences {
 impl Default for ExplorerPreferences {
     fn default() -> Self {
         Self {
-            auto_resize_columns: true,
-            remember_column_widths: false,
+            column_size_mode: ListColumnSizeMode::AutoFit,
             hover_preview: true,
             sidebar_unified_scroll: false,
         }
@@ -22,14 +51,23 @@ impl Default for ExplorerPreferences {
 impl ExplorerPreferences {
     pub(crate) fn load(prefs: &HashMap<String, String>) -> Self {
         Self {
-            auto_resize_columns: prefs
-                .get("auto_resize_columns")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(true),
-            remember_column_widths: prefs
-                .get("remember_column_widths")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(false),
+            column_size_mode: prefs
+                .get("list_column_size_mode")
+                .and_then(|value| ListColumnSizeMode::from_persisted_value(value))
+                .unwrap_or_else(|| {
+                    // Databases saved before the three-mode picker kept a pair of
+                    // booleans; "remember" was always on when automatic sizing was
+                    // off, so that pair maps onto the two legacy modes.
+                    let auto_resize_columns = prefs
+                        .get("auto_resize_columns")
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(true);
+                    if auto_resize_columns {
+                        ListColumnSizeMode::AutoFit
+                    } else {
+                        ListColumnSizeMode::RememberPerFolder
+                    }
+                }),
             hover_preview: prefs
                 .get("hover_preview")
                 .and_then(|value| value.parse().ok())
@@ -41,12 +79,11 @@ impl ExplorerPreferences {
         }
     }
 
-    pub(crate) fn preferences(self) -> [(&'static str, String); 4] {
+    pub(crate) fn preferences(self) -> [(&'static str, String); 3] {
         [
-            ("auto_resize_columns", self.auto_resize_columns.to_string()),
             (
-                "remember_column_widths",
-                self.remember_column_widths.to_string(),
+                "list_column_size_mode",
+                self.column_size_mode.persisted_value().to_string(),
             ),
             ("hover_preview", self.hover_preview.to_string()),
             (
@@ -69,6 +106,7 @@ mod tests {
             ExplorerPreferences::default()
         );
         let prefs = HashMap::from([
+            ("list_column_size_mode".into(), "invalid".into()),
             ("auto_resize_columns".into(), "invalid".into()),
             ("remember_column_widths".into(), "invalid".into()),
             ("hover_preview".into(), "invalid".into()),
@@ -81,24 +119,54 @@ mod tests {
     }
 
     #[test]
+    fn legacy_boolean_preferences_map_to_the_matching_modes() {
+        let auto = HashMap::from([
+            ("auto_resize_columns".to_string(), "true".to_string()),
+            ("remember_column_widths".to_string(), "false".to_string()),
+        ]);
+        assert_eq!(
+            ExplorerPreferences::load(&auto).column_size_mode,
+            ListColumnSizeMode::AutoFit
+        );
+        let remember = HashMap::from([
+            ("auto_resize_columns".to_string(), "false".to_string()),
+            ("remember_column_widths".to_string(), "true".to_string()),
+        ]);
+        assert_eq!(
+            ExplorerPreferences::load(&remember).column_size_mode,
+            ListColumnSizeMode::RememberPerFolder
+        );
+        // The three-mode key wins whenever it is present and valid.
+        let both = HashMap::from([
+            ("list_column_size_mode".to_string(), "fit_panel".to_string()),
+            ("auto_resize_columns".to_string(), "false".to_string()),
+        ]);
+        assert_eq!(
+            ExplorerPreferences::load(&both).column_size_mode,
+            ListColumnSizeMode::FitToPanel
+        );
+    }
+
+    #[test]
     fn options_round_trip_independently() {
-        for auto_resize_columns in [false, true] {
+        for column_size_mode in [
+            ListColumnSizeMode::AutoFit,
+            ListColumnSizeMode::RememberPerFolder,
+            ListColumnSizeMode::FitToPanel,
+        ] {
             for hover_preview in [false, true] {
-                for remember_column_widths in [false, true] {
-                    for sidebar_unified_scroll in [false, true] {
-                        let options = ExplorerPreferences {
-                            auto_resize_columns,
-                            remember_column_widths,
-                            hover_preview,
-                            sidebar_unified_scroll,
-                        };
-                        let prefs = options
-                            .preferences()
-                            .into_iter()
-                            .map(|(key, value)| (key.to_string(), value))
-                            .collect();
-                        assert_eq!(ExplorerPreferences::load(&prefs), options);
-                    }
+                for sidebar_unified_scroll in [false, true] {
+                    let options = ExplorerPreferences {
+                        column_size_mode,
+                        hover_preview,
+                        sidebar_unified_scroll,
+                    };
+                    let prefs = options
+                        .preferences()
+                        .into_iter()
+                        .map(|(key, value)| (key.to_string(), value))
+                        .collect();
+                    assert_eq!(ExplorerPreferences::load(&prefs), options);
                 }
             }
         }
@@ -115,8 +183,7 @@ mod tests {
             ExplorerPreferences::default()
         );
         let options = ExplorerPreferences {
-            auto_resize_columns: false,
-            remember_column_widths: true,
+            column_size_mode: ListColumnSizeMode::RememberPerFolder,
             hover_preview: false,
             sidebar_unified_scroll: true,
         };
@@ -124,6 +191,22 @@ mod tests {
             db.set_preference(key, &value).unwrap();
         }
         assert_eq!(StartupPreferences::load(&db).explorer_preferences, options);
+    }
+
+    #[test]
+    fn startup_migrates_legacy_boolean_mode_from_the_database() {
+        use crate::app::init_preferences::StartupPreferences;
+        use crate::infrastructure::app_state_db::AppStateDb;
+
+        let db = AppStateDb::new_in_memory().unwrap();
+        db.set_preference("auto_resize_columns", "false").unwrap();
+        db.set_preference("remember_column_widths", "true").unwrap();
+        assert_eq!(
+            StartupPreferences::load(&db)
+                .explorer_preferences
+                .column_size_mode,
+            ListColumnSizeMode::RememberPerFolder
+        );
     }
 
     #[test]

@@ -42,18 +42,22 @@ fn render_pane(
                     ColumnMeasurement {
                         id: ColumnId::Name,
                         width: 100.0,
+                        content: 0.0,
                     },
                     ColumnMeasurement {
                         id: ColumnId::Date,
                         width: 120.0,
+                        content: 0.0,
                     },
                     ColumnMeasurement {
                         id: ColumnId::Type,
                         width: 80.0,
+                        content: 0.0,
                     },
                     ColumnMeasurement {
                         id: ColumnId::Size,
                         width: 80.0,
+                        content: 0.0,
                     },
                 ];
                 if let Some(widths) = allocate(ui.available_width(), &measured) {
