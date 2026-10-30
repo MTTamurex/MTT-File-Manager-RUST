@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 const INACTIVE_PANEL_PROBE_INTERVAL: Duration = Duration::from_secs(3);
 
+mod content_probe;
+
 pub(super) struct WatcherPerfMarks {
     pub(super) watcher_start: Instant,
     pub(super) drive_events_done: Instant,
@@ -117,6 +119,7 @@ impl ImageViewerApp {
             return;
         }
         if !self.watcher_fallback_polling {
+            self.maybe_send_indexed_folder_size_probe();
             return;
         }
         if !is_filesystem_probe_target(&self.navigation_state.current_path) {
@@ -510,6 +513,11 @@ impl ImageViewerApp {
             let current_path = PathBuf::from(&self.navigation_state.current_path);
             let result_matches_current =
                 Self::normalize_for_match(&result.path) == Self::normalize_for_match(&current_path);
+
+            if result.mode == ConsistencyProbeMode::FolderContents {
+                self.apply_indexed_folder_size_probe_result(result);
+                continue;
+            }
 
             if !result_matches_current {
                 if self.inactive_panel_matches_path(&result.path) {

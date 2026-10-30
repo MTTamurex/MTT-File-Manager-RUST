@@ -156,6 +156,7 @@ pub(in crate::app) fn build_folder_size_state(
         display_size_cache: LruCache::new(
             NonZeroUsize::new(2000).expect("folder_size display cache size must be non-zero"),
         ),
+        content_probe_pending: None,
         loading: FxHashSet::default(),
         active_requests: std::collections::HashMap::new(),
         next_request_id: 0,

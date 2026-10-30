@@ -1,6 +1,8 @@
 use super::*;
 use crate::app::disk_analysis_duplicates::tests::{fixture, run};
 
+mod progress_tests;
+
 #[cfg(windows)]
 #[test]
 fn recycled_files_are_neither_deletion_targets_nor_surviving_copies() {

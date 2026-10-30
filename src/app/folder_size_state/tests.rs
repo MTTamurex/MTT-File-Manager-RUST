@@ -1,7 +1,7 @@
 use super::*;
 use std::num::NonZeroUsize;
 
-fn test_state() -> FolderSizeState {
+pub(super) fn test_state() -> FolderSizeState {
     let (req_sender, _req_receiver) = std::sync::mpsc::channel();
     let (_res_sender, res_receiver) = std::sync::mpsc::channel();
     let (batch_req_sender, _batch_req_receiver) = std::sync::mpsc::channel();
@@ -16,6 +16,7 @@ fn test_state() -> FolderSizeState {
         latest_request_id: Arc::new(AtomicU64::new(0)),
         cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         display_size_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
+        content_probe_pending: None,
         loading: FxHashSet::default(),
         active_requests: HashMap::new(),
         next_request_id: 0,

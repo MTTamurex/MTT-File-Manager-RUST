@@ -15,6 +15,8 @@ const SLOW_PROBE_LOG_THRESHOLD_MS: u64 = 50;
 /// Upper bound for the per-directory cover-scan bookkeeping map.
 const COVER_SCAN_MAP_LIMIT: usize = 256;
 
+mod content_changes;
+
 fn cover_scan_is_due(last_scan: Option<Instant>, now: Instant) -> bool {
     match last_scan {
         Some(last_scan) => now.saturating_duration_since(last_scan) >= COVER_SCAN_INTERVAL,
@@ -26,6 +28,8 @@ fn cover_scan_is_due(last_scan: Option<Instant>, now: Instant) -> bool {
 pub enum ConsistencyProbeMode {
     ListingDrift,
     PathLiveness,
+    /// Search-index query only: never enumerate directories or resolve covers.
+    FolderContents,
 }
 
 pub struct ConsistencyProbeRequest {
@@ -38,7 +42,8 @@ pub struct ConsistencyProbeRequest {
     /// Used to detect subfolder content changes that do not alter parent listing shape.
     pub modified_threshold_secs: u32,
     /// (folder_path, current_cover_file_path) pairs for visible subfolders whose
-    /// folder cover state should be verified.
+    /// folder cover state should be verified. FolderContents uses only the paths
+    /// for index queries; it never reads covers.
     pub folder_cover_states: Vec<(PathBuf, Option<PathBuf>)>,
 }
 
@@ -52,15 +57,18 @@ pub struct ConsistencyProbeResult {
     /// Folder paths whose contents changed recently according to the search service.
     /// This is used to invalidate folder-size caches without forcing a full reload.
     pub changed_folder_contents: Vec<PathBuf>,
+    /// False on service failure; an acknowledgement must not advance watermarks.
+    pub content_check_succeeded: bool,
 }
 
 /// Spawns a background thread that performs directory consistency probes
 /// for non-NTFS drives where ReadDirectoryChangesW is unreliable, plus
-/// lightweight current-folder liveness checks for focus recovery.
+/// lightweight current-folder liveness checks for focus recovery and index-only
+/// recursive content-change checks for the focused pane on USN filesystems.
 ///
 /// The worker drains stale requests (only processes the most recent),
-/// reads the directory from disk, and sends back a result only when
-/// the disk signature differs from the UI signature.
+/// enumerates directories only in ListingDrift mode. FolderContents always
+/// acknowledges completion, even if the service reports no changes or fails.
 pub fn spawn_consistency_probe_worker(
     ctx: egui::Context,
 ) -> (
@@ -111,6 +119,26 @@ pub fn spawn_consistency_probe_worker(
                         path_vanished,
                         changed_folder_covers: Vec::new(),
                         changed_folder_contents: Vec::new(),
+                        content_check_succeeded: false,
+                    });
+                    ctx.request_repaint();
+                    continue;
+                }
+
+                if latest.mode == ConsistencyProbeMode::FolderContents {
+                    let content_result = content_changes::query(
+                        &latest.folder_cover_states, is_onedrive, latest.modified_threshold_secs,
+                    );
+                    // Always acknowledge, including no changes/service failure, so
+                    // the UI can bound this mode to one outstanding request.
+                    let _ = res_tx.send(ConsistencyProbeResult {
+                        path,
+                        mode: latest.mode,
+                        disk_signature: ui_signature,
+                        path_vanished: false,
+                        changed_folder_covers: Vec::new(),
+                        content_check_succeeded: content_result.is_ok(),
+                        changed_folder_contents: content_result.unwrap_or_default(),
                     });
                     ctx.request_repaint();
                     continue;
@@ -133,6 +161,7 @@ pub fn spawn_consistency_probe_worker(
                                 path_vanished: true,
                                 changed_folder_covers: Vec::new(),
                                 changed_folder_contents: Vec::new(),
+                                content_check_succeeded: false,
                             });
                             ctx.request_repaint();
                         }
@@ -189,45 +218,11 @@ pub fn spawn_consistency_probe_worker(
                 // Also probe visible subfolders for recent content changes via
                 // the NTFS search service. This catches size changes that do
                 // not affect parent listing signature (same child names/mtimes).
-                let changed_folder_contents: Vec<PathBuf> = if latest.is_onedrive
-                    || latest.folder_cover_states.is_empty()
-                {
-                    Vec::new()
-                } else {
-                    let candidate_paths: Vec<String> = latest
-                        .folder_cover_states
-                        .iter()
-                        .map(|(folder_path, _)| folder_path.to_string_lossy().to_string())
-                        .collect();
-
-                    if candidate_paths.is_empty() {
-                        Vec::new()
-                    } else {
-                        let threshold = latest.modified_threshold_secs.max(5);
-                        match crate::infrastructure::global_search::check_paths_modified(
-                            &candidate_paths,
-                            threshold,
-                        ) {
-                            Ok(modified_paths) => {
-                                let modified_set: std::collections::HashSet<String> =
-                                    modified_paths.into_iter().collect();
-                                latest
-                                    .folder_cover_states
-                                    .iter()
-                                    .filter_map(|(folder_path, _)| {
-                                        let key = folder_path.to_string_lossy().to_string();
-                                        if modified_set.contains(&key) {
-                                            Some(folder_path.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect()
-                            }
-                            Err(_) => Vec::new(),
-                        }
-                    }
-                };
+                let content_result = content_changes::query(
+                    &latest.folder_cover_states, is_onedrive, latest.modified_threshold_secs,
+                );
+                let content_check_succeeded = content_result.is_ok();
+                let changed_folder_contents = content_result.unwrap_or_default();
 
                 let has_cover_changes = !changed_folder_covers.is_empty();
                 let has_folder_content_changes = !changed_folder_contents.is_empty();
@@ -264,6 +259,7 @@ pub fn spawn_consistency_probe_worker(
                         path_vanished: false,
                         changed_folder_covers,
                         changed_folder_contents,
+                        content_check_succeeded,
                     });
                     ctx.request_repaint();
                 }

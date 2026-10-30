@@ -15,7 +15,7 @@ mod session;
 mod workers;
 
 pub use candidates::group_by_size;
-pub use deletion::{DeleteStatus, DuplicateDeletion};
+pub use deletion::{DeleteFailure, DeleteProgress, DeleteStage, DeleteStatus, DuplicateDeletion};
 pub use report::compute_recoverable;
 pub use review::{CopyStatus, DuplicateReview, PreviewStatus};
 pub use session::DuplicateSession;

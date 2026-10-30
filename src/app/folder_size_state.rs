@@ -14,6 +14,8 @@ const FOLDER_SIZE_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
 mod batch;
+mod content_probe;
+pub use content_probe::{DisplayFolderSize, PendingContentProbe};
 mod revalidation;
 pub use revalidation::PendingFolderSizeRevalidation;
 mod sorting;
@@ -145,7 +147,9 @@ pub struct FolderSizeState {
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
     pub batch_cache: LruCache<PathBuf, u64>,
     /// Last confirmed totals, display only; survive invalidation and partial scans.
-    pub display_size_cache: LruCache<PathBuf, u64>,
+    pub display_size_cache: LruCache<PathBuf, DisplayFolderSize>,
+    /// At most one index-only content probe; survives navigation until acknowledged.
+    pub content_probe_pending: Option<PendingContentProbe>,
     /// Paths scheduled for one deferred re-invalidation.
     ///
     /// Handles the race condition where the search service's 2 s USN journal

@@ -57,7 +57,13 @@ impl FolderSizeState {
     }
 
     pub fn cache_completed_folder_size(&mut self, path: PathBuf, size: u64) {
-        self.display_size_cache.put(path.clone(), size);
+        self.display_size_cache.put(
+            path.clone(),
+            super::DisplayFolderSize {
+                size,
+                checked_at: std::time::Instant::now(),
+            },
+        );
         self.batch_progress.remove(&path);
         self.batch_cache.put(path.clone(), size);
         self.size_sorting.complete(&path, size);

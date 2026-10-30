@@ -5,11 +5,14 @@ use crate::app::disk_analysis_model::DiskAnalysisModel;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, TryRecvError},
+    Mutex,
 };
 
+mod progress;
 #[cfg(test)]
 mod tests;
 mod validation;
+pub use progress::{DeleteFailure, DeleteProgress, DeleteStage};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeleteStatus {
@@ -40,9 +43,14 @@ pub struct DuplicateDeletion {
     receiver: Option<Receiver<Completion>>,
     cancel: Arc<AtomicBool>,
     pub status: Option<DeleteStatus>,
+    progress: Arc<Mutex<DeleteProgress>>,
 }
 
 impl DuplicateDeletion {
+    pub fn progress(&self) -> DeleteProgress {
+        progress::snapshot(&self.progress)
+    }
+
     pub fn is_running(&self) -> bool {
         self.receiver.is_some()
     }
@@ -113,12 +121,16 @@ impl DuplicateDeletion {
     fn launch(&mut self, request: Request, hwnd: isize) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancel = cancel.clone();
+        self.progress = Arc::new(Mutex::new(DeleteProgress::default()));
+        let progress = self.progress.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         let result = std::thread::Builder::new()
             .name("duplicate-deletion".into())
             .spawn(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    validation::execute(&request, &cancel, |path| native_delete(path, hwnd))
+                    validation::execute_with_progress(&request, &cancel, &progress, |path| {
+                        native_delete(path, hwnd)
+                    })
                 }));
                 let (status, shell_called) = outcome.unwrap_or((DeleteStatus::WorkerFailed, true));
                 let _ = sender.send(Completion {

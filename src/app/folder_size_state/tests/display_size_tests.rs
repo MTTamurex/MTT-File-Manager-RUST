@@ -19,18 +19,27 @@ fn confirmed_display_survives_invalidation_failure_navigation_and_partial_result
         request_generation: 0,
     };
     assert!(!state.finish_batch_result(&result));
-    assert_eq!(state.display_size_cache.peek(&path), Some(&100));
+    assert_eq!(
+        state.display_size_cache.peek(&path).map(|v| v.size),
+        Some(100)
+    );
     result.complete = true;
     result.total_size = None;
     assert!(state.finish_batch_result(&result));
     state.record_failure(path.clone(), Instant::now());
     state.cancel_batch();
-    assert_eq!(state.display_size_cache.peek(&path), Some(&100));
+    assert_eq!(
+        state.display_size_cache.peek(&path).map(|v| v.size),
+        Some(100)
+    );
     assert!(state.export_size_snapshot().is_empty());
     // A valid result can shrink to zero; equal results are harmless too.
     for size in [100, 50, 0, 0] {
         state.cache_completed_folder_size(path.clone(), size);
-        assert_eq!(state.display_size_cache.peek(&path), Some(&size));
+        assert_eq!(
+            state.display_size_cache.peek(&path).map(|v| v.size),
+            Some(size)
+        );
     }
 }
 
@@ -115,12 +124,18 @@ fn stale_terminal_results_never_replace_last_confirmed_display() {
         request_generation: 0,
     };
     assert!(!state.finish_batch_result(&result));
-    assert_eq!(state.display_size_cache.peek(&path), Some(&100));
+    assert_eq!(
+        state.display_size_cache.peek(&path).map(|v| v.size),
+        Some(100)
+    );
     state.cancel_batch();
     state.batch_loading.insert(path.clone());
     state.batch_request_epochs.insert(path.clone(), 2);
     result.request_epoch = 2;
     assert!(!state.finish_batch_result(&result));
     assert!(state.batch_loading.contains(&path));
-    assert_eq!(state.display_size_cache.peek(&path), Some(&100));
+    assert_eq!(
+        state.display_size_cache.peek(&path).map(|v| v.size),
+        Some(100)
+    );
 }

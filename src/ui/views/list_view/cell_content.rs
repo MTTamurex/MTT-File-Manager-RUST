@@ -10,10 +10,10 @@ pub(super) fn cached_size(item: &FileEntry, ctx: &ListViewContext) -> Option<u64
     if item.is_dir && !item.is_archive() {
         ctx.folder_size_display_cache
             .peek(&item.path)
-            .or_else(|| ctx.folder_size_progress.get(&item.path))
-            .or_else(|| ctx.folder_size_cache.peek(&item.path))
-            .or_else(|| ctx.folder_sort_sizes.get(&item.path))
-            .copied()
+            .map(|confirmed| confirmed.size)
+            .or_else(|| ctx.folder_size_progress.get(&item.path).copied())
+            .or_else(|| ctx.folder_size_cache.peek(&item.path).copied())
+            .or_else(|| ctx.folder_sort_sizes.get(&item.path).copied())
     } else {
         Some(
             crate::app::live_file_size::cached_live_file_size(
