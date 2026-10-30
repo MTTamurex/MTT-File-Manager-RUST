@@ -1,18 +1,23 @@
 //! Exact duplicates: size → validated 64 KiB prefix → full BLAKE3 confirmation.
-//! Partial hashes never confirm large files. No files are modified or downloaded.
+//! Partial hashes never confirm large files. Scanning never modifies/downloads
+//! files; comparison offers separately confirmed native Windows deletion.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 mod candidates;
+mod deletion;
 mod pipeline;
 mod reader;
 mod report;
+mod review;
 mod session;
 mod workers;
 
 pub use candidates::group_by_size;
+pub use deletion::{DeleteStatus, DuplicateDeletion};
 pub use report::compute_recoverable;
+pub use review::{CopyStatus, DuplicateReview, PreviewStatus};
 pub use session::DuplicateSession;
 
 pub const DEFAULT_MIN_SIZE: u64 = 1024 * 1024;
@@ -87,6 +92,15 @@ pub struct DuplicateMember {
     pub idx: u32,
     pub logical_size: u64,
     pub allocated_size: u64,
+    /// Fingerprint captured during full-content confirmation, never guessed
+    /// from the model's older size snapshot.
+    pub(in crate::app::disk_analysis_duplicates) stamp: reader::FileStamp,
+}
+
+impl DuplicateMember {
+    pub fn physical_identity(&self) -> FileIdentity {
+        self.stamp.identity
+    }
 }
 
 #[derive(Clone, Debug)]

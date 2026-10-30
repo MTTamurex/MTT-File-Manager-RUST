@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-use windows::{capture, open};
+pub(super) use windows::{capture, open, open_for_deletion};
 #[cfg(not(windows))]
 mod portable;
 #[cfg(not(windows))]
-use portable::{capture, open};
+pub(super) use portable::{capture, open, open_for_deletion};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FileStamp {

@@ -67,6 +67,9 @@ pub fn render_results_panel(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             render_resize_handle(state, ui);
         }
         render_panel_chrome(state, ui);
+        if state.results_collapsed || state.results_tab != ResultsTab::Duplicates {
+            state.duplicates.review.close();
+        }
         if !collapsed {
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 4))

@@ -92,6 +92,9 @@
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
 - **Largest items report** — List the largest files and folders with file-count ranking and filter-adjusted values; visible controls independently select folders/files first, the sort column, and ascending or descending order, synchronized with clickable headers
 - **Duplicate detection** — Run an on-demand, cancelable scan: exact size, validated 64 KiB prefix, then full BLAKE3 confirmation; short files are not read twice. Per-stage progress and actual bytes read, conservative or opt-in bounded parallel readers, cloud-placeholder protection, and hardlink-aware recoverable-space totals
+- **Duplicate comparison and deletion** — Compare two selectable copies with full paths, sizes, dates and bounded image previews loaded in the background. Explicitly delete a selected file through the same native Windows Shell operation as the main file manager: the Recycle Bin is requested, but Windows may permanently delete depending on settings/location, with native warnings enabled. Both displayed files are fully compared again before deletion, and an unchanged, physically independent copy must remain verifiable; a hardlink alone is not sufficient. The report updates after removal; a visible warning requests a fresh disk analysis for chart and size totals
+
+Deletion validation and the native, path-based Windows operation are not an atomic filesystem transaction. The surviving file is held against writes and deletion during the operation, but unrelated software can still rename or replace the selected path between validation and Windows processing it.
 
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes

@@ -45,7 +45,9 @@ fn info(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, ReadOutcome> {
     Ok(info)
 }
 
-pub(super) fn capture(file: &File) -> Result<FileStamp, ReadOutcome> {
+pub(in crate::app::disk_analysis_duplicates) fn capture(
+    file: &File,
+) -> Result<FileStamp, ReadOutcome> {
     let info = info(file)?;
     Ok(FileStamp {
         identity: [
@@ -60,7 +62,28 @@ pub(super) fn capture(file: &File) -> Result<FileStamp, ReadOutcome> {
     })
 }
 
-pub(super) fn open(path: &Path) -> Result<(File, FileStamp), ReadOutcome> {
+pub(in crate::app::disk_analysis_duplicates) fn open(
+    path: &Path,
+) -> Result<(File, FileStamp), ReadOutcome> {
+    open_with_share(
+        path,
+        FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0,
+    )
+}
+
+pub(in crate::app::disk_analysis_duplicates) fn open_for_deletion(
+    path: &Path,
+    preserve: bool,
+) -> Result<(File, FileStamp), ReadOutcome> {
+    // Keep the surviving file immutable and non-deletable while Windows handles
+    // the selected path. The target must allow DELETE sharing for the Shell.
+    open_with_share(
+        path,
+        FILE_SHARE_READ.0 | if preserve { 0 } else { FILE_SHARE_DELETE.0 },
+    )
+}
+
+fn open_with_share(path: &Path, share: u32) -> Result<(File, FileStamp), ReadOutcome> {
     // Fail closed if locality cannot be established. No read follows a
     // placeholder or a reparse point, including an ancestor directory.
     if attributes(path)? & UNAVAILABLE != 0 {
@@ -73,7 +96,7 @@ pub(super) fn open(path: &Path) -> Result<(File, FileStamp), ReadOutcome> {
     }
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+        .share_mode(share)
         .custom_flags(
             FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL,
         )

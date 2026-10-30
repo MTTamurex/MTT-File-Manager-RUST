@@ -1,8 +1,8 @@
 //! "Duplicates" tab: manual duplicate detection UI (plan section 7).
 //!
 //! The scan only starts on an explicit button press; progress and the final
-//! report render from [`DuplicateSession`]. Report actions are limited to
-//! **Open in main app** and **Copy path** — no deletion here.
+//! report render from [`DuplicateSession`]. Explicit deletion is available only
+//! in the comparison view, with validation and native Windows confirmations.
 
 use super::{
     analyzer_text_color, attach_row_menu, largest_items::weak_text, paint_cell,
@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 mod details;
 mod progress;
+mod review;
 use progress::{phase_label, render_progress};
 
 pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
@@ -38,8 +39,10 @@ pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 
     match state.duplicates.report.clone() {
         Some(report) => {
+            state.duplicates.review.bind_report(&report);
             ui.add_space(6.0);
             render_report(state, ui, &model, &report);
+            review::render(state, ui, &model, &report);
         }
         None => {
             ui.add_space(8.0);
@@ -169,7 +172,7 @@ fn render_report(
                 ui.label(t!("disk_analysis.dup_none").to_string());
                 return;
             }
-            for group in &report.groups {
+            for (group_idx, group) in report.groups.iter().enumerate() {
                 let header_id = egui::Id::new("dup_group")
                     .with(group.logical_size)
                     .with(group.members.first().map(|m| m.idx).unwrap_or(0));
@@ -187,6 +190,12 @@ fn render_report(
                 egui::CollapsingHeader::new(egui::RichText::new(header).strong())
                     .id_salt(header_id)
                     .show(ui, |ui| {
+                        if ui
+                            .button(t!("disk_analysis.dup_compare").to_string())
+                            .clicked()
+                        {
+                            state.duplicates.review.open_group(report, group_idx);
+                        }
                         let total_w = ui.available_width();
                         for member in &group.members {
                             let resp = ui.allocate_response(

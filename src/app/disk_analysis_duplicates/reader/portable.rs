@@ -2,13 +2,22 @@ use super::{File, FileStamp, ReadOutcome};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(in crate::app::disk_analysis_duplicates) fn open_for_deletion(
+    path: &Path,
+    _preserve: bool,
+) -> Result<(File, FileStamp), ReadOutcome> {
+    open(path)
+}
+
 fn ticks(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64
 }
 
-pub(super) fn capture(file: &File) -> Result<FileStamp, ReadOutcome> {
+pub(in crate::app::disk_analysis_duplicates) fn capture(
+    file: &File,
+) -> Result<FileStamp, ReadOutcome> {
     let meta = file.metadata().map_err(|_| ReadOutcome::Inaccessible)?;
     #[cfg(unix)]
     let identity = {
@@ -26,7 +35,9 @@ pub(super) fn capture(file: &File) -> Result<FileStamp, ReadOutcome> {
     })
 }
 
-pub(super) fn open(path: &Path) -> Result<(File, FileStamp), ReadOutcome> {
+pub(in crate::app::disk_analysis_duplicates) fn open(
+    path: &Path,
+) -> Result<(File, FileStamp), ReadOutcome> {
     for ancestor in path.ancestors() {
         let meta = ancestor
             .symlink_metadata()

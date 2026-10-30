@@ -303,6 +303,9 @@ impl DiskAnalysisState {
     /// Start (or restart) a snapshot fetch for `drive_letter`. The previous
     /// model stays visible until the new one arrives.
     pub fn request(&mut self, drive_letter: char) {
+        if self.duplicates.deletion.is_running() {
+            return;
+        }
         let drive_letter = drive_letter.to_ascii_uppercase();
         let switched_drive = self.drive_letter != Some(drive_letter);
         self.next_request_id = self.next_request_id.wrapping_add(1);
@@ -636,6 +639,8 @@ impl DiskAnalysisState {
             || self.largest_pending
             || self.search_worker_pending
             || self.duplicates.is_running()
+            || self.duplicates.review.is_pending()
+            || self.duplicates.deletion.is_running()
     }
 
     pub fn memory_trim_has_pending_work(&self) -> bool {
@@ -679,6 +684,7 @@ impl DiskAnalysisState {
                 }
                 self.drill_stack = vec![model.root];
                 self.model = Some(model);
+                self.duplicates.snapshot_stale = false;
                 self.reset_view_state(false);
                 self.treemap_cache.clear();
                 self.drives = drives;

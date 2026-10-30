@@ -3,6 +3,28 @@ use super::*;
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use std::collections::{HashMap, HashSet};
 
+pub(super) fn remove_member(report: &mut DuplicateReport, idx: u32) {
+    for group in &mut report.groups {
+        group.members.retain(|m| m.idx != idx);
+        let entries: Vec<_> = group
+            .members
+            .iter()
+            .map(|m| (m.physical_identity(), m.allocated_size))
+            .collect();
+        (group.recoverable, group.has_hardlinks) = compute_recoverable(&entries);
+    }
+    report.groups.retain(|g| {
+        g.members.len() > 1
+            && g.members
+                .iter()
+                .any(|m| m.physical_identity() != g.members[0].physical_identity())
+    });
+    report.total_recoverable = report
+        .groups
+        .iter()
+        .fold(0u64, |sum, g| sum.saturating_add(g.recoverable));
+}
+
 pub fn compute_recoverable(entries: &[(FileIdentity, u64)]) -> (u64, bool) {
     let mut allocations: HashMap<FileIdentity, u64> = HashMap::new();
     for &(identity, bytes) in entries {
@@ -77,6 +99,7 @@ pub(super) fn build(
                             idx,
                             logical_size: node.size,
                             allocated_size: node.allocated_size,
+                            stamp: hashes[&idx].stamp,
                         }
                     })
                     .collect(),

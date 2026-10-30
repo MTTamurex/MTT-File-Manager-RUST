@@ -9,6 +9,9 @@ pub struct DuplicateSession {
     pub read_mode: DuplicateReadMode,
     pub progress: DuplicateProgress,
     pub report: Option<Arc<DuplicateReport>>,
+    pub review: DuplicateReview,
+    pub deletion: DuplicateDeletion,
+    pub snapshot_stale: bool,
     pub(super) cancel_flag: Option<Arc<AtomicBool>>,
     pub(super) receiver: Option<Receiver<DuplicateMessage>>,
 }
@@ -27,6 +30,9 @@ impl DuplicateSession {
             read_mode: DuplicateReadMode::default(),
             progress: DuplicateProgress::default(),
             report: None,
+            review: DuplicateReview::default(),
+            deletion: DuplicateDeletion::default(),
+            snapshot_stale: false,
             cancel_flag: None,
             receiver: None,
         }
@@ -64,6 +70,9 @@ impl DuplicateSession {
         root: u32,
         resolver: PathResolver,
     ) {
+        if self.deletion.is_running() {
+            return;
+        }
         self.cancel();
         let Some(min_size) = self.min_size() else {
             return;
@@ -88,6 +97,8 @@ impl DuplicateSession {
     }
 
     pub fn cancel(&mut self) {
+        self.deletion.cancel();
+        self.review.reset();
         if let Some(flag) = self.cancel_flag.take() {
             flag.store(true, Ordering::Release);
         }
@@ -106,10 +117,20 @@ impl DuplicateSession {
     }
 
     pub fn poll(&mut self) -> bool {
+        let mut changed = self.review.poll();
+        let was_running = self.deletion.is_running();
+        if let Some(completion) = self.deletion.poll() {
+            deletion::apply_completion(self, completion);
+            changed = true;
+        } else if was_running && !self.deletion.is_running() {
+            // An unexpected disconnect cannot prove no native work occurred.
+            self.snapshot_stale = true;
+            self.review.refresh();
+        }
+        changed |= was_running != self.deletion.is_running();
         let Some(rx) = &self.receiver else {
-            return false;
+            return changed;
         };
-        let mut changed = false;
         while let Ok(message) = rx.try_recv() {
             match message {
                 DuplicateMessage::Progress(phase, progress) => {
@@ -119,6 +140,7 @@ impl DuplicateSession {
                     self.progress = progress;
                 }
                 DuplicateMessage::Finished(finish) => {
+                    self.review.reset();
                     self.cancel_flag = None;
                     match finish {
                         DuplicateFinish::Complete(report) => {

@@ -8,7 +8,9 @@ mod measurements;
 mod reader_tests;
 mod selection_tests;
 
-fn fixture(contents: &[Vec<u8>]) -> (tempfile::TempDir, Arc<DiskAnalysisModel>, PathResolver) {
+pub(super) fn fixture(
+    contents: &[Vec<u8>],
+) -> (tempfile::TempDir, Arc<DiskAnalysisModel>, PathResolver) {
     let dir = tempfile::tempdir().unwrap();
     let mut records = vec![DiskAnalysisRecord {
         frn: 5,
@@ -49,7 +51,7 @@ fn fixture(contents: &[Vec<u8>]) -> (tempfile::TempDir, Arc<DiskAnalysisModel>, 
     (dir, model, resolver)
 }
 
-fn run(
+pub(super) fn run(
     model: Arc<DiskAnalysisModel>,
     resolver: PathResolver,
     mode: DuplicateReadMode,

@@ -7,6 +7,7 @@
 //! which runs as its own OS process (same model as the dedicated viewers)
 //! so it gets an independent taskbar button and minimize/restore lifecycle.
 
+mod deletion;
 mod duplicates;
 mod largest_items;
 mod results_panel;
@@ -14,6 +15,7 @@ mod sidebar;
 mod sort_controls;
 pub(crate) mod toolbar;
 pub(crate) mod treemap;
+mod treemap_input;
 
 pub(crate) use results_panel::{
     attach_row_menu, paint_cell, HEADER_ROW_H, ROW_HEIGHT, TABLE_FONT_SIZE,
@@ -185,6 +187,7 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     if state.has_background_work() {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
+    deletion::render(state, &ctx);
 }
 
 fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
@@ -196,6 +199,17 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                 .inner_margin(egui::Margin::same(12)),
         )
         .show(ui, |ui| {
+            if state.duplicates.snapshot_stale {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            t!("disk_analysis.dup_delete_snapshot_stale").to_string(),
+                        )
+                        .color(ui.visuals().warn_fg_color),
+                    )
+                    .wrap(),
+                );
+            }
             ui.horizontal(|ui| {
                 let letter = state.drive_letter;
                 if let Some(letter) = letter {
@@ -474,10 +488,12 @@ fn render_treemap(
     // Geometric hover check instead of `resp.hover_pos()`: when the clamped
     // tooltip covers the pointer (near window edges) its layer steals the
     // hover from this response, hiding the tooltip next frame and making it
-    // flicker. The raw pointer position keeps the hover stable.
+    // flicker. Keep that workaround only for our own tooltip, not for windows
+    // or popups covering the treemap.
     let pointer = ui
         .input(|i| i.pointer.hover_pos())
         .filter(|p| rect.contains(*p))
+        .filter(|p| treemap_input::allows_pointer(ui, *p))
         .filter(|p| !search_results_rect.is_some_and(|popup| popup.contains(*p)));
     let hovered = pointer
         .and_then(|pos| treemap::hit_test(&placed, pos))
@@ -522,9 +538,14 @@ fn render_treemap(
             painter.circle_filled(p.rect.center(), marker_radius * 0.5, selected_yellow);
         }
     }
-    if resp.clicked() {
+    let click_pos = resp
+        .interact_pointer_pos()
+        .filter(|p| treemap_input::allows_pointer(ui, *p));
+    let primary_clicked = resp.clicked() && click_pos.is_some();
+    let secondary_clicked = resp.secondary_clicked() && click_pos.is_some();
+    if primary_clicked {
         state.context_menu = None;
-        if let Some(pos) = resp.interact_pointer_pos() {
+        if let Some(pos) = click_pos {
             if let Some(p) = treemap::hit_test(&placed, pos) {
                 // Reparse points are leaves: never drill into them.
                 if p.is_dir && !model.nodes[p.idx as usize].is_reparse {
@@ -541,9 +562,8 @@ fn render_treemap(
     }
 
     // Right-click a tile: remember the target for the context menu below.
-    if resp.secondary_clicked() {
-        state.context_menu = resp
-            .interact_pointer_pos()
+    if secondary_clicked {
+        state.context_menu = click_pos
             .and_then(|pos| treemap::hit_test(&placed, pos))
             .map(|p| p.idx);
     }
@@ -576,7 +596,7 @@ fn render_treemap(
                     .max(screen.min.x + 4.0),
                 (pos.y + 12.0).min(screen.max.y - 120.0),
             );
-            egui::Area::new(egui::Id::new("disk_analysis_tooltip"))
+            egui::Area::new(treemap_input::tooltip_id())
                 .order(egui::Order::Tooltip)
                 .interactable(false)
                 .fixed_pos(tooltip_pos)
@@ -611,9 +631,9 @@ fn render_treemap(
     // Context menu for the right-clicked tile (open folder in the main app).
     // Opens at the pointer position; only when a tile was actually hit.
     let context_menu_id = egui::Id::new("disk_analysis_tile_context");
-    let open_cmd = if resp.secondary_clicked() && state.context_menu.is_some() {
+    let open_cmd = if secondary_clicked && state.context_menu.is_some() {
         Some(egui::SetOpenCommand::Bool(true))
-    } else if resp.clicked() {
+    } else if primary_clicked {
         Some(egui::SetOpenCommand::Bool(false))
     } else {
         None

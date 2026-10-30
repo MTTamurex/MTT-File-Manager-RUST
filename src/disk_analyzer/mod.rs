@@ -216,7 +216,19 @@ impl eframe::App for DiskAnalyzerApp {
         }
         crate::viewer_runtime::schedule_saved_theme_poll(&ctx, self.last_theme_poll);
 
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if self.state.duplicates.deletion.is_running()
+            && ctx.input(|i| i.viewport().close_requested())
+        {
+            // Do not terminate the process while a native Shell operation is
+            // displaying confirmation/progress or modifying the filesystem.
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape))
+            && self.state.duplicates.deletion.is_open()
+        {
+            self.state.duplicates.deletion.cancel();
+        } else if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // Escape closes the context menu first, then clears the search,
             // then the window (plan section 5).
             if self.state.context_menu.is_some() {
