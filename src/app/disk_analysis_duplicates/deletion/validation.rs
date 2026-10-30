@@ -54,6 +54,8 @@ pub(super) fn execute(
         return (DeleteStatus::CancelledOrFailed, false);
     }
     if request.target.idx == request.survivor.idx
+        || super::super::candidates::is_recycle_path(&request.target_path)
+        || super::super::candidates::is_recycle_path(&request.survivor_path)
         || request.target_path == request.survivor_path
         || request.target.physical_identity() == request.survivor.physical_identity()
         || request.target.stamp.size != request.survivor.stamp.size

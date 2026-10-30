@@ -1,6 +1,27 @@
 use super::*;
 use crate::app::disk_analysis_duplicates::tests::{fixture, run};
 
+#[cfg(windows)]
+#[test]
+fn recycled_files_are_neither_deletion_targets_nor_surviving_copies() {
+    let (_dir, request) = request();
+    for survivor in [false, true] {
+        let mut request = request.clone();
+        let recycled = PathBuf::from(r"C:\$RECYCLE.BIN\account\file.bin");
+        if survivor {
+            request.survivor_path = recycled;
+        } else {
+            request.target_path = recycled;
+        }
+        assert_eq!(
+            validation::execute(&request, &AtomicBool::new(false), |_| panic!(
+                "recycled copy dispatched"
+            )),
+            (DeleteStatus::Unsafe, false)
+        );
+    }
+}
+
 fn request() -> (tempfile::TempDir, Request) {
     let (dir, model, resolver) = fixture(&[vec![7; 4096], vec![7; 4096], vec![7; 4096]]);
     let (report, _) = run(model, resolver.clone(), DuplicateReadMode::Conservative);

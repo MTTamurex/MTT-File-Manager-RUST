@@ -157,8 +157,8 @@ fn render_panel_chrome(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 
 /// Paints one truncated table cell starting at `*x` with the given slot
-/// width; advances `*x`. Right-aligned cells truncate from the left so
-/// numeric tails stay visible.
+/// width; advances `*x` and returns whether text was truncated. Uses the
+/// actual font metrics rather than estimating width from character counts.
 pub(crate) fn paint_cell(
     painter: &egui::Painter,
     row_rect: egui::Rect,
@@ -167,32 +167,19 @@ pub(crate) fn paint_cell(
     text: &str,
     align_right: bool,
     color: egui::Color32,
-) {
+) -> bool {
     const PAD: f32 = 6.0;
     let max_w = width - PAD * 2.0;
     if max_w <= 4.0 || text.is_empty() {
         *x += width;
-        return;
+        return !text.is_empty();
     }
-    // Character-count approximation keeps per-cell cost trivial; exact
-    // measurement would allocate a galley per candidate width.
-    const CHAR_W: f32 = 7.0 * TABLE_FONT_SIZE / 12.5;
-    let max_chars = ((max_w / CHAR_W).floor() as usize).max(2);
-    let count = text.chars().count();
-    let display: String = if count <= max_chars {
-        text.to_string()
-    } else if align_right {
-        let mut s: String = text.chars().skip(count + 1 - max_chars).collect();
-        s.insert(0, '…');
-        s
-    } else {
-        let mut s: String = text.chars().take(max_chars.saturating_sub(1)).collect();
-        s.push('…');
-        s
-    };
-
     let font_id = egui::FontId::proportional(TABLE_FONT_SIZE);
-    let galley = painter.layout_no_wrap(display, font_id, color);
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font_id, color, max_w);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = painter.layout_job(job);
+    let truncated = galley.elided;
     let pos = if align_right {
         egui::pos2(
             *x + width - PAD - galley.size().x,
@@ -209,6 +196,7 @@ pub(crate) fn paint_cell(
         .with_clip_rect(painter.clip_rect().intersect(cell))
         .galley(pos, galley, color);
     *x += width;
+    truncated
 }
 
 /// Context menu shared by result rows: **Open in main app** everywhere, plus

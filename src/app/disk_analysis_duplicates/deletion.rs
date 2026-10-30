@@ -74,7 +74,10 @@ impl DuplicateDeletion {
         model: &DiskAnalysisModel,
         idx: u32,
     ) -> Option<Request> {
-        if !review.matches_report(report) || !review.current(idx) {
+        if !review.matches_report(report)
+            || !review.current(idx)
+            || candidates::is_in_recycle_bin(model, idx)
+        {
             return None;
         }
         let group = report.groups.get(review.active_group?)?;
@@ -85,6 +88,9 @@ impl DuplicateDeletion {
             .flatten()
             .find(|e| e.idx != idx && review.current(e.idx))?;
         let survivor = group.members.iter().find(|m| m.idx == other.idx)?;
+        if candidates::is_in_recycle_bin(model, survivor.idx) {
+            return None;
+        }
         if target.physical_identity() == survivor.physical_identity() {
             return None;
         }

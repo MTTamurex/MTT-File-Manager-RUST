@@ -14,6 +14,8 @@ use eframe::egui;
 use rust_i18n::t;
 use std::sync::Arc;
 
+mod layout;
+
 pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let Some(model) = state.model.clone() else {
         ui.centered_and_justified(|ui| {
@@ -37,64 +39,76 @@ pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         return;
     }
 
-    let total_w = ui.available_width();
-    let widths = column_widths(ui, total_w);
+    let widths = layout::widths(ui, (ui.available_width() - 20.0).max(0.0), &model, state);
+    let total_w = widths.iter().sum();
 
-    paint_header(ui, total_w, widths, state);
-    let rows = state.largest_rows.clone();
+    egui::ScrollArea::horizontal()
+        .id_salt("largest_columns_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_min_width(total_w);
+            paint_header(ui, total_w, widths, state);
+            let rows = state.largest_rows.clone();
 
-    // One-shot scroll request from search activation (plan section 5).
-    let scroll_to = state.largest_scroll_to_row.take();
-    let mut scroll_area = egui::ScrollArea::vertical()
-        .id_salt("disk_analysis_largest_scroll")
-        .auto_shrink([false, false]);
-    if let Some(row) = scroll_to {
-        // Same technique as the text viewer: show_rows positions rows with
-        // item spacing, so the stride includes it.
-        let row_stride = ROW_HEIGHT + ui.spacing().item_spacing.y;
-        scroll_area = scroll_area.vertical_scroll_offset(row as f32 * row_stride);
-    }
-
-    scroll_area.show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
-        for row in range {
-            let idx = rows[row];
-            let resp = ui.allocate_response(egui::vec2(total_w, ROW_HEIGHT), egui::Sense::click());
-            let bg = row_background(ui, state.selected == Some(idx), resp.hovered(), row);
-            if bg != egui::Color32::TRANSPARENT {
-                ui.painter().rect_filled(resp.rect, 3.0, bg);
+            // One-shot scroll request from search activation (plan section 5).
+            let scroll_to = state.largest_scroll_to_row.take();
+            let mut scroll_area = egui::ScrollArea::vertical()
+                .id_salt("disk_analysis_largest_scroll")
+                .auto_shrink([false, false]);
+            if let Some(row) = scroll_to {
+                // Same technique as the text viewer: show_rows positions rows with
+                // item spacing, so the stride includes it.
+                let row_stride = ROW_HEIGHT + ui.spacing().item_spacing.y;
+                scroll_area = scroll_area.vertical_scroll_offset(row as f32 * row_stride);
             }
-            paint_largest_row(
-                ui.painter(),
-                resp.rect,
-                &model,
-                idx,
-                state.active_weights.as_ref().and_then(|weights| {
-                    weights
-                        .weights
-                        .get(idx as usize)
-                        .copied()
-                        .map(|value| (state.metric, value))
-                }),
-                widths,
-                (analyzer_text_color(ui), weak_text(ui)),
-            );
 
-            if resp.clicked() {
-                state.selected = Some(idx);
-            }
-            // Double-clicking a folder drills into it; a file reveals its
-            // parent and highlights the file in the treemap.
-            if resp.double_clicked() {
-                if model.nodes[idx as usize].is_dir {
-                    state.navigate_to(idx);
-                    state.selected = None;
-                } else {
-                    state.reveal_file(idx);
+            scroll_area.show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+                for row in range {
+                    let idx = rows[row];
+                    let resp =
+                        ui.allocate_response(egui::vec2(total_w, ROW_HEIGHT), egui::Sense::click());
+                    let bg = row_background(ui, state.selected == Some(idx), resp.hovered(), row);
+                    if bg != egui::Color32::TRANSPARENT {
+                        ui.painter().rect_filled(resp.rect, 3.0, bg);
+                    }
+                    let truncated = paint_largest_row(
+                        ui.painter(),
+                        resp.rect,
+                        &model,
+                        idx,
+                        layout::filtered(state, idx),
+                        widths,
+                        (analyzer_text_color(ui), weak_text(ui)),
+                    );
+                    if let Some(pos) = resp.hover_pos() {
+                        let offset = pos.x - resp.rect.left();
+                        if offset < widths[0] && truncated[0] {
+                            resp.clone().on_hover_text(&model.nodes[idx as usize].name);
+                        } else if offset >= widths[0]
+                            && offset < widths[0] + widths[1]
+                            && truncated[1]
+                        {
+                            resp.clone().on_hover_text(model.path_of(idx));
+                        }
+                    }
+
+                    if resp.clicked() {
+                        state.selected = Some(idx);
+                    }
+                    // Double-clicking a folder drills into it; a file reveals its
+                    // parent and highlights the file in the treemap.
+                    if resp.double_clicked() {
+                        if model.nodes[idx as usize].is_dir {
+                            state.navigate_to(idx);
+                            state.selected = None;
+                        } else {
+                            state.reveal_file(idx);
+                        }
+                    }
+                    attach_row_menu(state, ui, &resp, idx, false);
                 }
-            }
-            attach_row_menu(state, ui, &resp, idx, false);
-        }
-    });
+            });
+        });
 }
 
 pub(crate) fn row_background(
@@ -112,31 +126,6 @@ pub(crate) fn row_background(
     } else {
         egui::Color32::TRANSPARENT
     }
-}
-
-/// Name | Path | Type | Logical | Allocated | Difference | Files
-fn column_widths(ui: &egui::Ui, total_w: f32) -> [f32; 7] {
-    let header_width = |text: String, minimum: f32| {
-        (ui.painter()
-            .layout_no_wrap(
-                format!("{text} ↓"),
-                egui::FontId::proportional(TABLE_FONT_SIZE),
-                analyzer_text_color(ui),
-            )
-            .size()
-            .x
-            + 12.0)
-            .max(minimum)
-    };
-    let type_w = header_width(t!("disk_analysis.col_type").to_string(), 56.0);
-    let logical = header_width(t!("disk_analysis.logical_size_short").to_string(), 88.0);
-    let allocated = header_width(t!("disk_analysis.allocated_size").to_string(), 88.0);
-    let difference = header_width(t!("disk_analysis.col_difference").to_string(), 88.0);
-    let files_w = header_width(t!("disk_analysis.col_files").to_string(), 64.0);
-    let flex = (total_w - type_w - logical - allocated - difference - files_w).max(220.0);
-    let name = (flex * 0.42).clamp(120.0, 320.0);
-    let path = (flex - name).max(80.0);
-    [name, path, type_w, logical, allocated, difference, files_w]
 }
 
 fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut DiskAnalysisState) {
@@ -256,18 +245,17 @@ fn paint_largest_row(
     filtered: Option<(SizeMetric, u64)>,
     widths: [f32; 7],
     colors: (egui::Color32, egui::Color32),
-) {
+) -> [bool; 2] {
     let (text_color, weak) = colors;
     let node = &model.nodes[idx as usize];
-    let filtered_value = filtered.map(|(_, value)| value);
-    let metric = filtered.map(|(metric, _)| metric);
+    let values = layout::values(model, idx, filtered);
     let mut x = rect.left();
 
-    paint_cell(
+    let name_truncated = paint_cell(
         painter, rect, &mut x, widths[0], &node.name, false, text_color,
     );
     // Full paths are built only for painted rows (plan section 4).
-    paint_cell(
+    let path_truncated = paint_cell(
         painter,
         rect,
         &mut x,
@@ -283,43 +271,16 @@ fn paint_largest_row(
     };
     paint_cell(painter, rect, &mut x, widths[2], &type_text, false, weak);
     paint_cell(
-        painter,
-        rect,
-        &mut x,
-        widths[3],
-        &format_size(if metric == Some(SizeMetric::Logical) {
-            filtered_value.unwrap_or(node.subtree_size)
-        } else {
-            node.subtree_size
-        }),
-        true,
-        text_color,
+        painter, rect, &mut x, widths[3], &values[0], true, text_color,
     );
     paint_cell(
-        painter,
-        rect,
-        &mut x,
-        widths[4],
-        &format_size(if metric == Some(SizeMetric::Allocated) {
-            filtered_value.unwrap_or(node.subtree_allocated_size)
-        } else {
-            node.subtree_allocated_size
-        }),
-        true,
-        text_color,
+        painter, rect, &mut x, widths[4], &values[1], true, text_color,
     );
-    let diff_text = signed_diff_text(node.subtree_size, node.subtree_allocated_size);
-    paint_cell(painter, rect, &mut x, widths[5], &diff_text, true, weak);
-    let files_text = if node.is_dir {
-        if metric == Some(SizeMetric::FileCount) {
-            filtered_value.unwrap_or(node.subtree_files).to_string()
-        } else {
-            node.subtree_files.to_string()
-        }
-    } else {
-        String::new()
-    };
-    paint_cell(painter, rect, &mut x, widths[6], &files_text, true, weak);
+    let diff_text = &values[2];
+    paint_cell(painter, rect, &mut x, widths[5], diff_text, true, weak);
+    let files_text = &values[3];
+    paint_cell(painter, rect, &mut x, widths[6], files_text, true, weak);
+    [name_truncated, path_truncated]
 }
 
 /// Signed logical-minus-allocated difference rendered without any raw u64

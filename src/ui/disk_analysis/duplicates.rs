@@ -194,7 +194,9 @@ fn render_report(
                             .button(t!("disk_analysis.dup_compare").to_string())
                             .clicked()
                         {
-                            state.duplicates.review.open_group(report, group_idx);
+                            if state.duplicates.review.open_group(report, group_idx) {
+                                review::center_on_open(ui.ctx());
+                            }
                         }
                         let total_w = ui.available_width();
                         for member in &group.members {

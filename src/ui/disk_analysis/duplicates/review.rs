@@ -5,6 +5,41 @@ use crate::app::disk_analysis_duplicates::{DuplicateGroup, DuplicateReview};
 
 mod card;
 
+#[cfg(test)]
+mod tests;
+
+pub(super) fn center_on_open(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new("duplicate_comparison_window").with("center_on_open"),
+            true,
+        )
+    });
+}
+
+fn comparison_window(ctx: &egui::Context) -> egui::Window<'static> {
+    let id = egui::Id::new("duplicate_comparison_window");
+    let center = ctx.viewport_rect().center();
+    let window = egui::Window::new(t!("disk_analysis.dup_compare").to_string())
+        .id(id)
+        .collapsible(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(center)
+        .default_size([1040.0, 720.0])
+        .min_width(340.0)
+        .resizable(true);
+    if ctx
+        .data_mut(|data| data.remove_temp::<bool>(id.with("center_on_open")))
+        .unwrap_or(false)
+    {
+        // Only on opening: prevent egui's title-bar drag from restoring the
+        // previous position over current_pos. Later frames remain movable.
+        window.movable(false).current_pos(center)
+    } else {
+        window
+    }
+}
+
 pub(super) fn render(
     state: &mut DiskAnalysisState,
     parent: &mut egui::Ui,
@@ -21,13 +56,8 @@ pub(super) fn render(
     state.duplicates.review.queue_visible(model);
     let mut open = true;
     let style = parent.style().clone();
-    egui::Window::new(t!("disk_analysis.dup_compare").to_string())
-        .id(egui::Id::new("duplicate_comparison_window"))
+    comparison_window(parent.ctx())
         .open(&mut open)
-        .collapsible(false)
-        .default_size([1040.0, 720.0])
-        .min_width(340.0)
-        .resizable(true)
         .show(parent.ctx(), |ui| {
             ui.set_style(style);
             ui.spacing_mut().item_spacing = egui::vec2(12.0, 10.0);
