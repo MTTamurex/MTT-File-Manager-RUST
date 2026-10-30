@@ -42,6 +42,9 @@ pub(super) fn menu(ui: &mut Ui, ctx: &mut ListViewContext, owner: egui::Id) {
     if ui.button(t!("column_headers.more_columns")).clicked() {
         ctx.columns.show_picker = true;
         ctx.columns.picker_owner = Some(owner);
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(owner.with("column_picker").with("center_on_open"), true)
+        });
         ui.close();
     }
 }
@@ -51,7 +54,7 @@ pub(super) fn dialog(ui: &mut Ui, ctx: &mut ListViewContext) {
         return;
     }
     let mut open = true;
-    picker_window(ctx.rename_click_scope.with("column_picker"))
+    picker_window(ui.ctx(), ctx.rename_click_scope.with("column_picker"))
         .open(&mut open)
         .show(ui.ctx(), |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -93,13 +96,29 @@ pub(super) fn dialog(ui: &mut Ui, ctx: &mut ListViewContext) {
     ctx.columns.show_picker = open;
 }
 
-fn picker_window(id: egui::Id) -> egui::Window<'static> {
-    egui::Window::new(t!("column_headers.choose_columns").to_string())
+fn picker_window(ctx: &egui::Context, id: egui::Id) -> egui::Window<'static> {
+    let center = ctx.viewport_rect().center();
+    let window = egui::Window::new(t!("column_headers.choose_columns").to_string())
         .id(id)
+        .collapsible(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(center)
         .default_width(340.0)
         .min_width(280.0)
         .max_width(440.0)
-        .resizable(true)
+        .resizable(true);
+    // Center on each opening, including when an older position was remembered.
+    // Do not anchor: the user must still be able to move the open window.
+    if ctx
+        .data_mut(|data| data.remove_temp::<bool>(id.with("center_on_open")))
+        .unwrap_or(false)
+    {
+        // Disable dragging only on the opening frame: egui's title-bar drag
+        // otherwise restores the previous position over current_pos.
+        window.movable(false).current_pos(center)
+    } else {
+        window
+    }
 }
 
 fn choices_scroll(

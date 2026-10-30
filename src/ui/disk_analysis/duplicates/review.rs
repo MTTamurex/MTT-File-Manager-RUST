@@ -24,6 +24,7 @@ pub(super) fn render(
     egui::Window::new(t!("disk_analysis.dup_compare").to_string())
         .id(egui::Id::new("duplicate_comparison_window"))
         .open(&mut open)
+        .collapsible(false)
         .default_size([1040.0, 720.0])
         .min_width(340.0)
         .resizable(true)
@@ -53,8 +54,8 @@ pub(super) fn render(
                                     &mut state.duplicates.deletion,
                                     slot,
                                     report,
-                                    group,
                                     model,
+                                    state.viewport_hwnd.unwrap_or(0),
                                 );
                             }
                         });
@@ -69,8 +70,8 @@ pub(super) fn render(
                                 &mut state.duplicates.deletion,
                                 slot,
                                 report,
-                                group,
                                 model,
+                                state.viewport_hwnd.unwrap_or(0),
                             );
                         }
                     }

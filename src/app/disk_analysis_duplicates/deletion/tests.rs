@@ -185,12 +185,9 @@ fn completion_for_an_old_report_cannot_mutate_a_replacement() {
 }
 
 #[test]
-fn confirmation_is_discarded_if_report_changes() {
-    let (_dir, request) = request();
-    let replacement = Arc::new(request.report.as_ref().clone());
+fn cancelling_an_idle_operation_does_not_start_deletion() {
     let mut deletion = DuplicateDeletion::default();
-    deletion.confirmation = Some(request);
-    deletion.confirm(&replacement, 0);
+    deletion.cancel();
     assert!(!deletion.is_open());
 }
 
@@ -200,8 +197,9 @@ fn requests_require_two_verified_visible_copies_from_the_same_report() {
     let (_, model, _) = fixture(&[vec![7; 4096], vec![7; 4096], vec![7; 4096]]);
     let mut review = DuplicateReview::default();
     review.open_group(&request.report, 0);
-    let mut deletion = DuplicateDeletion::default();
-    assert!(!deletion.request(&request.report, &review, &model, request.target.idx));
+    assert!(
+        DuplicateDeletion::prepare(&request.report, &review, &model, request.target.idx).is_none()
+    );
     for entry in review.entries.iter_mut().flatten() {
         entry.info = Some(super::super::review::CopyInfo {
             status: CopyStatus::Current,
@@ -213,26 +211,21 @@ fn requests_require_two_verified_visible_copies_from_the_same_report() {
         });
     }
     let replacement = Arc::new(request.report.as_ref().clone());
-    assert!(!deletion.request(&replacement, &review, &model, request.target.idx));
-    assert!(deletion.request(&request.report, &review, &model, request.target.idx));
-    assert!(deletion.confirmation_paths().is_some());
     assert!(
-        !deletion.is_running(),
-        "preparing confirmation cannot start deletion"
+        DuplicateDeletion::prepare(&replacement, &review, &model, request.target.idx).is_none()
     );
-    assert!(!deletion.request(&request.report, &review, &model, request.survivor.idx));
-    deletion.cancel();
-    assert!(!deletion.is_open());
+    let prepared =
+        DuplicateDeletion::prepare(&request.report, &review, &model, request.target.idx).unwrap();
+    assert_eq!(prepared.target.idx, request.target.idx);
+    assert_eq!(prepared.survivor.idx, request.survivor.idx);
 }
 
 #[test]
 fn asynchronous_validation_failure_never_calls_native_deletion() {
     let (dir, mut request) = request();
     request.survivor_path = dir.path().join("missing.bin");
-    let report = request.report.clone();
     let mut deletion = DuplicateDeletion::default();
-    deletion.confirmation = Some(request);
-    deletion.confirm(&report, 0);
+    deletion.launch(request, 0);
     assert!(deletion.is_running());
     let completion = deletion
         .receiver

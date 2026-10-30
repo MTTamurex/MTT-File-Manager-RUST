@@ -37,7 +37,6 @@ pub(super) struct Completion {
 
 #[derive(Default)]
 pub struct DuplicateDeletion {
-    confirmation: Option<Request>,
     receiver: Option<Receiver<Completion>>,
     cancel: Arc<AtomicBool>,
     pub status: Option<DeleteStatus>,
@@ -48,72 +47,64 @@ impl DuplicateDeletion {
         self.receiver.is_some()
     }
     pub fn is_open(&self) -> bool {
-        self.confirmation.is_some() || self.is_running() || self.status.is_some()
-    }
-    pub fn confirmation_paths(&self) -> Option<(&std::path::Path, &std::path::Path)> {
-        self.confirmation
-            .as_ref()
-            .map(|r| (r.target_path.as_path(), r.survivor_path.as_path()))
+        self.is_running() || self.status.is_some()
     }
 
-    pub fn request(
+    pub fn start(
         &mut self,
         report: &Arc<DuplicateReport>,
         review: &DuplicateReview,
         model: &DiskAnalysisModel,
         idx: u32,
+        hwnd: isize,
     ) -> bool {
-        if self.is_open() || !review.matches_report(report) || !review.current(idx) {
+        if self.is_open() {
             return false;
         }
-        let Some(group) = review.active_group.and_then(|g| report.groups.get(g)) else {
+        let Some(request) = Self::prepare(report, review, model, idx) else {
             return false;
         };
-        let Some(target) = group.members.iter().find(|m| m.idx == idx) else {
-            return false;
-        };
-        let Some(other) = review
+        self.launch(request, hwnd);
+        true
+    }
+
+    fn prepare(
+        report: &Arc<DuplicateReport>,
+        review: &DuplicateReview,
+        model: &DiskAnalysisModel,
+        idx: u32,
+    ) -> Option<Request> {
+        if !review.matches_report(report) || !review.current(idx) {
+            return None;
+        }
+        let group = report.groups.get(review.active_group?)?;
+        let target = group.members.iter().find(|m| m.idx == idx)?;
+        let other = review
             .entries
             .iter()
             .flatten()
-            .find(|e| e.idx != idx && review.current(e.idx))
-        else {
-            return false;
-        };
-        let Some(survivor) = group.members.iter().find(|m| m.idx == other.idx) else {
-            return false;
-        };
+            .find(|e| e.idx != idx && review.current(e.idx))?;
+        let survivor = group.members.iter().find(|m| m.idx == other.idx)?;
         if target.physical_identity() == survivor.physical_identity() {
-            return false;
+            return None;
         }
-        self.confirmation = Some(Request {
+        Some(Request {
             report: report.clone(),
             target: target.clone(),
             survivor: survivor.clone(),
             target_path: PathBuf::from(model.path_of(idx)),
             survivor_path: PathBuf::from(model.path_of(other.idx)),
-        });
-        true
+        })
     }
 
     pub fn cancel(&mut self) {
-        self.confirmation = None;
         self.cancel.store(true, Ordering::Release);
         if !self.is_running() {
             self.status = None;
         }
     }
 
-    pub fn confirm(&mut self, report: &Arc<DuplicateReport>, hwnd: isize) {
-        if self.is_running() {
-            return;
-        }
-        let Some(request) = self.confirmation.take() else {
-            return;
-        };
-        if !Arc::ptr_eq(report, &request.report) {
-            return;
-        }
+    fn launch(&mut self, request: Request, hwnd: isize) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancel = cancel.clone();
         let (sender, receiver) = mpsc::sync_channel(1);

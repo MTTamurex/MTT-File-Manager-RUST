@@ -24,13 +24,16 @@ pub(super) fn render(
     deletion: &mut DuplicateDeletion,
     slot: usize,
     report: &Arc<DuplicateReport>,
-    group: &DuplicateGroup,
     model: &DiskAnalysisModel,
+    hwnd: isize,
 ) {
     ui.push_id(slot, |ui| {
         egui::Frame::group(ui.style())
             .inner_margin(14)
             .show(ui, |ui| {
+                let Some(group) = review.active_group.and_then(|g| report.groups.get(g)) else {
+                    return;
+                };
                 let Some(idx) = selector(ui, review, slot, group, model) else {
                     return;
                 };
@@ -117,18 +120,16 @@ pub(super) fn render(
                                 && other.physical_identity() != member.physical_identity()
                         })
                 });
-                if ui
-                    .add_enabled(
-                        current && other_current && !deletion.is_open(),
-                        egui::Button::new(t!("disk_analysis.dup_delete_file").to_string()),
-                    )
-                    .on_hover_text(t!("disk_analysis.dup_delete_hint").to_string())
-                    .clicked()
-                {
-                    deletion.request(report, review, model, idx);
-                }
-                ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            current && other_current && !deletion.is_open(),
+                            egui::Button::new(t!("disk_analysis.dup_delete_file").to_string()),
+                        )
+                        .clicked()
+                    {
+                        deletion.start(report, review, model, idx, hwnd);
+                    }
                     if ui
                         .add_enabled(
                             current,
