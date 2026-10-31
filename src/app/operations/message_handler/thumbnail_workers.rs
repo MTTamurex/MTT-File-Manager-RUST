@@ -1,7 +1,7 @@
 use crate::app::folder_size_state::FolderContentSummary;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -783,31 +783,27 @@ impl ImageViewerApp {
     }
 
     fn process_deferred_panel_folder_size_revalidation(&mut self, now: Instant) -> bool {
-        if self.selected_file.is_some()
+        if !self.show_preview_panel
             || self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
             || self.file_operation_state.file_ops_in_progress > 0
             || self.is_loading_folder
-            || self.frame_time_peak_ms > 25.0
+            || self.thumbnail_scroll_is_settling()
         {
             return false;
         }
 
-        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        let current_path = match self.selected_file.as_ref() {
+            Some(file) if file.is_dir && !file.is_archive() => file.path.clone(),
+            Some(_) => return false,
+            None => PathBuf::from(&self.navigation_state.current_path),
+        };
+        if crate::domain::special_paths::is_virtual_path(&current_path.to_string_lossy()) {
+            return false;
+        }
         if self.folder_size_state.loading.contains(&current_path) {
             return false;
         }
-        if self
-            .folder_size_state
-            .cache
-            .peek(&current_path)
-            .is_some_and(|summary| summary.has_counts())
-        {
-            self.folder_size_state
-                .clear_panel_stale_summary(&current_path);
-            return false;
-        }
-
         let Some(path) = self
             .folder_size_state
             .take_due_panel_revalidation(now, &current_path)
@@ -815,14 +811,7 @@ impl ImageViewerApp {
             return false;
         };
 
-        let request_epoch = self
-            .folder_size_state
-            .batch_invalidation_epoch
-            .get(&path)
-            .copied()
-            .unwrap_or(0);
-        self.folder_size_state
-            .dispatch_request(path, request_epoch, now)
+        self.folder_size_state.request_panel_refresh(path, now)
     }
 
     pub(super) fn process_folder_size_results(&mut self) -> bool {
@@ -936,7 +925,7 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .finish_request(&folder_path, request_id);
                     self.folder_size_state
-                        .clear_panel_stale_summary(&folder_path);
+                        .cache_completed_panel_summary(folder_path.clone(), summary);
                     self.folder_size_state.clear_failure(&folder_path);
                     *self
                         .folder_size_state
@@ -1079,26 +1068,13 @@ impl ImageViewerApp {
                 for (path, release_batch_loading) in
                     self.folder_size_state.take_expired_revalidations(now)
                 {
-                    let is_current_folder_panel = self.selected_file.is_none()
-                        && path.as_path() == Path::new(&self.navigation_state.current_path);
-                    if is_current_folder_panel {
-                        if let Some(summary) = self.folder_size_state.cache.peek(&path).copied() {
-                            self.folder_size_state
-                                .preserve_panel_summary_for_deferred_revalidation(
-                                    path.clone(),
-                                    summary,
-                                    now,
-                                );
-                        } else {
-                            self.folder_size_state
-                                .reschedule_panel_revalidation_if_stale(&path, now);
-                        }
-                        if self.folder_size_state.panel_stale_cache.contains(&path) {
-                            self.ui_ctx.request_repaint_after(
-                                crate::app::folder_size_state::PANEL_STALE_REVALIDATION_DELAY
-                                    + Duration::from_millis(25),
-                            );
-                        }
+                    self.folder_size_state
+                        .reschedule_panel_revalidation_if_stale(&path, now);
+                    if self.folder_size_state.panel_stale_cache.contains(&path) {
+                        self.ui_ctx.request_repaint_after(
+                            crate::app::folder_size_state::PANEL_STALE_REVALIDATION_DELAY
+                                + Duration::from_millis(25),
+                        );
                     }
                     self.folder_size_state
                         .invalidate_calculated_folder_size(&path);
@@ -1106,8 +1082,9 @@ impl ImageViewerApp {
                         self.folder_size_state.batch_loading.remove(&path);
                     }
                     self.folder_size_state.cache.pop(&path);
-                    self.folder_size_state.cancel_active_request(&path);
-                    self.folder_size_state.clear_failure(&path);
+                    // Keep active work bounded by its existing timeout instead
+                    // of repeatedly aborting/restarting it during continuous writes.
+                    // The epoch below still rejects results from before this change.
                     // Bump epoch so in-flight results from before are rejected.
                     *self
                         .folder_size_state

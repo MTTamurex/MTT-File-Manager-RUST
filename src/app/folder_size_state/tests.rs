@@ -48,17 +48,12 @@ mod size_sorting_tests;
 fn panel_stale_summary_requires_complete_counts() {
     let mut state = test_state();
     let path = PathBuf::from(r"C:\data");
-    let now = Instant::now();
 
-    state.preserve_panel_summary_for_deferred_revalidation(
-        path.clone(),
-        FolderContentSummary::size_only(10),
-        now,
-    );
+    state.cache_completed_panel_summary(path.clone(), FolderContentSummary::size_only(10));
     assert!(state.panel_stale_cache.peek(&path).is_none());
 
     let summary = FolderContentSummary::complete(10, 2, 1);
-    state.preserve_panel_summary_for_deferred_revalidation(path.clone(), summary, now);
+    state.cache_completed_panel_summary(path.clone(), summary);
     assert_eq!(state.panel_stale_cache.peek(&path).copied(), Some(summary));
 }
 
@@ -67,13 +62,13 @@ fn panel_render_uses_stale_summary_without_loading_state() {
     let mut state = test_state();
     let path = PathBuf::from(r"C:\data");
     let stale = FolderContentSummary::complete(100, 12, 3);
-    state.preserve_panel_summary_for_deferred_revalidation(path.clone(), stale, Instant::now());
+    state.cache_completed_panel_summary(path.clone(), stale);
     state
         .cache
         .put(path.clone(), FolderContentSummary::size_only(50));
     state.loading.insert(path.clone());
 
-    let (summary, loading) = state.summary_for_panel_render(&path, true);
+    let (summary, loading) = state.summary_for_panel_render(&path);
 
     assert_eq!(summary, Some(stale));
     assert!(!loading);
@@ -101,11 +96,8 @@ fn panel_deferred_revalidation_waits_for_deadline() {
     let other = PathBuf::from(r"C:\other");
     let now = Instant::now();
 
-    state.preserve_panel_summary_for_deferred_revalidation(
-        path.clone(),
-        FolderContentSummary::complete(100, 12, 3),
-        now,
-    );
+    state.cache_completed_panel_summary(path.clone(), FolderContentSummary::complete(100, 12, 3));
+    state.reschedule_panel_revalidation_if_stale(&path, now);
 
     assert_eq!(
         state.take_due_panel_revalidation(

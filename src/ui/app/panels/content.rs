@@ -114,19 +114,17 @@ pub(super) fn render_preview_panel_layout(
                                 None
                             };
 
-                            let is_current_folder_panel =
-                                is_current_folder_panel_target(app, &file);
                             let (folder_summary, is_folder_size_loading, is_folder_size_failed) = if is_tag_view {
                                 // Tag view: skip folder_size_state, use pre-computed tag counts
                                 (None, false, false)
                             } else if file.is_dir {
                                 let (summary, loading) = app
                                     .folder_size_state
-                                    .summary_for_panel_render(&file.path, is_current_folder_panel);
+                                    .summary_for_panel_render(&file.path);
                                 let failed = app
                                     .folder_size_state
                                     .is_failure_active(&file.path, std::time::Instant::now());
-                                (summary, loading, failed)
+                                (summary, loading, failed && !app.folder_size_state.panel_stale_cache.contains(&file.path))
                             } else {
                                 (None, false, false)
                             };
@@ -355,18 +353,8 @@ pub(super) fn render_preview_panel_layout(
                                                  // the deferred action is evaluated again.
                                                  ctx.request_repaint_after(std::time::Duration::from_millis(100));
                                              } else {
-                                                // Cancel any in-progress calculation before starting new one
-                                                app.folder_size_state.cancel
-                                                    .store(true, std::sync::atomic::Ordering::Release);
-                                                let request_epoch = app
-                                                    .folder_size_state
-                                                    .batch_invalidation_epoch
-                                                    .get(&path)
-                                                    .copied()
-                                                    .unwrap_or(0);
-                                                app.folder_size_state.dispatch_request(
-                                                    path,
-                                                    request_epoch,
+                                                 app.folder_size_state.request_panel_refresh(
+                                                     path,
                                                     std::time::Instant::now(),
                                                 );
                                             }
@@ -588,15 +576,6 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         });
         Some(entry)
     }
-}
-
-fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> bool {
-    app.selected_file.is_none()
-        && !app.navigation_state.is_computer_view
-        && !app.navigation_state.is_recycle_bin_view
-        && !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
-        && file.is_dir
-        && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
 }
 
 fn should_defer_folder_size_walk(folder_loading: bool, thumbnail_scroll_is_settling: bool) -> bool {

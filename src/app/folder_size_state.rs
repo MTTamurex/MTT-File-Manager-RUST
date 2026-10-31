@@ -11,10 +11,11 @@ const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
 const FOLDER_SIZE_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(30);
 const FOLDER_SIZE_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
-pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
+pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_secs(3);
 
 mod batch;
 mod content_probe;
+mod panel;
 pub use content_probe::{DisplayFolderSize, PendingContentProbe};
 mod revalidation;
 pub use revalidation::PendingFolderSizeRevalidation;
@@ -271,39 +272,12 @@ impl FolderSizeState {
         paths
     }
 
-    pub fn preserve_panel_summary_for_deferred_revalidation(
-        &mut self,
-        folder_path: PathBuf,
-        summary: FolderContentSummary,
-        now: Instant,
-    ) {
-        if !summary.has_counts() {
-            return;
-        }
-
-        self.panel_stale_cache.put(folder_path.clone(), summary);
-        self.panel_deferred_revalidation
-            .insert(folder_path, now + PANEL_STALE_REVALIDATION_DELAY);
-        self.prune_panel_revalidations_without_stale();
-    }
-
-    pub fn reschedule_panel_revalidation_if_stale(&mut self, folder_path: &PathBuf, now: Instant) {
-        if self.panel_stale_cache.contains(folder_path) {
-            self.panel_deferred_revalidation
-                .insert(folder_path.clone(), now + PANEL_STALE_REVALIDATION_DELAY);
-        }
-    }
-
-    pub fn clear_panel_stale_summary(&mut self, folder_path: &PathBuf) {
-        self.panel_stale_cache.pop(folder_path);
-        self.panel_deferred_revalidation.remove(folder_path);
-    }
-
     pub fn clear_failure(&mut self, folder_path: &PathBuf) {
         self.failed_until.remove(folder_path);
     }
 
     pub fn record_failure(&mut self, folder_path: PathBuf, now: Instant) {
+        self.reschedule_panel_revalidation_if_stale(&folder_path, now);
         self.failed_until
             .insert(folder_path, now + FOLDER_SIZE_FAILURE_RETRY_DELAY);
     }
@@ -319,59 +293,6 @@ impl FolderSizeState {
         }
     }
 
-    pub fn summary_for_panel_render(
-        &mut self,
-        folder_path: &PathBuf,
-        allow_stale: bool,
-    ) -> (Option<FolderContentSummary>, bool) {
-        let live_summary = self.cache.peek(folder_path).copied();
-        let stale_summary = if allow_stale {
-            self.panel_stale_cache.peek(folder_path).copied()
-        } else {
-            None
-        };
-        let use_stale = stale_summary.is_some()
-            && match live_summary {
-                Some(summary) => !summary.has_counts(),
-                None => true,
-            };
-
-        let summary = if use_stale {
-            stale_summary
-        } else {
-            live_summary
-        };
-        let loading = self.loading.contains(folder_path) && !use_stale;
-        (summary, loading)
-    }
-
-    pub fn take_due_panel_revalidation(
-        &mut self,
-        now: Instant,
-        current_path: &PathBuf,
-    ) -> Option<PathBuf> {
-        let deadline = self
-            .panel_deferred_revalidation
-            .get(current_path)
-            .copied()?;
-        if deadline > now {
-            return None;
-        }
-
-        self.panel_deferred_revalidation.remove(current_path);
-        if self.panel_stale_cache.contains(current_path) {
-            Some(current_path.clone())
-        } else {
-            None
-        }
-    }
-
-    fn prune_panel_revalidations_without_stale(&mut self) {
-        let panel_stale_cache = &self.panel_stale_cache;
-        self.panel_deferred_revalidation
-            .retain(|path, _| panel_stale_cache.contains(path));
-    }
-
     /// Cancel all pending batch work and drain stale results.
     ///
     /// Call on every navigation or List→Grid switch to stop orphan
@@ -383,6 +304,17 @@ impl FolderSizeState {
         //    doesn't keep running after the user navigates away.
         self.cancel.store(true, Ordering::Release);
         self.latest_request_id.store(0, Ordering::Release);
+        // Navigation invalidates queued/active preview work immediately. Its
+        // confirmed display survives, but partial caches must not become usable
+        // simply because the loading flags were released.
+        let now = Instant::now();
+        let active_paths: Vec<_> = self.active_requests.drain().map(|(path, _)| path).collect();
+        for path in active_paths {
+            self.loading.remove(&path);
+            self.cache.pop(&path);
+            self.invalidate_calculated_folder_size(&path);
+            self.reschedule_panel_revalidation_if_stale(&path, now);
+        }
 
         // 1. Bump generation so the worker discards all queued requests
         //    from the previous folder (they carry the old generation).

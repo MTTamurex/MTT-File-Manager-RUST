@@ -832,53 +832,21 @@ impl ImageViewerApp {
     ) {
         let folder_path = folder.to_path_buf();
         let now = std::time::Instant::now();
-        let stale_total_size = self
-            .folder_size_state
-            .cache
-            .peek(&folder_path)
-            .map(|summary| summary.total_size)
-            .or_else(|| {
-                self.folder_size_state
-                    .batch_cache
-                    .peek(&folder_path)
-                    .copied()
-            })
-            .or_else(|| {
-                self.folder_size_state
-                    .panel_stale_cache
-                    .peek(&folder_path)
-                    .map(|summary| summary.total_size)
-            });
-        if schedule_revalidation && stale_total_size.is_some() {
-            let wake_panel_revalidation =
-                if let Some(summary) = self.folder_size_state.cache.peek(&folder_path).copied() {
-                    let has_counts = summary.has_counts();
-                    self.folder_size_state
-                        .preserve_panel_summary_for_deferred_revalidation(
-                            folder_path.clone(),
-                            summary,
-                            now,
-                        );
-                    has_counts
-                } else {
-                    let has_stale = self
-                        .folder_size_state
-                        .panel_stale_cache
-                        .contains(&folder_path);
-                    self.folder_size_state
-                        .reschedule_panel_revalidation_if_stale(&folder_path, now);
-                    has_stale
-                };
-            if wake_panel_revalidation {
-                self.ui_ctx.request_repaint_after(
-                    crate::app::folder_size_state::PANEL_STALE_REVALIDATION_DELAY
-                        + std::time::Duration::from_millis(25),
-                );
-            }
+        if schedule_revalidation {
+            // Confirmed triplets were captured on completion. Never promote a
+            // progress/size-only cache entry while handling an invalidation.
+            self.folder_size_state
+                .reschedule_panel_revalidation_if_stale(&folder_path, now);
         }
-        let was_loading = self.folder_size_state.cancel_active_request(&folder_path);
+        // Ordinary notifications invalidate results by epoch, but must not
+        // restart a full-tree scan on every write. Explicit invalidations without
+        // revalidation (manual refresh) still cancel immediately.
+        let was_loading =
+            !schedule_revalidation && self.folder_size_state.cancel_active_request(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
-        self.folder_size_state.clear_failure(&folder_path);
+        if !schedule_revalidation {
+            self.folder_size_state.clear_failure(&folder_path);
+        }
         // Also clear the batch (list-view) cache so the next render re-fetches.
         self.folder_size_state
             .invalidate_calculated_folder_size(&folder_path);
@@ -902,6 +870,17 @@ impl ImageViewerApp {
                 .request_repaint_after(delay + std::time::Duration::from_millis(25));
         } else {
             self.folder_size_state.cancel_revalidation(&folder_path);
+            if self
+                .folder_size_state
+                .panel_stale_cache
+                .contains(&folder_path)
+            {
+                // A manual refresh must still update a preserved summary, but
+                // needs no journal-settling delay or placeholder in the UI.
+                self.folder_size_state
+                    .panel_deferred_revalidation
+                    .insert(folder_path, now);
+            }
         }
 
         if was_loading {
