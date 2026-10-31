@@ -257,6 +257,14 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        if app
+            .shortcuts
+            .consume_triggered(ShortcutAction::ReopenClosedTab, ctx)
+        {
+            app.reopen_closed_main_tab();
+            user_active = true;
+        }
+
         if app.shortcuts.is_triggered(ShortcutAction::NextTab, ctx) {
             switch_tab(app, false);
             user_active = true;

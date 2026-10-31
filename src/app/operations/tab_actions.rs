@@ -3,6 +3,24 @@ use crate::app::{dual_panel::ActivePanel, ImageViewerApp};
 use crate::tabs::actions::{close_candidates, detach_snapshot, TabAction};
 
 impl ImageViewerApp {
+    pub(crate) fn reopen_closed_main_tab(&mut self) {
+        if self.tab_navigation_blocked() || !self.tab_manager.has_closed_tabs() {
+            return;
+        }
+        if !self.tab_manager.can_add_tab() {
+            self.notifications.warning(
+                rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string(),
+            );
+            return;
+        }
+        self.sync_to_tab();
+        if self.tab_manager.reopen_closed_tab() {
+            self.sync_from_tab();
+            self.update_video_visibility();
+            self.save_preferences();
+        }
+    }
+
     pub(crate) fn close_main_tab(&mut self, index: usize) {
         let Some(tab) = self.tab_manager.tabs.get(index) else {
             return;
@@ -55,6 +73,7 @@ impl ImageViewerApp {
                 self.apply_tab_quick_access_action(&path, action);
             }
             TabAction::Close => self.close_main_tab(index),
+            TabAction::ReopenClosed => self.reopen_closed_main_tab(),
             TabAction::Duplicate => {
                 if !self.tab_manager.can_add_tab() {
                     self.notifications.warning(
@@ -105,6 +124,8 @@ impl ImageViewerApp {
             return;
         }
         match action {
+            // Closed workspace tabs belong to the main strip, not pane tabs.
+            TabAction::ReopenClosed => return,
             TabAction::ExpandFolderTree | TabAction::CollapseFolderTree => {
                 let owner = crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(
                     self.tab_manager.active().id,

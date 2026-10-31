@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 mod action;
 mod binding;
+#[cfg(test)]
+mod reopen_tests;
 pub use action::ShortcutAction;
 use action::DEFAULT_BINDINGS;
 use binding::{binding_from_event, validate_binding_policy};

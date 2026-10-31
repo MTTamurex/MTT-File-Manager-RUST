@@ -343,6 +343,7 @@ pub(super) fn render_tabs(
                         .in_sidebar(tab_manager.active().id),
                     if is_active { live_path } else { &tab.path },
                 ),
+                Some(tab_manager.can_reopen_closed_tab()),
             ) {
                 action = TabBarAction::Context(idx, command);
             }

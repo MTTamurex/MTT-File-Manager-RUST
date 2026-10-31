@@ -4,6 +4,7 @@ use super::{PanelTabSet, TabManager};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabAction {
     Close,
+    ReopenClosed,
     Duplicate,
     CloseLeft,
     CloseRight,

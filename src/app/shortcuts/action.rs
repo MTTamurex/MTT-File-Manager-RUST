@@ -28,10 +28,11 @@ pub enum ShortcutAction {
     GoBack,
     GoForward,
     GoUp,
+    ReopenClosedTab,
 }
 
 impl ShortcutAction {
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 25;
     pub const ALL: [Self; Self::COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -57,11 +58,13 @@ impl ShortcutAction {
         Self::GoBack,
         Self::GoForward,
         Self::GoUp,
+        Self::ReopenClosedTab,
     ];
-    pub const CONFIGURABLE_COUNT: usize = 15;
+    pub const CONFIGURABLE_COUNT: usize = 16;
     pub const CONFIGURABLE: [Self; Self::CONFIGURABLE_COUNT] = [
         Self::NewTab,
         Self::CloseTab,
+        Self::ReopenClosedTab,
         Self::NextTab,
         Self::PreviousTab,
         Self::MoveTabLeft,
@@ -85,6 +88,7 @@ impl ShortcutAction {
         match self {
             Self::NewTab => "shortcut_new_tab",
             Self::CloseTab => "shortcut_close_tab",
+            Self::ReopenClosedTab => "shortcut_reopen_closed_tab",
             Self::NextTab => "shortcut_next_tab",
             Self::PreviousTab => "shortcut_previous_tab",
             Self::MoveTabLeft => "shortcut_move_tab_left",
@@ -114,6 +118,7 @@ impl ShortcutAction {
         match self {
             Self::NewTab => "settings.shortcut_new_tab",
             Self::CloseTab => "settings.shortcut_close_tab",
+            Self::ReopenClosedTab => "settings.shortcut_reopen_closed_tab",
             Self::NextTab => "settings.shortcut_next_tab",
             Self::PreviousTab => "settings.shortcut_previous_tab",
             Self::MoveTabLeft => "settings.shortcut_move_tab_left",
@@ -169,4 +174,5 @@ pub(super) const DEFAULT_BINDINGS: [ShortcutBinding; ShortcutAction::COUNT] = [
     ShortcutBinding::alt(Key::ArrowLeft),
     ShortcutBinding::alt(Key::ArrowRight),
     ShortcutBinding::alt(Key::ArrowUp),
+    ShortcutBinding::ctrl_shift(Key::T),
 ];

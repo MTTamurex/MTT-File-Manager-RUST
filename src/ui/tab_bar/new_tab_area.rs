@@ -26,6 +26,7 @@ pub(super) fn render_new_tab_and_drag_area(
     let tab_reorder_dragging = ctx
         .data(|data| data.get_temp::<usize>(egui::Id::new("tab_reorder_drag")))
         .is_some();
+    let popup_open = egui::Popup::is_any_open(ctx);
     if remaining_width > 0.0 {
         let native_caption_drag = is_native_caption_drag_enabled();
         let sense = if native_caption_drag {
@@ -38,8 +39,9 @@ pub(super) fn render_new_tab_and_drag_area(
 
         ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
 
-        // Sync native caption drag area with this explicit empty strip.
-        if tab_reorder_active || tab_reorder_dragging {
+        // Native caption clicks bypass egui. Keep this strip in the client area
+        // while a popup is open so clicking it can dismiss the popup normally.
+        if tab_reorder_active || tab_reorder_dragging || popup_open {
             clear_caption_drag_region();
         } else {
             let ppp = ctx.pixels_per_point();
@@ -54,6 +56,7 @@ pub(super) fn render_new_tab_and_drag_area(
         // Fallback path for environments where native caption drag is disabled.
         if !tab_reorder_active
             && !tab_reorder_dragging
+            && !popup_open
             && !native_caption_drag
             && (drag_response.drag_started() || drag_response.dragged())
         {

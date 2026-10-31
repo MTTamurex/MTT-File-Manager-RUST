@@ -2,7 +2,8 @@ use crate::tabs::actions::TabAction;
 use eframe::egui;
 use rust_i18n::t;
 
-/// Both tab strips expose the same commands without selecting the clicked tab.
+/// Commands do not select the clicked tab. `can_reopen` is `None` for pane
+/// strips, which do not share the workspace's closed-tab history.
 pub(crate) fn tab_context_menu(
     response: &egui::Response,
     pinned: bool,
@@ -11,6 +12,7 @@ pub(crate) fn tab_context_menu(
     can_close_right: bool,
     quick_access_action: Option<TabAction>,
     tree_action: Option<TabAction>,
+    can_reopen: Option<bool>,
 ) -> Option<TabAction> {
     let mut action = None;
     response.context_menu(|ui| {
@@ -35,6 +37,15 @@ pub(crate) fn tab_context_menu(
         ] {
             if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                 action = Some(command);
+                ui.close();
+            }
+        }
+        if let Some(enabled) = can_reopen {
+            if ui
+                .add_enabled(enabled, egui::Button::new(t!("tabs.reopen_closed")))
+                .clicked()
+            {
+                action = Some(TabAction::ReopenClosed);
                 ui.close();
             }
         }

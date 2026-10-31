@@ -146,6 +146,7 @@ fn action_label(action: ShortcutAction) -> String {
     match action {
         ShortcutAction::NewTab => t!("settings.shortcut_new_tab").to_string(),
         ShortcutAction::CloseTab => t!("settings.shortcut_close_tab").to_string(),
+        ShortcutAction::ReopenClosedTab => t!("settings.shortcut_reopen_closed_tab").to_string(),
         ShortcutAction::NextTab => t!("settings.shortcut_next_tab").to_string(),
         ShortcutAction::PreviousTab => t!("settings.shortcut_previous_tab").to_string(),
         ShortcutAction::MoveTabLeft => t!("settings.shortcut_move_tab_left").to_string(),

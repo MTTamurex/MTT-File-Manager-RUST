@@ -19,6 +19,7 @@ pub(crate) mod actions;
 mod creation;
 mod panel_tabs;
 pub(crate) mod quick_access;
+mod reopen;
 mod reorder;
 pub use actions::TabAction;
 pub use panel_tabs::{DualPanelTabs, PanelTab, PanelTabSet, MAX_PANEL_TABS};
@@ -625,57 +626,6 @@ impl TabManager {
         }
 
         self.move_tab_to_gap(self.active_tab, self.active_tab + 2)
-    }
-
-    /// Reopen the most recently closed tab
-    pub fn reopen_closed_tab(&mut self) -> bool {
-        // PERF-05: respect the tab cap. Checked BEFORE popping closed_tabs so
-        // a rejected reopen never loses the closed-tab snapshot.
-        if !self.can_add_tab() {
-            return false;
-        }
-        if let Some(tab) = self.closed_tabs.pop() {
-            let mut reopened = TabState::new_at_path(self.next_id, &tab.path);
-            reopened.navigation = tab.navigation;
-            reopened.is_computer_view = tab.is_computer_view;
-            reopened.items = tab.items;
-            reopened.all_items = tab.all_items;
-            reopened.items_revision = tab.items_revision;
-            reopened.items_snapshot_compact = tab.items_snapshot_compact;
-            reopened.selected_item = tab.selected_item;
-            reopened.selected_file = tab.selected_file;
-            reopened.selected_thumbnail = tab.selected_thumbnail;
-            reopened.selected_metadata = tab.selected_metadata;
-            reopened.selected_gif = tab.selected_gif;
-            reopened.search_query = tab.search_query;
-            reopened.total_items = tab.total_items;
-            reopened.view_mode = tab.view_mode;
-            reopened.multi_selection = tab.multi_selection;
-            reopened.sort_mode = tab.sort_mode;
-            reopened.sort_descending = tab.sort_descending;
-            reopened.folders_position = tab.folders_position;
-            reopened.group_mode = tab.group_mode;
-            reopened.group_descending = tab.group_descending;
-            reopened.group_projection = tab.group_projection;
-            reopened.collapsed_groups_by_context = tab.collapsed_groups_by_context;
-            reopened.show_left_sidebar = tab.show_left_sidebar;
-            reopened.show_preview_panel = tab.show_preview_panel;
-            reopened.sidebar_expanded = tab.sidebar_expanded;
-            reopened.sidebar_scroll_y = tab.sidebar_scroll_y;
-            reopened.active_tag_filter = tab.active_tag_filter;
-            reopened.collapse_tags = tab.collapse_tags;
-
-            self.next_id += 1;
-
-            // Insert after active tab
-            let boundary = self.tabs.iter().take_while(|tab| tab.pinned).count();
-            let insert_pos = (self.active_tab + 1).max(boundary);
-            self.tabs.insert(insert_pos, reopened);
-            self.active_tab = insert_pos;
-            true
-        } else {
-            false
-        }
     }
 
     /// Get number of open tabs

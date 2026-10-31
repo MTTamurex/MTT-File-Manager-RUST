@@ -342,6 +342,7 @@ pub(super) fn render_panel_tab_bar(
                                                 crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(workspace_id, tab.id),
                                                 path,
                                             ),
+                                            None,
                                         )
                                     {
                                         action =

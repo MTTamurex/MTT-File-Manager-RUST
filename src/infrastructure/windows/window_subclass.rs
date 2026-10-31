@@ -34,6 +34,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_PAINT, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
 };
 
+#[cfg(test)]
+pub(crate) use hit_test::is_caption_drag_region_active;
 pub use hit_test::{
     clear_caption_drag_region, is_native_caption_drag_enabled, set_caption_drag_region_px,
     set_native_caption_drag_enabled,

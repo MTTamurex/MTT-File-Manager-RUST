@@ -28,6 +28,122 @@ fn right_click_on_pin_keeps_the_tab_context_menu_available() {
 }
 
 #[test]
+fn context_menu_reopens_a_closed_tab_without_selecting_the_clicked_tab() {
+    click_command_without_selecting_tab(None, TabAction::ReopenClosed, "tabs.reopen_closed", false);
+}
+
+#[test]
+fn clicking_empty_title_strip_dismisses_tab_menu_without_opening_a_tab_or_dragging() {
+    use crate::infrastructure::windows::window_subclass::is_caption_drag_region_active;
+
+    let ctx = Context::default();
+    let mut new_tab_clicked = false;
+    let mut action = None;
+    let mut render = |ui: &mut egui::Ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
+            action = action.or(tab_context_menu(
+                &response,
+                false,
+                true,
+                false,
+                false,
+                None,
+                None,
+                Some(false),
+            ));
+            new_tab_clicked |= super::new_tab_area::render_new_tab_and_drag_area(
+                ui,
+                &ctx,
+                36.0,
+                138.0,
+                egui::Color32::GRAY,
+                egui::Color32::LIGHT_GRAY,
+                egui::Color32::WHITE,
+                false,
+            );
+        });
+    };
+    let _ = ctx.run_ui(RawInput::default(), &mut render);
+    assert!(is_caption_drag_region_active());
+    for pressed in [true, false] {
+        let _ = ctx.run_ui(
+            pointer_input(pos2(40.0, 20.0), PointerButton::Secondary, pressed),
+            &mut render,
+        );
+    }
+    let _ = ctx.run_ui(RawInput::default(), &mut render);
+    assert!(egui::Popup::is_any_open(&ctx));
+    assert!(!is_caption_drag_region_active());
+
+    for pressed in [true, false] {
+        let output = ctx.run_ui(
+            pointer_input(pos2(500.0, 20.0), PointerButton::Primary, pressed),
+            &mut render,
+        );
+        assert!(output.viewport_output.values().all(|viewport| !viewport
+            .commands
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::StartDrag))));
+        if pressed {
+            assert!(!is_caption_drag_region_active());
+        }
+    }
+    assert!(!egui::Popup::is_any_open(&ctx));
+    assert!(is_caption_drag_region_active());
+    assert!(!new_tab_clicked);
+    assert_eq!(action, None);
+}
+
+#[test]
+fn reopen_menu_entry_is_disabled_without_history_and_hidden_for_pane_tabs() {
+    for availability in [Some(false), None] {
+        let ctx = Context::default();
+        let mut action = None;
+        let mut render = |ui: &mut egui::Ui| {
+            let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
+            action = action.or(tab_context_menu(
+                &response,
+                false,
+                true,
+                false,
+                false,
+                None,
+                None,
+                availability,
+            ));
+        };
+        let _ = ctx.run_ui(RawInput::default(), &mut render);
+        for pressed in [true, false] {
+            let _ = ctx.run_ui(
+                pointer_input(pos2(40.0, 20.0), PointerButton::Secondary, pressed),
+                &mut render,
+            );
+        }
+        let output = ctx.run_ui(RawInput::default(), &mut render);
+        let position = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text)
+                if text.galley.text() == rust_i18n::t!("tabs.reopen_closed") =>
+            {
+                Some(shape.shape.visual_bounding_rect().center())
+            }
+            _ => None,
+        });
+        assert_eq!(position.is_some(), availability.is_some());
+        if let Some(position) = position {
+            for pressed in [true, false] {
+                let _ = ctx.run_ui(
+                    pointer_input(position, PointerButton::Primary, pressed),
+                    &mut render,
+                );
+            }
+        }
+        assert_eq!(action, None);
+    }
+}
+
+#[test]
 fn quick_access_commands_do_not_select_or_pin_the_tab() {
     for (command, label) in [
         (TabAction::PinQuickAccess, "context_menu.pin_quick_access"),
@@ -88,6 +204,7 @@ fn click_command_without_selecting_tab(
                 TabAction::ExpandFolderTree | TabAction::CollapseFolderTree
             )
             .then_some(expected),
+            Some(true),
         ) {
             action = Some(command);
         }

@@ -44,6 +44,11 @@ pub fn clear_caption_drag_region() {
     CAPTION_DRAG_REGION_VALID.store(false, Ordering::Release);
 }
 
+#[cfg(test)]
+pub(crate) fn is_caption_drag_region_active() -> bool {
+    CAPTION_DRAG_REGION_VALID.load(Ordering::Acquire)
+}
+
 pub(super) fn is_caption_code(code: usize) -> bool {
     code == HTCAPTION as usize
 }
