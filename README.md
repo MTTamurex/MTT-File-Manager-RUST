@@ -2,7 +2,7 @@
 
 **Native Windows file manager** built in Rust with a modern UI, disk usage analysis, archive browsing and creation, advanced media preview, and Windows integration.
 
-<img width="3840" height="2064" alt="image" src="https://github.com/user-attachments/assets/98196918-bfee-4d40-8fa5-c1ff2914b99d" />
+<img width="3840" height="2064" alt="main_app" src="https://github.com/user-attachments/assets/a0d6a2e2-798c-4fde-97f9-08bb62381f93" />
 
 ## Download & Install (Windows)
 
