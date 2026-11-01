@@ -93,6 +93,8 @@ coverage/
 /vendor/*
 !/vendor/yrs/
 !/vendor/yrs/**
+!/vendor/betteroffice-opc/
+!/vendor/betteroffice-opc/**
 
 # ============================================
 # Other Project-Specific Files

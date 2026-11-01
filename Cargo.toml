@@ -74,7 +74,7 @@ mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 bincode = { workspace = true }
 serde = { workspace = true }
 rust-i18n = "3"
-zip = "2"                   # Native ZIP extraction fallback when Shell fails
+zip = "9.0.5"               # Native ZIP extraction fallback when Shell fails
 sevenz-rust = "0.6"         # Native 7z extraction fallback when Shell fails
 sevenz-rust2 = { version = "0.20", default-features = false, features = ["compress"] } # 7z creation: optimized lzma-rust2 encoder
 unrar = "0.5"               # Native RAR extraction (statically links unrar C++ source)
@@ -178,6 +178,7 @@ lopdf = { version = "0.44", default-features = false }
 
 [patch.crates-io]
 yrs = { path = "vendor/yrs" }
+betteroffice-opc = { path = "vendor/betteroffice-opc" }
 
 [[bench]]
 name = "image_viewer_decode"

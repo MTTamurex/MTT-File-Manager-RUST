@@ -546,7 +546,10 @@ mod tests {
 
         let file = fs::File::open(&dest).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let mut names: Vec<String> = archive
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
         names.sort();
         assert_eq!(
             names,
@@ -685,6 +688,10 @@ mod tests {
 
         let file = fs::File::open(&dest).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
-        assert_eq!(archive.file_names().collect::<Vec<_>>(), vec!["Empty/"]);
+        let names = archive
+            .file_names()
+            .collect::<zip::result::ZipResult<Vec<_>>>()
+            .unwrap();
+        assert_eq!(names, vec!["Empty/"]);
     }
 }

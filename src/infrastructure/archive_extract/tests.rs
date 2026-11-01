@@ -117,3 +117,84 @@ fn tar_pax_unselected_entry_does_not_hide_selected_entry() -> io::Result<()> {
 fn tar_regular_entries_extract_without_regression() -> io::Result<()> {
     assert_tar_extraction(false, &["first.txt", "second.txt"])
 }
+
+fn single_entry_zip() -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
+    writer
+        .start_file("local.txt", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    writer.write_all(b"archive content").unwrap();
+    writer.finish().unwrap().into_inner()
+}
+
+#[test]
+fn zip_header_mismatch_is_rejected_without_changing_existing_files() -> io::Result<()> {
+    let mut bytes = single_entry_zip();
+    let central = bytes
+        .windows(4)
+        .position(|signature| signature == b"PK\x01\x02")
+        .unwrap();
+    bytes[central + 46..central + 55].copy_from_slice(b"alias.pdf");
+
+    let temp = tempfile::tempdir()?;
+    let archive_path = temp.path().join("archive.zip");
+    let destination = temp.path().join("output");
+    fs::create_dir(&destination)?;
+    fs::write(&archive_path, bytes)?;
+    fs::write(destination.join("local.txt"), b"original local content")?;
+    fs::write(destination.join("alias.pdf"), b"original alias content")?;
+
+    let mut extracted = 0;
+    let mut extracted_bytes = 0;
+    let error = extract_from_archive(
+        &archive_path,
+        &["alias.pdf"],
+        &destination,
+        &new_shared_progress(),
+        &new_cancel_flag(),
+        &mut extracted,
+        &mut extracted_bytes,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(extracted, 0);
+    assert_eq!(extracted_bytes, 0);
+    assert_eq!(
+        fs::read(destination.join("local.txt"))?,
+        b"original local content"
+    );
+    assert_eq!(
+        fs::read(destination.join("alias.pdf"))?,
+        b"original alias content"
+    );
+    assert_eq!(fs::read_dir(&destination)?.count(), 2);
+    Ok(())
+}
+
+#[test]
+fn zip_consistent_headers_extract_without_regression() -> io::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let archive_path = temp.path().join("archive.zip");
+    let destination = temp.path().join("output");
+    fs::create_dir(&destination)?;
+    fs::write(&archive_path, single_entry_zip())?;
+
+    let mut extracted = 0;
+    let mut extracted_bytes = 0;
+    let count = extract_from_archive(
+        &archive_path,
+        &["local.txt"],
+        &destination,
+        &new_shared_progress(),
+        &new_cancel_flag(),
+        &mut extracted,
+        &mut extracted_bytes,
+    )?;
+
+    assert_eq!(count, 1);
+    assert_eq!(extracted, 1);
+    assert_eq!(extracted_bytes, b"archive content".len() as u64);
+    assert_eq!(fs::read(destination.join("local.txt"))?, b"archive content");
+    Ok(())
+}

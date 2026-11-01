@@ -598,6 +598,9 @@ fn extract_from_zip(
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    archive
+        .validate_header_consistency()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
     let matcher = EntryMatcher::new(internal_paths);
 
@@ -606,7 +609,10 @@ fn extract_from_zip(
     for i in 0..archive.len() {
         if let Ok(entry) = archive.by_index(i) {
             if !entry.is_dir() {
-                let name = entry.name().replace('\\', "/");
+                let name = entry
+                    .name()
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+                    .replace('\\', "/");
                 let lower = name.to_ascii_lowercase();
                 if !matches!(matcher.match_entry(&lower), MatchKind::None) {
                     total_matching += 1;
@@ -635,7 +641,10 @@ fn extract_from_zip(
             continue;
         }
 
-        let entry_name = entry.name().replace('\\', "/");
+        let entry_name = entry
+            .name()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+            .replace('\\', "/");
         let entry_lower = entry_name.to_ascii_lowercase();
 
         let match_kind = matcher.match_entry(&entry_lower);
