@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 
+mod preferences;
+pub(crate) use preferences::{remember, HighlightPreferences, PREFERENCE_KEY};
+
 #[derive(Default)]
 struct Feedback {
     paths: FxHashSet<String>,
@@ -149,7 +152,7 @@ pub(crate) fn operation(ctx: &egui::Context, path: &Path) -> Option<ClipboardOp>
 }
 
 pub(crate) fn icon_opacity(ctx: &egui::Context, path: &Path) -> f32 {
-    if operation(ctx, path) == Some(ClipboardOp::Move) {
+    if preferences::current(ctx).enabled && operation(ctx, path) == Some(ClipboardOp::Move) {
         0.5
     } else {
         1.0
@@ -157,16 +160,14 @@ pub(crate) fn icon_opacity(ctx: &egui::Context, path: &Path) -> f32 {
 }
 
 pub(crate) fn paint(ui: &egui::Ui, rect: egui::Rect, path: &Path) {
+    let preferences = preferences::current(ui.ctx());
+    if !preferences.enabled {
+        return;
+    }
     let Some(op) = operation(ui.ctx(), path) else {
         return;
     };
-    let dark = ui.visuals().dark_mode;
-    let color = match (op, dark) {
-        (ClipboardOp::Copy, false) => Color32::from_rgb(25, 125, 65),
-        (ClipboardOp::Copy, true) => Color32::from_rgb(95, 205, 135),
-        (ClipboardOp::Move, false) => Color32::from_rgb(170, 105, 0),
-        (ClipboardOp::Move, true) => Color32::from_rgb(235, 180, 65),
-    };
+    let color = preferences.color(op, ui.visuals().dark_mode);
     // Inset from selection/focus and drop-target borders so they remain visible.
     ui.painter().rect_stroke(
         rect.shrink(3.0),

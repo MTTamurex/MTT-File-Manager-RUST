@@ -229,6 +229,7 @@ impl ImageViewerApp {
             theme_mode,
             folder_appearance,
             list_stripes_enabled,
+            clipboard_highlights,
             interface_scale,
             gpu_backend_preference,
             scroll_interpolation_enabled,
@@ -833,6 +834,7 @@ impl ImageViewerApp {
             theme_mode,
             folder_appearance,
             list_stripes_enabled,
+            clipboard_highlights,
             interface_scale,
             system_theme_dark: theme_mode.resolve_dark(),
             last_system_theme_poll: Instant::now(),
@@ -953,6 +955,7 @@ impl ImageViewerApp {
             app.apply_folder_appearance(&ctx);
         }
         crate::ui::list_stripes::remember(&ctx, list_stripes_enabled);
+        crate::ui::clipboard_feedback::remember(&ctx, clipboard_highlights);
 
         // Apply folder lock for the initial folder (if it has one saved)
         app.apply_folder_lock_if_present();

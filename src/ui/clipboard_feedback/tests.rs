@@ -2,6 +2,101 @@ use super::*;
 use std::path::PathBuf;
 
 #[test]
+fn highlight_preferences_round_trip_and_recover_invalid_data() {
+    for value in [
+        None,
+        Some(""),
+        Some("invalid"),
+        Some("{}"),
+        Some("{\"enabled\":42}"),
+    ] {
+        assert_eq!(
+            HighlightPreferences::load(value),
+            HighlightPreferences::default()
+        );
+    }
+    let preferences = HighlightPreferences {
+        enabled: false,
+        copy_color: Some([10, 20, 30]),
+        cut_color: Some([40, 50, 60]),
+    };
+    assert_eq!(
+        HighlightPreferences::load(Some(&preferences.serialize())),
+        preferences
+    );
+    assert!(!HighlightPreferences::load(Some("{\"enabled\":false}")).enabled);
+}
+
+#[test]
+fn disabling_highlights_hides_borders_and_dimming_without_changing_clipboard_state() {
+    let ctx = egui::Context::default();
+    let path = Path::new(r"C:\Folder\file.txt");
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(160.0, 28.0));
+    for op in [ClipboardOp::Copy, ClipboardOp::Move] {
+        publish(&ctx, &[path.to_path_buf()], Some(op));
+        for enabled in [true, false, true] {
+            remember(
+                &ctx,
+                HighlightPreferences {
+                    enabled,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(operation(&ctx, path), Some(op));
+            assert_eq!(
+                icon_opacity(&ctx, path),
+                if enabled && op == ClipboardOp::Move {
+                    0.5
+                } else {
+                    1.0
+                }
+            );
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui, rect, path));
+            let borders = output.shapes.iter().filter(|shape| {
+                matches!(&shape.shape, egui::epaint::Shape::Rect(shape) if shape.rect == rect.shrink(3.0))
+            }).count();
+            assert_eq!(borders, usize::from(enabled));
+        }
+    }
+}
+
+#[test]
+fn custom_colors_are_independent_and_apply_immediately_in_both_themes() {
+    let ctx = egui::Context::default();
+    let path = Path::new(r"C:\Folder\file.txt");
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(160.0, 28.0));
+    for dark in [false, true] {
+        ctx.set_visuals(if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+        for cut_color in [[40, 50, 60], [10, 20, 30]] {
+            let preferences = HighlightPreferences {
+                enabled: true,
+                copy_color: Some([10, 20, 30]),
+                cut_color: Some(cut_color),
+            };
+            remember(&ctx, preferences);
+            for op in [ClipboardOp::Copy, ClipboardOp::Move] {
+                publish(&ctx, &[path.to_path_buf()], Some(op));
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui, rect, path));
+                let expected = if op == ClipboardOp::Copy {
+                    [10, 20, 30]
+                } else {
+                    cut_color
+                };
+                assert!(output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Rect(shape)
+                        if shape.rect == rect.shrink(3.0)
+                        && shape.stroke.color == Color32::from_rgb(expected[0], expected[1], expected[2]))
+                }));
+            }
+        }
+    }
+}
+
+#[test]
 fn windows_path_keys_match_case_separators_and_extended_prefixes() {
     assert_eq!(
         path_key(Path::new(r"C:\Folder\file.txt")),

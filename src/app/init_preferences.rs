@@ -35,6 +35,7 @@ pub(super) struct StartupPreferences {
     pub(super) theme_mode: ThemeMode,
     pub(super) folder_appearance: crate::domain::folder_appearance::FolderAppearance,
     pub(super) list_stripes_enabled: bool,
+    pub(super) clipboard_highlights: crate::ui::clipboard_feedback::HighlightPreferences,
     pub(super) interface_scale: f32,
     pub(super) gpu_backend_preference: String,
     pub(super) scroll_interpolation_enabled: bool,
@@ -393,6 +394,11 @@ impl StartupPreferences {
             language,
             theme_mode,
             folder_appearance,
+            clipboard_highlights: crate::ui::clipboard_feedback::HighlightPreferences::load(
+                prefs
+                    .get(crate::ui::clipboard_feedback::PREFERENCE_KEY)
+                    .map(String::as_str),
+            ),
             list_stripes_enabled: crate::ui::list_stripes::from_preference(
                 prefs
                     .get(crate::ui::list_stripes::PREFERENCE_KEY)
@@ -433,6 +439,9 @@ mod folder_appearance_tests;
 
 #[cfg(test)]
 mod list_stripes_tests;
+
+#[cfg(test)]
+mod clipboard_highlights_tests;
 
 #[cfg(test)]
 mod tests {

@@ -391,6 +391,10 @@ impl ImageViewerApp {
         // Language preference
         prefs.push(("language", rust_i18n::locale().to_string()));
 
+        prefs.push((
+            crate::ui::clipboard_feedback::PREFERENCE_KEY,
+            self.clipboard_highlights.serialize(),
+        ));
         // Theme preference
         let theme_str = self.theme_mode.preference();
         prefs.push(("theme_mode", theme_str.to_string()));

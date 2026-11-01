@@ -168,8 +168,6 @@ pub(super) fn render_grid_item(
         );
     }
 
-    crate::ui::clipboard_feedback::paint(ui, rect, &item.path);
-
     let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
     let is_active_drop_target = ctx.is_item_dragging
         && item.is_dir
@@ -325,6 +323,8 @@ pub(super) fn render_grid_item(
         allow_thumbnail_requests,
         hover_scale,
     );
+    // Hover zoom can reach the inset border; paint it above the item content.
+    crate::ui::clipboard_feedback::paint(ui, rect, &item.path);
     if !ctx.is_recycle_bin_view
         && !ctx.global_search_active
         && !is_renaming

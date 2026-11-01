@@ -771,6 +771,7 @@ pub struct ImageViewerApp {
     pub theme_mode: ThemeMode,
     pub folder_appearance: crate::domain::folder_appearance::FolderAppearance,
     pub list_stripes_enabled: bool,
+    pub(crate) clipboard_highlights: crate::ui::clipboard_feedback::HighlightPreferences,
     pub interface_scale: f32,
     // Last resolved dark state for ThemeMode::System, used to detect OS changes.
     pub system_theme_dark: bool,

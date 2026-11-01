@@ -4,6 +4,8 @@ use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
+mod clipboard_highlights;
+
 pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageViewerApp) -> bool {
     settings_ui::section_header(
         ui,
@@ -22,6 +24,7 @@ pub fn render_appearance_page(ui: &mut egui::Ui, app: &mut crate::app::ImageView
         app.save_preferences();
         app.save_preferences_async();
     }
+    clipboard_highlights::render(ui, app);
     let previous = app.folder_appearance;
     render_folder_appearance(ui, &mut app.folder_appearance);
     if previous != app.folder_appearance {
