@@ -8,19 +8,32 @@
 
 **[Download the latest release](../../releases/latest)**
 
-1. On the release page, expand **Assets** and choose **`MTT-File-Manager-Setup-<version>.exe`** (standard, with built-in updating) or **`MTT-File-Manager-Setup-<version>-no-update.exe`** (no update checks, notifications, or update helper; install future versions manually). Install only one edition. The **Source code** ZIP/TAR files are for developers, not installers.
+1. On the release page, expand **Assets** and download one of the two installers described below. The **Source code** ZIP/TAR files are for developers, not installers.
 2. Open the downloaded installer and approve the Windows administrator prompt. Administrator access is needed to install the background search and drive-information service; normal use of the file manager does not require it.
 3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
 4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
 
-### Installation help
+### Choose your edition
 
-- **Installer editions:** both editions share the same installation location and file-manager features apart from built-in updating. To switch editions, close MTT and run the other installer; they are not side-by-side installations. The no-update edition does not disable network-share browsing. See [building both editions](installer/VARIANTS.md).
+| Edition | Installer | Update behavior |
+| --- | --- | --- |
+| **Standard** | `MTT-File-Manager-Setup-<version>.exe` | Checks for new versions online, displays release notes, and supports downloading and installing updates from the app. Automatic installation is optional and off by default. |
+| **No-update** | `MTT-File-Manager-Setup-<version>-no-update.exe` | Excludes the entire built-in update component at compile time: no online version checks, update notifications, update controls, or update helper. Check the Releases page and install future versions manually. |
+
+**Why two editions?** During release testing, builds containing update components received antivirus alerts that we believe are false positives. Removing the entire update component resulted in a scan with no detections. We offer both editions so users can choose whether to include built-in updating. This comparison does not identify the exact detection trigger; scan results can change, and neither a clean scan nor an isolated alert is conclusive proof of safety or malware. We do not recommend disabling antivirus protection or adding exclusions to install MTT.
+
+Both editions use the same source base and provide the same file-manager features apart from built-in updating.
+
+Install only one edition. They share the same application identity and installation location, so they are not side-by-side installations. To switch, close MTT and run the other edition's installer; no uninstall is required. To stay on the no-update edition, choose the `-no-update.exe` installer for future upgrades. The standard edition's built-in updater selects the standard installer.
+
+For developers, see [building both editions from the same source](installer/VARIANTS.md).
+
+### Installation help
 
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
 - **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
-- **Updating:** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually, disable startup checks, or enable optional startup installation (off by default). Downloaded installers are verified against GitHub's SHA-256 digest. Updates wait for file operations to finish and other MTT windows/viewers to close; pause enabled Organizer rules before proceeding. Windows requests administrator approval, then MTT reopens without elevation. Setup rebuilds the search index as it already does for manual upgrades. You can still close MTT and run the newer installer manually; no uninstall is needed. Versions released before the built-in updater require one manual upgrade. See [Privacy](#privacy) and the [update release requirements and validation checklist](installer/UPDATES.md).
+- **Updating (standard edition):** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually, disable startup checks, or enable optional startup installation (off by default). Downloaded installers are verified against GitHub's SHA-256 digest. Updates wait for file operations to finish and other MTT windows/viewers to close; pause enabled Organizer rules before proceeding. Windows requests administrator approval, then MTT reopens without elevation. Setup rebuilds the search index as it already does for manual upgrades. You can still close MTT and run the newer installer manually; no uninstall is needed. Versions released before the built-in updater require one manual upgrade. See [Privacy](#privacy) and the [update release requirements and validation checklist](installer/UPDATES.md).
 
 ## Key Features
 
