@@ -13,7 +13,7 @@ fn confirmed_display_survives_invalidation_failure_navigation_and_partial_result
     state.batch_request_epochs.insert(path.clone(), 1);
     let mut result = BatchSizeResult {
         folder_path: path.clone(),
-        total_size: Some(20),
+        summary: Some(FolderContentSummary::size_only(20)),
         complete: false,
         request_epoch: 1,
         request_generation: 0,
@@ -24,7 +24,7 @@ fn confirmed_display_survives_invalidation_failure_navigation_and_partial_result
         Some(100)
     );
     result.complete = true;
-    result.total_size = None;
+    result.summary = None;
     assert!(state.finish_batch_result(&result));
     state.record_failure(path.clone(), Instant::now());
     state.cancel_batch();
@@ -70,7 +70,7 @@ fn batch_dispatch_deduplicates_and_caps_all_producers() {
     // A terminal result frees capacity without requiring navigation.
     assert!(state.finish_batch_result(&BatchSizeResult {
         folder_path: PathBuf::from("folder-0"),
-        total_size: Some(1),
+        summary: Some(FolderContentSummary::size_only(1)),
         complete: true,
         request_epoch: 0,
         request_generation: 0,
@@ -118,7 +118,7 @@ fn stale_terminal_results_never_replace_last_confirmed_display() {
     state.batch_loading.insert(path.clone());
     let mut result = BatchSizeResult {
         folder_path: path.clone(),
-        total_size: Some(500),
+        summary: Some(FolderContentSummary::size_only(500)),
         complete: true,
         request_epoch: 1,
         request_generation: 0,

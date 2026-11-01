@@ -1015,11 +1015,11 @@ impl ImageViewerApp {
 
                 let crate::app::folder_size_state::BatchSizeResult {
                     folder_path,
-                    total_size,
+                    summary,
                     ..
                 } = result;
 
-                let Some(total_size) = total_size else {
+                let Some(_) = summary else {
                     self.folder_size_state.selection_size.failed(&folder_path);
                     // Service unavailable — keep in batch_loading and schedule
                     // a deferred retry to prevent per-frame re-requests.
@@ -1035,15 +1035,6 @@ impl ImageViewerApp {
                     continue;
                 };
 
-                self.folder_size_state
-                    .cache_completed_folder_size(folder_path.clone(), total_size);
-                // Keep the preview-panel cache in sync so selecting the folder
-                // in the details panel shows the same (fresh) value.
-                upsert_folder_content_summary(
-                    &mut self.folder_size_state.cache,
-                    folder_path,
-                    FolderContentSummary::size_only(total_size),
-                );
                 received_any = true;
             }
             if batch_count >= MAX_BATCH_PER_FRAME {

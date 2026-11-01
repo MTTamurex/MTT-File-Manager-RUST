@@ -8,7 +8,7 @@ fn pending_scan() -> (FolderSizeState, BatchSizeResult) {
     state.batch_request_epochs.insert(path.clone(), 0);
     let result = BatchSizeResult {
         folder_path: path,
-        total_size: Some(10),
+        summary: Some(FolderContentSummary::size_only(10)),
         complete: false,
         request_epoch: 0,
         request_generation: 0,
@@ -27,10 +27,10 @@ fn partial_sizes_only_update_display_and_keep_request_pending() {
     assert!(state.batch_cache.peek(&path).is_none());
     assert!(state.cache.peek(&path).is_none());
 
-    result.total_size = Some(5);
+    result.summary = Some(FolderContentSummary::size_only(5));
     assert!(!state.finish_batch_result(&result));
     assert_eq!(state.batch_progress.get(&path), Some(&10));
-    result.total_size = Some(30);
+    result.summary = Some(FolderContentSummary::size_only(30));
     assert!(!state.finish_batch_result(&result));
     assert_eq!(state.batch_progress.get(&path), Some(&30));
 
@@ -124,7 +124,7 @@ fn failure_and_completed_preview_clear_partial_sizes() {
     let (mut state, mut result) = pending_scan();
     state.finish_batch_result(&result);
     result.complete = true;
-    result.total_size = None;
+    result.summary = None;
     assert!(state.finish_batch_result(&result));
     assert!(state.batch_progress.is_empty());
 
@@ -149,7 +149,7 @@ fn preview_owns_display_progress_while_its_request_is_active() {
     assert!(state.dispatch_request(result.folder_path.clone(), 0, Instant::now()));
     assert!(state.batch_progress.is_empty());
 
-    result.total_size = Some(20);
+    result.summary = Some(FolderContentSummary::size_only(20));
     assert!(!state.finish_batch_result(&result));
     assert!(state.batch_progress.is_empty());
     assert!(state.batch_loading.contains(&result.folder_path));

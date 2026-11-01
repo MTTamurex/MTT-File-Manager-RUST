@@ -616,10 +616,14 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 // NTFS fast path: use the service index instead of local recursion.
                 if is_ntfs_volume(&path) {
                     match query_ntfs_folder_size_with_retry(&path, &cancel_worker) {
-                        Ok((total_size, _file_count, _folder_count)) => {
+                        Ok((total_size, file_count, folder_count)) => {
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
-                                total_size: Some(total_size),
+                                summary: Some(FolderContentSummary::complete(
+                                    total_size,
+                                    file_count,
+                                    folder_count,
+                                )),
                                 complete: true,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
@@ -637,7 +641,11 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                     Ok(result) => {
                                         let _ = res_tx.send(BatchSizeResult {
                                             folder_path: path,
-                                            total_size: Some(result.total_size),
+                                            summary: Some(FolderContentSummary::complete(
+                                                result.total_size,
+                                                result.file_count,
+                                                result.folder_count,
+                                            )),
                                             complete: true,
                                             request_epoch: req_epoch,
                                             request_generation: req_gen,
@@ -665,7 +673,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             );
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
-                                total_size: None,
+                                summary: None,
                                 complete: true,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
@@ -714,7 +722,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             *last = Some(now);
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path.clone(),
-                                total_size: Some(partial),
+                                summary: Some(FolderContentSummary::size_only(partial)),
                                 complete: false,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
@@ -738,7 +746,11 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 {
                     let _ = res_tx.send(BatchSizeResult {
                         folder_path: path,
-                        total_size: result.map(|result| result.total_size),
+                        summary: result.map(|result| FolderContentSummary::complete(
+                            result.total_size,
+                            result.file_count,
+                            result.folder_count,
+                        )),
                         complete: true,
                         request_epoch: req_epoch,
                         request_generation: req_gen,

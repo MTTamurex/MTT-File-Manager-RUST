@@ -104,7 +104,7 @@ impl FolderSizeState {
         Ok(true)
     }
 
-    /// Apply display-only progress or release a terminal request.
+    /// Apply display-only progress or publish a validated terminal snapshot.
     /// Returns true only for a current terminal result.
     /// A previous navigation must not release a newer request for the same path.
     pub fn finish_batch_result(&mut self, result: &BatchSizeResult) -> bool {
@@ -129,12 +129,12 @@ impl FolderSizeState {
                         .copied()
                         .unwrap_or(0)
             {
-                if let Some(size) = result.total_size {
+                if let Some(summary) = result.summary {
                     let partial = self
                         .batch_progress
                         .entry(result.folder_path.clone())
                         .or_default();
-                    *partial = (*partial).max(size);
+                    *partial = (*partial).max(summary.total_size);
                 }
             }
             return false;
@@ -142,11 +142,23 @@ impl FolderSizeState {
         self.batch_progress.remove(&result.folder_path);
         self.batch_loading.remove(&result.folder_path);
         self.batch_request_epochs.remove(&result.folder_path);
-        result.request_epoch
-            >= self
+        if result.request_epoch
+            < self
                 .batch_invalidation_epoch
                 .get(&result.folder_path)
                 .copied()
                 .unwrap_or(0)
+        {
+            return false;
+        }
+        if let Some(summary) = result.summary {
+            // Publish one snapshot only after generation/epoch validation. Never
+            // combine new sizes with counts from a different snapshot.
+            self.cache_completed_folder_size(result.folder_path.clone(), summary.total_size);
+            self.cache_completed_panel_summary(result.folder_path.clone(), summary);
+            self.clear_failure(&result.folder_path);
+            self.cache.put(result.folder_path.clone(), summary);
+        }
+        true
     }
 }

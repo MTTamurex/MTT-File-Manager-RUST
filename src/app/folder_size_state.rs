@@ -103,7 +103,9 @@ pub struct FolderSizeRequest {
 /// before a cache invalidation.
 pub struct BatchSizeResult {
     pub folder_path: PathBuf,
-    pub total_size: Option<u64>,
+    /// One indexed/scanned snapshot; `None` denotes failure, never an empty folder.
+    /// Progress carries size only and must not publish confirmed counts.
+    pub summary: Option<FolderContentSummary>,
     /// Partial totals update the display only; they must not finish the request.
     pub complete: bool,
     /// Invalidation epoch copied from the request — compared against the

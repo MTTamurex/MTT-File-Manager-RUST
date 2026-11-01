@@ -39,6 +39,7 @@ pub(super) fn test_state() -> FolderSizeState {
 }
 
 mod batch_progress_tests;
+mod batch_summary_tests;
 mod display_size_tests;
 mod export_snapshot_tests;
 mod selection_size_tests;
