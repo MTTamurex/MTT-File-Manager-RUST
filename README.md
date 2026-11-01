@@ -27,21 +27,23 @@
 - **Interface fonts and text size** — Choose an installed Windows font in **Settings > Appearance**, preview it before confirming, and save a separate text-size preference for each font without resizing icons or document contents
 - **Text and interface scaling** — Adjust the status-bar interface-size slider from 100–200%; release it to apply and save the size. Text and controls grow together on top of Windows display scaling; 100% follows Windows scaling alone. Thumbnail size remains separately adjustable alongside it
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
-- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation. Right-click tabs to close, duplicate, close tabs to the left or right, or pin/unpin them. Pinned tabs stay on the left, cannot be closed until unpinned, and open other locations in a new tab instead of replacing their pinned location
-- **Session restoration and startup location** — Continue the previous session with saved tabs, pane layouts, and view preferences, or start at This PC, Documents, the user profile, or a custom folder; restored Tag tabs display their names immediately
-- **New-tab preferences** — Choose the current location, This PC, Documents, the user profile, or a custom folder for new tabs, and optionally open archives in a new tab; middle-click supported sidebar locations to open them in a new tab
-- **System tray** — Optionally send the main window to the notification area when closing it; reopen it or exit the app from the tray menu
+- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation. Right-click tabs to close, duplicate, close tabs to the left or right, or pin/unpin them. Pinned tabs stay on the left, cannot be closed until unpinned, and open other locations in a new tab instead of replacing their pinned location. Reopen closed main tabs from the context menu or with Ctrl+Shift+T
+- **Tab detaching and drag previews** — Drag a main or dual-panel tab outside the window to move it into a new window when multiple instances are enabled; animated previews show tab movement while dragging
+- **Session restoration and startup location** — Continue the previous session with saved tabs, pane layouts, and view preferences, or start at This PC, Documents, the user profile, or a custom folder; restored Tag tabs display their names immediately. With previous-session startup and multiple instances enabled, exiting all instances together preserves their separate tab sessions for the next launch
+- **New-tab preferences** — Choose the current location, This PC, Documents, the user profile, or a custom folder for new tabs, and optionally open archives in a new tab. Choose whether new tabs become active, with Ctrl reversing that preference for supported opening actions; open multiple selected folders in separate tabs, or middle-click supported sidebar locations to open them in a new tab
+- **System tray** — Optionally send the main window to the notification area when closing it. A shared icon with an instance-count badge provides a menu organized by instance, tab, and panel; restore a specific location, restore all instances, or exit all instances
 - **Single or multiple instances** — Choose whether to allow multiple application instances in **Settings > General**. When disabled, launching MTT again restores the existing window, including from the system tray
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
-- **File grouping** — Group items by name, date, type, or size in supported views; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions
+- **File grouping** — Group items by name, date, type, or size, including in Miller's Columns; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions. Enabled additional property and tag columns are also available as sorting and grouping criteria
 - **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings, including Back, Forward, and Up navigation with support for assigning Backspace. Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
-- **File-list preferences** — Independently disable automatic column resizing or hover previews in **Settings > General**; manual column widths support horizontal scrolling. Enable optional alternating row colors in **Settings > Appearance**
+- **Customizable columns** — Drag List view headers to reorder columns, right-click to show or hide columns, or use the searchable picker to add Windows file properties and tags; column layouts are saved separately for regular folders, This PC, and the Recycle Bin
+- **File-list preferences** — In **Settings > General**, choose automatic content sizing, manual column widths remembered per folder, or **Fit columns to panel**; wider layouts support horizontal scrolling. Hover previews can be disabled independently. Enable optional alternating row colors in **Settings > Appearance**
 - **Date formats** — Choose DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD for displayed dates and Global Search date filters
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
-- **Smart address bar** — Direct path input with breadcrumbs
-- **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin; sections reclaim space when collapsed, with an adjustable drives area and a separate collapsible Network Locations section. Right-click empty space or section headers to collapse or expand all sections
+- **Smart address bar** — Direct path input with breadcrumbs; activating path editing selects the full path for copying or replacement. Recognized Windows folders use shorter breadcrumb labels, and supported cloud roots show provider and account labels while editing retains the filesystem path
+- **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin; sections reclaim space when collapsed, with an adjustable drives area and a separate collapsible Network Locations section. Choose independent section scrolling or an optional unified scrollbar in **Settings > General**. Right-click empty space or section headers to collapse or expand all sections; tab context menus can reveal a folder in the tree or collapse the expansion created by that action
 - **Sidebar renaming** — Rename folders directly in the sidebar tree
-- **Network browsing** — Enter a UNC server address to list its shares; browse saved Windows Network Locations from the sidebar or This PC, and launch the Windows Add Network Location wizard
+- **Network browsing** — Enter a UNC server address to list its shares; browse saved Windows Network Locations from the sidebar or This PC, and launch the Windows Add Network Location wizard. Use native Windows dialogs to map network shares to drive letters or disconnect mapped network drives
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; pin/unpin supported folder locations directly from tab context menus; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
@@ -49,7 +51,7 @@
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
 - **Dedicated Tag views** — Browse every item assigned to a tag from the resizable Tags section in the sidebar
-- **Tag management** — Create, rename, recolor, and delete tags from Settings, with usage counts shown before deletion
+- **Tag management** — Create, rename, recolor, and delete tags from Settings, with usage counts shown before deletion; choose custom RGB colors for new or existing tags, saved between sessions
 - **Global Search filters** — Show any tagged item or narrow search results to specific tags
 - **File operation tracking** — Preserve tags across supported renames and moves, and clear them when files are deleted
 - **Scalable browsing** — Load large Tag views in pages using cached file metadata while limiting thumbnail work to visible items
@@ -91,13 +93,14 @@
 - **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
 - **Largest items report** — List the largest files and folders with file-count ranking and filter-adjusted values; visible controls independently select folders/files first, the sort column, and ascending or descending order, synchronized with clickable headers
-- **Duplicate detection** — Run an on-demand, cancelable scan: exact size, validated 64 KiB prefix, then full BLAKE3 confirmation; short files are not read twice. Per-stage progress and actual bytes read, conservative or opt-in bounded parallel readers, cloud-placeholder protection, and hardlink-aware recoverable-space totals
+- **Duplicate detection** — Run an on-demand, cancelable scan: exact size, validated 64 KiB prefix, then full BLAKE3 confirmation; short files are not read twice. Per-stage progress and actual bytes read, conservative or opt-in bounded parallel readers, cloud-placeholder protection, Recycle Bin exclusion, and hardlink-aware recoverable-space totals
 - **Duplicate comparison and deletion** — Compare two selectable copies with full paths, sizes, dates and bounded image previews loaded in the background. Explicitly delete a selected file through the same native Windows Shell operation as the main file manager: the Recycle Bin is requested, but Windows may permanently delete depending on settings/location, with native warnings enabled. Both displayed files are fully compared again before deletion, and an unchanged, physically independent copy must remain verifiable; a hardlink alone is not sufficient. The report updates after removal; a visible warning requests a fresh disk analysis for chart and size totals
 
 Deletion validation and the native, path-based Windows operation are not an atomic filesystem transaction. The surviving file is held against writes and deletion during the operation, but unrelated software can still rename or replace the selected path between validation and Windows processing it.
 
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes
+- **Filename patterns** — Use case-insensitive `*` and `?` wildcards and semicolon-separated alternatives, such as `*.jpg;*.png`, in global search, local filtering, and tagged results
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
 - **Live NTFS size updates** — Refresh logical size and stream allocation using complete NTFS file references, including after growth or truncation. Older binary caches retain their records and receive a one-time background size refresh after upgrading; no manual index deletion is required
 - **Background service** — Dedicated Windows Service for continuous indexing
@@ -114,11 +117,13 @@ Deletion validation and the native, path-based Windows operation are not an atom
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
-- **Clipboard feedback** — Distinct markers identify copied and cut files and folders, with faded icons for items marked for moving
+- **Clipboard feedback** — Distinct markers identify copied and cut files and folders, with faded icons for items marked for moving; choose separate copy/cut highlight colors or disable both highlights and cut-icon fading in **Settings > Appearance**
+- **Internal drag-and-drop** — Move items between folders, hold Ctrl to copy, or hold Alt to create shortcuts. Copies and shortcuts can also be dropped into the source folder, with copies receiving a separate name
 - **Permanent deletion** — Use Shift+Delete or hold Shift while clicking Delete in the context menu or toolbar to bypass the Recycle Bin
 - **Selection controls** — Select all, clear selection, or invert selection from the status bar
 - **Folder access assistance** — For access-denied folders, request permanent full control for your Windows account through an administrator-authorized helper; the main file manager stays unelevated. A warning explains that the grant also applies to inheriting files/subfolders and can be used by other programs running under your account
-- **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
+- **Batch rename** — Select 2+ eligible files or folders and press F2 or click the toolbar's Rename button to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
+- **Folder listing export** — Export all items or a selection from a filesystem folder to CSV, TSV, TXT, or HTML, saved to a file or copied to the clipboard. Choose columns and sorting, optionally include subfolders and calculate folder sizes, and use a tree layout for recursive TXT exports
 - **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
 - **Archive creation** — Compress selected files and folders to ZIP or 7Z from the context menu, with byte-level progress, cancellation, conflict-free archive naming, and temporary output cleanup after failures
 - **Archive extraction** — Access the Windows Shell **Extract All** action directly from the context menu for supported archive files
@@ -146,6 +151,7 @@ Deletion validation and the native, path-based Windows operation are not an atom
 - **Async workers** — Background processing keeps UI responsive
 - **UI virtualization** — Efficient rendering of large directories
 - **Bounded background work** — Folder loading, thumbnail generation, and search rescans use concurrency limits to avoid resource spikes and improve shutdown behavior
+- **Folder summaries** — Reuse completed background calculations for folder sizes and details-panel file/subfolder counts; retain previously calculated values while refreshing them in the background
 - **Idle memory trimming** — Trims the Windows process working set after idle periods when it exceeds a configured threshold
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`; event bursts are coalesced into debounced reloads
 
