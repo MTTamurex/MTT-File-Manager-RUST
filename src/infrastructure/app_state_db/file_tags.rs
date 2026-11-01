@@ -4,6 +4,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod color_tests;
+
 fn normalize_path_text(path: &str) -> String {
     crate::domain::file_tag::normalize_tag_path_text(path)
 }
@@ -35,25 +38,11 @@ pub(super) fn seed_default_file_tags(conn: &Connection) {
         return;
     }
 
-    for (position, color) in TagColor::default_palette().into_iter().take(5).enumerate() {
-        let name = match color {
-            TagColor::Red => "Red",
-            TagColor::Orange => "Orange",
-            TagColor::Yellow => "Yellow",
-            TagColor::Green => "Green",
-            TagColor::Blue => "Blue",
-            TagColor::Purple => "Purple",
-            TagColor::Gray => "Gray",
-            TagColor::Pink => "Pink",
-            TagColor::Brown => "Brown",
-            TagColor::Mint => "Mint",
-            TagColor::Teal => "Teal",
-            TagColor::Cyan => "Cyan",
-            TagColor::Indigo => "Indigo",
-            TagColor::Lime => "Lime",
-            TagColor::Olive => "Olive",
-            TagColor::Black => "Black",
-        };
+    for (position, (name, color)) in ["Red", "Orange", "Yellow", "Green", "Blue"]
+        .into_iter()
+        .zip(TagColor::default_palette())
+        .enumerate()
+    {
         let _ = conn.execute(
             "INSERT OR IGNORE INTO file_tags (name, color, position) VALUES (?1, ?2, ?3)",
             params![name, color.as_db_str(), position as i64],

@@ -67,7 +67,10 @@ mod tests {
     fn tag_tabs_use_tag_icons_in_the_current_tag_color() {
         let mut tags = FxHashMap::default();
         let path = tag_view_path(1);
-        for color in TagColor::expanded_palette() {
+        for color in TagColor::expanded_palette()
+            .into_iter()
+            .chain([TagColor::Custom([12, 34, 56])])
+        {
             tags.insert(
                 1,
                 FileTag {

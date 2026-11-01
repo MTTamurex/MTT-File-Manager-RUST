@@ -1,7 +1,7 @@
 //! Cached clipboard feedback shared by all file views in a viewport.
 use crate::application::{ClipboardManager, ClipboardOp};
 use crate::infrastructure::windows_clipboard::{self, snapshot::FileSnapshot, ClipboardFileOp};
-use eframe::egui::{self, Color32};
+use eframe::egui;
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};

@@ -1,4 +1,5 @@
 use super::*;
+use eframe::egui::Color32;
 use std::path::PathBuf;
 
 #[test]

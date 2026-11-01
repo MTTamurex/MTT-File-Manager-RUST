@@ -80,6 +80,7 @@ pub enum TagColor {
     Lime,
     Olive,
     Black,
+    Custom([u8; 3]),
 }
 
 impl TagColor {
@@ -116,8 +117,8 @@ impl TagColor {
         ]
     }
 
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
+    pub fn as_db_str(self) -> String {
+        let name = match self {
             TagColor::Red => "red",
             TagColor::Orange => "orange",
             TagColor::Yellow => "yellow",
@@ -134,7 +135,9 @@ impl TagColor {
             TagColor::Lime => "lime",
             TagColor::Olive => "olive",
             TagColor::Black => "black",
-        }
+            TagColor::Custom([r, g, b]) => return format!("#{r:02X}{g:02X}{b:02X}"),
+        };
+        name.to_owned()
     }
 
     pub fn from_db_str(value: &str) -> Option<Self> {
@@ -155,7 +158,17 @@ impl TagColor {
             "lime" => Some(TagColor::Lime),
             "olive" => Some(TagColor::Olive),
             "black" => Some(TagColor::Black),
-            _ => None,
+            _ => {
+                let hex = value.strip_prefix('#')?;
+                if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                Some(TagColor::Custom([
+                    u8::from_str_radix(&hex[0..2], 16).ok()?,
+                    u8::from_str_radix(&hex[2..4], 16).ok()?,
+                    u8::from_str_radix(&hex[4..6], 16).ok()?,
+                ]))
+            }
         }
     }
 
@@ -177,6 +190,7 @@ impl TagColor {
             TagColor::Lime => Color32::from_rgb(191, 215, 48),
             TagColor::Olive => Color32::from_rgb(128, 128, 0),
             TagColor::Black => Color32::from_rgb(28, 28, 30),
+            TagColor::Custom([r, g, b]) => Color32::from_rgb(r, g, b),
         }
     }
 }
@@ -196,7 +210,38 @@ mod tests {
     #[test]
     fn tag_color_roundtrips_db_values() {
         for color in TagColor::expanded_palette() {
-            assert_eq!(TagColor::from_db_str(color.as_db_str()), Some(color));
+            assert_eq!(TagColor::from_db_str(&color.as_db_str()), Some(color));
+        }
+    }
+
+    #[test]
+    fn custom_tag_colors_roundtrip_without_losing_rgb_values() {
+        for rgb in [[0, 0, 0], [255, 255, 255], [12, 34, 56], [0, 128, 255]] {
+            let color = TagColor::Custom(rgb);
+            assert_eq!(TagColor::from_db_str(&color.as_db_str()), Some(color));
+            assert_eq!(color.to_color32().to_array(), [rgb[0], rgb[1], rgb[2], 255]);
+        }
+        assert_eq!(TagColor::Custom([12, 34, 56]).as_db_str(), "#0C2238");
+        assert_eq!(
+            TagColor::from_db_str("#aBcDeF"),
+            Some(TagColor::Custom([171, 205, 239]))
+        );
+    }
+
+    #[test]
+    fn malformed_custom_tag_colors_are_rejected() {
+        for value in [
+            "",
+            "unknown",
+            "123456",
+            "#12345",
+            "#1234567",
+            "#12345678",
+            "#GG0000",
+            "#é0000",
+            "#000000 ",
+        ] {
+            assert_eq!(TagColor::from_db_str(value), None, "{value}");
         }
     }
 
