@@ -323,6 +323,7 @@ pub struct ImageViewerApp {
     pub startup_custom_path: String,
     pub tab_preferences: crate::app::tab_preferences::TabPreferences,
     pub default_file_manager_settings: DefaultFileManagerSettingsState,
+    #[cfg(feature = "online-updates")]
     pub(crate) updates: crate::app::update_state::UpdateState,
     pub quick_access_placement: QuickAccessPlacement,
     pub show_tags: bool,               // Show Tags section in sidebar

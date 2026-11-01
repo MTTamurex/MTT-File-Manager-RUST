@@ -7,6 +7,8 @@ const APP_NAME: &str = "MTT File Manager";
 const REPOSITORY_URL: &str = "https://github.com/MTTamurex/MTT-File-Manager-RUST";
 
 pub fn render_about_settings_section(ui: &mut egui::Ui, app: &mut crate::app::ImageViewerApp) {
+    #[cfg(not(feature = "online-updates"))]
+    let _ = app;
     settings_ui::section_header(ui, &t!("settings.about"), &t!("settings.about_description"));
 
     settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
@@ -76,8 +78,11 @@ pub fn render_about_settings_section(ui: &mut egui::Ui, app: &mut crate::app::Im
             .size(12.0)
             .color(theme::secondary_text_color(ui.ctx())),
     );
-    ui.add_space(16.0);
-    crate::ui::components::update_settings::settings(ui, app);
+    #[cfg(feature = "online-updates")]
+    {
+        ui.add_space(16.0);
+        crate::ui::components::update_settings::settings(ui, app);
+    }
 }
 
 fn about_row(ui: &mut egui::Ui, label: &str, add_contents: impl FnOnce(&mut egui::Ui)) {

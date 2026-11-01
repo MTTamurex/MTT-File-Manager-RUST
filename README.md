@@ -8,12 +8,14 @@
 
 **[Download the latest release](../../releases/latest)**
 
-1. On the release page, expand **Assets** and download **`MTT-File-Manager-Setup-<version>.exe`**. The **Source code** ZIP/TAR files are for developers, not installers.
+1. On the release page, expand **Assets** and choose **`MTT-File-Manager-Setup-<version>.exe`** (standard, with built-in updating) or **`MTT-File-Manager-Setup-<version>-no-update.exe`** (no update checks, notifications, or update helper; install future versions manually). Install only one edition. The **Source code** ZIP/TAR files are for developers, not installers.
 2. Open the downloaded installer and approve the Windows administrator prompt. Administrator access is needed to install the background search and drive-information service; normal use of the file manager does not require it.
 3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
 4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
 
 ### Installation help
+
+- **Installer editions:** both editions share the same installation location and file-manager features apart from built-in updating. To switch editions, close MTT and run the other installer; they are not side-by-side installations. The no-update edition does not disable network-share browsing. See [building both editions](installer/VARIANTS.md).
 
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
@@ -239,7 +241,7 @@ MTT does not collect user or machine information for analytics, advertising, or 
 
 ### Internet access and updates
 
-MTT's built-in Internet requests are used exclusively to check for application updates, retrieve release notes, and download the installer needed to perform an update. These HTTPS requests go to the official GitHub repository and GitHub's download infrastructure, without account credentials or uploads of files, search terms, diagnostics, or machine identifiers. Installation then runs locally through Windows setup.
+In the standard edition, MTT's built-in Internet requests are used exclusively to check for application updates, retrieve release notes, and download the installer needed to perform an update. These HTTPS requests go to the official GitHub repository and GitHub's download infrastructure, without account credentials or uploads of files, search terms, diagnostics, or machine identifiers. Installation then runs locally through Windows setup. The no-update edition excludes this component at compile time; it makes no update requests and has no update controls or helper.
 
 Update requests identify the application and its version in the User-Agent header. Like any Internet connection, they expose the connection's public IP address to the service provider; this is not an anonymous connection. GitHub handles these requests under its own [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
 

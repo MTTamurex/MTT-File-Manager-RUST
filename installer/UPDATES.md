@@ -8,8 +8,11 @@
 - Upload `MTT-File-Manager-Setup-<version>.exe`. The version must match the tag.
 - GitHub must provide the asset's `sha256:` digest. Missing or malformed digests
   fail closed; users can still use the manual installation workflow.
-- Build the complete workspace with `installer/build_installer.ps1`. Installers
-  include `mtt-updater.exe`, which handles installation after MTT exits.
+- Build with `installer/build_installer.ps1 -Variant Both` to produce both editions
+  from the same source. The standard installer includes `mtt-updater.exe`, which
+  handles installation after MTT exits; the `-no-update.exe` installer excludes it.
+  See [variant build instructions](VARIANTS.md). The built-in updater selects only
+  the standard installer; the no-update edition must be updated manually.
 
 ## Behavior and trust
 

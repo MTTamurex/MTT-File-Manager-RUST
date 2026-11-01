@@ -297,6 +297,7 @@ impl OrganizerManager {
         self.events.try_recv()
     }
 
+    #[cfg(feature = "online-updates")]
     pub(crate) fn has_pending_commands(&self) -> bool {
         self.pending_commands
             .state

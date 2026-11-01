@@ -502,6 +502,7 @@ impl ImageViewerApp {
             explorer_preferences,
             default_file_manager_settings:
                 crate::app::default_file_manager_state::DefaultFileManagerSettingsState::new(),
+            #[cfg(feature = "online-updates")]
             updates: crate::app::update_state::UpdateState::default(),
             startup_location,
             startup_custom_path,

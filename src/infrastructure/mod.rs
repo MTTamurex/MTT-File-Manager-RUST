@@ -27,6 +27,7 @@ pub(crate) mod removal_aware_watcher;
 pub mod security;
 pub mod shell_menu_worker;
 pub mod threading;
+#[cfg(feature = "online-updates")]
 pub(crate) mod updater;
 pub mod user_session_search;
 pub mod virtual_drive_config;

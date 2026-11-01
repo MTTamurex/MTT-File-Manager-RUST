@@ -6,13 +6,19 @@
     2. Compiles the Inno Setup installer (.iss → Setup .exe)
     Requires: Inno Setup 6 (ISCC.exe in PATH or default install location)
 .PARAMETER SkipBuild
-    Skip the cargo build step (use existing target\release binary).
+    Reuse a verified build of the selected variant from its dedicated target directory.
+.PARAMETER Variant
+    Standard (default), NoUpdate, or Both. NoUpdate excludes built-in updating.
 .EXAMPLE
     .\build_installer.ps1
     .\build_installer.ps1 -SkipBuild
+    .\build_installer.ps1 -Variant NoUpdate
+    .\build_installer.ps1 -Variant Both
 #>
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [ValidateSet('Standard', 'NoUpdate', 'Both')]
+    [string]$Variant = 'Standard'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,28 +27,69 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $RepoRoot) { $RepoRoot = $PSScriptRoot }
 
-Write-Host "`n=== MTT File Manager Installer Build ===" -ForegroundColor Cyan
-
-# ── Step 1: Cargo build ────────────────────────────────────────────────
-if (-not $SkipBuild) {
-    Write-Host "`n[1/3] Building release binary..." -ForegroundColor Yellow
-    Push-Location $RepoRoot
-    try {
-        cargo build --release --workspace
-        if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit code $LASTEXITCODE)" }
-    } finally {
-        Pop-Location
-    }
-} else {
-    Write-Host "`n[1/3] Skipping cargo build (-SkipBuild)" -ForegroundColor DarkGray
+if ($Variant -eq 'Both') {
+    & $PSCommandPath -Variant Standard -SkipBuild:$SkipBuild
+    & $PSCommandPath -Variant NoUpdate -SkipBuild:$SkipBuild
+    return
 }
 
 if ($SkipBuild -and $env:MTT_MSIX_SIGNING_PFX -and $env:MTT_MSIX_PUBLISHER) {
     throw 'SkipBuild cannot be used when creating a signed sparse package; rebuild the executable with the configured publisher.'
 }
 
+$variantDirectory = if ($Variant -eq 'NoUpdate') { 'installer-no-update' } else { 'installer-standard' }
+$buildTargetDir = Join-Path $RepoRoot "target\$variantDirectory"
+$buildOutputDir = Join-Path $buildTargetDir 'release'
+$buildManifestPath = Join-Path $buildOutputDir 'installer-build.json'
+$binaries = @('mtt-file-manager.exe', 'mtt-search-service.exe', 'mtt_explorer_command.dll')
+if ($Variant -eq 'Standard') { $binaries += 'mtt-updater.exe' }
+
+Write-Host "`n=== MTT File Manager Installer Build ===" -ForegroundColor Cyan
+Write-Host "Variant: $Variant" -ForegroundColor Cyan
+
+# ── Step 1: Cargo build ────────────────────────────────────────────────
+if (-not $SkipBuild) {
+    Write-Host "`n[1/3] Building release binary..." -ForegroundColor Yellow
+    Push-Location $RepoRoot
+    try {
+        $cargoArguments = @('build', '--release', '--workspace', '--locked', '--target-dir', $buildTargetDir)
+        if ($Variant -eq 'NoUpdate') {
+            $cargoArguments += @('--no-default-features', '--features', 'notify-watcher')
+        }
+        cargo @cargoArguments
+        if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit code $LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+    $hashes = @{}
+    foreach ($binary in $binaries) {
+        $hashes[$binary] = (Get-FileHash -LiteralPath (Join-Path $buildOutputDir $binary) -Algorithm SHA256).Hash
+    }
+    @{ Variant = $Variant; Binaries = $hashes } | ConvertTo-Json | Set-Content -LiteralPath $buildManifestPath -Encoding UTF8
+} else {
+    if (-not (Test-Path -LiteralPath $buildManifestPath -PathType Leaf)) {
+        throw 'No verified build exists for this variant. Run without SkipBuild first.'
+    }
+    $manifest = Get-Content -LiteralPath $buildManifestPath -Raw | ConvertFrom-Json
+    if ($manifest.Variant -ne $Variant) { throw 'The existing build is for a different variant.' }
+    foreach ($binary in $binaries) {
+        $actual = (Get-FileHash -LiteralPath (Join-Path $buildOutputDir $binary) -Algorithm SHA256).Hash
+        if ($manifest.Binaries.$binary -ne $actual) { throw "The existing build changed: $binary. Run without SkipBuild." }
+    }
+    Write-Host "`n[1/3] Skipping cargo build (-SkipBuild)" -ForegroundColor DarkGray
+}
+
+# Runtime DLLs are shared inputs, but each variant packages its own staged copy.
+foreach ($runtime in @('pdfium.dll', 'libmpv-2.dll')) {
+    $source = Join-Path $RepoRoot "target\release\$runtime"
+    $destination = Join-Path $buildOutputDir $runtime
+    if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+        Copy-Item -LiteralPath $source -Destination $destination
+    }
+}
+
 $modernMenuPackageReady = $false
-$modernMenuPackagePath = "$RepoRoot\target\release\mtt-file-manager.identity.msix"
+$modernMenuPackagePath = Join-Path $buildOutputDir 'mtt-file-manager.identity.msix'
 $packageBuildResult = & "$RepoRoot\installer\build_sparse_package.ps1" -OutputPath $modernMenuPackagePath
 if ($packageBuildResult -eq 0 -and (Test-Path -LiteralPath $modernMenuPackagePath -PathType Leaf)) {
     $modernMenuPackageReady = $true
@@ -66,12 +113,11 @@ $requiredDirectories = @(
 )
 
 $requiredFiles = @(
-    "$RepoRoot\target\release\mtt-file-manager.exe",
-    "$RepoRoot\target\release\mtt-updater.exe",
-    "$RepoRoot\target\release\mtt_explorer_command.dll",
-    "$RepoRoot\target\release\mtt-search-service.exe",
-    "$RepoRoot\target\release\libmpv-2.dll",
-    "$RepoRoot\target\release\pdfium.dll",
+    "$buildOutputDir\mtt-file-manager.exe",
+    "$buildOutputDir\mtt_explorer_command.dll",
+    "$buildOutputDir\mtt-search-service.exe",
+    "$buildOutputDir\libmpv-2.dll",
+    "$buildOutputDir\pdfium.dll",
     "$RepoRoot\LICENSE",
     "$RepoRoot\NOTICE",
     "$RepoRoot\THIRD_PARTY_NOTICES.md",
@@ -130,6 +176,8 @@ $requiredFiles = @(
     "$RepoRoot\installer\languages\Greek.isl"
 )
 
+if ($Variant -eq 'Standard') { $requiredFiles += "$buildOutputDir\mtt-updater.exe" }
+
 foreach ($dir in $requiredDirectories) {
     if (-not (Test-Path $dir -PathType Container)) {
         throw "Required directory not found: $dir"
@@ -151,8 +199,8 @@ foreach ($file in $requiredFiles) {
 # SEC: Verify integrity of third-party DLLs before packaging.
 # Update these hashes when upgrading the corresponding libraries.
 $dllHashes = @{
-    "$RepoRoot\target\release\pdfium.dll"   = "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3"
-    "$RepoRoot\target\release\libmpv-2.dll"  = "AE7B7B6B3ECCC7AEEFF3CBEF30FD175F97B27F1B815F89D0BD0CCA926C8C2D99"
+    "$buildOutputDir\pdfium.dll"   = "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3"
+    "$buildOutputDir\libmpv-2.dll"  = "AE7B7B6B3ECCC7AEEFF3CBEF30FD175F97B27F1B815F89D0BD0CCA926C8C2D99"
 }
 
 $hashFailed = $false
@@ -199,16 +247,18 @@ Or download:     https://jrsoftware.org/isdl.php
 Write-Host "  Using: $isccCandidates" -ForegroundColor DarkGray
 
 $issFile = "$RepoRoot\installer\setup.iss"
-if ($modernMenuPackageReady) {
-    & $isccCandidates "/DModernMenuPackageEnabled=1" $issFile
-} else {
-    & $isccCandidates $issFile
-}
+$compilerArguments = @("/DBuildOutputDir=$buildOutputDir")
+if ($modernMenuPackageReady) { $compilerArguments += '/DModernMenuPackageEnabled=1' }
+if ($Variant -eq 'NoUpdate') { $compilerArguments += '/DNoOnlineUpdates=1' }
+& $isccCandidates @compilerArguments $issFile
 if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed (exit code $LASTEXITCODE)" }
 
 # ── Done ──────────────────────────────────────────────────────────────
 $outputDir = "$RepoRoot\installer\output"
-$installer = Get-ChildItem "$outputDir\*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$versionLine = Select-String -LiteralPath $issFile -Pattern '^#define MyAppVersion\s+"([^"]+)"'
+$version = $versionLine.Matches[0].Groups[1].Value
+$suffix = if ($Variant -eq 'NoUpdate') { '-no-update' } else { '' }
+$installer = Get-Item -LiteralPath (Join-Path $outputDir "MTT-File-Manager-Setup-$version$suffix.exe")
 
 Write-Host "`n=== Build complete ===" -ForegroundColor Green
 Write-Host "Installer: $($installer.FullName)" -ForegroundColor Cyan

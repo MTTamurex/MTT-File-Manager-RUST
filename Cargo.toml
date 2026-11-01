@@ -84,9 +84,9 @@ bzip2 = "0.5"               # Bzip2 decompression for .tar.bz2 / .tbz2
 xz2 = "0.1"                 # XZ/LZMA decompression for .tar.xz / .txz
 zstd = "0.13"               # Zstandard decompression for .tar.zst / .tzst
 sha2 = "0.10"               # SHA-256 file hash for the details panel (on-demand)
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-semver = "1"
-egui_commonmark = { version = "0.24", default-features = false, features = ["pulldown_cmark"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+semver = { version = "1", optional = true }
+egui_commonmark = { version = "0.24", default-features = false, features = ["pulldown_cmark"], optional = true }
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"
@@ -155,8 +155,14 @@ features = [
 wgpu = { version = "29.0", default-features = false, features = ["std", "dx12"] }
 
 [features]
-default = ["notify-watcher"]
+default = ["notify-watcher", "online-updates"]
 notify-watcher = ["notify"]
+online-updates = ["dep:reqwest", "dep:semver", "dep:egui_commonmark"]
+
+[[bin]]
+name = "mtt-updater"
+path = "src/bin/mtt-updater.rs"
+required-features = ["online-updates"]
 
 
 

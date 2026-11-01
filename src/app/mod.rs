@@ -50,6 +50,7 @@ pub mod state;
 pub mod tab_preferences;
 pub mod tab_transfer;
 pub mod ui_state;
+#[cfg(feature = "online-updates")]
 pub(crate) mod update_state;
 
 // Re-export navigation module for easy access

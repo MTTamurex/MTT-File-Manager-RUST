@@ -19,6 +19,7 @@ pub mod media_preview;
 pub mod mpv;
 pub mod mpv_preview;
 pub mod organizer_settings;
+#[cfg(feature = "online-updates")]
 pub(crate) mod release_notes;
 pub(crate) mod selection_controls;
 pub mod settings_ui;
@@ -29,6 +30,7 @@ pub(crate) mod status_bar_size_controls;
 pub mod tab_settings;
 pub mod tag_manager_modal;
 pub mod tag_settings;
+#[cfg(feature = "online-updates")]
 pub(crate) mod update_settings;
 pub mod video_controls_state;
 pub mod virtual_drive_settings;

@@ -1,0 +1,2 @@
+46482a7fd64275f9e2669e69c1ac0cdca41cb131a98b4efe16aabb6d30798021  MTT-File-Manager-Setup-0.2.9.exe
+8eb5e8106ba9819d12b51b637f56634828cb61cfa9c1d3cd045726fad6b92202  MTT-File-Manager-Setup-0.2.9-no-update.exe

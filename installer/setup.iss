@@ -15,7 +15,15 @@
 
 ; Source root is the repository root (one level above this .iss file)
 #define SrcRoot        ".."
-#define MyAppExeHash   GetSHA256OfFile(AddBackslash(SourcePath) + SrcRoot + "\target\release\" + MyAppExeName)
+#ifndef BuildOutputDir
+  #define BuildOutputDir AddBackslash(SourcePath) + SrcRoot + "\target\release"
+#endif
+#ifdef NoOnlineUpdates
+  #define InstallerSuffix "-no-update"
+#else
+  #define InstallerSuffix ""
+#endif
+#define MyAppExeHash   GetSHA256OfFile(AddBackslash(BuildOutputDir) + MyAppExeName)
 
 [Setup]
 AppId={{E3A9F1B2-7C4D-4E5F-8A1B-2C3D4E5F6A7B}
@@ -29,7 +37,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 ; Output installer to installer\output\
 OutputDir={#SrcRoot}\installer\output
-OutputBaseFilename=MTT-File-Manager-Setup-{#MyAppVersion}
+OutputBaseFilename=MTT-File-Manager-Setup-{#MyAppVersion}{#InstallerSuffix}
 SetupIconFile={#SrcRoot}\appicon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
@@ -63,8 +71,10 @@ Type: files; Name: "{app}\mtt-file-manager.identity.msix"
 
 [Files]
 ; Main executable
-Source: "{#SrcRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\target\release\mtt-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+#ifndef NoOnlineUpdates
+Source: "{#BuildOutputDir}\mtt-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 ; License and notice files
 Source: "{#SrcRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -73,13 +83,13 @@ Source: "{#SrcRoot}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignorevers
 Source: "{#SrcRoot}\third_party_licenses\*"; DestDir: "{app}\third_party_licenses"; Flags: ignoreversion recursesubdirs
 
 ; libmpv runtime
-Source: "{#SrcRoot}\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Pdfium runtime
-Source: "{#SrcRoot}\target\release\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Search service
-Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Per-user context-menu cleanup and sparse-package unregistration
 Source: "{#SrcRoot}\installer\cleanup_context_menu.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -88,9 +98,9 @@ Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; 
 
 #ifdef ModernMenuPackageEnabled
 ; Windows 11 compact context-menu extension (signed sparse package)
-Source: "{#SrcRoot}\target\release\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\appicon.png"; DestDir: "{app}\Assets"; Flags: ignoreversion
-Source: "{#SrcRoot}\target\release\mtt-file-manager.identity.msix"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputDir}\mtt-file-manager.identity.msix"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\register_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 
