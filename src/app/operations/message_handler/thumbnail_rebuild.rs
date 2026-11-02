@@ -170,12 +170,12 @@ impl ImageViewerApp {
         {
             None
         } else {
-            self.active_tag_filter
+            self.active_tag_filter_ids()
         };
         let result_items = match sorting::filter_items_opt_with_tags(
             &self.all_items,
             &self.search_query,
-            active_tag_filter,
+            active_tag_filter.as_deref(),
             self.tag_assignments_normalized.as_ref(),
         ) {
             Some(mut filtered) => {
@@ -218,7 +218,7 @@ impl ImageViewerApp {
         {
             None
         } else {
-            self.active_tag_filter
+            self.active_tag_filter_ids()
         };
         let tag_assignments = self.tag_assignments_normalized.clone();
         let sort_mode = signature.sort_mode;
@@ -236,7 +236,7 @@ impl ImageViewerApp {
             let result_items = match sorting::filter_items_opt_with_tags(
                 &items,
                 &query,
-                active_tag_filter,
+                active_tag_filter.as_deref(),
                 &tag_assignments,
             ) {
                 Some(mut filtered) => {
@@ -303,7 +303,7 @@ impl ImageViewerApp {
         {
             None
         } else {
-            self.active_tag_filter
+            self.active_tag_filter_ids()
         };
         let tag_assignments = self.tag_assignments_normalized.clone();
         let sort_mode = signature.sort_mode;
@@ -326,7 +326,7 @@ impl ImageViewerApp {
             let result_items = match sorting::filter_items_opt_with_tags(
                 &items,
                 &query,
-                active_tag_filter,
+                active_tag_filter.as_deref(),
                 &tag_assignments,
             ) {
                 Some(mut filtered) => {

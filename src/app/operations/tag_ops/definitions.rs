@@ -2,12 +2,23 @@ use crate::app::global_search_state::GlobalSearchTagFilter;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_tag::{FileTag, TagColor};
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path, COMPUTER_VIEW_ID};
+use crate::domain::tag_tree;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 impl ImageViewerApp {
-    pub fn create_new_tag(&mut self, name: &str, color: TagColor) -> Option<i64> {
-        let id = self.app_state_db.create_tag(name, color)?;
+    pub fn create_new_tag(
+        &mut self,
+        name: &str,
+        color: TagColor,
+        parent_id: Option<i64>,
+    ) -> Option<i64> {
+        if let Some(parent) = parent_id {
+            if !self.tag_definitions.contains_key(&parent) {
+                return None;
+            }
+        }
+        let id = self.app_state_db.create_tag(name, color, parent_id)?;
         let position = self
             .tag_definitions
             .values()
@@ -22,6 +33,7 @@ impl ImageViewerApp {
                 name: name.trim().to_string(),
                 color,
                 position,
+                parent_id,
             },
         );
         self.rebuild_sorted_tag_ids();
@@ -54,29 +66,92 @@ impl ImageViewerApp {
         true
     }
 
+    /// Moves a tag under another parent (`None` = root). Rejects invalid
+    /// parents: unknown tags, the tag itself, and any of its descendants.
+    pub fn set_tag_parent(&mut self, tag_id: i64, parent_id: Option<i64>) -> bool {
+        if let Some(parent) = parent_id {
+            if !self.tag_definitions.contains_key(&parent)
+                || tag_tree::would_create_cycle(&self.tag_definitions, tag_id, parent)
+            {
+                return false;
+            }
+        }
+        let old_parent = self
+            .tag_definitions
+            .get(&tag_id)
+            .and_then(|tag| tag.parent_id);
+        if old_parent == parent_id || !self.app_state_db.update_tag_parent(tag_id, parent_id) {
+            return false;
+        }
+        if let Some(tag) = self.tag_definitions.get_mut(&tag_id) {
+            tag.parent_id = parent_id;
+        }
+
+        // The union each view displays changed for the moved subtree and for
+        // both ancestry chains, so cached tag listings are stale.
+        self.rebuild_sorted_tag_ids();
+        self.sync_sidebar_tag_order();
+        // Subtree counts follow the hierarchy, not the assignments.
+        self.recompute_tag_counts_from_assignments();
+        let mut affected = FxHashSet::default();
+        for chain_start in [Some(tag_id), old_parent, parent_id] {
+            let Some(start) = chain_start else {
+                continue;
+            };
+            affected.extend(tag_tree::subtree_ids(&self.tag_definitions, start));
+            let mut current = self.tag_definitions.get(&start).and_then(|t| t.parent_id);
+            while let Some(id) = current {
+                if !affected.insert(id) {
+                    break;
+                }
+                current = self.tag_definitions.get(&id).and_then(|t| t.parent_id);
+            }
+        }
+        self.invalidate_cached_tag_views_for_tags(&affected);
+        self.reload_visible_tag_views();
+        self.ui_ctx.request_repaint();
+        true
+    }
+
+    /// Deletes a tag together with its whole subtree and every assignment
+    /// pointing at any of them. Tag metadata only — files and folders on
+    /// disk are never touched.
     pub fn delete_tag_definition(&mut self, tag_id: i64) -> bool {
-        if !self.app_state_db.delete_tag(tag_id) {
+        if !self.tag_definitions.contains_key(&tag_id) {
+            return false;
+        }
+        let removed_ids = tag_tree::subtree_ids(&self.tag_definitions, tag_id);
+        let removed: FxHashSet<i64> = removed_ids.iter().copied().collect();
+        let removed_tags = self.app_state_db.delete_tag_subtree(&removed_ids);
+        if removed_tags == 0 {
             return false;
         }
 
-        self.tag_definitions.remove(&tag_id);
+        for id in &removed_ids {
+            self.tag_definitions.remove(id);
+            self.sidebar_tags_collapsed.remove(id);
+            self.tag_manager_edit_names.remove(id);
+        }
         self.rebuild_sorted_tag_ids();
         self.sync_sidebar_tag_order();
-        self.tag_counts.remove(&tag_id);
         let assignments = Arc::make_mut(&mut self.tag_assignments);
         assignments.retain(|_, ids| {
-            ids.retain(|id| *id != tag_id);
+            ids.retain(|id| !removed.contains(id));
             !ids.is_empty()
         });
+        self.recompute_tag_counts_from_assignments();
 
-        let mut changed_tags = FxHashSet::default();
-        changed_tags.insert(tag_id);
-        self.invalidate_cached_tag_views_for_tags(&changed_tags);
+        self.invalidate_cached_tag_views_for_tags(&removed);
 
-        if self.active_tag_filter == Some(tag_id) {
+        if self
+            .active_tag_filter
+            .is_some_and(|active| removed.contains(&active))
+        {
             self.active_tag_filter = None;
             self.save_preferences();
-            if tag_id_from_view_path(&self.navigation_state.current_path) == Some(tag_id) {
+            if tag_id_from_view_path(&self.navigation_state.current_path)
+                .is_some_and(|id| removed.contains(&id))
+            {
                 self.navigate_to_computer();
             }
         }

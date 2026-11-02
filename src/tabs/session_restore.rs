@@ -349,6 +349,7 @@ mod tag_title_tests {
                         name: name.to_string(),
                         color: TagColor::Red,
                         position: id,
+                        parent_id: None,
                     },
                 )
             })

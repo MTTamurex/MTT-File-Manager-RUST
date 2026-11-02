@@ -247,6 +247,7 @@ impl ImageViewerApp {
             sidebar_quick_access_height,
             sidebar_drives_height,
             sidebar_tag_order,
+            sidebar_tags_collapsed,
             initial_indexing_notice_generation,
             mut saved_tab_session,
             minimize_to_tray,
@@ -292,6 +293,8 @@ impl ImageViewerApp {
             ),
         );
         let tag_counts = app_state_db.get_tag_counts();
+        let subtree_tag_counts =
+            crate::domain::tag_tree::compute_subtree_counts(&tag_definitions, &tag_assignments);
         let organizer_rules = app_state_db.get_organizer_rules();
         let organizer_state = crate::app::organizer_state::OrganizerState::new(
             file_op_tx.clone(),
@@ -861,6 +864,7 @@ impl ImageViewerApp {
             tag_assignments_normalized,
             tag_assignments_epoch: 0,
             tag_counts,
+            subtree_tag_counts,
             tag_assignment_gc_sender,
             tag_assignment_gc_receiver,
             pending_tag_view_hides: rustc_hash::FxHashMap::default(),
@@ -869,9 +873,11 @@ impl ImageViewerApp {
             ),
             active_tag_filter: initial_active_tag_filter,
             collapse_tags: false,
+            sidebar_tags_collapsed,
             show_tag_manager: false,
             tag_manager_new_name: String::new(),
             tag_manager_new_color: crate::domain::file_tag::TagColor::Red,
+            tag_manager_new_parent: None,
             tag_manager_edit_names: rustc_hash::FxHashMap::default(),
             tag_manager_delete_confirm: None,
 

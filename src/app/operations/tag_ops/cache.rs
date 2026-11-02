@@ -16,6 +16,10 @@ impl ImageViewerApp {
             }
         }
         self.tag_counts = counts;
+        self.subtree_tag_counts = crate::domain::tag_tree::compute_subtree_counts(
+            &self.tag_definitions,
+            &self.tag_assignments,
+        );
     }
 
     pub(super) fn refresh_visible_items_after_tag_change(&mut self) {
@@ -45,11 +49,15 @@ impl ImageViewerApp {
         // Re-filter the inactive panel if it's showing a tag view.
         if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
             if let Some(tag_id) = tag_id_from_view_path(&snapshot.path) {
+                let subtree: FxHashSet<i64> =
+                    crate::domain::tag_tree::subtree_ids(&self.tag_definitions, tag_id)
+                        .into_iter()
+                        .collect();
                 let needs_reload = {
                     let paths_with_tag: Vec<&PathBuf> = self
                         .tag_assignments
                         .iter()
-                        .filter(|(_, ids)| ids.contains(&tag_id))
+                        .filter(|(_, ids)| ids.iter().any(|id| subtree.contains(id)))
                         .map(|(path, _)| path)
                         .collect();
                     let view_paths: FxHashSet<&PathBuf> =
@@ -64,9 +72,11 @@ impl ImageViewerApp {
                         app.setup_tag_view(tag_id);
                     });
                 } else {
+                    let filter_ids: Vec<i64> = subtree.into_iter().collect();
                     let snapshot = self.dual_panel_inactive_state.as_mut().unwrap();
                     Self::refilter_snapshot_tag_view(
                         snapshot,
+                        Some(&filter_ids),
                         self.tag_assignments_normalized.as_ref(),
                     );
                 }
@@ -77,23 +87,34 @@ impl ImageViewerApp {
     }
 
     fn prune_active_tag_view_items_without_tag(&mut self, tag_id: i64) {
+        let subtree: FxHashSet<i64> =
+            crate::domain::tag_tree::subtree_ids(&self.tag_definitions, tag_id)
+                .into_iter()
+                .collect();
         let tag_assignments = self.tag_assignments_normalized.clone();
-        self.all_items_mut()
-            .retain(|item| file_tag::path_has_tag(tag_assignments.as_ref(), &item.path, tag_id));
+        self.all_items_mut().retain(|item| {
+            file_tag::tag_ids_for_path(tag_assignments.as_ref(), &item.path)
+                .is_some_and(|ids| ids.iter().any(|id| subtree.contains(id)))
+        });
     }
 
     /// Returns true if a tagged file is missing from the active panel's all_items,
     /// meaning the tag view must be fully reloaded to include it.
     fn tag_view_needs_reload(&self, tag_id: i64) -> bool {
+        let subtree: FxHashSet<i64> =
+            crate::domain::tag_tree::subtree_ids(&self.tag_definitions, tag_id)
+                .into_iter()
+                .collect();
         let view_paths: FxHashSet<&PathBuf> = self.all_items.iter().map(|e| &e.path).collect();
         self.tag_assignments
             .iter()
-            .filter(|(_, ids)| ids.contains(&tag_id))
+            .filter(|(_, ids)| ids.iter().any(|id| subtree.contains(id)))
             .any(|(path, _)| !view_paths.contains(path))
     }
 
     fn refilter_snapshot_tag_view(
         snapshot: &mut crate::app::dual_panel::PanelSnapshot,
+        tag_filter_ids: Option<&[i64]>,
         tag_assignments: &FxHashMap<String, Vec<i64>>,
     ) {
         // When compacted, all_items holds the real data and items is empty.
@@ -101,7 +122,7 @@ impl ImageViewerApp {
         let source = &snapshot.all_items;
 
         let has_query = !snapshot.search_query.is_empty();
-        let has_tag = snapshot.active_tag_filter.is_some();
+        let has_tag = tag_filter_ids.is_some_and(|ids| !ids.is_empty());
 
         if !has_query && !has_tag {
             snapshot.items = source.clone();
@@ -109,7 +130,7 @@ impl ImageViewerApp {
         } else if let Some(mut filtered) = sorting::filter_items_opt_with_tags(
             source,
             &snapshot.search_query,
-            snapshot.active_tag_filter,
+            tag_filter_ids,
             tag_assignments,
         ) {
             sorting::sort_items(

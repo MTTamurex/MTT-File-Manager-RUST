@@ -78,6 +78,7 @@ mod tests {
                     name: "Example".into(),
                     color,
                     position: 0,
+                    parent_id: None,
                 },
             );
             for selected in [false, true] {

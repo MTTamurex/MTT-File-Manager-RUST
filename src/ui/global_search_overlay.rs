@@ -456,6 +456,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     app.global_search.ensure_filter_cache(
         app.tag_assignments_normalized.as_ref(),
         app.tag_assignments_epoch,
+        &app.expanded_global_tag_filter(),
     );
     let drives = app.global_search.cached_available_drives.clone();
     if app

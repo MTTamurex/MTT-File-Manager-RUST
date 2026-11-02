@@ -95,14 +95,18 @@ pub(super) fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<F
 
 /// Filters items by name query and optional tag assignment.
 ///
-/// Returns None when both filters are inactive so callers can keep the existing
-/// no-clone fast path.
+/// `active_tag_ids` carries the tag IDs whose items remain visible — for a
+/// hierarchical tag view this is the tag plus all of its descendants, resolved
+/// once by the caller. An empty slice matches nothing; `None` disables the
+/// tag filter. Returns None when both filters are inactive so callers can
+/// keep the existing no-clone fast path.
 pub(super) fn filter_items_opt_with_tags(
     items: &[FileEntry],
     query: &str,
-    active_tag_filter: Option<i64>,
+    active_tag_ids: Option<&[i64]>,
     tag_assignments: &FxHashMap<String, Vec<i64>>,
 ) -> Option<Vec<FileEntry>> {
+    let has_tag_filter = active_tag_ids.is_some();
     if NameQuery::uses_masks_or_alternatives(query) {
         let matcher = NameQuery::new(query);
         return Some(
@@ -110,15 +114,18 @@ pub(super) fn filter_items_opt_with_tags(
                 .iter()
                 .filter(|item| {
                     matcher.matches(&item.name)
-                        && active_tag_filter.is_none_or(|tag_id| {
-                            file_tag::path_has_tag(tag_assignments, &item.path, tag_id)
-                        })
+                        && (!has_tag_filter
+                            || file_tag::tag_ids_for_path(tag_assignments, &item.path).is_some_and(
+                                |ids| {
+                                    ids.iter()
+                                        .any(|id| active_tag_ids.unwrap_or(&[]).contains(id))
+                                },
+                            ))
                 })
                 .cloned()
                 .collect(),
         );
     }
-    let has_tag_filter = active_tag_filter.is_some();
     if query.is_empty() && !has_tag_filter {
         return None;
     }
@@ -158,9 +165,11 @@ pub(super) fn filter_items_opt_with_tags(
                             needle_ascii.as_deref(),
                         )
                     });
-                let tag_matches = active_tag_filter.is_none_or(|tag_id| {
-                    file_tag::path_has_tag(tag_assignments, &item.path, tag_id)
-                });
+                let tag_matches = !has_tag_filter
+                    || file_tag::tag_ids_for_path(tag_assignments, &item.path).is_some_and(|ids| {
+                        ids.iter()
+                            .any(|id| active_tag_ids.unwrap_or(&[]).contains(id))
+                    });
                 name_matches && tag_matches
             })
             .cloned()

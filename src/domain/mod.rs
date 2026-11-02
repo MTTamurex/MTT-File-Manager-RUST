@@ -19,4 +19,5 @@ pub mod organizer_rule;
 pub mod pinned_folder;
 mod sort_mode;
 pub mod special_paths;
+pub mod tag_tree;
 pub mod thumbnail;

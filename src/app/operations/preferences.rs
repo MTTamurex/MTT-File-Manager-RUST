@@ -362,6 +362,12 @@ impl ImageViewerApp {
             "sidebar_tag_order",
             crate::app::operations::tag_ops::serialize_sidebar_tag_order(&self.sidebar_tag_ids),
         ));
+        let mut collapsed_ids: Vec<i64> = self.sidebar_tags_collapsed.iter().copied().collect();
+        collapsed_ids.sort_unstable();
+        prefs.push((
+            "sidebar_tags_collapsed",
+            crate::app::operations::tag_ops::serialize_sidebar_tag_order(&collapsed_ids),
+        ));
 
         // Save last active folder from current tab
         let last_folder = self.navigation_state.current_path.clone();

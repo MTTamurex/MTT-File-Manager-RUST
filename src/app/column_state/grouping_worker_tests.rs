@@ -29,6 +29,7 @@ fn grouping_covers_the_complete_listing_not_just_the_visible_metadata_cache() {
                 name: "Example".into(),
                 color: TagColor::Red,
                 position: 0,
+                parent_id: None,
             },
         )]),
         cancelled: Arc::new(AtomicBool::new(false)),

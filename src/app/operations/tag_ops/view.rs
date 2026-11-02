@@ -218,6 +218,42 @@ impl ImageViewerApp {
         self.sorted_tag_ids.clone()
     }
 
+    /// `tag_id` plus every descendant ID — the union a hierarchical tag view
+    /// displays for that tag.
+    pub fn tag_subtree_ids(&self, tag_id: i64) -> Vec<i64> {
+        crate::domain::tag_tree::subtree_ids(&self.tag_definitions, tag_id)
+    }
+
+    /// Tag IDs matched by the active tag filter: the tag itself plus its whole
+    /// subtree. `None` when no tag filter is active.
+    pub fn active_tag_filter_ids(&self) -> Option<Vec<i64>> {
+        self.active_tag_filter.map(|id| self.tag_subtree_ids(id))
+    }
+
+    /// Expands the global search tag filter's selected IDs to their full
+    /// subtrees, so selecting a parent matches its descendants too. The
+    /// filter chips keep showing the user's original selection; only the
+    /// matching side becomes subtree-aware.
+    pub fn expanded_global_tag_filter(
+        &self,
+    ) -> crate::app::global_search_state::GlobalSearchTagFilter {
+        match &self.global_search.tag_filter {
+            crate::app::global_search_state::GlobalSearchTagFilter::Selected(ids) => {
+                let mut expanded = rustc_hash::FxHashSet::default();
+                for id in ids {
+                    expanded.extend(crate::domain::tag_tree::subtree_ids(
+                        &self.tag_definitions,
+                        *id,
+                    ));
+                }
+                let mut ids: Vec<i64> = expanded.into_iter().collect();
+                ids.sort_unstable();
+                crate::app::global_search_state::GlobalSearchTagFilter::Selected(ids)
+            }
+            other => other.clone(),
+        }
+    }
+
     /// Recomputes [`Self::sorted_tag_ids`] from the current definitions.
     /// Call after create, rename, delete, or position changes — never on
     /// assign/unassign or recolor.
@@ -260,6 +296,9 @@ impl ImageViewerApp {
         let failure_path = PathBuf::from(&self.navigation_state.current_path);
         let app_state_db = self.app_state_db.clone();
         let tag_gc_sender = self.tag_assignment_gc_sender.clone();
+        // Resolved once on the UI thread: the view shows the union of the tag
+        // and all of its descendants.
+        let tag_ids = self.tag_subtree_ids(tag_id);
 
         // Each physical panel owns this token. It is invalidated by navigation,
         // tab switching, dual-panel removal, and shutdown without coupling the
@@ -299,8 +338,8 @@ impl ImageViewerApp {
                     }
 
                     let current_page_size = page_size;
-                    let paths = app_state_db.get_tag_assignment_paths_after(
-                        tag_id,
+                    let paths = app_state_db.get_tag_assignment_paths_after_for_tags(
+                        &tag_ids,
                         last_path.as_deref(),
                         current_page_size,
                     );

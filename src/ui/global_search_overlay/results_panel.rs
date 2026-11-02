@@ -36,6 +36,7 @@ pub(super) fn render_results_panel(
     app.global_search.ensure_sorted_indices(
         app.tag_assignments_normalized.as_ref(),
         app.tag_assignments_epoch,
+        &app.expanded_global_tag_filter(),
     );
     let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
     let context_menu_open = app.context_menu.is_open;
@@ -633,7 +634,7 @@ fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
         return;
     }
 
-    let tag_filter = app.global_search.tag_filter.clone();
+    let tag_filter = app.expanded_global_tag_filter();
     if !tag_filter_is_active(&tag_filter) {
         clear_tagged_results(app);
         return;

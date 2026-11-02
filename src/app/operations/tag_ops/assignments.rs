@@ -67,12 +67,14 @@ impl ImageViewerApp {
             let ids = assignments.entry(assignment_key).or_default();
             if !ids.contains(&tag_id) {
                 ids.push(tag_id);
-                *self.tag_counts.entry(tag_id).or_insert(0) += 1;
                 changed = true;
             }
         }
 
         if changed {
+            // Subtree counts aggregate distinct paths per ancestor, so a
+            // full recompute (not a +1) is required.
+            self.recompute_tag_counts_from_assignments();
             self.sync_tag_assignments_normalized();
             let mut changed_tags = FxHashSet::default();
             changed_tags.insert(tag_id);

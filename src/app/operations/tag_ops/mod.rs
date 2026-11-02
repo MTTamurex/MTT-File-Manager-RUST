@@ -64,11 +64,35 @@ fn tag_sort_key(tag: &FileTag) -> (i64, String) {
 
 /// Builds the ordered tag-ID snapshot from the current definitions.
 ///
-/// Ordering matches [`tag_sort_key`]: `(position, name case-insensitive)`.
+/// Depth-first pre-order: root tags in `(position, name case-insensitive)`
+/// order, each followed by its own subtree. Consumers that need the tree
+/// structure use [`crate::domain::tag_tree::build_children_map`].
 pub(crate) fn build_sorted_tag_ids(defs: &FxHashMap<i64, FileTag>) -> std::sync::Arc<[i64]> {
-    let mut tags: Vec<&FileTag> = defs.values().collect();
-    tags.sort_by_key(|tag| tag_sort_key(tag));
-    tags.iter().map(|tag| tag.id).collect()
+    let children = crate::domain::tag_tree::build_children_map(defs);
+    let mut out: Vec<i64> = Vec::with_capacity(defs.len());
+    fn walk(
+        children: &crate::domain::tag_tree::TagChildrenMap,
+        parent: Option<i64>,
+        out: &mut Vec<i64>,
+    ) {
+        if let Some(ids) = children.get(&parent) {
+            for id in ids {
+                out.push(*id);
+                walk(children, Some(*id), out);
+            }
+        }
+    }
+    walk(&children, None, &mut out);
+
+    // Defensive: malformed parent cycles would leave IDs unreachable from the
+    // roots; append them in sibling order so nothing silently disappears.
+    if out.len() != defs.len() {
+        let mut leftover: Vec<&FileTag> =
+            defs.values().filter(|tag| !out.contains(&tag.id)).collect();
+        leftover.sort_by_key(|tag| tag_sort_key(tag));
+        out.extend(leftover.iter().map(|tag| tag.id));
+    }
+    out.into()
 }
 
 fn tag_assignment_path_matches(assigned_path: &Path, path: &Path) -> bool {
@@ -117,6 +141,7 @@ mod sorted_tag_ids_tests {
             name: name.to_string(),
             color: TagColor::Red,
             position,
+            parent_id: None,
         }
     }
 
@@ -128,5 +153,17 @@ mod sorted_tag_ids_tests {
         defs.insert(3, tag(3, "zeta", 0)); // lower position sorts first
         let ids = build_sorted_tag_ids(&defs);
         assert_eq!(&*ids, &[3, 2, 1]);
+    }
+
+    #[test]
+    fn orders_depth_first_with_children_under_their_parent() {
+        let mut defs: FxHashMap<i64, FileTag> = FxHashMap::default();
+        defs.insert(1, tag(1, "Fotos", 0));
+        defs.insert(2, tag(2, "Músicas", 1));
+        let mut ferias = tag(3, "Férias", 0);
+        ferias.parent_id = Some(1);
+        defs.insert(3, ferias);
+        let ids = build_sorted_tag_ids(&defs);
+        assert_eq!(&*ids, &[1, 3, 2]);
     }
 }

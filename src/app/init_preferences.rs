@@ -53,6 +53,7 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_quick_access_height: Option<f32>,
     pub(super) sidebar_drives_height: Option<f32>,
     pub(super) sidebar_tag_order: Vec<i64>,
+    pub(super) sidebar_tags_collapsed: rustc_hash::FxHashSet<i64>,
     pub(super) initial_indexing_notice_generation: Option<String>,
     pub(super) saved_tab_session: Option<crate::tabs::TabManagerSession>,
     pub(super) minimize_to_tray: bool,
@@ -338,6 +339,14 @@ impl StartupPreferences {
             .get("sidebar_tag_order")
             .map(|value| crate::app::operations::tag_ops::parse_sidebar_tag_order(value))
             .unwrap_or_default();
+        let sidebar_tags_collapsed: rustc_hash::FxHashSet<i64> = prefs
+            .get("sidebar_tags_collapsed")
+            .map(|value| {
+                crate::app::operations::tag_ops::parse_sidebar_tag_order(value)
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
         let initial_indexing_notice_generation =
             crate::infrastructure::windows::read_installer_installation_generation().filter(
                 |generation| prefs.get("initial_indexing_completed_generation") != Some(generation),
@@ -421,6 +430,7 @@ impl StartupPreferences {
             sidebar_quick_access_height,
             sidebar_drives_height,
             sidebar_tag_order,
+            sidebar_tags_collapsed,
             initial_indexing_notice_generation,
             saved_tab_session,
             minimize_to_tray,

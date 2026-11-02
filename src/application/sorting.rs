@@ -46,13 +46,17 @@ pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntr
 }
 
 /// Filters items by query and optional active tag filter.
+///
+/// `active_tag_ids` are the tag IDs an item may carry to stay visible (for a
+/// hierarchical tag view: the tag plus its whole subtree, resolved by the
+/// caller). An empty slice matches nothing.
 pub fn filter_items_opt_with_tags(
     items: &[FileEntry],
     query: &str,
-    active_tag_filter: Option<i64>,
+    active_tag_ids: Option<&[i64]>,
     tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
 ) -> Option<Vec<FileEntry>> {
-    filtering::filter_items_opt_with_tags(items, query, active_tag_filter, tag_assignments)
+    filtering::filter_items_opt_with_tags(items, query, active_tag_ids, tag_assignments)
 }
 
 /// Filters items based on a query string. Returns a new Vec of matching items.

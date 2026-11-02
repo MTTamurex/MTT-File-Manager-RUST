@@ -201,6 +201,8 @@ pub struct FileTag {
     pub name: String,
     pub color: TagColor,
     pub position: i64,
+    /// Parent tag in the hierarchy; `None` for root tags.
+    pub parent_id: Option<i64>,
 }
 
 #[cfg(test)]

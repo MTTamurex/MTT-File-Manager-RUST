@@ -86,6 +86,10 @@ pub struct SidebarContext<'a> {
     /// User-defined tag order used only by the sidebar.
     pub sidebar_tag_ids: &'a [i64],
     pub tag_counts: &'a FxHashMap<i64, usize>,
+    /// Distinct-path counts per tag including its whole subtree.
+    pub subtree_tag_counts: &'a FxHashMap<i64, usize>,
+    /// Tag IDs whose children are hidden in the sidebar tree.
+    pub sidebar_tags_collapsed: &'a rustc_hash::FxHashSet<i64>,
     pub active_tag_filter: Option<i64>,
     pub collapse_tags: bool,
 }
@@ -137,6 +141,8 @@ pub enum SidebarAction {
     ToggleNetworkLocations,
     FilterByTag(Option<i64>),
     ToggleTags,
+    /// Expand or collapse a tag's children in the sidebar tree.
+    ToggleTagCollapse(i64),
     /// Items were dropped onto a sidebar folder/drive (move or copy)
     DropItemsTo(String),
     /// Items were dropped onto the Recycle Bin quick-access row.

@@ -63,6 +63,10 @@ pub struct ContextMenuItem {
     pub is_checked: bool,
     /// Optional leading color for app-defined tag items.
     pub leading_color: Option<egui::Color32>,
+    /// When true, clicking a submenu parent row fires its own command
+    /// (used by the tag tree: the parent row toggles the tag while hover
+    /// opens its sub-tags). Shell submenu parents keep the default `false`.
+    pub fire_command_on_click: bool,
 }
 
 impl Default for ContextMenuItem {
@@ -83,6 +87,7 @@ impl Default for ContextMenuItem {
             is_loading_placeholder: false,
             is_checked: false,
             leading_color: None,
+            fire_command_on_click: false,
         }
     }
 }
@@ -168,6 +173,13 @@ impl ContextMenuItem {
     /// Builder: add a leading tag color.
     pub fn with_leading_color(mut self, color: egui::Color32) -> Self {
         self.leading_color = Some(color);
+        self
+    }
+
+    /// Builder: clicking the submenu parent row fires its own command
+    /// instead of only opening the submenu (hover still opens it).
+    pub fn with_command_on_click(mut self) -> Self {
+        self.fire_command_on_click = true;
         self
     }
 }

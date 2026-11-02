@@ -100,6 +100,12 @@ pub(super) fn handle(app: &mut ImageViewerApp, action: SidebarAction) {
         }
         SidebarAction::FilterByTag(tag_id) => app.set_tag_filter(tag_id),
         SidebarAction::ToggleTags => app.collapse_tags = !app.collapse_tags,
+        SidebarAction::ToggleTagCollapse(tag_id) => {
+            if !app.sidebar_tags_collapsed.remove(&tag_id) {
+                app.sidebar_tags_collapsed.insert(tag_id);
+            }
+            app.save_preferences();
+        }
         SidebarAction::DropItemsTo(path) => {
             if app.is_item_dragging && !app.file_panel_input_blocked_by_drag_move_confirmation() {
                 let target = std::path::PathBuf::from(&path);

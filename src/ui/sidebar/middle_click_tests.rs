@@ -85,12 +85,15 @@ fn render_section_with_feedback(
             name: Section::Tag.label().to_string(),
             color: TagColor::Blue,
             position: 0,
+            parent_id: None,
         },
     )]);
     let tree = SidebarTreeState::new(Arc::new(DirectoryCache::new()));
     let drive_info = HashMap::new();
     let mounted_iso_drives = HashMap::new();
     let tag_counts = FxHashMap::default();
+    let subtree_tag_counts = FxHashMap::default();
+    let collapsed_tags = rustc_hash::FxHashSet::default();
     let mut icon_loader = crate::ui::icon_loader::IconLoader::new();
     let mut render = |ui: &mut egui::Ui| {
         ui.set_width(260.0);
@@ -127,6 +130,8 @@ fn render_section_with_feedback(
             tag_definitions: &tags,
             sidebar_tag_ids: &[7],
             tag_counts: &tag_counts,
+            subtree_tag_counts: &subtree_tag_counts,
+            sidebar_tags_collapsed: &collapsed_tags,
             active_tag_filter: Some(7),
             collapse_tags: false,
         };

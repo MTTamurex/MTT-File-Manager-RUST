@@ -800,8 +800,9 @@ pub struct ImageViewerApp {
 
     // File tags / color labels (persistent metadata keyed by path)
     pub tag_definitions: rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
-    /// Snapshot of tag IDs ordered by `(position, name case-insensitive)`.
-    /// Rebuilt only when definitions change (create/rename/delete/position),
+    /// Snapshot of tag IDs in depth-first pre-order: roots ordered by
+    /// `(position, name case-insensitive)`, each followed by its subtree.
+    /// Rebuilt only when definitions change (create/rename/delete/reparent),
     /// never on assign/unassign or recolor. Consumers resolve the current
     /// `FileTag` by ID so recurring renders avoid clone + lowercase + sort.
     pub sorted_tag_ids: Arc<[i64]>,
@@ -814,6 +815,10 @@ pub struct ImageViewerApp {
     pub tag_assignments_normalized: Arc<rustc_hash::FxHashMap<String, Vec<i64>>>,
     pub tag_assignments_epoch: u64,
     pub tag_counts: rustc_hash::FxHashMap<i64, usize>,
+    /// Distinct-path item count per tag including its whole subtree — the
+    /// aggregate a collapsed parent shows in the sidebar. Recomputed from
+    /// `tag_assignments` together with `tag_counts`, never per frame.
+    pub subtree_tag_counts: rustc_hash::FxHashMap<i64, usize>,
     pub(crate) tag_assignment_gc_sender: Sender<crate::app::operations::tag_ops::TagPathUpdate>,
     pub(crate) tag_assignment_gc_receiver: Receiver<crate::app::operations::tag_ops::TagPathUpdate>,
     pub(crate) pending_tag_view_hides:
@@ -824,9 +829,13 @@ pub struct ImageViewerApp {
     pub purge_worker_state: Option<crate::app::operations::tag_ops::purge_worker::PurgeWorkerState>,
     pub active_tag_filter: Option<i64>,
     pub collapse_tags: bool,
+    /// Tag IDs whose children are collapsed in the sidebar tree.
+    pub sidebar_tags_collapsed: rustc_hash::FxHashSet<i64>,
     pub show_tag_manager: bool,
     pub tag_manager_new_name: String,
     pub tag_manager_new_color: crate::domain::file_tag::TagColor,
+    /// Parent selected in the manager's "new tag" form (`None` = root).
+    pub tag_manager_new_parent: Option<i64>,
     pub tag_manager_edit_names: rustc_hash::FxHashMap<i64, String>,
     pub tag_manager_delete_confirm: Option<i64>,
 

@@ -234,6 +234,8 @@ mod tests {
         let mounted = Default::default();
         let tags = Default::default();
         let counts = Default::default();
+        let subtree_counts = Default::default();
+        let collapsed_tags = Default::default();
         let mut icons = crate::ui::icon_loader::IconLoader::new();
         let mut sidebar = SidebarContext {
             disks: &[],
@@ -268,6 +270,8 @@ mod tests {
             tag_definitions: &tags,
             sidebar_tag_ids: &[],
             tag_counts: &counts,
+            subtree_tag_counts: &subtree_counts,
+            sidebar_tags_collapsed: &collapsed_tags,
             active_tag_filter: None,
             collapse_tags: false,
         };

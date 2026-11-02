@@ -22,6 +22,8 @@ fn frame(
     let mounted = Default::default();
     let tags = Default::default();
     let counts = Default::default();
+    let subtree_counts = Default::default();
+    let collapsed_tags = Default::default();
     let mut action = None;
     let output = ctx.run_ui(
         egui::RawInput {
@@ -64,6 +66,8 @@ fn frame(
                 tag_definitions: &tags,
                 sidebar_tag_ids: &[],
                 tag_counts: &counts,
+                subtree_tag_counts: &subtree_counts,
+                sidebar_tags_collapsed: &collapsed_tags,
                 active_tag_filter: None,
                 collapse_tags: false,
             };

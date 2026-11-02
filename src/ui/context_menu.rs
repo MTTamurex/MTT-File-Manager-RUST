@@ -608,7 +608,6 @@ fn render_single_item(
 
     // Text with ellipsis truncation to prevent overflow
     let text_x = icon_rect.right() + ICON_TEXT_GAP;
-
     let display_text = truncated_label(&item.text);
 
     ui.painter().text(
@@ -639,10 +638,12 @@ fn render_single_item(
         );
     }
 
-    // Handle click — loading placeholder is not interactive
+    // Handle click — loading placeholder is not interactive. Submenu parents
+    // only open their submenu on hover/click, unless they opt in (tag tree:
+    // the parent row toggles the tag itself).
     if response.clicked()
         && item.is_enabled
-        && !has_submenu
+        && (!has_submenu || item.fire_command_on_click)
         && !item.is_loading_placeholder
         && !is_blocked_waiting_for_submenu
     {

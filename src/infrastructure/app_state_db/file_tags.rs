@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 mod color_tests;
 
+#[cfg(test)]
+mod hierarchy_tests;
+
 fn normalize_path_text(path: &str) -> String {
     crate::domain::file_tag::normalize_tag_path_text(path)
 }
@@ -63,7 +66,8 @@ impl AppStateDb {
         };
 
         let mut stmt = match db.prepare(
-            "SELECT id, name, color, position FROM file_tags ORDER BY position ASC, name ASC",
+            "SELECT id, name, color, position, parent_id FROM file_tags \
+             ORDER BY position ASC, name ASC",
         ) {
             Ok(stmt) => stmt,
             Err(e) => {
@@ -79,18 +83,20 @@ impl AppStateDb {
                 row.get::<_, String>(1)?,
                 color_raw,
                 row.get::<_, i64>(3)?,
+                row.get::<_, Option<i64>>(4)?,
             ))
         });
 
         if let Ok(rows) = rows {
             for row in rows.flatten() {
-                let (id, name, color_raw, position) = row;
+                let (id, name, color_raw, position, parent_id) = row;
                 if let Some(color) = TagColor::from_db_str(&color_raw) {
                     results.push(FileTag {
                         id,
                         name,
                         color,
                         position,
+                        parent_id,
                     });
                 } else {
                     log::warn!(
@@ -101,6 +107,10 @@ impl AppStateDb {
                 }
             }
         }
+
+        // Normalize malformed hierarchies right after loading: stale parent
+        // links (deleted tag, external edit) and cycles become root tags.
+        crate::domain::tag_tree::repair_orphan_parents(&mut results);
 
         results
     }
@@ -113,7 +123,7 @@ impl AppStateDb {
     }
 
     /// Create a custom tag and return its new id. [WRITER]
-    pub fn create_tag(&self, name: &str, color: TagColor) -> Option<i64> {
+    pub fn create_tag(&self, name: &str, color: TagColor, parent_id: Option<i64>) -> Option<i64> {
         let name = name.trim();
         if name.is_empty() {
             return None;
@@ -139,8 +149,8 @@ impl AppStateDb {
             .unwrap_or(0);
 
         match db.execute(
-            "INSERT INTO file_tags (name, color, position) VALUES (?1, ?2, ?3)",
-            params![name, color.as_db_str(), next_position],
+            "INSERT INTO file_tags (name, color, position, parent_id) VALUES (?1, ?2, ?3, ?4)",
+            params![name, color.as_db_str(), next_position, parent_id],
         ) {
             Ok(_) => Some(db.last_insert_rowid()),
             Err(e) => {
@@ -190,37 +200,72 @@ impl AppStateDb {
         }
     }
 
-    /// Delete a tag and its assignments. [WRITER]
-    pub fn delete_tag(&self, id: i64) -> bool {
+    /// Move a tag under another parent (`None` = root). Cycle validity is
+    /// enforced by the operations layer. [WRITER]
+    pub fn update_tag_parent(&self, id: i64, parent_id: Option<i64>) -> bool {
+        if let Ok(db) = self.writer.lock() {
+            match db.execute(
+                "UPDATE file_tags SET parent_id = ?1 WHERE id = ?2",
+                params![parent_id, id],
+            ) {
+                Ok(count) => count > 0,
+                Err(e) => {
+                    log::warn!("[TAGS] Failed to reparent tag {}: {:?}", id, e);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Delete the given tags (a tag plus its whole subtree) and every
+    /// assignment pointing at them, in one transaction. This only removes
+    /// tag metadata — files and folders on disk are never touched. [WRITER]
+    pub fn delete_tag_subtree(&self, ids: &[i64]) -> usize {
+        if ids.is_empty() {
+            return 0;
+        }
+
         let mut db = match self.writer.lock() {
             Ok(db) => db,
             Err(e) => {
                 log::error!(
-                    "[TAGS] Failed to acquire writer lock for delete_tag: {:?}",
+                    "[TAGS] Failed to acquire writer lock for delete_tag_subtree: {:?}",
                     e
                 );
-                return false;
+                return 0;
             }
         };
 
-        let tx = match db.transaction() {
-            Ok(tx) => tx,
-            Err(e) => {
-                log::warn!("[TAGS] Failed to start delete transaction: {:?}", e);
-                return false;
+        let result = (|| -> rusqlite::Result<usize> {
+            let tx = db.transaction()?;
+            let mut removed = 0;
+            const BATCH_SIZE: usize = 500;
+            for chunk in ids.chunks(BATCH_SIZE) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                removed += tx.execute(
+                    &format!("DELETE FROM file_tag_assignments WHERE tag_id IN ({placeholders})"),
+                    rusqlite::params_from_iter(chunk.iter()),
+                )?;
+                removed += tx.execute(
+                    &format!("DELETE FROM file_tags WHERE id IN ({placeholders})"),
+                    rusqlite::params_from_iter(chunk.iter()),
+                )?;
             }
-        };
-        let _ = tx.execute(
-            "DELETE FROM file_tag_assignments WHERE tag_id = ?1",
-            params![id],
-        );
-        let deleted = tx
-            .execute("DELETE FROM file_tags WHERE id = ?1", params![id])
-            .unwrap_or(0);
-        if tx.commit().is_err() {
-            return false;
+            tx.commit()?;
+            Ok(removed)
+        })();
+
+        match result {
+            Ok(removed) => removed,
+            Err(error) => {
+                log::warn!("[TAGS] Failed to delete tag subtree: {:?}", error);
+                0
+            }
         }
-        deleted > 0
     }
 
     /// Load all path -> tag assignments. [READER]
@@ -291,13 +336,18 @@ impl AppStateDb {
         .unwrap_or_default()
     }
 
-    /// Load one ordered keyset page of paths assigned to a specific tag. [READER]
-    pub fn get_tag_assignment_paths_after(
+    /// Load one ordered keyset page of the DISTINCT paths assigned to any of
+    /// `tag_ids` — the union a hierarchical tag view displays. [READER]
+    pub fn get_tag_assignment_paths_after_for_tags(
         &self,
-        tag_id: i64,
+        tag_ids: &[i64],
         after_path: Option<&Path>,
         limit: i64,
     ) -> Vec<PathBuf> {
+        if tag_ids.is_empty() {
+            return Vec::new();
+        }
+
         let db = match self.reader.lock() {
             Ok(db) => db,
             Err(e) => {
@@ -310,42 +360,60 @@ impl AppStateDb {
         };
 
         let map_path = |s: String| PathBuf::from(normalize_path_text(&s));
-        if let Some(after_path) = after_path.and_then(storage_path_text) {
-            let mut stmt = match db.prepare(
-                "SELECT file_path FROM file_tag_assignments \
-                 WHERE tag_id = ?1 AND file_path > ?2 COLLATE NOCASE \
-                 ORDER BY file_path ASC LIMIT ?3",
-            ) {
-                Ok(stmt) => stmt,
-                Err(e) => {
-                    log::error!("[TAGS] Failed to prepare tag keyset SELECT: {:?}", e);
-                    return Vec::new();
-                }
+        // Explicit placeholder numbering: the id list size is dynamic, so the
+        // tail placeholders must be numbered after it (?N+1, ?N+2) or rusqlite
+        // rejects the statement with an invalid parameter count.
+        let id_params: Vec<i64> = tag_ids.to_vec();
+        let ids_placeholders = (1..=tag_ids.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let after_index = tag_ids.len() + 1;
+        let limit_index = tag_ids.len() + 2;
+        let after_text = after_path.and_then(storage_path_text);
+
+        let (sql, params_vec): (String, Vec<&dyn rusqlite::ToSql>) =
+            if let Some(after) = &after_text {
+                let sql = format!(
+                    "SELECT DISTINCT file_path FROM file_tag_assignments \
+                 WHERE tag_id IN ({ids_placeholders}) \
+                 AND file_path > ?{after_index} COLLATE NOCASE \
+                 ORDER BY file_path ASC LIMIT ?{limit_index}"
+                );
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> = id_params
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::ToSql)
+                    .collect();
+                params_vec.push(after);
+                params_vec.push(&limit);
+                (sql, params_vec)
+            } else {
+                let sql = format!(
+                    "SELECT DISTINCT file_path FROM file_tag_assignments \
+                 WHERE tag_id IN ({ids_placeholders}) \
+                 ORDER BY file_path ASC LIMIT ?{after_index}"
+                );
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> = id_params
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::ToSql)
+                    .collect();
+                params_vec.push(&limit);
+                (sql, params_vec)
             };
-            stmt.query_map(params![tag_id, after_path, limit], |row| {
-                row.get::<_, String>(0).map(map_path)
-            })
-            .ok()
-            .map(|rows| rows.flatten().collect())
-            .unwrap_or_default()
-        } else {
-            let mut stmt = match db.prepare(
-                "SELECT file_path FROM file_tag_assignments \
-                 WHERE tag_id = ?1 ORDER BY file_path ASC LIMIT ?2",
-            ) {
-                Ok(stmt) => stmt,
-                Err(e) => {
-                    log::error!("[TAGS] Failed to prepare tag first-page SELECT: {:?}", e);
-                    return Vec::new();
-                }
-            };
-            stmt.query_map(params![tag_id, limit], |row| {
-                row.get::<_, String>(0).map(map_path)
-            })
-            .ok()
-            .map(|rows| rows.flatten().collect())
-            .unwrap_or_default()
-        }
+
+        let mut stmt = match db.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                log::error!("[TAGS] Failed to prepare tag keyset SELECT: {:?}", e);
+                return Vec::new();
+            }
+        };
+        stmt.query_map(params_vec.as_slice(), |row| {
+            row.get::<_, String>(0).map(map_path)
+        })
+        .ok()
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
     }
 
     /// Assign a tag to many paths in a single transaction. [WRITER]

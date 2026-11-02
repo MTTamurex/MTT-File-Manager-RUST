@@ -64,6 +64,7 @@ fn with_sidebar_tree<R>(
                     name: format!("Tag {index}"),
                     color: TagColor::Blue,
                     position: index as i64,
+                    parent_id: None,
                 },
             )
         })
@@ -96,6 +97,8 @@ fn with_sidebar_tree<R>(
     let drive_info = HashMap::new();
     let mounted = HashMap::new();
     let tag_counts = FxHashMap::default();
+    let subtree_tag_counts = FxHashMap::default();
+    let collapsed_tags = rustc_hash::FxHashSet::default();
     let mut icons = crate::ui::icon_loader::IconLoader::new();
     let mut sidebar = SidebarContext {
         disks: &disks,
@@ -130,6 +133,8 @@ fn with_sidebar_tree<R>(
         tag_definitions: &tags,
         sidebar_tag_ids: &tag_ids,
         tag_counts: &tag_counts,
+        subtree_tag_counts: &subtree_tag_counts,
+        sidebar_tags_collapsed: &collapsed_tags,
         active_tag_filter: None,
         collapse_tags: collapsed,
     };

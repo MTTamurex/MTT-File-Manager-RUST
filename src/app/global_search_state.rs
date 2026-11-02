@@ -766,10 +766,14 @@ impl GlobalSearchState {
     /// Rebuild the cached filtered indices and available drives only when the
     /// inputs have changed.
     /// Returns a reference to the cached filtered indices.
+    ///
+    /// `tag_filter` is the caller-resolved filter (a selected parent tag is
+    /// expanded to its subtree by the app layer before reaching this point).
     pub fn ensure_filter_cache(
         &mut self,
         tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
         tag_assignments_epoch: u64,
+        tag_filter: &GlobalSearchTagFilter,
     ) -> &[usize] {
         let filters = GlobalSearchFilters {
             category: self.category,
@@ -778,7 +782,7 @@ impl GlobalSearchState {
             max_size_mb: self.max_size_mb,
             created_after: self.created_after,
             created_before: self.created_before,
-            tag_filter: self.tag_filter.clone(),
+            tag_filter: tag_filter.clone(),
         };
         let key = (
             self.results_generation,
@@ -799,7 +803,7 @@ impl GlobalSearchState {
                     self.created_after,
                     self.created_before,
                     &self.created_ts_cache,
-                    &self.tag_filter,
+                    tag_filter,
                     tag_assignments,
                 );
             self.cached_available_drives =
@@ -822,8 +826,9 @@ impl GlobalSearchState {
         &mut self,
         tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
         tag_assignments_epoch: u64,
+        tag_filter: &GlobalSearchTagFilter,
     ) -> &[usize] {
-        self.ensure_filter_cache(tag_assignments, tag_assignments_epoch);
+        self.ensure_filter_cache(tag_assignments, tag_assignments_epoch, tag_filter);
         let filters = GlobalSearchFilters {
             category: self.category,
             drive_filter: self.drive_filter,
@@ -831,7 +836,7 @@ impl GlobalSearchState {
             max_size_mb: self.max_size_mb,
             created_after: self.created_after,
             created_before: self.created_before,
-            tag_filter: self.tag_filter.clone(),
+            tag_filter: tag_filter.clone(),
         };
         let key = (
             self.results_generation,
@@ -930,6 +935,7 @@ mod tests {
     use super::{
         GlobalSearchInteractionTarget, GlobalSearchSortMode, GlobalSearchState, TooltipRequest,
     };
+    use crate::app::global_search_state::GlobalSearchTagFilter;
     use mtt_search_protocol::SearchResultItem;
 
     fn state_with_tooltip_receiver(
@@ -979,7 +985,7 @@ mod tests {
         let mut resolved = 0usize;
         loop {
             let assignments = rustc_hash::FxHashMap::default();
-            state.ensure_sorted_indices(&assignments, 0);
+            state.ensure_sorted_indices(&assignments, 0, &GlobalSearchTagFilter::All);
             let mut batch = Vec::new();
             while let Ok(request) = tooltip_rx.try_recv() {
                 match request {
@@ -1011,7 +1017,7 @@ mod tests {
         assert!(state.sort_metadata_inflight.is_empty());
 
         let assignments = rustc_hash::FxHashMap::default();
-        state.ensure_sorted_indices(&assignments, 0);
+        state.ensure_sorted_indices(&assignments, 0, &GlobalSearchTagFilter::All);
         assert!(tooltip_rx.try_recv().is_err());
     }
 

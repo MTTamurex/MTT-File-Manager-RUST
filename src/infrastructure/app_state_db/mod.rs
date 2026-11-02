@@ -344,11 +344,24 @@ impl AppStateDb {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 color TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0
+                position INTEGER NOT NULL DEFAULT 0,
+                parent_id INTEGER
             )",
             [],
         )
         .unwrap_or(0);
+
+        // Hierarchy migration: parent links were added after the first release.
+        // Validity of parent_id (existing tag, no cycles) is enforced in the
+        // operations layer, not by a foreign key, so subtree deletion can
+        // remove parents and children in one transaction without FK ordering.
+        if conn
+            .prepare("SELECT parent_id FROM file_tags LIMIT 0")
+            .is_err()
+        {
+            conn.execute("ALTER TABLE file_tags ADD COLUMN parent_id INTEGER", [])
+                .unwrap_or(0);
+        }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS file_tag_assignments (

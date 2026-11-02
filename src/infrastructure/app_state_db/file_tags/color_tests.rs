@@ -8,7 +8,7 @@ fn custom_tag_colors_and_assignments_survive_reopening_the_database() {
     let id;
     {
         let db = AppStateDb::new(directory.path().to_path_buf()).unwrap();
-        id = db.create_tag("Example", color).unwrap();
+        id = db.create_tag("Example", color, None).unwrap();
         assert!(db.assign_tag_batch(std::slice::from_ref(&path), id));
     }
     let db = AppStateDb::new(directory.path().to_path_buf()).unwrap();
@@ -25,7 +25,7 @@ fn custom_tag_colors_and_assignments_survive_reopening_the_database() {
 fn custom_tag_colors_can_be_created_and_updated_without_changing_assignments() {
     let db = AppStateDb::new_in_memory().unwrap();
     let color = TagColor::Custom([12, 34, 56]);
-    let id = db.create_tag("Example", color).unwrap();
+    let id = db.create_tag("Example", color, None).unwrap();
     let path = PathBuf::from(r"C:\Folder\file.txt");
     assert!(db.assign_tag_batch(std::slice::from_ref(&path), id));
     let original = db
@@ -55,7 +55,9 @@ fn legacy_colors_keep_their_stored_names_and_rgb_values() {
     let db = AppStateDb::new_in_memory().unwrap();
     for color in TagColor::expanded_palette() {
         let name = color.as_db_str();
-        let id = db.create_tag(&format!("Example {name}"), color).unwrap();
+        let id = db
+            .create_tag(&format!("Example {name}"), color, None)
+            .unwrap();
         let stored: String = db
             .reader
             .lock()

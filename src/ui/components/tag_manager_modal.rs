@@ -1,14 +1,17 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_tag::TagColor;
+use crate::domain::tag_tree;
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
+use rustc_hash::FxHashSet;
 
 enum TagManagerAction {
     Create,
     Rename(i64, String),
     Recolor(i64, TagColor),
+    SetParent(i64, Option<i64>),
     Delete(i64),
 }
 
@@ -21,6 +24,50 @@ fn color_picker(ui: &mut egui::Ui, id: egui::Id, selected: TagColor) -> Option<T
             .then_some(TagColor::Custom(rgb))
     })
     .inner
+}
+
+/// Parent candidates for a tag: every tag except the tag itself and its own
+/// subtree (which would create a cycle).
+fn parent_candidates(app: &ImageViewerApp, tag_id: i64) -> Vec<crate::domain::file_tag::FileTag> {
+    let excluded: FxHashSet<i64> = tag_tree::subtree_ids(&app.tag_definitions, tag_id)
+        .into_iter()
+        .collect();
+    let mut candidates: Vec<crate::domain::file_tag::FileTag> = app
+        .tag_definitions
+        .values()
+        .filter(|tag| !excluded.contains(&tag.id))
+        .cloned()
+        .collect();
+    candidates.sort_by(|a, b| {
+        (a.position, a.name.to_lowercase()).cmp(&(b.position, b.name.to_lowercase()))
+    });
+    candidates
+}
+
+fn parent_combo(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    candidates: &[crate::domain::file_tag::FileTag],
+    selected: &mut Option<i64>,
+) {
+    let selected_text = match selected.and_then(|id| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.id == id)
+            .map(|candidate| candidate.name.clone())
+    }) {
+        Some(name) => name,
+        None => t!("tags.parent_root").to_string(),
+    };
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(selected_text)
+        .width(160.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(selected, None, t!("tags.parent_root"));
+            for candidate in candidates {
+                ui.selectable_value(selected, Some(candidate.id), candidate.name.clone());
+            }
+        });
 }
 
 pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -45,8 +92,9 @@ pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    // Resolve the current definitions in the cached display order, avoiding the
-    // per-frame clone + lowercase + sort of the whole definition set.
+    // Resolve the current definitions in the cached display order (DFS
+    // pre-order), avoiding the per-frame clone + lowercase + sort of the
+    // whole definition set.
     let sorted_ids = app.sorted_tag_ids();
     let tags: Vec<crate::domain::file_tag::FileTag> = sorted_ids
         .iter()
@@ -74,6 +122,16 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(t!("tags.parent")).color(theme::secondary_text_color(ui.ctx())));
+            let new_parent_candidates = parent_candidates(app, 0);
+            parent_combo(
+                ui,
+                ("tag_manager_new_parent", ui.id()),
+                &new_parent_candidates,
+                &mut app.tag_manager_new_parent,
+            );
+        });
 
         ui.add_space(12.0);
 
@@ -85,6 +143,9 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
         for tag in &tags {
             let assignment_count = app.tag_counts.get(&tag.id).copied().unwrap_or(0);
+            let depth = tag_tree::tag_depth(&app.tag_definitions, tag.id);
+            let indent = depth as f32 * 16.0;
+            let parent_candidates = parent_candidates(app, tag.id);
             let edit_name = app
                 .tag_manager_edit_names
                 .entry(tag.id)
@@ -99,6 +160,7 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 })
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        ui.add_space(indent);
                         let (icon_rect, icon_resp) =
                             ui.allocate_exact_size(egui::vec2(18.0, 26.0), egui::Sense::hover());
                         crate::ui::tag_icon::paint_filled(
@@ -130,21 +192,59 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                         });
                     });
 
+                    ui.horizontal(|ui| {
+                        ui.add_space(32.0 + indent);
+                        ui.label(
+                            RichText::new(t!("tags.parent"))
+                                .color(theme::secondary_text_color(ui.ctx())),
+                        );
+                        let mut selected_parent = tag.parent_id;
+                        parent_combo(
+                            ui,
+                            ("tag_manager_parent", tag.id),
+                            &parent_candidates,
+                            &mut selected_parent,
+                        );
+                        if selected_parent != tag.parent_id {
+                            actions.push(TagManagerAction::SetParent(tag.id, selected_parent));
+                        }
+                    });
+
                     if app.tag_manager_delete_confirm == Some(tag.id) {
+                        let subtree = tag_tree::subtree_ids(&app.tag_definitions, tag.id);
+                        let subtag_count = subtree.len().saturating_sub(1);
+                        let confirm_text = if subtag_count > 0 {
+                            let removed: FxHashSet<i64> = subtree.iter().copied().collect();
+                            let affected_items = app
+                                .tag_assignments
+                                .values()
+                                .filter(|ids| ids.iter().any(|id| removed.contains(id)))
+                                .count();
+                            RichText::new(
+                                t!(
+                                    "tags.delete_subtree_confirm",
+                                    name = tag.name.clone(),
+                                    subtags = subtag_count,
+                                    items = affected_items
+                                )
+                                .to_string(),
+                            )
+                            .color(ui.visuals().warn_fg_color)
+                        } else {
+                            RichText::new(
+                                t!(
+                                    "tags.delete_confirm",
+                                    name = tag.name.clone(),
+                                    count = assignment_count
+                                )
+                                .to_string(),
+                            )
+                            .color(ui.visuals().warn_fg_color)
+                        };
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            ui.label(
-                                RichText::new(
-                                    t!(
-                                        "tags.delete_confirm",
-                                        name = tag.name.clone(),
-                                        count = assignment_count
-                                    )
-                                    .to_string(),
-                                )
-                                .color(ui.visuals().warn_fg_color),
-                            );
+                            ui.add_space(24.0 + indent);
+                            ui.label(confirm_text);
                             if ui.button(t!("tags.confirm")).clicked() {
                                 actions.push(TagManagerAction::Delete(tag.id));
                             }
@@ -167,11 +267,13 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                         .warning(t!("tags.invalid_name").to_string());
                     continue;
                 }
+                let parent = app.tag_manager_new_parent;
                 if app
-                    .create_new_tag(&name, app.tag_manager_new_color)
+                    .create_new_tag(&name, app.tag_manager_new_color, parent)
                     .is_some()
                 {
                     app.tag_manager_new_name.clear();
+                    app.tag_manager_new_parent = None;
                 } else {
                     app.notifications
                         .warning(t!("tags.duplicate_name").to_string());
@@ -189,6 +291,9 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             }
             TagManagerAction::Recolor(tag_id, color) => {
                 app.update_tag_definition_color(tag_id, color);
+            }
+            TagManagerAction::SetParent(tag_id, parent) => {
+                app.set_tag_parent(tag_id, parent);
             }
             TagManagerAction::Delete(tag_id) => {
                 app.delete_tag_definition(tag_id);

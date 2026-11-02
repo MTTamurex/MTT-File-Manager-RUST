@@ -25,6 +25,54 @@ fn is_optical_disc_context_target(
         && drive_type == Some(crate::infrastructure::windows::DriveType::Cdrom)
 }
 
+/// Builds the tag toggle entries of the "Tag" submenu as a nested tree that
+/// mirrors the sidebar: a parent tag row toggles the tag itself when clicked
+/// and opens its sub-tags as a submenu on hover — no duplicated parent entry
+/// inside its own submenu, and the root level stays compact no matter how
+/// many sub-tags exist.
+fn build_tag_menu_entries(
+    app: &ImageViewerApp,
+    paths: &[PathBuf],
+    next_id: &mut i32,
+) -> Vec<crate::application::context_menu::ContextMenuItem> {
+    use crate::application::context_menu::ContextMenuItem;
+
+    let children_map = crate::domain::tag_tree::build_children_map(&app.tag_definitions);
+    fn build_level(
+        app: &ImageViewerApp,
+        parent: Option<i64>,
+        children_map: &crate::domain::tag_tree::TagChildrenMap,
+        paths: &[PathBuf],
+        next_id: &mut i32,
+    ) -> Vec<ContextMenuItem> {
+        let mut items = Vec::new();
+        let Some(ids) = children_map.get(&parent) else {
+            return items;
+        };
+        for tag_id in ids {
+            let Some(tag) = app.tag_definitions.get(tag_id) else {
+                continue;
+            };
+            let entry = ContextMenuItem::new(*next_id, tag.name.clone())
+                .with_command(format!("tag_toggle:{}", tag.id))
+                .with_leading_color(tag.color.to_color32())
+                .checked(app.paths_have_tag(paths, *tag_id));
+            *next_id -= 1;
+
+            let children = build_level(app, Some(*tag_id), children_map, paths, next_id);
+            if children.is_empty() {
+                items.push(entry);
+            } else {
+                // Clicking the row toggles the parent tag; hovering opens
+                // the submenu with its sub-tags.
+                items.push(entry.with_command_on_click().with_subitems(children));
+            }
+        }
+        items
+    }
+    build_level(app, None, &children_map, paths, next_id)
+}
+
 fn is_open_with_menu_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
     item.command_string.as_deref().is_some_and(|command| {
         matches!(
@@ -971,19 +1019,8 @@ impl ImageViewerApp {
             }
 
             if can_tag_targets && !self.tag_definitions.is_empty() {
-                let mut sub_items = Vec::new();
-                let sorted_ids = self.sorted_tag_ids();
-                for (idx, &tag_id) in sorted_ids.iter().enumerate() {
-                    let Some(tag) = self.tag_definitions.get(&tag_id) else {
-                        continue;
-                    };
-                    sub_items.push(
-                        ContextMenuItem::new(-9000 - idx as i32, tag.name.clone())
-                            .with_command(format!("tag_toggle:{}", tag.id))
-                            .with_leading_color(tag.color.to_color32())
-                            .checked(self.paths_have_tag(paths, tag.id)),
-                    );
-                }
+                let mut next_id: i32 = -9000;
+                let mut sub_items = build_tag_menu_entries(self, paths, &mut next_id);
                 sub_items.push(ContextMenuItem::separator());
                 sub_items
                     .push(ContextMenuItem::new(-91, t!("tags.manage")).with_command("tag_manage"));
@@ -1157,6 +1194,7 @@ impl ImageViewerApp {
                 is_loading_placeholder: false,
                 is_checked: false,
                 leading_color: None,
+                fire_command_on_click: false,
             })
         }
 
@@ -1497,6 +1535,7 @@ impl ImageViewerApp {
                 svg_icon_name: None,
                 is_loading_placeholder: false,
                 is_checked: false,
+                fire_command_on_click: false,
                 leading_color: None,
             }
         }

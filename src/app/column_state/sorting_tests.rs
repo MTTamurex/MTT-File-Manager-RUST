@@ -58,6 +58,7 @@ fn tags_sort_the_complete_listing_and_keep_missing_values_last() {
                 name: "Beta".into(),
                 color: TagColor::Red,
                 position: 0,
+                parent_id: None,
             },
         ),
         (
@@ -67,6 +68,7 @@ fn tags_sort_the_complete_listing_and_keep_missing_values_last() {
                 name: "Alpha".into(),
                 color: TagColor::Red,
                 position: 1,
+                parent_id: None,
             },
         ),
     ]);

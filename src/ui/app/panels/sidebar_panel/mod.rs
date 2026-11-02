@@ -129,6 +129,8 @@ fn context(app: &mut ImageViewerApp, can_drop_items_to_recycle_bin: bool) -> Sid
         tag_definitions: &app.tag_definitions,
         sidebar_tag_ids: &app.sidebar_tag_ids,
         tag_counts: &app.tag_counts,
+        subtree_tag_counts: &app.subtree_tag_counts,
+        sidebar_tags_collapsed: &app.sidebar_tags_collapsed,
         active_tag_filter: app.active_tag_filter,
         collapse_tags: app.collapse_tags,
     }
