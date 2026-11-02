@@ -6,15 +6,40 @@ use windows::core::w;
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF,
+    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, UpdateWindow,
+    RGN_DIFF,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, CW_USEDEFAULT, SW_HIDE, SW_SHOW,
-    WINDOW_EX_STYLE, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, SW_HIDE, SW_SHOW, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
 };
+
+#[cfg(target_os = "windows")]
+fn create_surface_window(parent: HWND) -> windows::core::Result<HWND> {
+    use windows::Win32::System::SystemServices::SS_BLACKRECT;
+
+    // A default STATIC has no opaque video background. Keep the surface hidden
+    // until it is positioned, and let STATIC paint black until MPV takes over.
+    unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("static"),
+            w!(""),
+            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WINDOW_STYLE(SS_BLACKRECT.0),
+            0,
+            0,
+            1,
+            1,
+            Some(parent),
+            None,
+            None,
+            None,
+        )
+    }
+}
 
 /// Encapsulates all native window (HWND) management for the MPV video surface.
 ///
@@ -26,6 +51,7 @@ pub struct VideoSurface {
     main_hwnd: Option<HWND>,
     last_rect: egui::Rect,
     last_overlay_regions: Option<Vec<PixelRoundedRect>>,
+    visible: std::cell::Cell<bool>,
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -99,6 +125,7 @@ impl VideoSurface {
             main_hwnd: None,
             last_rect: egui::Rect::NAN,
             last_overlay_regions: None,
+            visible: std::cell::Cell::new(false),
         }
     }
 
@@ -134,27 +161,13 @@ impl VideoSurface {
             return;
         };
 
-        unsafe {
-            let h_video = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
-                w!("static"),
-                w!(""),
-                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
-                0,
-                0,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                Some(parent),
-                None,
-                None,
-                None,
-            )
-            .unwrap_or(HWND::default());
-
-            if !h_video.is_invalid() {
+        match create_surface_window(parent) {
+            Ok(h_video) => {
                 self.mpv_hwnd = Some(h_video);
+                self.reset_rect();
                 let _ = mpv.set_property("wid", h_video.0 as i64);
             }
+            Err(error) => log::warn!("[MpvPreview] Failed to create video surface: {error}"),
         }
     }
 
@@ -184,9 +197,17 @@ impl VideoSurface {
     /// Shows or hides the video surface.
     /// Use this to resolve Z-order issues when popups need to appear over the video area.
     pub fn set_visible(&self, visible: bool) {
+        // Visibility may be requested before creation or before layout is ready.
+        let visible = visible && self.last_rect.is_positive();
         if let Some(hwnd) = self.mpv_hwnd {
-            unsafe {
-                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+            if self.visible.replace(visible) != visible {
+                unsafe {
+                    let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+                    if visible {
+                        // Paint the fallback now, not in a later message-loop iteration.
+                        let _ = UpdateWindow(hwnd);
+                    }
+                }
             }
         }
     }
@@ -288,6 +309,7 @@ impl VideoSurface {
 
     /// Destroys the child window and releases resources.
     pub fn destroy(&mut self) {
+        self.visible.set(false);
         if let Some(hwnd) = self.mpv_hwnd.take() {
             unsafe {
                 let _ = ShowWindow(hwnd, SW_HIDE);
@@ -369,41 +391,5 @@ impl VideoSurface {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{overlay_pixel_regions, PixelRoundedRect};
-    use eframe::egui;
-
-    fn popup_overlay(rect: egui::Rect) -> crate::ui::video_overlay::VideoOverlay {
-        crate::ui::video_overlay::VideoOverlay {
-            rect,
-            corner_radius: 6.0,
-        }
-    }
-
-    #[test]
-    fn converts_overlay_intersection_to_video_local_pixels() {
-        let video = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(300.0, 150.0));
-        let overlay_rect =
-            egui::Rect::from_min_max(egui::pos2(250.0, 25.0), egui::pos2(350.0, 100.0));
-
-        assert_eq!(
-            overlay_pixel_regions(video, &[popup_overlay(overlay_rect)], 1.5),
-            vec![PixelRoundedRect {
-                left: 225,
-                top: -38,
-                right: 375,
-                bottom: 75,
-                corner_diameter: 18,
-            }]
-        );
-    }
-
-    #[test]
-    fn ignores_overlays_outside_video() {
-        let video = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(200.0, 100.0));
-        let overlay_rect =
-            egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
-
-        assert!(overlay_pixel_regions(video, &[popup_overlay(overlay_rect)], 1.25).is_empty());
-    }
-}
+#[path = "window_embed_tests.rs"]
+mod tests;

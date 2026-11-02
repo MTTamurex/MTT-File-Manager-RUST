@@ -21,6 +21,8 @@ impl MpvPreview {
             egui::vec2(available.x, preview_height)
         };
         let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+        // Also cover initialization failures and time before the native surface appears.
+        ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
         if self.is_docked() {
             crate::ui::video_overlay::set_video_rect(ui.ctx(), rect);
         }
@@ -110,6 +112,8 @@ impl MpvPreview {
         if let Some(m) = &self.mpv {
             self.surface.ensure_child_window(m);
         }
+        // Never start loading into an unpositioned, default-sized native window.
+        self.surface.sync_rect(ui, rect);
 
         if let Some(m) = self.mpv.clone() {
             self.sync_fullscreen_from_mpv(ui, &m);
@@ -229,8 +233,6 @@ impl MpvPreview {
                 self.forward_osc_input(ui, rect, &m);
             }
         }
-
-        self.surface.sync_rect(ui, rect);
 
         // Keep MPV focus while native OSC is active so it can handle input events.
         let should_force_main_focus = !self.osc_active;

@@ -383,10 +383,9 @@ impl MpvPreview {
     }
 
     pub fn set_visibility(&mut self, visible: bool) {
-        if self.is_visible != visible {
-            self.is_visible = visible;
-            self.surface.set_visible(visible);
-        }
+        self.is_visible = visible;
+        // The requested visibility may predate the native window's creation.
+        self.surface.set_visible(visible);
     }
 
     /// Get native HWND for the video surface
