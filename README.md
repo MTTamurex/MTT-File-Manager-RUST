@@ -15,7 +15,7 @@
 
 ### Antivirus alerts on VirusTotal
 
-Some antivirus engines on VirusTotal flag the installer. Each case is submitted to the respective vendor for review. See the release notes for details and review outcomes.
+Some antivirus engines on VirusTotal may flag the installer. Each detection is submitted to the respective antivirus vendor for review. Refer to the release notes for details and review results.
 
 ### Installation help
 
