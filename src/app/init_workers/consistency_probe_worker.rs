@@ -66,11 +66,24 @@ pub struct ConsistencyProbeResult {
 /// lightweight current-folder liveness checks for focus recovery and index-only
 /// recursive content-change checks for the focused pane on USN filesystems.
 ///
-/// The worker drains stale requests (only processes the most recent),
+/// The worker drains stale requests (keeping the most recent per mode and path),
 /// enumerates directories only in ListingDrift mode. FolderContents always
 /// acknowledges completion, even if the service reports no changes or fails.
 pub fn spawn_consistency_probe_worker(
     ctx: egui::Context,
+) -> (
+    mpsc::Sender<ConsistencyProbeRequest>,
+    mpsc::Receiver<ConsistencyProbeResult>,
+) {
+    spawn_consistency_probe_worker_with_priority(
+        ctx,
+        crate::infrastructure::io_priority::IOPriority::Background,
+    )
+}
+
+fn spawn_consistency_probe_worker_with_priority(
+    ctx: egui::Context,
+    priority: crate::infrastructure::io_priority::IOPriority,
 ) -> (
     mpsc::Sender<ConsistencyProbeRequest>,
     mpsc::Receiver<ConsistencyProbeResult>,
@@ -81,9 +94,7 @@ pub fn spawn_consistency_probe_worker(
     if let Err(e) = std::thread::Builder::new()
         .name("consistency-probe".into())
         .spawn(move || {
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
+            crate::infrastructure::io_priority::set_thread_priority(priority);
 
             // Per-directory cover-scan bookkeeping (single-threaded worker).
             let mut last_cover_scans: HashMap<PathBuf, Instant> = HashMap::new();

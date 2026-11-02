@@ -80,7 +80,11 @@ fn virtual_views_are_never_reported_as_missing_directories() {
 fn index_only_probe_acknowledges_without_a_directory_read_or_liveness_check() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("missing-folder");
-    let (sender, receiver) = spawn_consistency_probe_worker(egui::Context::default());
+    // Test the real worker without competing at background priority with the suite.
+    let (sender, receiver) = spawn_consistency_probe_worker_with_priority(
+        egui::Context::default(),
+        crate::infrastructure::io_priority::IOPriority::Prefetch,
+    );
     sender
         .send(ConsistencyProbeRequest {
             path: path.clone(),
@@ -100,4 +104,49 @@ fn index_only_probe_acknowledges_without_a_directory_read_or_liveness_check() {
     assert!(!result.path_vanished);
     assert!(result.changed_folder_contents.is_empty());
     assert!(result.changed_folder_covers.is_empty());
+}
+
+#[test]
+fn liveness_worker_acknowledges_each_virtual_view_without_reporting_disappearance() {
+    use crate::domain::special_paths::{tag_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+
+    let (sender, receiver) = spawn_consistency_probe_worker_with_priority(
+        egui::Context::default(),
+        crate::infrastructure::io_priority::IOPriority::Prefetch,
+    );
+    let paths = (1..=5)
+        .map(|id| PathBuf::from(tag_view_path(id)))
+        .chain([COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID].map(PathBuf::from))
+        .collect::<Vec<_>>();
+    for path in &paths {
+        sender
+            .send(ConsistencyProbeRequest {
+                path: path.clone(),
+                is_onedrive: false,
+                ui_signature: 42,
+                show_hidden_files: false,
+                mode: ConsistencyProbeMode::PathLiveness,
+                modified_threshold_secs: 0,
+                folder_cover_states: Vec::new(),
+            })
+            .unwrap();
+    }
+    drop(sender);
+
+    for path in paths {
+        let result = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("liveness worker must acknowledge every distinct virtual path");
+        assert_eq!(result.path, path);
+        assert_eq!(result.mode, ConsistencyProbeMode::PathLiveness);
+        assert!(!result.path_vanished);
+        assert_eq!(result.disk_signature, 0);
+        assert!(result.changed_folder_covers.is_empty());
+        assert!(result.changed_folder_contents.is_empty());
+        assert!(!result.content_check_succeeded);
+    }
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_secs(10)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
 }

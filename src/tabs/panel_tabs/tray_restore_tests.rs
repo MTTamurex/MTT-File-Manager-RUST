@@ -1,14 +1,9 @@
 use super::{snapshot_sync_tests::snapshot, *};
-use crate::app::init_workers::consistency_probe_worker::{
-    spawn_consistency_probe_worker, ConsistencyProbeMode, ConsistencyProbeRequest,
-};
 use crate::domain::special_paths::tag_view_path;
 use crate::infrastructure::windows::system_tray::model::{
     Entry, LocationKind, Snapshot, Target, Workspace,
 };
 use crate::tabs::{TabManager, TabManagerSession};
-use std::path::PathBuf;
-use std::time::Duration;
 
 fn tag_snapshot(id: i64) -> PanelSnapshot {
     let mut state = snapshot(&tag_view_path(id));
@@ -18,8 +13,7 @@ fn tag_snapshot(id: i64) -> PanelSnapshot {
 }
 
 #[test]
-fn four_pinned_tag_tabs_survive_tray_selection_and_a_delayed_liveness_probe() {
-    let (requests, results) = spawn_consistency_probe_worker(eframe::egui::Context::default());
+fn four_pinned_tag_tabs_survive_tray_target_selection_and_session_round_trip() {
     for selected in 0..4 {
         let mut panels = DualPanelTabs::new(tag_snapshot(1), tag_snapshot(5));
         for id in 2..=4 {
@@ -44,19 +38,6 @@ fn four_pinned_tag_tabs_survive_tray_selection_and_a_delayed_liveness_probe() {
         manager.active_mut().dual_panel_active = ActivePanel::Right;
         manager.active_mut().dual_panel_tabs = Some(panels);
 
-        // Reproduce an obsolete request queued for the inactive left tag while
-        // the right panel was focused. Receive it only after tray activation.
-        requests
-            .send(ConsistencyProbeRequest {
-                path: PathBuf::from(&path),
-                is_onedrive: false,
-                ui_signature: 0,
-                show_hidden_files: false,
-                mode: ConsistencyProbeMode::PathLiveness,
-                modified_threshold_secs: 0,
-                folder_cover_states: Vec::new(),
-            })
-            .unwrap();
         let workspace = manager.active();
         let panels = workspace.dual_panel_tabs.as_ref().unwrap();
         let menu = Snapshot {
@@ -101,14 +82,13 @@ fn four_pinned_tag_tabs_survive_tray_selection_and_a_delayed_liveness_probe() {
         workspace.navigation = restored.navigation;
         workspace.dual_panel_active = ActivePanel::Left;
 
-        let delayed = results.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(delayed.path, PathBuf::from(&path));
-        assert!(
-            !delayed.path_vanished,
-            "a tag must never trigger filesystem recovery"
-        );
         let panels = manager.active().dual_panel_tabs.as_ref().unwrap();
         assert_eq!(manager.active().path, path);
+        assert_eq!(
+            manager.active().active_tag_filter,
+            Some(selected as i64 + 1)
+        );
+        assert_eq!(manager.active().dual_panel_active, ActivePanel::Left);
         assert_eq!(
             panels
                 .left

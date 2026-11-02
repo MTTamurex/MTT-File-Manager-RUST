@@ -1,4 +1,4 @@
-use super::probe_paths::is_filesystem_probe_target;
+use super::probe_paths::{is_filesystem_probe_target, next_filesystem_probe_result};
 use crate::app::init_workers::consistency_probe_worker::{
     ConsistencyProbeMode, ConsistencyProbeRequest, ConsistencyProbeResult,
 };
@@ -496,12 +496,7 @@ impl ImageViewerApp {
         &mut self,
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
-        while let Ok(result) = self.consistency_probe_rx.try_recv() {
-            // A result may arrive after its formerly inactive tab gained focus.
-            // Never apply a filesystem disappearance/reload to a virtual view.
-            if !is_filesystem_probe_target(&result.path.to_string_lossy()) {
-                continue;
-            }
+        while let Some(result) = next_filesystem_probe_result(&self.consistency_probe_rx) {
             if result.mode == ConsistencyProbeMode::PathLiveness {
                 if self.handle_current_liveness_probe_result(result) {
                     continue;
