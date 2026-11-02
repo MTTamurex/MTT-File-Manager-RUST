@@ -728,6 +728,10 @@ impl eframe::App for ImageViewerApp {
             crate::ui::components::tag_manager_modal::render_tag_manager_modal(self, ctx);
         }
 
+        if self.pending_tag_cascade.is_some() {
+            crate::ui::components::tag_cascade_modal::render_tag_cascade_modal(self, ctx);
+        }
+
         // 14. Notifications
         app::notifications::render_notifications(self, ctx);
 

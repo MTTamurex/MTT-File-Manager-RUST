@@ -838,6 +838,9 @@ pub struct ImageViewerApp {
     pub tag_manager_new_parent: Option<i64>,
     pub tag_manager_edit_names: rustc_hash::FxHashMap<i64, String>,
     pub tag_manager_delete_confirm: Option<i64>,
+    /// Unchecking a parent tag would also remove sub-tags from these paths.
+    /// Set while the user confirms the cascade; `None` when no confirmation is open.
+    pub pending_tag_cascade: Option<crate::app::operations::tag_ops::PendingTagCascade>,
 
     // SIDEBAR FOLDER TREE (hierarchical expand/collapse state)
     pub sidebar_tree: sidebar_tree_state::SidebarTreeState,

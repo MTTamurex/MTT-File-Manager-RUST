@@ -73,7 +73,8 @@ pub fn tag_depth(defs: &FxHashMap<i64, FileTag>, tag_id: i64) -> usize {
 }
 
 /// `tag_id` plus every ancestor up to the root. Defensive against cycles.
-fn ancestor_chain(defs: &FxHashMap<i64, FileTag>, tag_id: i64) -> Vec<i64> {
+/// Under the implicit-parent model, assigning a tag also assigns this chain.
+pub fn ancestor_chain(defs: &FxHashMap<i64, FileTag>, tag_id: i64) -> Vec<i64> {
     let mut chain = Vec::new();
     let mut visited: FxHashSet<i64> = FxHashSet::default();
     let mut current = Some(tag_id);
@@ -143,6 +144,47 @@ pub fn repair_orphan_parents(tags: &mut [FileTag]) {
             tags[index].parent_id = None;
         }
     }
+}
+
+/// Tags a file receives when `tag_id` is assigned under the implicit-parent
+/// model: the tag itself plus all of its ancestors.
+pub fn tags_to_assign(defs: &FxHashMap<i64, FileTag>, tag_id: i64) -> Vec<i64> {
+    ancestor_chain(defs, tag_id)
+}
+
+/// Tags a file loses when `tag_id` is removed: the tag itself plus every
+/// descendant. Ancestors are kept, since sibling sub-tags may still need them.
+pub fn tags_to_remove(defs: &FxHashMap<i64, FileTag>, tag_id: i64) -> Vec<i64> {
+    subtree_ids(defs, tag_id)
+}
+
+/// Ancestor links that a legacy assignment set is missing under the
+/// implicit-parent invariant. Returns `(path, tag_id)` pairs to insert; never
+/// includes an assignment that already exists, so applying it is additive.
+pub fn missing_ancestor_assignments(
+    defs: &FxHashMap<i64, FileTag>,
+    assignments: &FxHashMap<PathBuf, Vec<i64>>,
+) -> Vec<(PathBuf, i64)> {
+    let mut missing = Vec::new();
+    for (path, ids) in assignments {
+        let present: FxHashSet<i64> = ids.iter().copied().collect();
+        let mut needed: FxHashSet<i64> = FxHashSet::default();
+        for id in ids {
+            // Undefined tags have no ancestry to repair.
+            if !defs.contains_key(id) {
+                continue;
+            }
+            for ancestor in ancestor_chain(defs, *id).into_iter().skip(1) {
+                needed.insert(ancestor);
+            }
+        }
+        let mut to_add: Vec<i64> = needed.difference(&present).copied().collect();
+        to_add.sort_unstable();
+        for id in to_add {
+            missing.push((path.clone(), id));
+        }
+    }
+    missing
 }
 
 #[cfg(test)]
@@ -253,5 +295,80 @@ mod tests {
         let defs = defs(tags);
         let children = build_children_map(&defs);
         assert!(children.contains_key(&None));
+    }
+
+    #[test]
+    fn ancestor_chain_includes_self_and_every_ancestor() {
+        let defs = defs(vec![
+            tag(1, "Fotos", 0, None),
+            tag(2, "Férias", 1, Some(1)),
+            tag(3, "2025", 0, Some(2)),
+        ]);
+        assert_eq!(ancestor_chain(&defs, 3), vec![3, 2, 1]);
+        assert_eq!(ancestor_chain(&defs, 1), vec![1]);
+        assert_eq!(ancestor_chain(&defs, 99), vec![99]);
+    }
+
+    #[test]
+    fn assigning_a_sub_tag_assigns_its_ancestors() {
+        let defs = defs(vec![
+            tag(1, "Fotos", 0, None),
+            tag(2, "Férias", 1, Some(1)),
+            tag(3, "2025", 0, Some(2)),
+        ]);
+        let mut to_assign = tags_to_assign(&defs, 3);
+        to_assign.sort_unstable();
+        assert_eq!(to_assign, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn removing_a_parent_removes_its_subtree_but_removing_a_child_keeps_ancestors() {
+        let defs = defs(vec![
+            tag(1, "Fotos", 0, None),
+            tag(2, "Férias", 1, Some(1)),
+            tag(3, "2025", 0, Some(2)),
+            tag(4, "Passeio", 1, Some(1)),
+        ]);
+        let mut parent_removal = tags_to_remove(&defs, 1);
+        parent_removal.sort_unstable();
+        assert_eq!(parent_removal, vec![1, 2, 3, 4]);
+
+        // Removing "2025" leaves "Férias" and "Fotos" in place.
+        assert_eq!(tags_to_remove(&defs, 3), vec![3]);
+    }
+
+    #[test]
+    fn migration_adds_only_missing_ancestors() {
+        let defs = defs(vec![
+            tag(1, "Fotos", 0, None),
+            tag(2, "Férias", 1, Some(1)),
+            tag(3, "2025", 0, Some(2)),
+        ]);
+        let mut assignments: FxHashMap<PathBuf, Vec<i64>> = FxHashMap::default();
+        // Legacy: only the leaf was stored.
+        assignments.insert(PathBuf::from("a.jpg"), vec![3]);
+        // Already complete.
+        assignments.insert(PathBuf::from("b.jpg"), vec![3, 2, 1]);
+        // Undefined tag id: left alone.
+        assignments.insert(PathBuf::from("c.jpg"), vec![999]);
+
+        let mut missing = missing_ancestor_assignments(&defs, &assignments);
+        missing.sort();
+        assert_eq!(
+            missing,
+            vec![(PathBuf::from("a.jpg"), 1), (PathBuf::from("a.jpg"), 2)]
+        );
+    }
+
+    #[test]
+    fn migration_is_idempotent_once_applied() {
+        let defs = defs(vec![tag(1, "Fotos", 0, None), tag(2, "Férias", 1, Some(1))]);
+        let mut assignments: FxHashMap<PathBuf, Vec<i64>> = FxHashMap::default();
+        assignments.insert(PathBuf::from("a.jpg"), vec![2]);
+
+        for (path, id) in missing_ancestor_assignments(&defs, &assignments) {
+            assignments.entry(path).or_default().push(id);
+        }
+        assert!(missing_ancestor_assignments(&defs, &assignments).is_empty());
     }
 }

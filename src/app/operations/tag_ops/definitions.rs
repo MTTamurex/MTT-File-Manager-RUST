@@ -4,9 +4,59 @@ use crate::domain::file_tag::{FileTag, TagColor};
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path, COMPUTER_VIEW_ID};
 use crate::domain::tag_tree;
 use rustc_hash::FxHashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+/// A pending "uncheck parent" action that would remove sub-tags from files.
+/// Held until the user confirms in the cascade modal.
+#[derive(Debug, Clone)]
+pub struct PendingTagCascade {
+    pub paths: Vec<PathBuf>,
+    pub tag_id: i64,
+    pub tag_name: String,
+    /// Number of sub-tag assignments that confirming will remove.
+    pub sub_tag_assignments: usize,
+}
+
 impl ImageViewerApp {
+    /// Entry point for the context menu's tag toggle. Unchecking a tag that has
+    /// sub-tags on the target files opens a confirmation first; everything
+    /// else is applied directly.
+    pub fn request_tag_toggle(&mut self, paths: &[PathBuf], tag_id: i64) {
+        let cascade = if self.paths_have_tag(paths, tag_id) {
+            self.cascade_count_for_unassign(paths, tag_id)
+        } else {
+            0
+        };
+        if cascade > 0 {
+            let tag_name = self
+                .tag_definitions
+                .get(&tag_id)
+                .map(|tag| tag.name.clone())
+                .unwrap_or_default();
+            self.pending_tag_cascade = Some(PendingTagCascade {
+                paths: paths.to_vec(),
+                tag_id,
+                tag_name,
+                sub_tag_assignments: cascade,
+            });
+            self.ui_ctx.request_repaint();
+        } else {
+            self.toggle_tag_on_paths(paths, tag_id);
+        }
+    }
+
+    /// Applies the pending cascade after the user confirmed it.
+    pub fn confirm_pending_tag_cascade(&mut self) {
+        if let Some(pending) = self.pending_tag_cascade.take() {
+            self.unassign_tag_from_paths(&pending.paths, pending.tag_id);
+        }
+    }
+
+    pub fn cancel_pending_tag_cascade(&mut self) {
+        self.pending_tag_cascade = None;
+    }
+
     pub fn create_new_tag(
         &mut self,
         name: &str,

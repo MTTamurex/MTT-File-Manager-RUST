@@ -28,6 +28,7 @@ pub mod shortcut_settings;
 pub mod startup_date_settings;
 pub(crate) mod status_bar_size_controls;
 pub mod tab_settings;
+pub mod tag_cascade_modal;
 pub mod tag_manager_modal;
 pub mod tag_settings;
 #[cfg(feature = "online-updates")]

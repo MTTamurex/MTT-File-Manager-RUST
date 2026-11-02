@@ -669,7 +669,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 if let Some(tag_id_raw) = command.strip_prefix("tag_toggle:") {
                     if let Ok(tag_id) = tag_id_raw.parse::<i64>() {
-                        app.toggle_tag_on_paths(&context_menu.target_paths, tag_id);
+                        app.request_tag_toggle(&context_menu.target_paths, tag_id);
                     }
                     context_menu.close();
                     app.context_menu = context_menu;

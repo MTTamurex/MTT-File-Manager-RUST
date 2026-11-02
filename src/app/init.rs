@@ -280,6 +280,13 @@ impl ImageViewerApp {
             .into_iter()
             .map(|tag| (tag.id, tag))
             .collect();
+        // One-time upgrade: complete legacy assignments with their ancestors
+        // (implicit-parent invariant). Additive; runs before the in-memory
+        // assignment map is loaded so the UI sees the repaired state.
+        crate::app::operations::tag_ops::migration::run_ancestor_backfill_once(
+            &app_state_db,
+            &tag_definitions,
+        );
         let sorted_tag_ids =
             crate::app::operations::tag_ops::build_sorted_tag_ids(&tag_definitions);
         let sidebar_tag_ids = crate::app::operations::tag_ops::reconcile_sidebar_tag_order(
@@ -880,6 +887,7 @@ impl ImageViewerApp {
             tag_manager_new_parent: None,
             tag_manager_edit_names: rustc_hash::FxHashMap::default(),
             tag_manager_delete_confirm: None,
+            pending_tag_cascade: None,
 
             // SIDEBAR FOLDER TREE
             sidebar_tree: {

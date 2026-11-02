@@ -416,10 +416,51 @@ impl AppStateDb {
         .unwrap_or_default()
     }
 
-    /// Assign a tag to many paths in a single transaction. [WRITER]
-    pub fn assign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
+    /// Inserts the given `(path, tag_id)` links in one transaction. Additive
+    /// only: existing rows are ignored, nothing is removed. [WRITER]
+    pub fn insert_tag_links(&self, links: &[(PathBuf, i64)]) -> bool {
+        if links.is_empty() {
+            return true;
+        }
+        let mut db = match self.writer.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire writer lock for insert_tag_links: {:?}",
+                    e
+                );
+                return false;
+            }
+        };
+        let result = (|| -> rusqlite::Result<()> {
+            let tx = db.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
+                )?;
+                for (path, tag_id) in links {
+                    if let Some(text) = storage_path_text(path) {
+                        stmt.execute(params![text, tag_id])?;
+                    }
+                }
+            }
+            tx.commit()
+        })();
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("[TAGS] Failed to insert tag links: {:?}", error);
+                false
+            }
+        }
+    }
+
+    /// Assign several tags to many paths in a single transaction. Used for the
+    /// implicit-parent model, where one action writes a tag and its ancestors.
+    /// [WRITER]
+    pub fn assign_tags_batch(&self, paths: &[PathBuf], tag_ids: &[i64]) -> bool {
         let paths = storage_path_texts(paths);
-        if paths.is_empty() {
+        if paths.is_empty() || tag_ids.is_empty() {
             return false;
         }
 
@@ -427,7 +468,7 @@ impl AppStateDb {
             Ok(db) => db,
             Err(e) => {
                 log::error!(
-                    "[TAGS] Failed to acquire writer lock for assign_tag_batch: {:?}",
+                    "[TAGS] Failed to acquire writer lock for assign_tags_batch: {:?}",
                     e
                 );
                 return false;
@@ -441,7 +482,9 @@ impl AppStateDb {
                     "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
                 )?;
                 for path in &paths {
-                    stmt.execute(params![path, tag_id])?;
+                    for tag_id in tag_ids {
+                        stmt.execute(params![path, tag_id])?;
+                    }
                 }
             }
             tx.commit()
@@ -454,10 +497,11 @@ impl AppStateDb {
         true
     }
 
-    /// Remove one tag assignment from many paths in a single transaction. [WRITER]
-    pub fn unassign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
+    /// Remove several tag assignments from many paths in a single transaction.
+    /// [WRITER]
+    pub fn unassign_tags_batch(&self, paths: &[PathBuf], tag_ids: &[i64]) -> bool {
         let paths = storage_path_texts(paths);
-        if paths.is_empty() {
+        if paths.is_empty() || tag_ids.is_empty() {
             return false;
         }
 
@@ -465,7 +509,7 @@ impl AppStateDb {
             Ok(db) => db,
             Err(e) => {
                 log::error!(
-                    "[TAGS] Failed to acquire writer lock for unassign_tag_batch: {:?}",
+                    "[TAGS] Failed to acquire writer lock for unassign_tags_batch: {:?}",
                     e
                 );
                 return false;
@@ -479,7 +523,9 @@ impl AppStateDb {
                     "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
                 )?;
                 for path in &paths {
-                    stmt.execute(params![path, tag_id])?;
+                    for tag_id in tag_ids {
+                        stmt.execute(params![path, tag_id])?;
+                    }
                 }
             }
             tx.commit()

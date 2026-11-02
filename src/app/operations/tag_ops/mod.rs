@@ -1,16 +1,19 @@
 use crate::domain::file_tag::FileTag;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 mod assignments;
 mod cache;
 mod definitions;
+pub(crate) mod migration;
 pub(crate) mod normalized;
 pub(crate) mod purge_worker;
 mod sidebar_order;
 mod view;
 mod view_hides;
 mod view_reload;
+
+pub(crate) use definitions::PendingTagCascade;
 
 pub(crate) use sidebar_order::{
     parse_sidebar_tag_order, reconcile_sidebar_tag_order, serialize_sidebar_tag_order,
@@ -112,20 +115,20 @@ fn tag_assignment_key_for_path<'a>(
         .find(|assigned_path| tag_assignment_path_matches(assigned_path, path))
 }
 
-fn tag_assignment_key_for_path_with_tag<'a>(
+fn tag_assignment_key_for_path_with_any<'a>(
     assignments: &'a FxHashMap<PathBuf, Vec<i64>>,
     path: &Path,
-    tag_id: i64,
+    tag_ids: &FxHashSet<i64>,
 ) -> Option<&'a PathBuf> {
+    let has_any = |ids: &Vec<i64>| ids.iter().any(|id| tag_ids.contains(id));
     if let Some((key, ids)) = assignments.get_key_value(path) {
-        if ids.contains(&tag_id) {
+        if has_any(ids) {
             return Some(key);
         }
     }
 
     assignments.iter().find_map(|(assigned_path, ids)| {
-        (ids.contains(&tag_id) && tag_assignment_path_matches(assigned_path, path))
-            .then_some(assigned_path)
+        (has_any(ids) && tag_assignment_path_matches(assigned_path, path)).then_some(assigned_path)
     })
 }
 
