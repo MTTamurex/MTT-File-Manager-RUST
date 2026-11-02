@@ -21,7 +21,7 @@ if (-not $CompilerPath) { throw 'Inno Setup compiler not found.' }
 if (Test-Path -LiteralPath $WorkDirectory) { throw 'WorkDirectory must not already exist.' }
 [void](New-Item -ItemType Directory -Path $WorkDirectory)
 
-function Invoke-CompileCase([string]$Name, [string[]]$Defines) {
+function Invoke-CompileCase([string]$Name, [string[]]$Defines, [string]$ExpectedSuffix) {
     $arguments = @('/O-', "/DBuildOutputDir=$WorkDirectory") + $Defines
     $previousPreference = $ErrorActionPreference
     try {
@@ -35,6 +35,30 @@ function Invoke-CompileCase([string]$Name, [string[]]$Defines) {
     if ($exitCode -ne 0) {
         throw "$Name failed: $($output -join [Environment]::NewLine)"
     }
+
+    # Compile the real preprocessor header with an assertion on the asset name.
+    # This catches changes that would prevent older installed updaters from
+    # finding the standard installer, without producing an installer artifact.
+    $source = Get-Content -LiteralPath (Join-Path $installerRoot 'setup.iss') -Raw
+    $header = $source.Substring(0, $source.IndexOf('[Setup]'))
+    $probe = $header + @"
+
+#if InstallerSuffix != "$ExpectedSuffix"
+  #error Unexpected installer filename suffix
+#endif
+[Setup]
+AppName=Fixture
+AppVersion={#MyAppVersion}
+DefaultDirName={tmp}\Fixture
+Uninstallable=no
+"@
+    $probePath = Join-Path $WorkDirectory 'filename-check.iss'
+    Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
+    $arguments = @('/O-', '/Q', "/DBuildOutputDir=$WorkDirectory") + $Defines + @($probePath)
+    $output = & $CompilerPath @arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name filename check failed: $($output -join [Environment]::NewLine)"
+    }
     Write-Output "$Name passed."
 }
 
@@ -43,8 +67,8 @@ try {
     foreach ($name in @('mtt-file-manager.exe', 'mtt-search-service.exe', 'pdfium.dll', 'libmpv-2.dll')) {
         Set-Content -LiteralPath (Join-Path $WorkDirectory $name) -Value 'fixture'
     }
-    Invoke-CompileCase 'No-update installer excludes a missing helper' @('/DNoOnlineUpdates=1')
-    Invoke-CompileCase 'Browser-update installer excludes a missing helper' @()
+    Invoke-CompileCase 'No-update installer excludes a missing helper' @('/DNoOnlineUpdates=1') '-no-update'
+    Invoke-CompileCase 'Standard installer excludes a missing helper and keeps its asset name' @() ''
     $installerSource = Get-Content -LiteralPath (Join-Path $installerRoot 'setup.iss') -Raw
     if ($installerSource -match '(?im)^Source:.*mtt-updater\.exe') {
         throw 'The browser-update installer must not package an update helper.'

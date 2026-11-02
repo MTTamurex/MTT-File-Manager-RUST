@@ -8,7 +8,7 @@
 
 **[Download the latest release](../../releases/latest)**
 
-1. On the release page, expand **Assets** and download the installer. This experimental branch produces **`MTT-File-Manager-Setup-<version>-browser-update.exe`**. The **Source code** ZIP/TAR files are for developers, not installers.
+1. On the release page, expand **Assets** and download **`MTT-File-Manager-Setup-<version>.exe`**. The **Source code** ZIP/TAR files are for developers, not installers.
 2. Open the downloaded installer and approve the Windows administrator prompt. Administrator access is needed to install the background search and drive-information service; normal use of the file manager does not require it.
 3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
 4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
@@ -22,7 +22,7 @@ Some antivirus engines on VirusTotal flag the installer. Each case is submitted 
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
 - **Microsoft component still missing:** complete its installation, including a restart if requested, and click **Check again**. Installing the x86 version alone does not satisfy the x64 requirement.
 - **An older MTT installer only displays a prerequisite warning:** install the Microsoft component using the link above, then run setup again.
-- **Updating (browser-update experiment):** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually or disable startup checks. **Download update** opens the official release page in your browser; download and run the installer manually. MTT does not download or execute installers, close itself to update, or include a separate updater executable. The original integrated updater remains on branch `v0_2_10`.
+- **Updating:** MTT checks normal GitHub releases at startup and shows the release notes. Use **Settings > About > Check for updates** to check manually or disable startup checks. **Download update** opens the official release page in your browser; download and run the installer manually. MTT does not download or execute installers, close itself to update, or include a separate updater executable.
 
 ## Key Features
 
@@ -247,7 +247,7 @@ MTT's built-in Internet requests are used exclusively to check for application u
 
 Update requests identify the application and its version in the User-Agent header. Like any Internet connection, they expose the connection's public IP address to the service provider; this is not an anonymous connection. GitHub handles these requests under its own [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
 
-Startup checks are enabled by default and can be disabled in **Settings > About**. Manual checks remain available; this experimental branch does not perform automatic installation.
+Startup checks are enabled by default and can be disabled in **Settings > About**. Manual checks remain available; installation is manual.
 
 ### Optional local diagnostics
 

@@ -1,8 +1,8 @@
-# Installer editions — browser-update experiment
+# Installer editions
 
-This experimental branch replaces integrated installation with a browser link.
-The original integrated updater remains on `v0_2_10`. Both editions below are
-built from this experimental source tree.
+The standard edition checks for updates and opens the official release page in
+the browser. The no-update edition omits update checks. Both editions are built
+from the same source tree.
 
 ## Cargo feature
 
@@ -56,7 +56,7 @@ changes; it intentionally reuses existing binaries rather than recompiling them.
 
 Outputs in `installer/output`:
 
-- `MTT-File-Manager-Setup-<version>-browser-update.exe`
+- `MTT-File-Manager-Setup-<version>.exe`
 - `MTT-File-Manager-Setup-<version>-no-update.exe`
 
 Both installers use the same application identity and installation location.
@@ -64,8 +64,9 @@ Only one edition is installed at a time. Existing update preferences are left
 untouched when switching; the no-update edition neither reads nor acts on them.
 The previous automatic-install preference is ignored, not erased. An old helper
 file from an earlier installation may remain on disk, but neither edition has
-code to invoke it. The new standard target directory and installer suffix keep
-this experiment separate from existing integrated-updater build artifacts.
+code to invoke it. The standard target directory remains separate from earlier
+integrated-updater builds. The standard installer retains its original asset
+name so already-installed integrated updaters can find this release.
 
 ## Validation and release hashes
 

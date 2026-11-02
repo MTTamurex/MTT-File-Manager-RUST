@@ -1,8 +1,7 @@
-# Browser-based application updates (experiment)
+# Browser-based application updates
 
-This branch keeps update checks and release notes but removes installer downloads,
-automatic installation, and the separate update executable. The original flow is
-preserved on `v0_2_10`.
+The standard edition keeps update checks and release notes without installer
+downloads, automatic installation, or a separate update executable.
 
 ## Release requirements
 
@@ -12,10 +11,10 @@ preserved on `v0_2_10`.
   its version is newer. It does not select, download, or execute release assets.
 - **Download update** opens the official release page in the default browser;
   the user chooses an installer and runs it manually.
-- See [variant build instructions](VARIANTS.md). The experiment produces
-  `MTT-File-Manager-Setup-<version>-browser-update.exe` without overwriting the
-  original standard installer. Existing integrated-updater clients still require
-  their original asset naming; this experimental installer is for manual testing.
+- See [variant build instructions](VARIANTS.md). Publish the standard installer as
+  `MTT-File-Manager-Setup-<version>.exe`. Existing integrated-updater clients require
+  this asset name and GitHub's SHA-256 digest to perform their final integrated
+  upgrade; after upgrading, future downloads and installation are manual.
 
 ## Behavior and trust
 
@@ -49,7 +48,7 @@ installation is left untouched and is not invoked.
 7. Test the no-update edition and confirm all update controls are absent.
 
 Use `installer/tests/test_update_variants.ps1` to validate packaging without
-installing MTT. Scan the exact final experimental installer and record its hash;
+installing MTT. Scan the exact final installer and record its hash;
 this change does not guarantee a particular antivirus result.
 
 ## Uninstall after a VM downgrade test
@@ -58,4 +57,4 @@ Inno Setup accumulates uninstall actions across installations. The existing
 folder-restoration action uses a guarded script with the SHA-256 of the packaged
 application. It runs maintenance only if the installed executable still matches;
 the native installer restoration remains available on mismatch. This protection
-and its existing RunOnceId are unchanged by the browser-update experiment.
+and its existing RunOnceId are unchanged by the browser-based update flow.

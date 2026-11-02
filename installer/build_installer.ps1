@@ -255,7 +255,7 @@ if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed (exit code $LASTEXITCODE)" }
 $outputDir = "$RepoRoot\installer\output"
 $versionLine = Select-String -LiteralPath $issFile -Pattern '^#define MyAppVersion\s+"([^"]+)"'
 $version = $versionLine.Matches[0].Groups[1].Value
-$suffix = if ($Variant -eq 'NoUpdate') { '-no-update' } else { '-browser-update' }
+$suffix = if ($Variant -eq 'NoUpdate') { '-no-update' } else { '' }
 $installer = Get-Item -LiteralPath (Join-Path $outputDir "MTT-File-Manager-Setup-$version$suffix.exe")
 
 Write-Host "`n=== Build complete ===" -ForegroundColor Green

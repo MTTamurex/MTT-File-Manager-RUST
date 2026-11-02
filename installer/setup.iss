@@ -21,7 +21,7 @@
 #ifdef NoOnlineUpdates
   #define InstallerSuffix "-no-update"
 #else
-  #define InstallerSuffix "-browser-update"
+  #define InstallerSuffix ""
 #endif
 #define MyAppExeHash   GetSHA256OfFile(AddBackslash(BuildOutputDir) + MyAppExeName)
 
