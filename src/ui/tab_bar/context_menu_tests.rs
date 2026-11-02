@@ -1,4 +1,4 @@
-use super::context_menu::{close_control, tab_context_menu};
+use super::context_menu::{close_control, tab_context_menu, TabContextMenuOptions};
 use crate::tabs::TabAction;
 use eframe::egui::{self, pos2, vec2, Context, Event, Modifiers, PointerButton, RawInput, Sense};
 
@@ -45,13 +45,15 @@ fn clicking_empty_title_strip_dismisses_tab_menu_without_opening_a_tab_or_draggi
             let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
             action = action.or(tab_context_menu(
                 &response,
-                false,
-                true,
-                false,
-                false,
-                None,
-                None,
-                Some(false),
+                TabContextMenuOptions {
+                    pinned: false,
+                    can_duplicate: true,
+                    can_close_left: false,
+                    can_close_right: false,
+                    quick_access_action: None,
+                    tree_action: None,
+                    can_reopen: Some(false),
+                },
             ));
             new_tab_clicked |= super::new_tab_area::render_new_tab_and_drag_area(
                 ui,
@@ -105,13 +107,15 @@ fn reopen_menu_entry_is_disabled_without_history_and_hidden_for_pane_tabs() {
             let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
             action = action.or(tab_context_menu(
                 &response,
-                false,
-                true,
-                false,
-                false,
-                None,
-                None,
-                availability,
+                TabContextMenuOptions {
+                    pinned: false,
+                    can_duplicate: true,
+                    can_close_left: false,
+                    can_close_right: false,
+                    quick_access_action: None,
+                    tree_action: None,
+                    can_reopen: availability,
+                },
             ));
         };
         let _ = ctx.run_ui(RawInput::default(), &mut render);
@@ -194,17 +198,19 @@ fn click_command_without_selecting_tab(
         };
         if let Some(command) = tab_context_menu(
             &context_response,
-            pinned,
-            true,
-            false,
-            false,
-            quick_access,
-            matches!(
-                expected,
-                TabAction::ExpandFolderTree | TabAction::CollapseFolderTree
-            )
-            .then_some(expected),
-            Some(true),
+            TabContextMenuOptions {
+                pinned,
+                can_duplicate: true,
+                can_close_left: false,
+                can_close_right: false,
+                quick_access_action: quick_access,
+                tree_action: matches!(
+                    expected,
+                    TabAction::ExpandFolderTree | TabAction::CollapseFolderTree
+                )
+                .then_some(expected),
+                can_reopen: Some(true),
+            },
         ) {
             action = Some(command);
         }

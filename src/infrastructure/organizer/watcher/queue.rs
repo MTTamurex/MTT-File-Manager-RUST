@@ -77,6 +77,9 @@ pub(super) fn queue_rule_paths(
     paused_rules: &HashSet<i64>,
     pending: &mut HashMap<PathBuf, PendingFile>,
 ) {
+    if !rule.enabled || paused_rules.contains(&rule.id) {
+        return;
+    }
     for path in preview_rule(rule) {
         queue_matching_path(rules, activation_flags, paused_rules, path, pending);
     }

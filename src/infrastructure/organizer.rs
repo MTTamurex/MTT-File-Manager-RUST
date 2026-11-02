@@ -99,17 +99,13 @@ impl PendingCommandRegistry {
 }
 
 enum OrganizerCommand {
+    SetGlobalPause {
+        command_id: OrganizerCommandId,
+        paused: bool,
+    },
     SetRules {
         command_id: OrganizerCommandId,
         rules: Vec<OrganizerRule>,
-    },
-    PauseRule {
-        command_id: OrganizerCommandId,
-        rule_id: i64,
-    },
-    ResumeRule {
-        command_id: OrganizerCommandId,
-        rule_id: i64,
     },
     CreateFolder {
         command_id: OrganizerCommandId,
@@ -235,18 +231,11 @@ impl OrganizerManager {
         self.enqueue(move |command_id| OrganizerCommand::SetRules { command_id, rules })
     }
 
-    pub fn pause_rule(&self, rule_id: i64) -> Result<OrganizerCommandId, OrganizerCommandError> {
-        self.enqueue(move |command_id| OrganizerCommand::PauseRule {
-            command_id,
-            rule_id,
-        })
-    }
-
-    pub fn resume_rule(&self, rule_id: i64) -> Result<OrganizerCommandId, OrganizerCommandError> {
-        self.enqueue(move |command_id| OrganizerCommand::ResumeRule {
-            command_id,
-            rule_id,
-        })
+    pub fn set_global_pause(
+        &self,
+        paused: bool,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        self.enqueue(move |command_id| OrganizerCommand::SetGlobalPause { command_id, paused })
     }
 
     pub fn create_missing_folder(
@@ -327,3 +316,7 @@ mod watcher;
 #[cfg(test)]
 #[path = "organizer/manager_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "notify-watcher"))]
+#[path = "organizer/global_pause_tests.rs"]
+mod global_pause_tests;

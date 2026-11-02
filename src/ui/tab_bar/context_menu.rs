@@ -2,18 +2,31 @@ use crate::tabs::actions::TabAction;
 use eframe::egui;
 use rust_i18n::t;
 
-/// Commands do not select the clicked tab. `can_reopen` is `None` for pane
-/// strips, which do not share the workspace's closed-tab history.
+pub(crate) struct TabContextMenuOptions {
+    pub pinned: bool,
+    pub can_duplicate: bool,
+    pub can_close_left: bool,
+    pub can_close_right: bool,
+    pub quick_access_action: Option<TabAction>,
+    pub tree_action: Option<TabAction>,
+    /// Pane strips do not share workspace closed-tab history and use `None`.
+    pub can_reopen: Option<bool>,
+}
+
+/// Commands do not select the clicked tab.
 pub(crate) fn tab_context_menu(
     response: &egui::Response,
-    pinned: bool,
-    can_duplicate: bool,
-    can_close_left: bool,
-    can_close_right: bool,
-    quick_access_action: Option<TabAction>,
-    tree_action: Option<TabAction>,
-    can_reopen: Option<bool>,
+    options: TabContextMenuOptions,
 ) -> Option<TabAction> {
+    let TabContextMenuOptions {
+        pinned,
+        can_duplicate,
+        can_close_left,
+        can_close_right,
+        quick_access_action,
+        tree_action,
+        can_reopen,
+    } = options;
     let mut action = None;
     response.context_menu(|ui| {
         for (command, enabled, label) in [

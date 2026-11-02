@@ -438,6 +438,18 @@ pub fn toggle_switch(
 fn paint_switch(ui: &mut egui::Ui, track: Rect, on: bool, hovered: bool) {
     let dark_mode = ui.visuals().dark_mode;
     let painter = ui.painter();
+    if !ui.is_enabled() {
+        let visuals = &ui.visuals().widgets.noninteractive;
+        painter.rect_filled(track, 10.0, visuals.bg_fill);
+        painter.rect_stroke(track, 10.0, visuals.bg_stroke, StrokeKind::Inside);
+        let x = if on {
+            track.max.x - 10.0
+        } else {
+            track.min.x + 10.0
+        };
+        painter.circle_filled(Pos2::new(x, track.center().y), 6.0, visuals.fg_stroke.color);
+        return;
+    }
     if on {
         painter.rect_filled(track, 10.0, theme::accent_color(ui.ctx()));
         painter.circle_filled(

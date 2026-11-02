@@ -1,6 +1,101 @@
 use super::*;
 use egui::accesskit::{Action, Role, Toggled};
 
+#[test]
+fn organizer_disabled_toggles_keep_their_positions_with_neutral_colors_in_every_theme() {
+    use crate::app::navigation_state::ThemeMode;
+    for mode in [
+        ThemeMode::Light,
+        ThemeMode::Dark,
+        ThemeMode::DarkDeep,
+        ThemeMode::GitHubDark,
+    ] {
+        let ctx = egui::Context::default();
+        theme::apply_theme_visuals(&ctx, mode);
+        let mut enabled_on = true;
+        let active = ctx.run_ui(egui::RawInput::default(), |ui| {
+            toggle_switch(ui, &mut enabled_on, "Rule enabled");
+        });
+        let active_fill = selected_control_rect(&active, 20.0).fill;
+        let mut disabled_fills = Vec::new();
+        for original in [false, true] {
+            let mut value = original;
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.add_enabled_ui(false, |ui| {
+                    let response = toggle_switch(ui, &mut value, "Rule enabled");
+                    assert!(!response.enabled());
+                });
+            });
+            assert_eq!(value, original);
+            let track = selected_control_rect(&output, 20.0);
+            disabled_fills.push(track.fill);
+            assert_ne!(track.fill, active_fill, "{mode:?}");
+            let knob = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Circle(circle) => Some(circle),
+                    _ => None,
+                })
+                .expect("toggle knob");
+            let expected_x = if original {
+                track.rect.max.x - 10.0
+            } else {
+                track.rect.min.x + 10.0
+            };
+            assert_eq!(knob.center.x, expected_x);
+        }
+        assert_eq!(disabled_fills[0], disabled_fills[1], "{mode:?}");
+        let restored = ctx.run_ui(egui::RawInput::default(), |ui| {
+            toggle_switch(ui, &mut enabled_on, "Rule enabled");
+        });
+        assert_eq!(selected_control_rect(&restored, 20.0).fill, active_fill);
+    }
+}
+
+#[test]
+fn organizer_disabled_individual_toggles_ignore_clicks_until_enabled_again() {
+    for original in [false, true] {
+        let ctx = egui::Context::default();
+        let mut value = original;
+        let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.add_enabled_ui(false, |ui| {
+                rect.set(toggle_switch(ui, &mut value, "Rule enabled").rect);
+            });
+        });
+        let pos = rect.get().center();
+        for interactive in [false, true] {
+            // egui hit-testing uses the previous frame's enabled widgets.
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.add_enabled_ui(interactive, |ui| {
+                    toggle_switch(ui, &mut value, "Rule enabled");
+                });
+            });
+            for pressed in [true, false] {
+                let input = egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                };
+                let _ = ctx.run_ui(input, |ui| {
+                    ui.add_enabled_ui(interactive, |ui| {
+                        toggle_switch(ui, &mut value, "Rule enabled");
+                    });
+                });
+            }
+            assert_eq!(value, if interactive { !original } else { original });
+        }
+    }
+}
+
 fn selected_control_rect(output: &egui::FullOutput, height: f32) -> egui::epaint::RectShape {
     output
         .shapes

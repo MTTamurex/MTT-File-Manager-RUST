@@ -125,7 +125,7 @@ impl ImageViewerApp {
         }
         match action {
             // Closed workspace tabs belong to the main strip, not pane tabs.
-            TabAction::ReopenClosed => return,
+            TabAction::ReopenClosed => (),
             TabAction::ExpandFolderTree | TabAction::CollapseFolderTree => {
                 let owner = crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(
                     self.tab_manager.active().id,

@@ -285,15 +285,15 @@ fn commands_return_typed_success_confirmations() {
         receive_command_result(&manager, rules_id),
         Ok(OrganizerCommandResult::RulesUpdated { rule_count: 1 })
     );
-    let pause_id = manager.pause_rule(7).expect("queue pause");
+    let pause_id = manager.set_global_pause(true).expect("queue global off");
     assert_eq!(
         receive_command_result(&manager, pause_id),
-        Ok(OrganizerCommandResult::RulePaused { rule_id: 7 })
+        Ok(OrganizerCommandResult::GlobalPauseSet { paused: true })
     );
-    let resume_id = manager.resume_rule(7).expect("queue resume");
+    let resume_id = manager.set_global_pause(false).expect("queue global on");
     assert_eq!(
         receive_command_result(&manager, resume_id),
-        Ok(OrganizerCommandResult::RuleResumed { rule_id: 7 })
+        Ok(OrganizerCommandResult::GlobalPauseSet { paused: false })
     );
     let folder_id = manager
         .create_missing_folder(7, true)

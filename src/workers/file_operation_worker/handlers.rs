@@ -706,6 +706,15 @@ pub(super) fn handle_organizer_move(
     let (operation_id, rule_id) = operation;
     let (activation, shutdown) = lifecycle;
     let result = (|| {
+        // Check only at entry, not during the move: global pause lets the current
+        // operation finish but prevents requests still waiting in the worker queue.
+        if !is_undo && app_state_db.organizer_globally_paused().unwrap_or(true) {
+            return FileOperationResult::OrganizerMoveCancelled {
+                operation_id,
+                rule_id,
+                path,
+            };
+        }
         if shutdown.load(std::sync::atomic::Ordering::Acquire)
             || !activation.load(std::sync::atomic::Ordering::Acquire)
         {
@@ -1352,6 +1361,10 @@ pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendH
 #[cfg(test)]
 #[path = "handlers_policy_tests.rs"]
 mod policy_tests;
+
+#[cfg(test)]
+#[path = "handlers_pause_tests.rs"]
+mod pause_tests;
 
 #[cfg(test)]
 mod tests {

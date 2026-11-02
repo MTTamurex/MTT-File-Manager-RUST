@@ -18,6 +18,7 @@ const MAX_COMMANDS_PER_TICK: usize = 64;
 const WATCH_EVENT_QUEUE_CAPACITY: usize = 1024;
 
 mod commands;
+mod pause;
 mod queue;
 mod supervisor;
 
@@ -63,7 +64,8 @@ pub(super) fn run_organizer(
         WatcherRuntime::new(watch_event_sender, Arc::clone(&watch_overflowed));
     let mut next_health_check = Instant::now();
     let mut reported_statuses = HashMap::new();
-    let mut paused_rules = HashSet::new();
+    let mut globally_paused = pause::load_pause_state(&app_state_db, &event_sender);
+    let mut paused_rules = pause::effective_paused_rules(&rules, globally_paused);
     let mut pending = HashMap::new();
     let mut activation_flags = activation_flags_for(&rules);
     let in_flight = OrganizerInFlightRegistry::default();
@@ -141,6 +143,7 @@ pub(super) fn run_organizer(
                 rules: &mut rules,
                 activation_flags: &mut activation_flags,
                 paused_rules: &mut paused_rules,
+                globally_paused: &mut globally_paused,
                 pending: &mut pending,
                 watcher_runtime: &mut watcher_runtime,
                 reported_statuses: &mut reported_statuses,

@@ -320,30 +320,45 @@ pub(super) fn render_tabs(
             };
         }
         if !is_item_dragging {
+            use super::context_menu::{tab_context_menu, TabContextMenuOptions};
             use crate::tabs::actions::{close_candidates, TabAction};
             let context_response = if tab.pinned {
                 response.union(close_response)
             } else {
                 response
             };
-            if let Some(command) = super::context_menu::tab_context_menu(
+            if let Some(command) = tab_context_menu(
                 &context_response,
-                tab.pinned,
-                tab_manager.can_add_tab(),
-                !close_candidates(&tab_manager.tabs, idx, TabAction::CloseLeft, |t| t.pinned)
+                TabContextMenuOptions {
+                    pinned: tab.pinned,
+                    can_duplicate: tab_manager.can_add_tab(),
+                    can_close_left: !close_candidates(
+                        &tab_manager.tabs,
+                        idx,
+                        TabAction::CloseLeft,
+                        |t| t.pinned,
+                    )
                     .is_empty(),
-                !close_candidates(&tab_manager.tabs, idx, TabAction::CloseRight, |t| t.pinned)
+                    can_close_right: !close_candidates(
+                        &tab_manager.tabs,
+                        idx,
+                        TabAction::CloseRight,
+                        |t| t.pinned,
+                    )
                     .is_empty(),
-                crate::tabs::quick_access::tab_quick_access_action(
-                    if is_active { live_path } else { &tab.path },
-                    pinned_folders,
-                ),
-                tree_state.tab_tree_action(
-                    crate::app::state::sidebar_tree_state::reveal::RevealOwner::workspace(tab.id)
+                    quick_access_action: crate::tabs::quick_access::tab_quick_access_action(
+                        if is_active { live_path } else { &tab.path },
+                        pinned_folders,
+                    ),
+                    tree_action: tree_state.tab_tree_action(
+                        crate::app::state::sidebar_tree_state::reveal::RevealOwner::workspace(
+                            tab.id,
+                        )
                         .in_sidebar(tab_manager.active().id),
-                    if is_active { live_path } else { &tab.path },
-                ),
-                Some(tab_manager.can_reopen_closed_tab()),
+                        if is_active { live_path } else { &tab.path },
+                    ),
+                    can_reopen: Some(tab_manager.can_reopen_closed_tab()),
+                },
             ) {
                 action = TabBarAction::Context(idx, command);
             }

@@ -25,6 +25,7 @@ pub(super) struct CommandContext<'a> {
     pub(super) rules: &'a mut Vec<OrganizerRule>,
     pub(super) activation_flags: &'a mut HashMap<i64, Arc<AtomicBool>>,
     pub(super) paused_rules: &'a mut HashSet<i64>,
+    pub(super) globally_paused: &'a mut bool,
     pub(super) pending: &'a mut HashMap<PathBuf, PendingFile>,
     pub(super) watcher_runtime: &'a mut WatcherRuntime,
     pub(super) reported_statuses: &'a mut HashMap<i64, OrganizerRuleStatus>,
@@ -42,18 +43,13 @@ pub(super) struct CommandContext<'a> {
 impl CommandContext<'_> {
     pub(super) fn process(&mut self, command: OrganizerCommand) -> bool {
         match command {
+            OrganizerCommand::SetGlobalPause { command_id, paused } => {
+                self.set_global_pause(command_id, paused)
+            }
             OrganizerCommand::SetRules {
                 command_id,
                 rules: new_rules,
             } => self.set_rules(command_id, new_rules),
-            OrganizerCommand::PauseRule {
-                command_id,
-                rule_id,
-            } => self.pause_rule(command_id, rule_id),
-            OrganizerCommand::ResumeRule {
-                command_id,
-                rule_id,
-            } => self.resume_rule(command_id, rule_id),
             OrganizerCommand::CreateFolder {
                 command_id,
                 rule_id,
@@ -86,11 +82,7 @@ impl CommandContext<'_> {
             update_activation_flags(&previous_rules, self.rules, self.activation_flags);
         self.pending
             .retain(|_, pending| pending.activation.load(Ordering::Acquire));
-        self.paused_rules.retain(|rule_id| {
-            self.rules
-                .iter()
-                .any(|rule| rule.id == *rule_id && rule.enabled)
-        });
+        self.refresh_paused_rules();
         reset_watcher(self.watcher_runtime);
         self.reported_statuses
             .retain(|rule_id, _| self.rules.iter().any(|rule| rule.id == *rule_id));
@@ -110,51 +102,6 @@ impl CommandContext<'_> {
             Ok(OrganizerCommandResult::RulesUpdated {
                 rule_count: self.rules.len(),
             }),
-        )
-    }
-
-    fn pause_rule(&mut self, command_id: OrganizerCommandId, rule_id: i64) -> bool {
-        if !self
-            .rules
-            .iter()
-            .any(|rule| rule.id == rule_id && rule.enabled)
-        {
-            return self.rule_unavailable(command_id);
-        }
-        if let Some(activation) = self.activation_flags.get(&rule_id) {
-            activation.store(false, Ordering::Release);
-        }
-        self.activation_flags
-            .insert(rule_id, Arc::new(AtomicBool::new(false)));
-        self.paused_rules.insert(rule_id);
-        self.pending.retain(|_, pending| pending.rule.id != rule_id);
-        self.respond(
-            command_id,
-            Ok(OrganizerCommandResult::RulePaused { rule_id }),
-        )
-    }
-
-    fn resume_rule(&mut self, command_id: OrganizerCommandId, rule_id: i64) -> bool {
-        let Some(rule) = self
-            .rules
-            .iter()
-            .find(|rule| rule.id == rule_id && rule.enabled)
-        else {
-            return self.rule_unavailable(command_id);
-        };
-        self.paused_rules.remove(&rule_id);
-        self.activation_flags
-            .insert(rule_id, Arc::new(AtomicBool::new(true)));
-        queue_rule_paths(
-            rule,
-            self.rules,
-            self.activation_flags,
-            self.paused_rules,
-            self.pending,
-        );
-        self.respond(
-            command_id,
-            Ok(OrganizerCommandResult::RuleResumed { rule_id }),
         )
     }
 
@@ -967,7 +914,7 @@ impl CommandContext<'_> {
         )
     }
 
-    fn respond(
+    pub(super) fn respond(
         &self,
         command_id: OrganizerCommandId,
         result: Result<OrganizerCommandResult, OrganizerCommandError>,

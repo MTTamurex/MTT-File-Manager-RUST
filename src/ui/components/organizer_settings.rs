@@ -5,7 +5,7 @@ use crate::domain::organizer_rule::{
     OrganizerRuleError,
 };
 use crate::infrastructure::app_state_db::OrganizerRuleDbError;
-use crate::infrastructure::organizer::{OrganizerCommandError, OrganizerRuleStatus};
+use crate::infrastructure::organizer::OrganizerRuleStatus;
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
@@ -13,6 +13,7 @@ use rust_i18n::t;
 use std::path::PathBuf;
 
 mod conflicts;
+mod controls;
 mod history;
 mod policies;
 mod status;
@@ -23,9 +24,9 @@ use status::{render_folder_creation_confirmation, status_label};
 
 pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     settings_ui::section_header(ui, &t!("settings.organizer"), &t!("organizer.description"));
-
     let form_rect = render_rule_form(ui, app);
     ui.add_space(16.0);
+    controls::render_global_toggle(ui, app);
     let edit_clicked = render_rules(ui, app);
     if edit_clicked {
         // Jump straight to the form so the user sees the fields being edited.
@@ -230,8 +231,16 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
                     label_resp.on_hover_text(extensions_text.clone());
                 }
                 let toggle_label = format!("{}: {}", t!("organizer.enabled"), extensions_text);
+                let toggles_enabled = app
+                    .organizer_state
+                    .global_pause
+                    .individual_toggles_enabled();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled, &toggle_label)
+                    let toggle = ui
+                        .add_enabled_ui(toggles_enabled, |ui| {
+                            settings_ui::toggle_switch(ui, &mut rule.enabled, &toggle_label)
+                        })
+                        .inner
                         .on_hover_text(t!("organizer.enabled").to_string());
                     if toggle.clicked() {
                         let message = if rule.enabled {
@@ -287,18 +296,6 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> bool {
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if rule.enabled && status == OrganizerRuleStatus::Active {
-                    if ui.button(t!("organizer.pause")).clicked() {
-                        let result = app.organizer_state.manager.pause_rule(rule.id);
-                        report_command_error(app, result);
-                    }
-                } else if rule.enabled
-                    && status == OrganizerRuleStatus::Paused
-                    && ui.button(t!("organizer.resume")).clicked()
-                {
-                    let result = app.organizer_state.manager.resume_rule(rule.id);
-                    report_command_error(app, result);
-                }
                 if matches!(
                     status,
                     OrganizerRuleStatus::SourceUnavailable | OrganizerRuleStatus::BothUnavailable
@@ -442,15 +439,6 @@ fn reload_rules(app: &mut ImageViewerApp) {
         .organizer_state
         .replace_rules(app.app_state_db.get_organizer_rules())
     {
-        app.notifications.warning(error.to_string());
-    }
-}
-
-fn report_command_error(
-    app: &mut ImageViewerApp,
-    result: Result<crate::infrastructure::organizer::OrganizerCommandId, OrganizerCommandError>,
-) {
-    if let Err(error) = result {
         app.notifications.warning(error.to_string());
     }
 }

@@ -25,6 +25,7 @@ mod organizer_conflict_resolutions;
 mod organizer_conflicts;
 mod organizer_operation_schema;
 mod organizer_operations;
+mod organizer_pause;
 mod organizer_rules;
 mod pinned_folders;
 mod preferences;
@@ -423,6 +424,7 @@ impl AppStateDb {
             }
         }
 
+        organizer_pause::migrate_individual_pauses(conn)?;
         organizer_operation_schema::migrate(conn)?;
 
         conn.execute(

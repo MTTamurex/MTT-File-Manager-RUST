@@ -310,39 +310,42 @@ pub(super) fn render_panel_tab_bar(
                                 }
                                 if !is_item_dragging {
                                     use crate::tabs::actions::{close_candidates, TabAction};
+                                    use crate::ui::tab_bar::context_menu::{tab_context_menu, TabContextMenuOptions};
                                     let context_response = if tab.pinned {
                                         tab_response.union(close_response)
                                     } else {
                                         tab_response
                                     };
                                     if let Some(command) =
-                                        crate::ui::tab_bar::context_menu::tab_context_menu(
+                                        tab_context_menu(
                                             &context_response,
-                                            tab.pinned,
-                                            can_add_tab,
-                                            !close_candidates(
+                                            TabContextMenuOptions {
+                                            pinned: tab.pinned,
+                                            can_duplicate: can_add_tab,
+                                            can_close_left: !close_candidates(
                                                 &tabs.tabs,
                                                 index,
                                                 TabAction::CloseLeft,
                                                 |t| t.pinned,
                                             )
                                             .is_empty(),
-                                            !close_candidates(
+                                            can_close_right: !close_candidates(
                                                 &tabs.tabs,
                                                 index,
                                                 TabAction::CloseRight,
                                                 |t| t.pinned,
                                             )
                                             .is_empty(),
-                                            crate::tabs::quick_access::tab_quick_access_action(
+                                            quick_access_action: crate::tabs::quick_access::tab_quick_access_action(
                                                 path,
                                                 pinned_folders,
                                             ),
-                                            tree_state.tab_tree_action(
+                                            tree_action: tree_state.tab_tree_action(
                                                 crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(workspace_id, tab.id),
                                                 path,
                                             ),
-                                            None,
+                                            can_reopen: None,
+                                            },
                                         )
                                     {
                                         action =

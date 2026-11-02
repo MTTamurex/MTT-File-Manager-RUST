@@ -13,14 +13,11 @@ pub enum OrganizerConflictResolution {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum OrganizerCommandResult {
+    GlobalPauseSet {
+        paused: bool,
+    },
     RulesUpdated {
         rule_count: usize,
-    },
-    RulePaused {
-        rule_id: i64,
-    },
-    RuleResumed {
-        rule_id: i64,
     },
     FolderReady {
         rule_id: i64,
@@ -81,6 +78,7 @@ pub enum OrganizerUndoUnavailableReason {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum OrganizerCommandError {
+    PausePersistenceFailed { reason: String },
     ManagerUnavailable,
     CommandIdExhausted,
     InvalidRules(OrganizerRuleError),
@@ -101,6 +99,11 @@ pub enum OrganizerCommandError {
 impl fmt::Display for OrganizerCommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::PausePersistenceFailed { reason } => write!(
+                formatter,
+                "{}",
+                rust_i18n::t!("organizer.error_pause_persistence", reason = reason)
+            ),
             Self::ManagerUnavailable => {
                 formatter.write_str(rust_i18n::t!("organizer.error_manager_unavailable").as_ref())
             }
