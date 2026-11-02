@@ -83,7 +83,12 @@ impl ImageViewerApp {
         self.sync_thumbnail_generation_gate();
     }
 
-    pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {
+    pub(super) fn reset_folder_loading_state(
+        &mut self,
+        force_refresh: bool,
+        trim_icons: bool,
+        preserve_empty_listing: bool,
+    ) {
         // 1. State Cleanup (UI Thread)
         let preserve_visual_pipeline = !force_refresh && !self.items.is_empty();
         let preserve_inactive_dual_panel_pipeline =
@@ -109,7 +114,8 @@ impl ImageViewerApp {
             // a blank/partial-list flash. They will be replaced atomically once
             // the new generation reaches end-of-load.
             self.pending_all_items_clear = true;
-            self.hold_visible_items_until_load_complete = preserve_visual_pipeline;
+            self.hold_visible_items_until_load_complete =
+                preserve_visual_pipeline || preserve_empty_listing;
         }
         // Soft reloads of the same folder can preserve icon caches to avoid a
         // per-file icon re-extraction storm for executables (.exe/.lnk/.ico).

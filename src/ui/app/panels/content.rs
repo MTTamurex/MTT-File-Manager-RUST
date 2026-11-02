@@ -9,6 +9,7 @@ use rust_i18n::t;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+mod loading_state;
 mod panel_focus;
 
 // M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
@@ -1038,7 +1039,11 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     app.refresh_column_sort(ui.ctx());
     app.refresh_column_grouping(ui.ctx());
 
-    if app.is_loading_folder && app.items.is_empty() {
+    if loading_state::show_initial_loading(
+        app.is_loading_folder,
+        app.items.is_empty(),
+        app.hold_visible_items_until_load_complete,
+    ) {
         ui.centered_and_justified(|ui| {
             ui.label(rust_i18n::t!("panels.loading"));
         });

@@ -1330,8 +1330,7 @@ impl ImageViewerApp {
                         }
                     }
                     self.with_inactive_panel(|app| {
-                        app.loaded_path.clear();
-                        app.load_folder_for_inactive();
+                        app.reload_folder_for_inactive();
                     });
                 }
 

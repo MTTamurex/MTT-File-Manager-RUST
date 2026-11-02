@@ -11,20 +11,44 @@ mod refresh;
 mod size_sorting;
 mod view_updates;
 
+#[cfg(test)]
+mod tests;
+
+fn preserve_empty_listing_on_reload(
+    is_loading: bool,
+    hold_visible_items: bool,
+    has_load_error: bool,
+) -> bool {
+    !has_load_error && (!is_loading || hold_visible_items)
+}
+
 // EST-02: pool workers run the pipeline body directly.
 pub(in crate::app::operations) use guards::allocate_folder_load_generation;
 pub(crate) use load_pipeline::run_folder_load_pipeline;
 
 impl ImageViewerApp {
     pub fn load_folder(&mut self, force_refresh: bool) {
-        self.load_folder_with_icon_trim(force_refresh, true);
+        self.load_folder_with_icon_trim(force_refresh, true, false);
     }
 
     pub fn reload_current_folder_preserving_icon_cache(&mut self) {
-        self.load_folder_with_icon_trim(false, false);
+        // An empty, completed listing is still a valid visual snapshot. Do not
+        // replace it with the initial-loading screen during a same-folder reload.
+        // A restart of an initial load (or a failed load) has no snapshot to keep.
+        let preserve_empty_listing = preserve_empty_listing_on_reload(
+            self.is_loading_folder,
+            self.hold_visible_items_until_load_complete,
+            self.folder_load_error.is_some(),
+        );
+        self.load_folder_with_icon_trim(false, false, preserve_empty_listing);
     }
 
-    fn load_folder_with_icon_trim(&mut self, force_refresh: bool, trim_icons: bool) {
+    fn load_folder_with_icon_trim(
+        &mut self,
+        force_refresh: bool,
+        trim_icons: bool,
+        preserve_empty_listing: bool,
+    ) {
         let mut diagnostic_stage =
             crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
                 "folder_load_guards",
@@ -42,7 +66,7 @@ impl ImageViewerApp {
         self.bump_folder_load_generation();
 
         diagnostic_stage.lap("folder_load_reset_caches");
-        self.reset_folder_loading_state(force_refresh, trim_icons);
+        self.reset_folder_loading_state(force_refresh, trim_icons, preserve_empty_listing);
 
         diagnostic_stage.lap("folder_load_submit");
         self.start_folder_load_pipeline(force_refresh, true);
@@ -56,6 +80,21 @@ impl ImageViewerApp {
     /// pipeline.  Clearing them would nuke in-progress thumbnail work for the
     /// active panel and cause persistent thumbnail display corruption.
     pub fn load_folder_for_inactive(&mut self) {
+        self.load_folder_for_inactive_with_snapshot(false);
+    }
+
+    /// Same-folder refresh, retaining a completed empty view in the inactive pane.
+    pub(in crate::app::operations) fn reload_folder_for_inactive(&mut self) {
+        let preserve_empty_listing = preserve_empty_listing_on_reload(
+            self.is_loading_folder,
+            self.hold_visible_items_until_load_complete,
+            self.folder_load_error.is_some(),
+        );
+        self.loaded_path.clear();
+        self.load_folder_for_inactive_with_snapshot(preserve_empty_listing);
+    }
+
+    fn load_folder_for_inactive_with_snapshot(&mut self, preserve_empty_listing: bool) {
         if let Some(tag_id) =
             crate::domain::special_paths::tag_id_from_view_path(&self.navigation_state.current_path)
         {
@@ -71,7 +110,8 @@ impl ImageViewerApp {
         // Reset ONLY per-panel state; leave shared caches untouched.
         let preserve_visual_pipeline = !self.items.is_empty();
         self.pending_all_items_clear = true;
-        self.hold_visible_items_until_load_complete = preserve_visual_pipeline;
+        self.hold_visible_items_until_load_complete =
+            preserve_visual_pipeline || preserve_empty_listing;
         if !preserve_visual_pipeline {
             self.selected_item = None;
             self.total_items = 0;
