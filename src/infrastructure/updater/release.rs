@@ -3,15 +3,13 @@ use serde::Deserialize;
 use std::io::Read;
 
 const API: &str = "https://api.github.com/repos/MTTamurex/MTT-File-Manager-RUST/releases/latest";
-const ASSET_PREFIX: &str = "https://github.com/MTTamurex/MTT-File-Manager-RUST/releases/download/";
+const RELEASE_PREFIX: &str = "https://github.com/MTTamurex/MTT-File-Manager-RUST/releases/tag/";
 
 #[derive(Clone, Debug)]
 pub(crate) struct Release {
     pub version: Version,
     pub notes: String,
     pub url: String,
-    pub size: u64,
-    pub digest: String,
 }
 
 #[derive(Deserialize)]
@@ -20,15 +18,6 @@ struct ApiRelease {
     body: Option<String>,
     draft: bool,
     prerelease: bool,
-    assets: Vec<Asset>,
-}
-
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
-    digest: Option<String>,
 }
 
 pub(crate) fn check() -> Result<Option<Release>, String> {
@@ -77,37 +66,12 @@ fn parse(bytes: &[u8], current: &str) -> Result<Option<Release>, String> {
     {
         return Ok(None);
     }
-    let name = format!("MTT-File-Manager-Setup-{version}.exe");
-    let mut matching = release
-        .assets
-        .into_iter()
-        .filter(|asset| asset.name == name);
-    let asset = matching
-        .next()
-        .ok_or("The release has no compatible installer")?;
-    let asset_url = reqwest::Url::parse(&asset.browser_download_url)
-        .map_err(|_| "Invalid release installer URL".to_string())?;
-    if matching.next().is_some()
-        || !asset.browser_download_url.starts_with(ASSET_PREFIX)
-        || !asset_url
-            .path()
-            .starts_with("/MTTamurex/MTT-File-Manager-RUST/releases/download/")
-        || asset.size == 0
-        || asset.size > 2 * 1024 * 1024 * 1024
-    {
-        return Err("Invalid release installer".into());
-    }
-    let digest = asset
-        .digest
-        .and_then(|value| value.strip_prefix("sha256:").map(str::to_owned))
-        .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or("The installer has no valid GitHub SHA-256 digest")?;
+    // Construct the page URL from the fixed official repository and the
+    // validated version tag; do not open URLs supplied by the release body.
     Ok(Some(Release {
         version,
         notes: release.body.unwrap_or_default(),
-        url: asset.browser_download_url,
-        size: asset.size,
-        digest,
+        url: format!("{RELEASE_PREFIX}{}", release.tag_name),
     }))
 }
 
@@ -117,9 +81,7 @@ mod tests {
 
     fn fixture(tag: &str) -> serde_json::Value {
         serde_json::json!({"tag_name": tag, "body": "Release notes", "draft": false,
-            "prerelease": false, "assets": [{"name": format!("MTT-File-Manager-Setup-{}.exe", tag.trim_start_matches('v')),
-            "browser_download_url": format!("{ASSET_PREFIX}{tag}/setup.exe"), "size": 123,
-            "digest": format!("sha256:{}", "a".repeat(64))}]})
+            "prerelease": false})
     }
 
     #[test]
@@ -155,32 +117,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_digest_untrusted_url_and_missing_installer() {
-        for field in ["digest", "browser_download_url", "name"] {
-            let mut data = fixture("0.3.0");
-            data["assets"][0][field] = "invalid".into();
-            assert!(parse(&serde_json::to_vec(&data).unwrap(), "0.2.8").is_err());
-        }
+    fn opens_the_official_release_page_without_requiring_download_assets() {
+        let bytes = serde_json::to_vec(&fixture("v0.3.0")).unwrap();
+        let release = parse(&bytes, "0.2.10").unwrap().unwrap();
+        assert_eq!(release.url, format!("{RELEASE_PREFIX}v0.3.0"));
+        assert_eq!(release.notes, "Release notes");
     }
 
     #[test]
-    fn rejects_ambiguous_or_oversized_installers() {
-        let mut data = fixture("0.3.0");
-        let duplicate = data["assets"][0].clone();
-        data["assets"].as_array_mut().unwrap().push(duplicate);
-        assert!(parse(&serde_json::to_vec(&data).unwrap(), "0.2.8").is_err());
-        for size in [0u64, 2 * 1024 * 1024 * 1024 + 1] {
-            let mut data = fixture("0.3.0");
-            data["assets"][0]["size"] = size.into();
-            assert!(parse(&serde_json::to_vec(&data).unwrap(), "0.2.8").is_err());
-        }
+    fn ignores_api_supplied_page_urls() {
+        let mut data = fixture("v0.3.0");
+        data["html_url"] = "https://example.invalid/untrusted".into();
+        let release = parse(&serde_json::to_vec(&data).unwrap(), "0.2.10")
+            .unwrap()
+            .unwrap();
+        assert_eq!(release.url, format!("{RELEASE_PREFIX}v0.3.0"));
     }
 
     #[test]
-    fn rejects_path_traversal_outside_the_official_release_directory() {
-        let mut data = fixture("0.3.0");
-        data["assets"][0]["browser_download_url"] =
-            format!("{ASSET_PREFIX}../../../../other/setup.exe").into();
-        assert!(parse(&serde_json::to_vec(&data).unwrap(), "0.2.8").is_err());
+    fn rejects_invalid_tags_before_constructing_a_browser_url() {
+        for tag in [
+            "../../other",
+            "v0.3.0?redirect=other",
+            "https://example.invalid",
+            "v0.2.9.1",
+        ] {
+            assert!(parse(&serde_json::to_vec(&fixture(tag)).unwrap(), "0.2.10").is_err());
+        }
     }
 }

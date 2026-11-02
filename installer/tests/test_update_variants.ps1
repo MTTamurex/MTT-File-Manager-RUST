@@ -21,7 +21,7 @@ if (-not $CompilerPath) { throw 'Inno Setup compiler not found.' }
 if (Test-Path -LiteralPath $WorkDirectory) { throw 'WorkDirectory must not already exist.' }
 [void](New-Item -ItemType Directory -Path $WorkDirectory)
 
-function Invoke-CompileCase([string]$Name, [string[]]$Defines, [bool]$ShouldSucceed) {
+function Invoke-CompileCase([string]$Name, [string[]]$Defines) {
     $arguments = @('/O-', "/DBuildOutputDir=$WorkDirectory") + $Defines
     $previousPreference = $ErrorActionPreference
     try {
@@ -32,11 +32,8 @@ function Invoke-CompileCase([string]$Name, [string[]]$Defines, [bool]$ShouldSucc
     } finally {
         $ErrorActionPreference = $previousPreference
     }
-    if (($exitCode -eq 0) -ne $ShouldSucceed) {
+    if ($exitCode -ne 0) {
         throw "$Name failed: $($output -join [Environment]::NewLine)"
-    }
-    if (-not $ShouldSucceed -and ($output -join "`n") -notmatch 'mtt-updater\.exe') {
-        throw 'Standard installer failed for an unexpected reason.'
     }
     Write-Output "$Name passed."
 }
@@ -46,10 +43,12 @@ try {
     foreach ($name in @('mtt-file-manager.exe', 'mtt-search-service.exe', 'pdfium.dll', 'libmpv-2.dll')) {
         Set-Content -LiteralPath (Join-Path $WorkDirectory $name) -Value 'fixture'
     }
-    Invoke-CompileCase 'No-update installer excludes a missing helper' @('/DNoOnlineUpdates=1') $true
-    Invoke-CompileCase 'Standard installer requires the helper' @() $false
-    Set-Content -LiteralPath (Join-Path $WorkDirectory 'mtt-updater.exe') -Value 'fixture'
-    Invoke-CompileCase 'Standard installer accepts the helper' @() $true
+    Invoke-CompileCase 'No-update installer excludes a missing helper' @('/DNoOnlineUpdates=1')
+    Invoke-CompileCase 'Browser-update installer excludes a missing helper' @()
+    $installerSource = Get-Content -LiteralPath (Join-Path $installerRoot 'setup.iss') -Raw
+    if ($installerSource -match '(?im)^Source:.*mtt-updater\.exe') {
+        throw 'The browser-update installer must not package an update helper.'
+    }
 
     Push-Location $repoRoot
     try {
@@ -58,12 +57,12 @@ try {
         $package = ($json | ConvertFrom-Json).packages | Where-Object name -eq 'mtt-file-manager'
         if ($package.features.default -notcontains 'online-updates') { throw 'Standard build must enable online-updates.' }
         $helper = $package.targets | Where-Object name -eq 'mtt-updater'
-        if ($helper.'required-features' -notcontains 'online-updates') { throw 'Helper must require online-updates.' }
+        if ($helper) { throw 'The browser-update build must not define an updater binary.' }
         foreach ($name in @('reqwest', 'semver', 'egui_commonmark')) {
             $dependency = $package.dependencies | Where-Object name -eq $name
             if (-not $dependency.optional) { throw "$name must be optional." }
         }
-        Write-Output 'Cargo feature and helper configuration passed.'
+        Write-Output 'Cargo feature and browser-only update configuration passed.'
 
         $tree = cargo tree -p mtt-file-manager --depth 1 --prefix none --edges normal --locked --no-default-features --features notify-watcher
         if ($LASTEXITCODE -ne 0) { throw 'No-update dependency resolution failed.' }

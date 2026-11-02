@@ -2,7 +2,6 @@ use crate::app::ImageViewerApp;
 use crate::ui::{components::settings_ui, theme};
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
-use std::sync::atomic::Ordering;
 
 pub(crate) fn settings(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.add_space(8.0);
@@ -10,34 +9,28 @@ pub(crate) fn settings(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 10.0;
-        for (key, label, value) in [
-            (
-                "updates_check_on_startup",
-                t!("updates.check_startup"),
-                &mut app.updates.check_on_startup,
-            ),
-            (
-                "updates_auto_install",
-                t!("updates.auto_install"),
-                &mut app.updates.auto_install,
-            ),
-        ] {
-            let previous = *value;
-            if preference_row(ui, &label, value).changed()
-                && app
-                    .app_state_db
-                    .set_preference(key, if *value { "true" } else { "false" })
-                    .is_err()
-            {
-                *value = previous;
-                app.updates.error = Some(t!("updates.save_failed").to_string());
-            }
+        let previous = app.updates.check_on_startup;
+        if preference_row(
+            ui,
+            &t!("updates.check_startup"),
+            &mut app.updates.check_on_startup,
+        )
+        .changed()
+            && app
+                .app_state_db
+                .set_preference(
+                    "updates_check_on_startup",
+                    if app.updates.check_on_startup {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                )
+                .is_err()
+        {
+            app.updates.check_on_startup = previous;
+            app.updates.error = Some(t!("updates.save_failed").to_string());
         }
-        ui.label(
-            RichText::new(t!("updates.auto_install_hint"))
-                .small()
-                .color(theme::secondary_text_color(ui.ctx())),
-        );
         ui.add_space(2.0);
         ui.separator();
         ui.label(
@@ -50,12 +43,12 @@ pub(crate) fn settings(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             ui.spacing_mut().button_padding = egui::vec2(12.0, 7.0);
             if ui
                 .add_enabled(
-                    !app.updates.checking && !app.updates.downloading && !app.updates.waiting(),
+                    !app.updates.checking,
                     egui::Button::new(t!("updates.check")),
                 )
                 .clicked()
             {
-                app.updates.check(ui.ctx(), false);
+                app.updates.check(ui.ctx());
             }
             if app.updates.release.is_some() && ui.button(t!("updates.details")).clicked() {
                 app.updates.show_dialog = true;
@@ -94,13 +87,6 @@ fn preference_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> egui::Res
 fn status(ui: &mut egui::Ui, app: &ImageViewerApp) {
     if app.updates.checking {
         ui.label(t!("updates.checking"));
-    } else if app.updates.downloading {
-        let size = app.updates.release.as_ref().map_or(1, |r| r.size);
-        let done = app.updates.progress.load(Ordering::Relaxed);
-        ui.add(egui::ProgressBar::new(done as f32 / size as f32).show_percentage());
-        ui.label(t!("updates.downloading"));
-    } else if app.updates.waiting() {
-        ui.label(t!("updates.waiting"));
     } else if app.updates.up_to_date {
         ui.label(t!("updates.current"));
     }
@@ -110,7 +96,7 @@ fn status(ui: &mut egui::Ui, app: &ImageViewerApp) {
 }
 
 pub(crate) fn dialog(ctx: &egui::Context, app: &mut ImageViewerApp) {
-    if !app.updates.show_dialog || app.updates.exiting {
+    if !app.updates.show_dialog {
         return;
     }
     egui::Window::new(t!("updates.title"))
@@ -156,23 +142,14 @@ pub(crate) fn dialog(ctx: &egui::Context, app: &mut ImageViewerApp) {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
-                        app.updates.release.is_some()
-                            && !app.updates.checking
-                            && !app.updates.downloading
-                            && !app.updates.waiting(),
-                        egui::Button::new(t!("updates.install")),
+                        app.updates.release.is_some() && !app.updates.checking,
+                        egui::Button::new(t!("updates.download")),
                     )
                     .clicked()
                 {
-                    app.updates.download(ctx);
+                    app.updates.open_release(ctx);
                 }
-                if ui
-                    .add_enabled(
-                        !app.updates.downloading,
-                        egui::Button::new(t!("updates.later")),
-                    )
-                    .clicked()
-                {
+                if ui.button(t!("updates.later")).clicked() {
                     app.updates.postpone();
                 }
             });

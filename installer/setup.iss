@@ -21,7 +21,7 @@
 #ifdef NoOnlineUpdates
   #define InstallerSuffix "-no-update"
 #else
-  #define InstallerSuffix ""
+  #define InstallerSuffix "-browser-update"
 #endif
 #define MyAppExeHash   GetSHA256OfFile(AddBackslash(BuildOutputDir) + MyAppExeName)
 
@@ -72,9 +72,6 @@ Type: files; Name: "{app}\mtt-file-manager.identity.msix"
 [Files]
 ; Main executable
 Source: "{#BuildOutputDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-#ifndef NoOnlineUpdates
-Source: "{#BuildOutputDir}\mtt-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
-#endif
 
 ; License and notice files
 Source: "{#SrcRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

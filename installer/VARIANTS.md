@@ -1,15 +1,16 @@
-# Installer editions
+# Installer editions — browser-update experiment
 
-Maintain both editions on the same branch and release tag. Do not maintain a
-separate copy of the application or a permanent branch for each edition.
+This experimental branch replaces integrated installation with a browser link.
+The original integrated updater remains on `v0_2_10`. Both editions below are
+built from this experimental source tree.
 
 ## Cargo feature
 
 `online-updates` is enabled by default. It controls the update state, network
-client, release-note renderer, update UI, and the `mtt-updater` binary. Its
+client, release-note renderer, and update UI. Its
 exclusive dependencies (`reqwest`, `semver`, `egui_commonmark`) are optional.
-The helper declares `required-features = ["online-updates"]`, so Cargo does not
-build it when that feature is disabled.
+Neither edition builds or packages `mtt-updater.exe`. The standard edition opens
+the official release page only after the user clicks **Download update**.
 
 ```powershell
 # Standard edition (default features).
@@ -40,29 +41,31 @@ and runtime DLL prerequisites available:
 
 The script uses separate Cargo target directories:
 
-- Standard: `target/installer-standard/release`
+- Standard: `target/installer-browser-updates/release`
 - No-update: `target/installer-no-update/release`
 
 Each directory receives verified runtime DLLs staged from `target/release` if
 they are not already present. The existing DLL hash checks remain mandatory.
 MSIX signing configuration and the classic context-menu fallback are unchanged.
 
-The script passes the selected build directory to Inno Setup and excludes the
-helper from the no-update package, even if an unrelated helper exists elsewhere.
+The script passes the selected build directory to Inno Setup. Neither package
+includes a helper, even if an unrelated helper exists elsewhere.
 `-SkipBuild` accepts only a prior script-produced build of the same edition whose
 recorded executable/DLL hashes still match. Run without `-SkipBuild` after source
 changes; it intentionally reuses existing binaries rather than recompiling them.
 
 Outputs in `installer/output`:
 
-- `MTT-File-Manager-Setup-<version>.exe`
+- `MTT-File-Manager-Setup-<version>-browser-update.exe`
 - `MTT-File-Manager-Setup-<version>-no-update.exe`
 
 Both installers use the same application identity and installation location.
 Only one edition is installed at a time. Existing update preferences are left
 untouched when switching; the no-update edition neither reads nor acts on them.
-An old helper file from an earlier installation may remain on disk, but the
-no-update application has no update code to invoke it.
+The previous automatic-install preference is ignored, not erased. An old helper
+file from an earlier installation may remain on disk, but neither edition has
+code to invoke it. The new standard target directory and installer suffix keep
+this experiment separate from existing integrated-updater build artifacts.
 
 ## Validation and release hashes
 

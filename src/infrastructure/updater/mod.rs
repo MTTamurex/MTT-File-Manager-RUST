@@ -1,10 +1,5 @@
-mod download;
-mod helper;
-pub(crate) mod platform;
 mod release;
 
-pub(crate) use download::{download, DownloadedUpdate};
-pub(crate) use helper::HelperProcess;
 pub(crate) use release::{check, Release};
 
 fn client() -> Result<reqwest::blocking::Client, String> {
@@ -17,9 +12,7 @@ fn client_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder()
         .user_agent(concat!("MTT-File-Manager/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(15))
-        // The blocking client's timeout bounds each Read, not the complete
-        // streamed download. A request-level override also sets a total timeout.
-        .timeout(std::time::Duration::from_secs(600))
+        .timeout(std::time::Duration::from_secs(30))
         .https_only(true)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             let host = attempt.url().host_str().unwrap_or_default();

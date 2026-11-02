@@ -8,7 +8,8 @@
 .PARAMETER SkipBuild
     Reuse a verified build of the selected variant from its dedicated target directory.
 .PARAMETER Variant
-    Standard (default), NoUpdate, or Both. NoUpdate excludes built-in updating.
+    Standard (default) checks for updates and opens the release page in a browser.
+    NoUpdate excludes update checks; Both builds each edition.
 .EXAMPLE
     .\build_installer.ps1
     .\build_installer.ps1 -SkipBuild
@@ -37,12 +38,11 @@ if ($SkipBuild -and $env:MTT_MSIX_SIGNING_PFX -and $env:MTT_MSIX_PUBLISHER) {
     throw 'SkipBuild cannot be used when creating a signed sparse package; rebuild the executable with the configured publisher.'
 }
 
-$variantDirectory = if ($Variant -eq 'NoUpdate') { 'installer-no-update' } else { 'installer-standard' }
+$variantDirectory = if ($Variant -eq 'NoUpdate') { 'installer-no-update' } else { 'installer-browser-updates' }
 $buildTargetDir = Join-Path $RepoRoot "target\$variantDirectory"
 $buildOutputDir = Join-Path $buildTargetDir 'release'
 $buildManifestPath = Join-Path $buildOutputDir 'installer-build.json'
 $binaries = @('mtt-file-manager.exe', 'mtt-search-service.exe', 'mtt_explorer_command.dll')
-if ($Variant -eq 'Standard') { $binaries += 'mtt-updater.exe' }
 
 Write-Host "`n=== MTT File Manager Installer Build ===" -ForegroundColor Cyan
 Write-Host "Variant: $Variant" -ForegroundColor Cyan
@@ -176,8 +176,6 @@ $requiredFiles = @(
     "$RepoRoot\installer\languages\Greek.isl"
 )
 
-if ($Variant -eq 'Standard') { $requiredFiles += "$buildOutputDir\mtt-updater.exe" }
-
 foreach ($dir in $requiredDirectories) {
     if (-not (Test-Path $dir -PathType Container)) {
         throw "Required directory not found: $dir"
@@ -257,7 +255,7 @@ if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed (exit code $LASTEXITCODE)" }
 $outputDir = "$RepoRoot\installer\output"
 $versionLine = Select-String -LiteralPath $issFile -Pattern '^#define MyAppVersion\s+"([^"]+)"'
 $version = $versionLine.Matches[0].Groups[1].Value
-$suffix = if ($Variant -eq 'NoUpdate') { '-no-update' } else { '' }
+$suffix = if ($Variant -eq 'NoUpdate') { '-no-update' } else { '-browser-update' }
 $installer = Get-Item -LiteralPath (Join-Path $outputDir "MTT-File-Manager-Setup-$version$suffix.exe")
 
 Write-Host "`n=== Build complete ===" -ForegroundColor Green

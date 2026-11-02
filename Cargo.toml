@@ -159,15 +159,6 @@ default = ["notify-watcher", "online-updates"]
 notify-watcher = ["notify"]
 online-updates = ["dep:reqwest", "dep:semver", "dep:egui_commonmark"]
 
-[[bin]]
-name = "mtt-updater"
-path = "src/bin/mtt-updater.rs"
-required-features = ["online-updates"]
-
-
-
-
-
 [build-dependencies]
 winresource = "0.1"
 sha2 = "0.10"

@@ -139,15 +139,13 @@ impl ImageViewerApp {
         self.poll_system_theme(ctx);
 
         let t0 = std::time::Instant::now();
-        #[cfg(feature = "online-updates")]
-        let organizer_commands_pending = self.organizer_state.manager.has_pending_commands();
         diagnostic_stage.lap("background_messages");
         if upload_textures {
             self.process_incoming_messages(ctx);
         } else {
             self.process_background_messages(ctx);
             #[cfg(feature = "online-updates")]
-            self.poll_updates(ctx, organizer_commands_pending);
+            self.poll_updates(ctx);
             self.retry_completed_clipboard_cleanup();
             self.flush_preferences_if_needed();
             self.run_background_memory_maintenance();
@@ -160,7 +158,7 @@ impl ImageViewerApp {
         let t1 = std::time::Instant::now();
         diagnostic_stage.lap("background_drive_requests");
         #[cfg(feature = "online-updates")]
-        self.poll_updates(ctx, organizer_commands_pending);
+        self.poll_updates(ctx);
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
         }
@@ -271,11 +269,6 @@ impl eframe::App for ImageViewerApp {
             return;
         }
         let ctx_owned = ui.ctx().clone();
-        #[cfg(feature = "online-updates")]
-        if self.updates.exiting {
-            ui.disable();
-            return;
-        }
         let ctx = &ctx_owned;
         // Real gap between painted frames (catches a window that stops painting
         // while the event loop keeps ticking).
@@ -310,11 +303,6 @@ impl eframe::App for ImageViewerApp {
         diagnostic_frame.checkpoint("frame_input_setup");
         self.run_background_updates(ctx, true);
         diagnostic_frame.checkpoint("frame_background_updates");
-        #[cfg(feature = "online-updates")]
-        if self.updates.exiting {
-            ui.disable();
-            return;
-        }
 
         // Apply asynchronously loaded fonts as soon as the worker finishes.
         if let Some(rx) = &self.font_loader_rx {
