@@ -5,6 +5,7 @@
 mod computer;
 mod local_open;
 mod new_submenu;
+mod open_with;
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::network_path::{is_network_location_root, unc_server_name};
@@ -895,8 +896,8 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-21, t!("context_menu.open_new_tab"))
                     .with_svg_icon("external-link"),
             );
-            // Open with placeholder — only for files, inserted before shell items load
-            if target_is_file {
+            // Reserve space only for a single eligible file, just like enumeration below.
+            if open_with::should_offer_open_with(target_is_file, paths.len()) {
                 items.push(ContextMenuItem {
                     id: -201,
                     text: t!("context_menu.open_with").to_string(),
@@ -1072,7 +1073,7 @@ impl ImageViewerApp {
                 .is_ok();
             self.shell_menu_loading = shell_sent;
 
-            let open_with_sent = if target_is_file && paths.len() == 1 {
+            let open_with_sent = if open_with::should_offer_open_with(target_is_file, paths.len()) {
                 let sent = self
                     .open_with_req_tx
                     .try_send(
@@ -1153,7 +1154,18 @@ impl ImageViewerApp {
             )
         }) && self.context_menu.target_paths.len() == 1;
 
-        fn convert(ui_ctx: &egui::Context, item: &ShellMenuItemData) -> Option<ContextMenuItem> {
+        fn convert(
+            ui_ctx: &egui::Context,
+            item: &ShellMenuItemData,
+            path_count: usize,
+        ) -> Option<ContextMenuItem> {
+            if open_with::should_hide_shell_open_with(
+                path_count,
+                item.command_string.as_deref(),
+                &item.text,
+            ) {
+                return None;
+            }
             // Filter verbs handled internally
             if let Some(ref verb) = item.command_string {
                 if is_known_verb(verb) {
@@ -1175,7 +1187,7 @@ impl ImageViewerApp {
             let sub_items = item
                 .sub_items
                 .iter()
-                .filter_map(|s| convert(ui_ctx, s))
+                .filter_map(|s| convert(ui_ctx, s, path_count))
                 .collect();
 
             Some(ContextMenuItem {
@@ -1243,7 +1255,7 @@ impl ImageViewerApp {
                 raw.command_string.as_deref(),
                 &raw.text,
             );
-            if let Some(item) = convert(ctx, raw) {
+            if let Some(item) = convert(ctx, raw, self.context_menu.target_paths.len()) {
                 if item.is_separator {
                     continue;
                 }
