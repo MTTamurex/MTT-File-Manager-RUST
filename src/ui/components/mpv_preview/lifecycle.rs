@@ -9,12 +9,18 @@ impl MpvPreview {
         if self.event_thread_running.load(Ordering::Relaxed) {
             return;
         }
+        // A previous event thread may still be finishing asynchronous teardown.
+        self.first_frame_ready = Arc::new(AtomicBool::new(false));
 
-        let event_client = match mpv.create_client(Some("mtt-preview-events")) {
+        // libmpv2 5.0.3 drops its temporary CString before mpv_create_client
+        // uses a supplied name. Let MPV choose the name to avoid that dangling pointer.
+        let event_client = match mpv.create_client(None) {
             Ok(client) => Some(client),
             Err(error) => {
+                // Preserve playback on the existing no-event fallback path.
+                self.first_frame_ready.store(true, Ordering::Release);
                 log::warn!(
-                    "[MpvPreview] Failed to create dedicated event client; using verified-path fallback: {:?}",
+                    "[MpvPreview] Failed to create dedicated event client; first-frame visibility protection unavailable, using verified-path fallback: {:?}",
                     error
                 );
                 None
@@ -30,6 +36,7 @@ impl MpvPreview {
                 self.tracks_need_query.clone(),
                 self.file_load_gate.clone(),
                 self.pending_seek.clone(),
+                self.first_frame_ready.clone(),
                 ctx,
             ),
         );
@@ -118,6 +125,7 @@ impl MpvPreview {
         self.last_profile_was_docked = None;
         self.show_player = false;
         self.is_visible = false;
+        self.first_frame_ready.store(false, Ordering::Release);
         self.surface.reset_rect();
         let mpv = self.mpv.take();
         spawn_mpv_reaper(handle, mpv);

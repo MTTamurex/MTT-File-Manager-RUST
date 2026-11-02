@@ -145,6 +145,105 @@ mod native {
 
         preview.set_visibility(true);
         let style = unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 };
+        assert_eq!(style & WS_VISIBLE.0, 0);
+        preview.restore_from_overlay();
+        let style = unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 };
+        assert_eq!(style & WS_VISIBLE.0, 0);
+
+        preview
+            .first_frame_ready
+            .store(true, std::sync::atomic::Ordering::Release);
+        preview.set_visibility(true);
+        let style = unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 };
         assert_ne!(style & WS_VISIBLE.0, 0);
+
+        preview.hide_for_overlay();
+        assert_eq!(
+            unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 } & WS_VISIBLE.0,
+            0
+        );
+        preview.restore_from_overlay();
+        assert_ne!(
+            unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 } & WS_VISIBLE.0,
+            0
+        );
+    }
+
+    #[test]
+    #[ignore = "requires libmpv D3D11 output and a Windows desktop"]
+    fn real_d3d11_startup_releases_visibility_after_playback_restart() {
+        use crate::ui::components::mpv_preview::MpvPreview;
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+        };
+
+        let fixture = SurfaceFixture::new();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("frame.bmp");
+        // A generated image exercises the real video output without an external
+        // encoder, personal media, or a checked-in binary fixture.
+        image::RgbImage::from_pixel(64, 64, image::Rgb([20, 40, 60]))
+            .save(&path)
+            .unwrap();
+        let mut preview = MpvPreview::new(path.clone());
+        let mpv = Arc::new(
+            mpv::Mpv::with_initializer(|init| {
+                init.set_option("config", false)?;
+                init.set_option("load-scripts", false)?;
+                init.set_option("vo", "gpu")?;
+                init.set_option("gpu-api", "d3d11")?;
+                init.set_option("gpu-context", "d3d11")?;
+                init.set_option("pause", true)?;
+                Ok(())
+            })
+            .unwrap(),
+        );
+        preview.surface.main_hwnd = fixture.surface.main_hwnd();
+        preview.surface.ensure_child_window(&mpv);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            preview.surface.sync_rect(
+                ui,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 180.0)),
+            );
+        });
+        preview.mpv = Some(mpv.clone());
+        preview.start_event_loop_internal(mpv.clone(), ctx);
+        preview.set_visibility(true);
+        let child = preview.surface.hwnd().unwrap();
+        assert_eq!(
+            unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 } & WS_VISIBLE.0,
+            0
+        );
+
+        let generation = preview.begin_file_load();
+        mpv.command("loadfile", &[path.to_str().unwrap()]).unwrap();
+        preview.finish_file_load(generation, true);
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !preview.first_frame_ready.load(Ordering::Acquire) && Instant::now() < deadline {
+            // MPV's native parent hook needs the owning thread's message loop.
+            unsafe {
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            preview.first_frame_ready.load(Ordering::Acquire),
+            "MPV did not reach PlaybackRestart while its host was hidden"
+        );
+        assert_eq!(mpv.get_property::<String>("current-vo").unwrap(), "gpu");
+        preview.set_visibility(true);
+        assert_ne!(
+            unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 } & WS_VISIBLE.0,
+            0
+        );
     }
 }

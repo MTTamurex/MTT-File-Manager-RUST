@@ -13,6 +13,7 @@ mod lifecycle;
 mod osc_input;
 mod playback_state;
 mod update_loop;
+mod visibility;
 mod window_embed;
 
 pub use window_embed::VideoSurface;
@@ -88,6 +89,7 @@ pub struct MpvPreview {
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
     event_thread_handle: Option<thread::JoinHandle<()>>,
+    first_frame_ready: Arc<AtomicBool>,
 
     // Performance: Caching (polling removed in Fase 2)
     cached_duration: Option<f64>,
@@ -271,6 +273,7 @@ impl MpvPreview {
             audio_normalizer_enabled: false,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
+            first_frame_ready: Arc::new(AtomicBool::new(false)),
             cached_duration: None,
             cached_tracks: None,
             pending_external_subtitle: None,
@@ -347,28 +350,6 @@ impl MpvPreview {
         self.surface.reset_rect();
     }
 
-    /// Temporarily hides the video surface (for popups over the video area)
-    pub fn hide_for_overlay(&mut self) {
-        self.surface.set_visible(false);
-    }
-
-    /// Restores the video surface after closing an overlay
-    pub fn restore_from_overlay(&mut self) {
-        self.surface.set_visible(self.is_visible);
-    }
-
-    pub(crate) fn set_overlay_rects(
-        &mut self,
-        overlays: &[crate::ui::video_overlay::VideoOverlay],
-        pixels_per_point: f32,
-    ) {
-        if self.is_docked() {
-            self.surface.set_overlay_rects(overlays, pixels_per_point);
-        } else {
-            self.surface.set_overlay_rects(&[], pixels_per_point);
-        }
-    }
-
     pub fn try_init(
         &mut self,
         _window: &dyn raw_window_handle::HasWindowHandle,
@@ -380,12 +361,6 @@ impl MpvPreview {
 
     pub fn is_initialized(&self) -> bool {
         self.surface.is_initialized()
-    }
-
-    pub fn set_visibility(&mut self, visible: bool) {
-        self.is_visible = visible;
-        // The requested visibility may predate the native window's creation.
-        self.surface.set_visible(visible);
     }
 
     /// Get native HWND for the video surface

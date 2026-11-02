@@ -22,6 +22,7 @@ pub struct EventLoopShared {
     tracks_need_query: Arc<AtomicU64>,
     file_load_gate: Arc<FileLoadGate>,
     pending_seek: Arc<RwLock<Option<PendingSeekState>>>,
+    first_frame_ready: Arc<AtomicBool>,
     ctx: egui::Context,
 }
 
@@ -32,6 +33,7 @@ impl EventLoopShared {
         tracks_need_query: Arc<AtomicU64>,
         file_load_gate: Arc<FileLoadGate>,
         pending_seek: Arc<RwLock<Option<PendingSeekState>>>,
+        first_frame_ready: Arc<AtomicBool>,
         ctx: egui::Context,
     ) -> Self {
         Self {
@@ -40,6 +42,7 @@ impl EventLoopShared {
             tracks_need_query,
             file_load_gate,
             pending_seek,
+            first_frame_ready,
             ctx,
         }
     }
@@ -83,6 +86,7 @@ pub fn start_event_loop(
         tracks_need_query,
         file_load_gate,
         pending_seek,
+        first_frame_ready,
         ctx,
     } = shared;
     running.store(true, Ordering::Release);
@@ -111,6 +115,12 @@ pub fn start_event_loop(
                     match client.wait_event(0.0) {
                         Some(Ok(mpv::events::Event::StartFile)) => {
                             active_load = file_load_gate.take_start_file_registration();
+                        }
+                        Some(Ok(mpv::events::Event::PlaybackRestart)) => {
+                            // FileLoaded/VideoReconfig precede actual playback readiness.
+                            // Only release the initially hidden native subtree here.
+                            first_frame_ready.store(true, Ordering::Release);
+                            ctx.request_repaint();
                         }
                         Some(Ok(mpv::events::Event::FileLoaded)) => {
                             if let Some(load) = active_load.take() {
@@ -142,6 +152,8 @@ pub fn start_event_loop(
                                 "[MpvPreview] Event queue overflow; enabling verified-path fallback"
                             );
                             use_event_fallback = true;
+                            first_frame_ready.store(true, Ordering::Release);
+                            ctx.request_repaint();
                         }
                         Some(Ok(mpv::events::Event::Shutdown)) => {
                             running.store(false, Ordering::Release);
@@ -154,6 +166,8 @@ pub fn start_event_loop(
                                 error
                             );
                             use_event_fallback = true;
+                            first_frame_ready.store(true, Ordering::Release);
+                            ctx.request_repaint();
                         }
                         None => break,
                     }
