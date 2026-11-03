@@ -1,5 +1,5 @@
 use super::{column_choices, columns, ListViewContext};
-use crate::domain::list_columns::ColumnId;
+use crate::domain::list_columns::{ColumnId, ColumnLayout};
 use eframe::egui::{self, Ui};
 use rust_i18n::t;
 
@@ -18,24 +18,28 @@ fn checkbox(ui: &mut Ui, ctx: &mut ListViewContext, id: ColumnId, label: &str) {
     }
 }
 
-pub(super) fn menu(ui: &mut Ui, ctx: &mut ListViewContext, owner: egui::Id) {
-    let scope = columns::scope(ctx);
-    let ids: Vec<_> = ctx
-        .columns
-        .preferences
-        .layout(scope)
+fn menu_ids(layout: &ColumnLayout, is_onedrive_folder: bool) -> Vec<ColumnId> {
+    let mut columns: Vec<_> = layout
         .columns
         .iter()
-        .map(|column| column.id)
+        .filter(|column| column.id != ColumnId::Status || is_onedrive_folder)
         .collect();
+    // Sort only the menu, retaining the saved order within each visibility group.
+    columns.sort_by_key(|column| !column.visible);
+    columns.into_iter().map(|column| column.id).collect()
+}
+
+pub(super) fn menu(ui: &mut Ui, ctx: &mut ListViewContext, owner: egui::Id) {
+    let scope = columns::scope(ctx);
+    let ids = menu_ids(
+        ctx.columns.preferences.layout(scope),
+        ctx.is_onedrive_folder,
+    );
     egui::ScrollArea::vertical()
         .max_height(300.0)
         .show(ui, |ui| {
             for id in ids {
-                if id == ColumnId::Status && !ctx.is_onedrive_folder {
-                    continue;
-                }
-                checkbox(ui, ctx, id, &columns::label(ctx, id));
+                ui.push_id(id, |ui| checkbox(ui, ctx, id, &columns::label(ctx, id)));
             }
         });
     ui.separator();

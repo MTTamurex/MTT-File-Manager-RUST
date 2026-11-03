@@ -67,6 +67,13 @@ pub(super) fn choices(
             result.push((id, column.label.clone(), column.canonical_name.clone()));
         }
     }
+    let active: HashSet<_> = layout
+        .columns
+        .iter()
+        .filter(|column| column.visible)
+        .map(|column| column.id)
+        .collect();
+    result.sort_by_key(|(id, _, _)| !active.contains(id));
     result
 }
 
@@ -139,6 +146,51 @@ mod tests {
                     .count(),
                 1
             );
+        }
+    }
+
+    #[test]
+    fn picker_groups_active_choices_without_changing_layout_or_losing_catalog_entries() {
+        for scope in [
+            ColumnScope::Files,
+            ColumnScope::Computer,
+            ColumnScope::RecycleBin,
+        ] {
+            let catalog = vec![
+                property(1, "System.DateCreated"),
+                property(2, "System.Title"),
+            ];
+            let mut layout = ColumnLayout::defaults(scope);
+            let hidden = layout.columns[1].id;
+            layout.set_visible(hidden, false);
+            layout.set_visible(ColumnId::Tags, true);
+            layout.set_visible(catalog[1].id, true);
+            let saved = layout.clone();
+            let result = choices(&layout, &catalog, scope, |_| "Label".into());
+            let active: Vec<_> = layout
+                .columns
+                .iter()
+                .filter(|c| c.visible)
+                .map(|c| c.id)
+                .collect();
+            assert_eq!(
+                result
+                    .iter()
+                    .take(active.len())
+                    .map(|(id, _, _)| *id)
+                    .collect::<Vec<_>>(),
+                active
+            );
+            assert_eq!(result[active.len()].0, hidden);
+            assert_eq!(result.last().unwrap().0, catalog[0].id);
+            let unique: HashSet<_> = result.iter().map(|(id, _, _)| *id).collect();
+            assert_eq!(unique.len(), result.len());
+            assert_eq!(layout, saved);
+
+            layout.set_visible(catalog[1].id, false);
+            let disabled = choices(&layout, &catalog, scope, |_| "Label".into());
+            assert!(disabled.iter().any(|(id, _, _)| *id == catalog[1].id));
+            assert_eq!(disabled.len(), result.len());
         }
     }
 }

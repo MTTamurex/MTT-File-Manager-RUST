@@ -71,7 +71,7 @@ pub(super) fn render_settings_title_bar(
     let close_resp = ui.interact(
         close_rect,
         ui.id().with("settings_close_button"),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
     let hovered = close_resp.hovered() || close_resp.has_focus();
     ui.painter().rect_filled(

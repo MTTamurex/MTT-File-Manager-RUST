@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn menu_groups_active_columns_without_changing_the_saved_layout() {
+    use crate::domain::list_columns::ColumnScope;
+    for scope in [
+        ColumnScope::Files,
+        ColumnScope::Computer,
+        ColumnScope::RecycleBin,
+    ] {
+        let mut layout = ColumnLayout::defaults(scope);
+        layout.set_visible(ColumnId::Name, false);
+        let hidden = layout.columns[1].id;
+        layout.set_visible(hidden, false);
+        layout.set_visible(ColumnId::Tags, true);
+        let saved = layout.clone();
+        let ids = menu_ids(&layout, true);
+        let expected: Vec<_> = layout
+            .columns
+            .iter()
+            .filter(|c| c.visible)
+            .chain(layout.columns.iter().filter(|c| !c.visible))
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, expected);
+        assert_eq!(ids.last(), Some(&hidden));
+        assert_eq!(layout, saved);
+        assert!(layout.is_visible(ColumnId::Name));
+
+        layout.set_visible(hidden, true);
+        assert_eq!(
+            menu_ids(&layout, true),
+            layout.columns.iter().map(|c| c.id).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn menu_retains_hidden_columns_and_filters_status_outside_onedrive() {
+    use crate::domain::list_columns::ColumnScope;
+    let mut layout = ColumnLayout::defaults(ColumnScope::Files);
+    layout.set_visible(ColumnId::Status, false);
+    layout.set_visible(ColumnId::Type, false);
+    let ids = menu_ids(&layout, false);
+    assert!(!ids.contains(&ColumnId::Status));
+    assert!(ids.contains(&ColumnId::Type));
+    assert!(menu_ids(&layout, true).contains(&ColumnId::Status));
+}
+
+#[test]
 fn picker_uses_compact_width_and_keeps_the_scrollbar_at_the_content_right_edge() {
     let context = egui::Context::default();
     for _ in 0..3 {
