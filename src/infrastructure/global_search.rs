@@ -359,7 +359,7 @@ fn open_pipe() -> Result<HANDLE, String> {
         unsafe {
             match CreateFileW(
                 PCWSTR(pipe_name_wide.as_ptr()),
-                0x80000000 | 0x40000000, // GENERIC_READ | GENERIC_WRITE
+                PIPE_CLIENT_ACCESS, // Read access + write data, no create-instance right.
                 FILE_SHARE_NONE,
                 None,
                 OPEN_EXISTING,

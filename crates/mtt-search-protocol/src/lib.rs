@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 mod disk_analysis;
 mod drive_health;
 pub mod name_query;
+mod pipe_access;
 pub use disk_analysis::*;
 pub use drive_health::*;
+pub use pipe_access::PIPE_CLIENT_ACCESS;
 
 /// Named pipe path for IPC between the search service and the file manager app.
 pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";

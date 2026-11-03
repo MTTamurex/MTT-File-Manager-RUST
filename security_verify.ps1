@@ -4,20 +4,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== MTT Security Verification Suite ===" -ForegroundColor Cyan
-
+# Historical behavior: -NoBuild skips the full service suite, not compilation.
+$steps = @()
 if (-not $NoBuild) {
-    Write-Host "[1/3] cargo test -p mtt-search-service" -ForegroundColor Yellow
-    cargo test -p mtt-search-service
+    $steps += ,@("test", "-p", "mtt-search-service", "--locked")
 }
+$steps += ,@("test", "-p", "mtt-search-protocol", "--locked")
+$steps += ,@("test", "-p", "mtt-search-service", "--locked", "ipc_server::")
+$steps += ,@("test", "-p", "mtt-search-service", "--locked", "ipc_authorization::")
+$steps += ,@("test", "-p", "mtt-search-service", "--locked", "security_policy::tests")
 
-Write-Host "[2/3] cargo test -p mtt-search-protocol" -ForegroundColor Yellow
-cargo test -p mtt-search-protocol
-
-Write-Host "[3/4] cargo test -p mtt-search-service ipc_server::tests" -ForegroundColor Yellow
-cargo test -p mtt-search-service ipc_server::tests
-
-Write-Host "[4/4] cargo test -p mtt-search-service security_policy::tests" -ForegroundColor Yellow
-cargo test -p mtt-search-service security_policy::tests
-
-Write-Host "Security verification suite finished." -ForegroundColor Green
+# Only ordinary Cargo commands are invoked; no encoded or nested PowerShell.
+Push-Location $PSScriptRoot
+try {
+    Write-Host "=== MTT Security Verification Suite ===" -ForegroundColor Cyan
+    for ($index = 0; $index -lt $steps.Count; $index++) {
+        $cargoArgs = $steps[$index]
+        Write-Host "[$($index + 1)/$($steps.Count)] cargo $($cargoArgs -join ' ')" -ForegroundColor Yellow
+        & cargo @cargoArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cargo failed (exit code $LASTEXITCODE): $($cargoArgs -join ' ')"
+        }
+    }
+    Write-Host "Selected package tests passed. Installed SCM/LocalSystem compatibility is not validated by this suite." -ForegroundColor Green
+} finally {
+    Pop-Location
+}

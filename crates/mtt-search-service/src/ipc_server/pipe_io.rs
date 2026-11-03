@@ -17,6 +17,9 @@ use mtt_search_protocol::*;
 
 use super::{MAX_REQUEST_PAYLOAD, PIPE_BUFFER_SIZE, PIPE_MAX_INSTANCES, PIPE_OPEN_MODE};
 
+#[cfg(test)]
+mod tests;
+
 /// FILE_FLAG_FIRST_PIPE_INSTANCE (0x00080000): causes CreateNamedPipeW to fail
 /// if a pipe with this name already exists. Prevents pre-emptive pipe squatting
 /// where an attacker creates the pipe before the service starts.
@@ -113,6 +116,11 @@ impl Drop for AclGuard {
 }
 
 pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
+    create_pipe_named(PIPE_NAME, first_instance)
+}
+
+// Keep the production endpoint fixed; tests supply a separate, unique name.
+fn create_pipe_named(name: &str, first_instance: bool) -> Result<HANDLE, String> {
     unsafe {
         let users_sid = SidGuard::authenticated_users()?;
         let system_sid = SidGuard::local_system()?;
@@ -157,7 +165,7 @@ pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
             bInheritHandle: false.into(),
         };
 
-        let pipe_name: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+        let pipe_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
 
         // SEC: On the first instance, include FILE_FLAG_FIRST_PIPE_INSTANCE so that
         // CreateNamedPipeW fails if the pipe name is already taken (pipe squatting).

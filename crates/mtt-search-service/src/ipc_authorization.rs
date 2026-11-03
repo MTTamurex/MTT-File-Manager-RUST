@@ -428,6 +428,9 @@ pub fn collect_authorized_search_page(
 }
 
 #[cfg(test)]
+mod regression_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::file_index::{IndexState, SearchPage, SearchResult};
