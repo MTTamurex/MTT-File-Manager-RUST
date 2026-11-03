@@ -16,11 +16,7 @@ impl TabManager {
     pub(crate) fn restore_tag_titles(&mut self, definitions: &FxHashMap<i64, FileTag>) {
         for tab in &mut self.tabs {
             if let Some(tag_id) = tag_id_from_view_path(&tab.path) {
-                let name = definitions
-                    .get(&tag_id)
-                    .map(|tag| tag.name.clone())
-                    .unwrap_or_else(|| tag_id.to_string());
-                tab.title = rust_i18n::t!("tags.filter_active", name = name).to_string();
+                tab.title = crate::app::operations::tag_ops::tag_view_title(tag_id, definitions);
                 tab.path_input = tab.title.clone();
             }
         }

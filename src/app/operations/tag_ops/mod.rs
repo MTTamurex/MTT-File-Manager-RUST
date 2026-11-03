@@ -65,6 +65,17 @@ fn tag_sort_key(tag: &FileTag) -> (i64, String) {
     (tag.position, tag.name.to_lowercase())
 }
 
+/// "Tag: %{name}" label for a tag view tab, shared by the app state (active-tab
+/// sync, session restore) and the mono tab bar renderer so every surface shows
+/// the same text (raw id when the tag is gone).
+pub(crate) fn tag_view_title(tag_id: i64, tag_definitions: &FxHashMap<i64, FileTag>) -> String {
+    let name = tag_definitions
+        .get(&tag_id)
+        .map(|tag| tag.name.clone())
+        .unwrap_or_else(|| tag_id.to_string());
+    rust_i18n::t!("tags.filter_active", name = name).to_string()
+}
+
 /// Builds the ordered tag-ID snapshot from the current definitions.
 ///
 /// Depth-first pre-order: root tags in `(position, name case-insensitive)`

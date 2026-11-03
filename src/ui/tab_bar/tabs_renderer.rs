@@ -172,7 +172,7 @@ pub(super) fn render_tabs(
         let title_color = if is_active { text_color } else { inactive_text };
 
         // Translate special folder names (Desktop, Documents, etc.) for tab title
-        let translated_title = display_title_for_tab_path(&tab.path, &tab.title);
+        let translated_title = display_title_for_tab_path(&tab.path, &tab.title, tag_definitions);
         let full_text: &str = &translated_title;
 
         let galley =

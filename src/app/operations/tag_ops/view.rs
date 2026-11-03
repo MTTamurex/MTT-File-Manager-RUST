@@ -262,12 +262,7 @@ impl ImageViewerApp {
     }
 
     pub fn tag_view_display_name(&self, tag_id: i64) -> String {
-        let name = self
-            .tag_definitions
-            .get(&tag_id)
-            .map(|tag| tag.name.clone())
-            .unwrap_or_else(|| tag_id.to_string());
-        rust_i18n::t!("tags.filter_active", name = name).to_string()
+        tag_view_title(tag_id, &self.tag_definitions)
     }
 
     pub fn tag_view_display_name_for_path(&self, path: &str) -> Option<String> {
