@@ -1513,6 +1513,7 @@ impl ImageViewerApp {
                     "auxiliary_icon_threads",
                     self.item_icon_loader.auxiliary_icon_thread_count() as u64,
                 ),
+                #[cfg(feature = "notify-watcher")]
                 field_u64("deferred_fs_events", self.deferred_fs_events.len() as u64),
                 field_u64(
                     "dirty_directories",

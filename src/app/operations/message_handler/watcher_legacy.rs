@@ -435,6 +435,7 @@ impl ImageViewerApp {
                             self.app_state_db
                                 .rename_cached_file_entry(&cleaned_old, &cleaned_new);
                             self.move_tag_assignments_for_path(&cleaned_old, &cleaned_new);
+                            self.remap_auto_tag_rule_folders(&cleaned_old, &cleaned_new);
                             self.reload_visible_tag_views();
 
                             if let Some(parent) = cleaned_old.parent() {

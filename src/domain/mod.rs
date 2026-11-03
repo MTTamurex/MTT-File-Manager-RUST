@@ -1,5 +1,6 @@
 // Domain types and business logic
 
+pub mod auto_tag_rule;
 pub mod cloud_root;
 pub(crate) mod column_widths;
 pub mod date_format;

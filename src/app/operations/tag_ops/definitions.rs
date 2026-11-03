@@ -143,6 +143,8 @@ impl ImageViewerApp {
         self.sync_sidebar_tag_order();
         // Subtree counts follow the hierarchy, not the assignments.
         self.recompute_tag_counts_from_assignments();
+        // Ancestor chains changed: the worker expands rule tags with them.
+        self.sync_auto_tag_worker();
         let mut affected = FxHashSet::default();
         for chain_start in [Some(tag_id), old_parent, parent_id] {
             let Some(start) = chain_start else {
@@ -208,6 +210,10 @@ impl ImageViewerApp {
 
         // Drop any stale tag IDs from the active global search filter.
         self.prune_stale_tag_filter();
+
+        // Rules pointing at deleted tags were removed in the database
+        // (delete_tag_subtree); refresh the in-memory copy and the worker.
+        self.reload_auto_tag_rules();
 
         self.sync_tag_assignments_normalized();
         self.refresh_visible_items_after_tag_change();

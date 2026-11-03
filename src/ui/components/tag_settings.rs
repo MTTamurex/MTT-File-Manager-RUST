@@ -18,7 +18,13 @@ pub fn render_tag_settings_section(
     }
     ui.add_space(16.0);
 
-    crate::ui::components::tag_manager_modal::render_tag_manager_content(app, ui);
+    crate::ui::components::tag_manager_modal::render_tag_create_form(app, ui);
+
+    ui.add_space(16.0);
+    crate::ui::components::auto_tag_settings::render_auto_tag_settings(app, ui);
+
+    ui.add_space(16.0);
+    crate::ui::components::tag_manager_modal::render_tag_list(app, ui);
 
     TagSettingsOutput { show_tags_changed }
 }

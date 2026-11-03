@@ -92,14 +92,14 @@ pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    // Resolve the current definitions in the cached display order (DFS
-    // pre-order), avoiding the per-frame clone + lowercase + sort of the
-    // whole definition set.
-    let sorted_ids = app.sorted_tag_ids();
-    let tags: Vec<crate::domain::file_tag::FileTag> = sorted_ids
-        .iter()
-        .filter_map(|id| app.tag_definitions.get(id).cloned())
-        .collect();
+    render_tag_create_form(app, ui);
+    ui.add_space(12.0);
+    render_tag_list(app, ui);
+}
+
+/// The "Add tag" form, shown in the settings section before the auto-tag
+/// block and inside the manager modal.
+pub fn render_tag_create_form(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let mut actions = Vec::new();
 
     ui.vertical(|ui| {
@@ -132,9 +132,25 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 &mut app.tag_manager_new_parent,
             );
         });
+    });
 
-        ui.add_space(12.0);
+    process_tag_actions(app, actions);
+}
 
+/// The tag list with edit/recolor/reparent/delete controls, shown after the
+/// create form (and after the auto-tag block in the settings section).
+pub fn render_tag_list(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+    // Resolve the current definitions in the cached display order (DFS
+    // pre-order), avoiding the per-frame clone + lowercase + sort of the
+    // whole definition set.
+    let sorted_ids = app.sorted_tag_ids();
+    let tags: Vec<crate::domain::file_tag::FileTag> = sorted_ids
+        .iter()
+        .filter_map(|id| app.tag_definitions.get(id).cloned())
+        .collect();
+    let mut actions = Vec::new();
+
+    ui.vertical(|ui| {
         if tags.is_empty() {
             ui.label(
                 RichText::new(t!("tags.no_tags")).color(theme::secondary_text_color(ui.ctx())),
@@ -258,6 +274,10 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         }
     });
 
+    process_tag_actions(app, actions);
+}
+
+fn process_tag_actions(app: &mut ImageViewerApp, actions: Vec<TagManagerAction>) {
     for action in actions {
         match action {
             TagManagerAction::Create => {

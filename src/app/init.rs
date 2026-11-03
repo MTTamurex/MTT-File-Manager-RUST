@@ -309,6 +309,13 @@ impl ImageViewerApp {
             organizer_rules,
             ctx.clone(),
         );
+        let auto_tag_rules = app_state_db.get_auto_tag_rules();
+        let auto_tag_manager = crate::infrastructure::auto_tag::AutoTagManager::start(
+            app_state_db.clone(),
+            auto_tag_rules.clone(),
+            tag_definitions.values().cloned().collect(),
+            ctx.clone(),
+        );
         if let Some(session) = saved_tab_session.as_mut() {
             session.replace_invalid_paths(|path| {
                 if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(path) {
@@ -888,6 +895,13 @@ impl ImageViewerApp {
             tag_manager_edit_names: rustc_hash::FxHashMap::default(),
             tag_manager_delete_confirm: None,
             pending_tag_cascade: None,
+            auto_tag_rules,
+            auto_tag_manager,
+            auto_tag_status: rustc_hash::FxHashMap::default(),
+            auto_tag_new_folder: None,
+            auto_tag_new_tag: None,
+            auto_tag_new_include_subfolders: true,
+            auto_tag_delete_confirm: None,
 
             // SIDEBAR FOLDER TREE
             sidebar_tree: {

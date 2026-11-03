@@ -246,6 +246,12 @@ impl AppStateDb {
                 let placeholders = std::iter::repeat_n("?", chunk.len())
                     .collect::<Vec<_>>()
                     .join(",");
+                // Auto-tag rules referencing a deleted tag die with it
+                // (foreign keys are not enforced by pragma here).
+                let _ = tx.execute(
+                    &format!("DELETE FROM auto_tag_rules WHERE tag_id IN ({placeholders})"),
+                    rusqlite::params_from_iter(chunk.iter()),
+                )?;
                 removed += tx.execute(
                     &format!("DELETE FROM file_tag_assignments WHERE tag_id IN ({placeholders})"),
                     rusqlite::params_from_iter(chunk.iter()),
@@ -479,7 +485,10 @@ impl AppStateDb {
             let tx = db.transaction()?;
             {
                 let mut stmt = tx.prepare(
-                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
+                    // A background worker can still hold a deleted tag in its
+                    // snapshot. Check existence in the same write transaction.
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id)
+                     SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM file_tags WHERE id = ?2)",
                 )?;
                 for path in &paths {
                     for tag_id in tag_ids {

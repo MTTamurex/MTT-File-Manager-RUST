@@ -338,6 +338,11 @@ impl ImageViewerApp {
             self.reload_visible_tag_views();
             self.ui_ctx.request_repaint();
         }
+
+        // The clear may have wiped a tag the auto-tag watcher just applied to
+        // a copy destination (the watcher runs concurrently). Re-evaluate the
+        // rules for the cleared paths; rule misses are no-ops.
+        self.reapply_auto_tag_rules_for_paths(&affected_paths);
     }
 
     pub fn move_tag_assignments_for_path(&mut self, old_path: &Path, new_path: &Path) {

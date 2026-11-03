@@ -842,6 +842,16 @@ pub struct ImageViewerApp {
     /// Set while the user confirms the cascade; `None` when no confirmation is open.
     pub pending_tag_cascade: Option<crate::app::operations::tag_ops::PendingTagCascade>,
 
+    // AUTO-TAG (rules that tag items arriving in watched folders)
+    pub auto_tag_rules: Vec<crate::domain::auto_tag_rule::AutoTagRule>,
+    pub auto_tag_manager: crate::infrastructure::auto_tag::AutoTagManager,
+    pub auto_tag_status:
+        rustc_hash::FxHashMap<i64, crate::infrastructure::auto_tag::AutoTagRuleStatus>,
+    pub auto_tag_new_folder: Option<PathBuf>,
+    pub auto_tag_new_tag: Option<i64>,
+    pub auto_tag_new_include_subfolders: bool,
+    pub auto_tag_delete_confirm: Option<i64>,
+
     // SIDEBAR FOLDER TREE (hierarchical expand/collapse state)
     pub sidebar_tree: sidebar_tree_state::SidebarTreeState,
 

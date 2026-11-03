@@ -734,6 +734,7 @@ impl ImageViewerApp {
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
         self.sidebar_tree.remap_renamed_folder(&path, &new_path);
         self.move_tag_assignments_for_path(&path, &new_path);
+        self.remap_auto_tag_rule_folders(&path, &new_path);
 
         if self.global_search.active {
             if let Some(result) = self.global_search.results.iter_mut().find(|result| {
@@ -1111,6 +1112,7 @@ impl ImageViewerApp {
             );
             self.remap_visual_caches_for_path(&source_path, dest_path);
             self.move_tag_assignments_for_path(&source_path, dest_path);
+            self.remap_auto_tag_rule_folders(&source_path, dest_path);
             self.enqueue_thumbnail_cache_renames(&[(source_path.clone(), dest_path.clone())]);
             self.reload_visible_tag_views();
         }
@@ -1170,6 +1172,7 @@ impl ImageViewerApp {
         }
         for (source, dest) in &known_moved_pairs {
             self.move_tag_assignments_for_path(source, dest);
+            self.remap_auto_tag_rule_folders(source, dest);
         }
         self.enqueue_thumbnail_cache_renames(&known_moved_pairs);
         if !known_moved_pairs.is_empty() {

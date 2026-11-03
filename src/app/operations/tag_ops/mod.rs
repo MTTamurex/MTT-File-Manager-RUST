@@ -3,6 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 mod assignments;
+mod auto_tag;
 mod cache;
 mod definitions;
 pub(crate) mod migration;

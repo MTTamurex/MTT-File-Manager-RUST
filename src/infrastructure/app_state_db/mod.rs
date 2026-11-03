@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use super::db_utils;
 
+mod auto_tag_rules;
 mod cleanup;
 mod column_widths;
 mod conditional_preferences;
@@ -560,6 +561,7 @@ impl AppStateDb {
         }
 
         file_tags::seed_default_file_tags(conn);
+        auto_tag_rules::create_auto_tag_rules_table(conn);
         Ok(())
     }
 

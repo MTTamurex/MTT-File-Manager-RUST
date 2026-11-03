@@ -114,6 +114,7 @@ impl ImageViewerApp {
             self.process_file_operation_results(&current_path_norm, ctx);
             self.flush_organizer_notification_summary();
             self.process_tag_assignment_gc_results();
+            self.process_auto_tag_events();
             #[cfg(feature = "notify-watcher")]
             self.defer_watcher_events_while_hidden();
             self.process_items_rebuild_results(ctx);
@@ -224,6 +225,7 @@ impl ImageViewerApp {
         self.flush_organizer_notification_summary();
 
         self.process_tag_assignment_gc_results();
+        self.process_auto_tag_events();
 
         // Drain the focus-restore purge worker (replaces the previous
         // synchronous scan that ran on the UI thread at lifecycle.rs).
@@ -275,6 +277,32 @@ impl ImageViewerApp {
                     self.queue_tag_view_hides_for_generation(generation, &paths);
                 }
             }
+        }
+    }
+
+    /// Applies worker-applied auto-tag assignments to the in-memory state and
+    /// refreshes per-rule watcher status for the settings UI.
+    fn process_auto_tag_events(&mut self) {
+        let events = self.auto_tag_manager.drain_events();
+        if events.is_empty() {
+            return;
+        }
+        let mut assignments: Vec<(PathBuf, i64)> = Vec::new();
+        for event in events {
+            match event {
+                crate::infrastructure::auto_tag::AutoTagEvent::Applied { assignments: batch } => {
+                    assignments.extend(batch)
+                }
+                crate::infrastructure::auto_tag::AutoTagEvent::Status { rule_id, status } => {
+                    self.auto_tag_status.insert(rule_id, status);
+                }
+                crate::infrastructure::auto_tag::AutoTagEvent::WatcherError { message } => {
+                    log::warn!("[AUTO-TAG] {message}");
+                }
+            }
+        }
+        if !assignments.is_empty() {
+            self.apply_auto_tag_assignments(&assignments);
         }
     }
 
