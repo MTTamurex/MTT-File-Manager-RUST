@@ -54,7 +54,7 @@ pub fn hbitmap_to_rgba(
         ReleaseDC(None, hdc);
 
         // BGRA → RGBA conversion
-        for pixel in buffer.chunks_exact_mut(4) {
+        for pixel in buffer.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
 
@@ -188,7 +188,7 @@ pub fn hicon_to_rgba(
 
         // BGRA → RGBA conversion
         let mut buffer = buffer;
-        for pixel in buffer.chunks_exact_mut(4) {
+        for pixel in buffer.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
 
@@ -201,7 +201,7 @@ pub fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
     let size = 256;
     let mut buffer = vec![0u8; size * size * 4];
 
-    for (i, pixel) in buffer.chunks_exact_mut(4).enumerate() {
+    for (i, pixel) in buffer.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let x = i % size;
         let y = i / size;
         let intensity = ((x + y) as f32 / (size * 2) as f32 * 100.0) as u8 + 100;

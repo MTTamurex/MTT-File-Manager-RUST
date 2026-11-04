@@ -414,7 +414,9 @@ pub fn parse_usn_records(
         if name_end <= offset + record_length && name_end <= data.len() {
             let name_slice = &data[name_start..name_end];
             let name_u16: Vec<u16> = name_slice
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             let name = String::from_utf16_lossy(&name_u16);
@@ -529,7 +531,7 @@ mod tests {
         record[52..56].copy_from_slice(&attributes.to_le_bytes());
         record[56..58].copy_from_slice(&(name_bytes as u16).to_le_bytes());
         record[58..60].copy_from_slice(&60u16.to_le_bytes());
-        for (chunk, code_unit) in record[60..].chunks_exact_mut(2).zip(name) {
+        for (chunk, code_unit) in record[60..].as_chunks_mut::<2>().0.iter_mut().zip(name) {
             chunk.copy_from_slice(&code_unit.to_le_bytes());
         }
         record

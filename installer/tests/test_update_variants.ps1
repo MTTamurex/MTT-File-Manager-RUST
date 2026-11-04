@@ -73,6 +73,13 @@ try {
     if ($installerSource -match '(?im)^Source:.*mtt-updater\.exe') {
         throw 'The browser-update installer must not package an update helper.'
     }
+    $installDelete = [regex]::Match(
+        $installerSource,
+        '(?ms)^\[InstallDelete\]\s*\r?\n(?<entries>.*?)(?=^\[|\z)'
+    ).Groups['entries'].Value
+    if ($installDelete -notmatch '(?im)^Type:\s*files;\s*Name:\s*"\{app\}\\mtt-updater\.exe"\s*$') {
+        throw 'Both installer editions must remove the retired updater from the application directory.'
+    }
 
     Push-Location $repoRoot
     try {

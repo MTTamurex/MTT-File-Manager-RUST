@@ -42,8 +42,10 @@ impl Bitmap {
             unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), pixels.data().len()) };
         for (rgba, bgra) in pixels
             .data()
-            .chunks_exact(4)
-            .zip(destination.chunks_exact_mut(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(destination.as_chunks_mut::<4>().0)
         {
             let channel = |value: u8| {
                 if straight_alpha && rgba[3] != 0 {
@@ -82,7 +84,7 @@ impl Icon {
         // an AND mask for consumers that do not use the 32-bit alpha channel.
         let stride = pixels.width().div_ceil(16) as usize * 2;
         let mut mask_bits = vec![0u8; stride * pixels.height() as usize];
-        for (index, pixel) in pixels.data().chunks_exact(4).enumerate() {
+        for (index, pixel) in pixels.data().as_chunks::<4>().0.iter().enumerate() {
             if pixel[3] == 0 {
                 let x = index % pixels.width() as usize;
                 let y = index / pixels.width() as usize;

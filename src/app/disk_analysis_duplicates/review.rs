@@ -247,10 +247,7 @@ impl DuplicateReview {
 
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        loop {
-            let Some(worker) = &self.worker else {
-                break;
-            };
+        while let Some(worker) = &self.worker {
             match worker.responses.try_recv() {
                 Ok(response) => {
                     if response.generation != self.generation.load(Ordering::Acquire) {

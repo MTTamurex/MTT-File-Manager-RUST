@@ -18,7 +18,7 @@ static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
 fn allocate_command_id(counter: &AtomicU64) -> Option<OrganizerCommandId> {
     counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             (current != 0).then(|| current.wrapping_add(1))
         })
         .ok()

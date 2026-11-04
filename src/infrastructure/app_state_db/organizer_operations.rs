@@ -118,7 +118,9 @@ pub(super) fn path_from_storage(
         return Err(malformed_column(column, "invalid organizer operation path"));
     }
     let wide = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect::<Vec<_>>();
     Ok(PathBuf::from(OsString::from_wide(&wide)))

@@ -20,19 +20,25 @@ fn folder_desktop_ini_icon_resource(folder: &std::path::Path) -> Option<String> 
 
     let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let words: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16_lossy(&words)
     } else if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
         let words: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16_lossy(&words)
     } else if bytes.iter().skip(1).step_by(2).take(16).any(|b| *b == 0) {
         let words: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16_lossy(&words)

@@ -47,6 +47,24 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
 }
 
 #[test]
+fn rendering_without_input_does_not_change_any_supported_percentage() {
+    for percent in (75..=150).step_by(5) {
+        let ctx = egui::Context::default();
+        let scale = percent as f32 / 100.0;
+        let mut fonts = egui::FontDefinitions::default();
+        sizing::apply(&mut fonts, scale);
+        ctx.set_fonts(fonts);
+        for _ in 0..4 {
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                let (value, response) = render(ui, "Test Font", scale, true);
+                assert_eq!(value, None, "idle slider at {percent}%");
+                assert!(!response.changed(), "idle slider at {percent}%");
+            });
+        }
+    }
+}
+
+#[test]
 fn dragging_does_not_move_the_slider_and_applies_on_release() {
     let ctx = egui::Context::default();
     let mut scale = 1.0;

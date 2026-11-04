@@ -30,7 +30,7 @@ pub(super) fn render(count: usize, size: u32) -> Option<Pixmap> {
         .as_ref()?;
     let resized = image::imageops::resize(base, size, size, image::imageops::FilterType::Lanczos3);
     let mut rgba = resized.into_raw();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         for channel in 0..3 {
             pixel[channel] = ((pixel[channel] as u16 * pixel[3] as u16 + 127) / 255) as u8;
         }

@@ -152,7 +152,7 @@ impl Writer {
         if self
             .counters
             .pending_events
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 n.checked_add(count).filter(|total| *total <= max_events)
             })
             .is_err()
@@ -163,7 +163,7 @@ impl Writer {
         if self
             .counters
             .pending
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < max_batches).then_some(n + 1)
             })
             .is_err()

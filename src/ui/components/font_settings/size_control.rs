@@ -12,7 +12,10 @@ pub(super) fn render(
 ) -> (Option<f32>, egui::Response) {
     let draft_id = ui.make_persistent_id(("font_scale_percent", family));
     let draft = ui.ctx().data(|data| data.get_temp::<f32>(draft_id));
-    let mut percent = draft.unwrap_or(scale * 100.0);
+    // Values such as 1.05 do not round-trip through f32 percentages exactly.
+    // Snap before constructing the slider so its own step rounding does not
+    // report a change on every idle frame.
+    let mut percent = draft.unwrap_or_else(|| (scale * 100.0 / 5.0).round() * 5.0);
     let mut reset = false;
     let response = ui
         .add_enabled_ui(enabled, |ui| {

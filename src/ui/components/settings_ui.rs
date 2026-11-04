@@ -57,12 +57,14 @@ fn radio_arrow_target(
     }
 
     let (previous, next) = ui.input_mut(|input| {
-        let previous = previous_keys.iter().fold(false, |pressed, &key| {
-            input.consume_key(egui::Modifiers::NONE, key) || pressed
-        });
-        let next = next_keys.iter().fold(false, |pressed, &key| {
-            input.consume_key(egui::Modifiers::NONE, key) || pressed
-        });
+        let mut previous = false;
+        for &key in previous_keys {
+            previous |= input.consume_key(egui::Modifiers::NONE, key);
+        }
+        let mut next = false;
+        for &key in next_keys {
+            next |= input.consume_key(egui::Modifiers::NONE, key);
+        }
         (previous, next)
     });
     if previous || next {

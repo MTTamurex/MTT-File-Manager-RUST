@@ -220,11 +220,7 @@ pub fn decode_gif_frames_from_memory(bytes: &[u8]) -> io::Result<Vec<GifAnimatio
             Ok(f) => {
                 let (numer, denom) = f.delay().numer_denom_ms();
                 // GIF spec: 0 delay → display "as fast as possible". Use 10 ms minimum.
-                let delay_ms = if denom == 0 {
-                    100
-                } else {
-                    (numer / denom).max(10)
-                };
+                let delay_ms = numer.checked_div(denom).map_or(100, |delay| delay.max(10));
                 let rgba = f.into_buffer();
                 let frame_bytes = rgba.as_raw().len();
                 total_rgba_bytes = total_rgba_bytes.saturating_add(frame_bytes);
@@ -600,7 +596,7 @@ fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFr
 fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(pixels.len());
 
-    for chunk in pixels.chunks_exact(4) {
+    for chunk in pixels.as_chunks::<4>().0 {
         let alpha = chunk[3];
         if alpha == 0 {
             rgba.extend_from_slice(&[0, 0, 0, 0]);
@@ -842,7 +838,13 @@ mod tests {
         };
 
         let rotated = rotate_frame(frame, 90).expect("rotate frame");
-        let red_values: Vec<u8> = rotated.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect();
+        let red_values: Vec<u8> = rotated
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect();
         assert_eq!(red_values, vec![3, 1, 4, 2]);
         assert_eq!((rotated.width, rotated.height), (2, 2));
     }

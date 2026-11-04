@@ -79,7 +79,7 @@ impl GifData {
 }
 
 fn atomic_saturating_sub(value: &AtomicUsize, amount: usize) {
-    let _ = value.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+    let _ = value.try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
         Some(current.saturating_sub(amount))
     });
 }

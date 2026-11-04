@@ -121,7 +121,13 @@ mod tests {
     }
 
     fn red_values(frame: &DecodedFrame) -> Vec<u8> {
-        frame.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect()
+        frame
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect()
     }
 
     #[test]

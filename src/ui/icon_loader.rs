@@ -213,7 +213,7 @@ impl Drop for ThreadCountGuard {
 
 fn try_reserve_auxiliary_icon_thread(active: &Arc<AtomicUsize>) -> bool {
     active
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
             (count < MAX_AUXILIARY_ICON_THREADS).then_some(count + 1)
         })
         .is_ok()

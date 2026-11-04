@@ -259,7 +259,7 @@ fn rgba_has_non_opaque_pixels_nonstandard(img: &DynamicImage) -> bool {
 fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
     let pixel_count = rgba.len() / 4;
     let mut rgb = Vec::with_capacity(pixel_count * 3);
-    for chunk in rgba.chunks_exact(4) {
+    for chunk in rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&chunk[..3]);
     }
     rgb

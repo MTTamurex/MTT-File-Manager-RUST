@@ -145,7 +145,7 @@ fn render_svg_to_image(
     if !preserve_colors {
         // Monochrome: replace ALL pixel colors with target color
         let pixels = pixmap.data_mut();
-        for chunk in pixels.chunks_exact_mut(4) {
+        for chunk in pixels.as_chunks_mut::<4>().0 {
             let alpha = chunk[3];
             if alpha > 0 {
                 chunk[0] = color[0];
@@ -158,7 +158,7 @@ fn render_svg_to_image(
         // Duotone: replace only dark/black pixels with target color,
         // keeping the accent-colored (blue) pixels intact.
         let pixels = pixmap.data_mut();
-        for chunk in pixels.chunks_exact_mut(4) {
+        for chunk in pixels.as_chunks_mut::<4>().0 {
             let alpha = chunk[3];
             if alpha > 0 {
                 // In premultiplied alpha, black pixels have near-zero RGB.

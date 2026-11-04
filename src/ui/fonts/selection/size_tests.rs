@@ -88,6 +88,34 @@ fn switching_fonts_and_resetting_remembers_sizes_independently() {
 }
 
 #[test]
+fn unchanged_scale_does_not_save_or_queue_font_updates() {
+    let (ctx, db) = fixture();
+    for scale in [1.0, 1.05, 1.2, 1.25] {
+        set_scale(&ctx, &db, scale);
+        flush_font_updates(&ctx);
+        // A distinguishable stored value proves the no-op does not write to the DB.
+        let key = sizing::preference_key("Test Font A");
+        db.set_preference(&key, "unchanged").unwrap();
+        set_scale(&ctx, &db, scale);
+        assert!(state(&ctx).unwrap().lock().unwrap().queued_fonts.is_none());
+        assert_eq!(db.get_preference(&key).as_deref(), Some("unchanged"));
+    }
+}
+
+#[test]
+fn unchanged_normalized_scale_does_not_queue_font_updates() {
+    let (ctx, db) = fixture();
+    set_scale(&ctx, &db, sizing::MAX);
+    flush_font_updates(&ctx);
+    set_scale(&ctx, &db, sizing::MAX + 1.0);
+    assert!(state(&ctx).unwrap().lock().unwrap().queued_fonts.is_none());
+    set_scale(&ctx, &db, sizing::DEFAULT);
+    flush_font_updates(&ctx);
+    set_scale(&ctx, &db, f32::NAN);
+    assert!(state(&ctx).unwrap().lock().unwrap().queued_fonts.is_none());
+}
+
+#[test]
 fn repeated_size_changes_do_not_compound_and_preserve_interface_zoom() {
     let (ctx, db) = fixture();
     crate::ui::interface_scale::apply(&ctx, 1.5);

@@ -33,7 +33,7 @@ const OUTPUT_HEADER: usize = 12; // FileReferenceNumber(8) + FileRecordLength(4)
 // ── MFT record constants ────────────────────────────────────────────────────
 
 /// MFT record signature: "FILE" in little-endian.
-const FILE_SIGNATURE: [u8; 4] = [b'F', b'I', b'L', b'E'];
+const FILE_SIGNATURE: [u8; 4] = *b"FILE";
 
 /// $DATA attribute type identifier.
 const ATTR_TYPE_DATA: u32 = 0x80;
@@ -1056,7 +1056,9 @@ fn parse_mft_record_bulk(record: &[u8], record_size: usize, frn: u64, state: Bul
 
                             if ns + nb <= record_size && name_chars > 0 {
                                 let name_u16: Vec<u16> = record[ns..ns + nb]
-                                    .chunks_exact(2)
+                                    .as_chunks::<2>()
+                                    .0
+                                    .iter()
                                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                                     .collect();
                                 let name = String::from_utf16_lossy(&name_u16);

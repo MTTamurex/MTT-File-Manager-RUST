@@ -258,7 +258,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         // Convert BGRA to RGBA if RGB32 was used (swap R and B channels)
         let mut rgba_data = rgba_data;
         if !use_nv12 {
-            for pixel in rgba_data.chunks_exact_mut(4) {
+            for pixel in rgba_data.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2); // Swap B and R
             }
         }

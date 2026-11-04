@@ -225,7 +225,7 @@ fn parse_ata_identify_string(data: &[u8], first_word: usize, word_count: usize) 
     let bytes = data.get(start..end)?;
     let mut decoded = Vec::with_capacity(bytes.len());
 
-    for word in bytes.chunks_exact(2) {
+    for word in bytes.as_chunks::<2>().0 {
         decoded.push(word[1]);
         decoded.push(word[0]);
     }

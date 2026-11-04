@@ -61,13 +61,12 @@ Name: "greek";       MessagesFile: "languages\Greek.isl"
 [Tasks]
 Name: "desktopicon";  Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-#ifndef ModernMenuPackageEnabled
 [InstallDelete]
-; Do not leave an older modern-menu extension behind when this build can only
-; install the classic static-verb fallback.
+; Remove the retired integrated updater from older installations.
+Type: files; Name: "{app}\mtt-updater.exe"
+; Remove obsolete modern-menu artifacts from older installations.
 Type: files; Name: "{app}\mtt_explorer_command.dll"
 Type: files; Name: "{app}\mtt-file-manager.identity.msix"
-#endif
 
 [Files]
 ; Main executable
@@ -88,18 +87,10 @@ Source: "{#BuildOutputDir}\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; Search service
 Source: "{#BuildOutputDir}\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
 
-; Per-user context-menu cleanup and sparse-package unregistration
+; Context-menu cleanup and legacy sparse-package unregistration
 Source: "{#SrcRoot}\installer\cleanup_context_menu.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\restore_folder_integration.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
-
-#ifdef ModernMenuPackageEnabled
-; Windows 11 compact context-menu extension (signed sparse package)
-Source: "{#BuildOutputDir}\mtt_explorer_command.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\appicon.png"; DestDir: "{app}\Assets"; Flags: ignoreversion
-Source: "{#BuildOutputDir}\mtt-file-manager.identity.msix"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\installer\register_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
-#endif
 
 ; mpv portable config (scripts, settings)
 Source: "{#SrcRoot}\mpv_ui\portable_config\mpv.conf";            DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
@@ -115,11 +106,7 @@ Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; Working
 Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Run]
-#ifdef ModernMenuPackageEnabled
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\register_sparse_package.ps1"" -PackagePath ""{app}\mtt-file-manager.identity.msix"" -ExternalLocation ""{app}"" -PackageName ""MTT.FileManager"" -PackageVersion ""{#MyAppVersion}.0"""; Flags: runhidden waituntilterminated runasoriginaluser
-#else
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\unregister_sparse_package.ps1"" -PackageName ""MTT.FileManager"" -AllUsers"; Flags: runhidden waituntilterminated
-#endif
 ; (Re)install and start the search indexer Windows service.
 ; The service was already stopped in CurStepChanged(ssInstall) before files
 ; were copied, so "install" here is idempotent for fresh installs and safe

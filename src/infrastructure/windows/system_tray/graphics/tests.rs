@@ -8,7 +8,9 @@ fn native_bitmap_and_icon_keep_colors_alpha_and_orientation() {
     pixels.data_mut()[..4].copy_from_slice(&[64, 128, 192, 255]);
     pixels.data_mut()[4..8].copy_from_slice(&[32, 64, 96, 128]);
     for (pixel, alpha) in pixels.data_mut()[8..28]
-        .chunks_exact_mut(4)
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
         .zip([1u8, 32, 64, 192, 254])
     {
         pixel.copy_from_slice(&[alpha / 4, alpha / 2, alpha, alpha]);
@@ -35,7 +37,12 @@ fn native_bitmap_and_icon_keep_colors_alpha_and_orientation() {
     assert_eq!(&rgba[..4], &[64, 128, 192, 255]);
     // Straight-alpha conversion and GDI blending can lose one RGB level.
     // Alpha must remain exact; applying it twice would greatly exceed this bound.
-    for (actual, expected) in rgba.chunks_exact(4).zip(pixels.data().chunks_exact(4)) {
+    for (actual, expected) in rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(pixels.data().as_chunks::<4>().0)
+    {
         assert_eq!(actual[3], expected[3]);
         for channel in 0..3 {
             assert!(

@@ -348,9 +348,14 @@ mod tests {
             assert_eq!((w, h), (sw, sh));
             assert_ne!(before, after);
             let mut visible_media = 0;
-            for (a, b) in before.chunks_exact(4).zip(after.chunks_exact(4)) {
+            for (a, b) in before
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(after.as_chunks::<4>().0)
+            {
                 assert_eq!(a[3], b[3]);
-                if a == [20, 80, 220, 255] {
+                if *a == [20, 80, 220, 255] {
                     assert_eq!(a, b);
                     visible_media += 1;
                 }

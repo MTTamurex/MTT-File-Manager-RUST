@@ -200,7 +200,7 @@ Dedicated image, PDF, DOCX, XLSX, and text viewer windows start with Glow indepe
 ## Prerequisites
 
 - **Windows 10 or newer, 64-bit** — The installer targets x64-compatible Windows systems.
-- **Rust 1.85 or newer for source builds** — The pinned BetterOffice DOCX and XLSX crates use the Rust 2024 edition; the application package itself remains edition 2021.
+- **Rust 1.99 or newer for source builds** — Required by the workspace. The application packages remain edition 2021; the pinned BetterOffice DOCX and XLSX crates use edition 2024.
 - **Microsoft Visual C++ Redistributable 2015-2022 (x64)** — Required by the native runtime dependencies. The official Microsoft installer is available at: https://aka.ms/vs/17/release/vc_redist.x64.exe
 - **Administrator permission during installation** — Required to install and start the Global Search and drive telemetry Windows Service (`mtt-search-service.exe`).
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).

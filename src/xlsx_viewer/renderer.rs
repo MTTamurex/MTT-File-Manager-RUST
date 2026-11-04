@@ -515,7 +515,12 @@ mod tests {
         assert!(tiles[0].width > 0);
         assert!(tiles[0].height > 0);
         assert_eq!(tiles[0].rgba.len(), tiles[0].width * tiles[0].height * 4);
-        assert!(tiles[0].rgba.chunks_exact(4).any(|pixel| pixel[0] < 128));
+        assert!(tiles[0]
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[0] < 128));
 
         let matches = renderer.search("needle");
         assert_eq!(matches.len(), 1);

@@ -80,6 +80,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
         ui.visuals_mut().override_text_color = Some(fg_color);
 
         egui::ComboBox::from_id_salt("sort_mode_secondary")
+            .popup_style(super::menu_popup_style.into())
             .selected_text(match app.sort_mode {
                 SortMode::Name => t!("secondary_toolbar.sort_name"),
                 SortMode::Date => t!("secondary_toolbar.sort_date"),

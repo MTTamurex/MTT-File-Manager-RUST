@@ -34,15 +34,11 @@ if ($Variant -eq 'Both') {
     return
 }
 
-if ($SkipBuild -and $env:MTT_MSIX_SIGNING_PFX -and $env:MTT_MSIX_PUBLISHER) {
-    throw 'SkipBuild cannot be used when creating a signed sparse package; rebuild the executable with the configured publisher.'
-}
-
 $variantDirectory = if ($Variant -eq 'NoUpdate') { 'installer-no-update' } else { 'installer-browser-updates' }
 $buildTargetDir = Join-Path $RepoRoot "target\$variantDirectory"
 $buildOutputDir = Join-Path $buildTargetDir 'release'
 $buildManifestPath = Join-Path $buildOutputDir 'installer-build.json'
-$binaries = @('mtt-file-manager.exe', 'mtt-search-service.exe', 'mtt_explorer_command.dll')
+$binaries = @('mtt-file-manager.exe', 'mtt-search-service.exe')
 
 Write-Host "`n=== MTT File Manager Installer Build ===" -ForegroundColor Cyan
 Write-Host "Variant: $Variant" -ForegroundColor Cyan
@@ -88,17 +84,6 @@ foreach ($runtime in @('pdfium.dll', 'libmpv-2.dll')) {
     }
 }
 
-$modernMenuPackageReady = $false
-$modernMenuPackagePath = Join-Path $buildOutputDir 'mtt-file-manager.identity.msix'
-$packageBuildResult = & "$RepoRoot\installer\build_sparse_package.ps1" -OutputPath $modernMenuPackagePath
-if ($packageBuildResult -eq 0 -and (Test-Path -LiteralPath $modernMenuPackagePath -PathType Leaf)) {
-    $modernMenuPackageReady = $true
-} elseif ($packageBuildResult -eq 10) {
-    Write-Host "Modern Explorer menu is not signed; the installer will use the classic context-menu fallback." -ForegroundColor Yellow
-} else {
-    throw "Sparse package build returned an unexpected status: $packageBuildResult"
-}
-
 # ── Step 2: Validate required files and directories ───────────────────
 Write-Host "`n[2/3] Validating required files and directories..." -ForegroundColor Yellow
 
@@ -106,7 +91,6 @@ $requiredDirectories = @(
     "$RepoRoot\mpv_ui\portable_config\scripts",
     "$RepoRoot\mpv_ui\portable_config\script-opts",
     "$RepoRoot\mpv_ui\portable_config\fonts",
-    "$RepoRoot\installer\sparse",
     "$RepoRoot\third_party_licenses",
     "$RepoRoot\third_party_licenses\pdfium-win-x64",
     "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses"
@@ -114,7 +98,6 @@ $requiredDirectories = @(
 
 $requiredFiles = @(
     "$buildOutputDir\mtt-file-manager.exe",
-    "$buildOutputDir\mtt_explorer_command.dll",
     "$buildOutputDir\mtt-search-service.exe",
     "$buildOutputDir\libmpv-2.dll",
     "$buildOutputDir\pdfium.dll",
@@ -158,12 +141,9 @@ $requiredFiles = @(
     "$RepoRoot\third_party_licenses\MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt",
     "$RepoRoot\appicon.ico",
     "$RepoRoot\appicon.png",
-    "$RepoRoot\installer\build_sparse_package.ps1",
-    "$RepoRoot\installer\register_sparse_package.ps1",
     "$RepoRoot\installer\unregister_sparse_package.ps1",
     "$RepoRoot\installer\cleanup_context_menu.ps1",
     "$RepoRoot\installer\restore_folder_integration.ps1",
-    "$RepoRoot\installer\sparse\AppxManifest.xml",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",
     "$RepoRoot\mpv_ui\portable_config\input.conf",
     "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
@@ -246,7 +226,6 @@ Write-Host "  Using: $isccCandidates" -ForegroundColor DarkGray
 
 $issFile = "$RepoRoot\installer\setup.iss"
 $compilerArguments = @("/DBuildOutputDir=$buildOutputDir")
-if ($modernMenuPackageReady) { $compilerArguments += '/DModernMenuPackageEnabled=1' }
 if ($Variant -eq 'NoUpdate') { $compilerArguments += '/DNoOnlineUpdates=1' }
 & $isccCandidates @compilerArguments $issFile
 if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed (exit code $LASTEXITCODE)" }

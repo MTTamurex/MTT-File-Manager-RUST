@@ -46,6 +46,7 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 _ => t!("secondary_toolbar.group_none").to_string(),
             });
         egui::ComboBox::from_id_salt("group_mode_secondary")
+            .popup_style(super::menu_popup_style.into())
             .width(140.0)
             .selected_text(format!(
                 "{}: {}",

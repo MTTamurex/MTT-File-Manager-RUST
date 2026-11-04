@@ -36,7 +36,7 @@ pub fn diagnose_cache_size() {
         }
     }
 
-    file_entries.sort_by(|a, b| b.1.cmp(&a.1));
+    file_entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     eprintln!("[CACHE-DIAG] Directory: {}", dir.display());
     eprintln!(

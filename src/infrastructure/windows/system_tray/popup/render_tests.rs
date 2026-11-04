@@ -161,7 +161,9 @@ fn offscreen_paint_renders_all_application_palettes_at_multiple_dpi_scales() {
                     .unwrap();
             assert_eq!((actual_width, actual_height), (width, height));
             let colors = rgba
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|pixel| &pixel[..3])
                 .collect::<std::collections::HashSet<_>>();
             assert!(
@@ -170,7 +172,7 @@ fn offscreen_paint_renders_all_application_palettes_at_multiple_dpi_scales() {
             );
             // Opt-in test artifacts for visual review; never captures user data.
             if let Some(directory) = std::env::var_os("MTT_TRAY_PREVIEW_DIR") {
-                for pixel in rgba.chunks_exact_mut(4) {
+                for pixel in rgba.as_chunks_mut::<4>().0 {
                     pixel[3] = 255;
                 }
                 let image = image::RgbaImage::from_raw(width, height, rgba).unwrap();

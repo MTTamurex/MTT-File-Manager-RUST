@@ -42,7 +42,7 @@ pub(super) fn usn_record(frn: u64, parent: u64, reason: u32, name: &[u16]) -> Ve
     record[40..44].copy_from_slice(&reason.to_le_bytes());
     record[56..58].copy_from_slice(&((name.len() * 2) as u16).to_le_bytes());
     record[58..60].copy_from_slice(&60u16.to_le_bytes());
-    for (chunk, unit) in record[60..].chunks_exact_mut(2).zip(name) {
+    for (chunk, unit) in record[60..].as_chunks_mut::<2>().0.iter_mut().zip(name) {
         chunk.copy_from_slice(&unit.to_le_bytes());
     }
     record

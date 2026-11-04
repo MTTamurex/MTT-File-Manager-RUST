@@ -295,7 +295,7 @@ fn rgb24_to_rgba(source: &[u8], bgr: bool) -> Option<Vec<u8>> {
 
     let pixel_count = source.len() / 3;
     let mut rgba = Vec::with_capacity(pixel_count.checked_mul(4)?);
-    for pixel in source.chunks_exact(3) {
+    for pixel in source.as_chunks::<3>().0 {
         if bgr {
             rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
         } else {
@@ -311,7 +311,7 @@ fn bgr32_to_rgba(source: &[u8], has_alpha: bool) -> Option<Vec<u8>> {
     }
 
     let mut rgba = Vec::with_capacity(source.len());
-    for pixel in source.chunks_exact(4) {
+    for pixel in source.as_chunks::<4>().0 {
         rgba.extend_from_slice(&[
             pixel[2],
             pixel[1],

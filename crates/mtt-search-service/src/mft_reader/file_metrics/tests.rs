@@ -105,7 +105,7 @@ fn stream(name: &str, size: i64, allocated: i64) -> Vec<u8> {
     bytes[4..8].copy_from_slice(&((name.len() * 2) as u32).to_le_bytes());
     bytes[8..16].copy_from_slice(&size.to_le_bytes());
     bytes[16..24].copy_from_slice(&allocated.to_le_bytes());
-    for (chunk, ch) in bytes[24..].chunks_exact_mut(2).zip(name) {
+    for (chunk, ch) in bytes[24..].as_chunks_mut::<2>().0.iter_mut().zip(name) {
         chunk.copy_from_slice(&ch.to_le_bytes());
     }
     bytes

@@ -81,7 +81,7 @@ impl IconLoader {
             match result.data {
                 Some((rgba_data, width, height)) => {
                     let texture = ctx.load_texture(
-                        format!("async_icon_{}", &result.key),
+                        format!("async_icon_{}", result.key),
                         egui::ColorImage::from_rgba_unmultiplied(
                             [width as usize, height as usize],
                             &rgba_data,

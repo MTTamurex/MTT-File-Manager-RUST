@@ -27,7 +27,7 @@ fn rendering_preserves_the_base_and_uses_valid_premultiplied_alpha() {
         // The badge occupies the top of the icon, not the lower app artwork.
         let start = (size * size * 3 / 4 * 4) as usize;
         assert_eq!(&base.data()[start..], &two.data()[start..]);
-        for pixel in two.data().chunks_exact(4) {
+        for pixel in two.data().as_chunks::<4>().0 {
             assert!(pixel[..3].iter().all(|&channel| channel <= pixel[3]));
         }
     }

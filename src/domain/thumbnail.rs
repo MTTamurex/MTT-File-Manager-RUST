@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// UI stall time, especially on OpenGL backends where each `ctx.load_texture` call blocks
 /// the CPU until the driver finishes the transfer.
 pub fn premultiply_rgba_in_place(rgba: &mut [u8]) {
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         let a = pixel[3] as u32;
         if a == 0 {
             pixel[0] = 0;
@@ -95,6 +95,14 @@ pub fn detail_preview_size(path: &std::path::Path) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn premultiplication_preserves_incomplete_pixel_bytes() {
+        let mut rgba = [128, 64, 32, 128, 9, 8, 7];
+        premultiply_rgba_in_place(&mut rgba);
+        assert_eq!(rgba, [64, 32, 16, 128, 9, 8, 7]);
+        premultiply_rgba_in_place(&mut []);
+    }
 
     #[test]
     fn accepts_minimal_and_max_side_buffers() {

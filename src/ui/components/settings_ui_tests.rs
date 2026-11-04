@@ -303,6 +303,31 @@ fn choice_list_arrows_move_once_and_support_both_orientations() {
 }
 
 #[test]
+fn radio_navigation_consumes_all_matching_arrow_keys() {
+    use egui::Key::{ArrowDown, ArrowLeft, ArrowRight, ArrowUp};
+    for (keys, expected) in [
+        (vec![ArrowUp, ArrowLeft], Some(0)),
+        (vec![ArrowDown, ArrowRight], Some(2)),
+        (vec![ArrowUp, ArrowLeft, ArrowDown, ArrowRight], None),
+    ] {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: keys.iter().flat_map(|&key| key_input(key).events).collect(),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            assert_eq!(
+                radio_arrow_target(ui, 1, 3, &[ArrowUp, ArrowLeft], &[ArrowDown, ArrowRight]),
+                expected,
+            );
+            for &key in &keys {
+                assert!(!ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)));
+            }
+        });
+    }
+}
+
+#[test]
 fn custom_controls_expose_accessibility_semantics() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();

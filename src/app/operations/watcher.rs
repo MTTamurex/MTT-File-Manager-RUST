@@ -168,7 +168,7 @@ impl ImageViewerApp {
         // Reserve a setup slot atomically before spawning. Incrementing inside
         // the new thread allowed concurrent callers to all pass the cap check.
         let reserved = LIVE_NOTIFY_SETUP_THREADS
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::AcqRel,
                 std::sync::atomic::Ordering::Acquire,
                 |live| (live < MAX_NOTIFY_SETUP_THREADS).then_some(live + 1),

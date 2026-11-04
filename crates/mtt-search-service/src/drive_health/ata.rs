@@ -290,7 +290,7 @@ fn parse_word_swapped_string(data: &[u8], first_word: usize, words: usize) -> Op
     let start = first_word.checked_mul(2)?;
     let bytes = data.get(start..start.checked_add(words.checked_mul(2)?)?)?;
     let mut decoded = Vec::with_capacity(bytes.len());
-    for word in bytes.chunks_exact(2) {
+    for word in bytes.as_chunks::<2>().0 {
         decoded.extend_from_slice(&[word[1], word[0]]);
     }
     if decoded
@@ -321,8 +321,10 @@ mod tests {
 
     fn set_swapped(data: &mut [u8], word_index: usize, value: &[u8]) {
         for (destination, source) in data[word_index * 2..]
-            .chunks_exact_mut(2)
-            .zip(value.chunks_exact(2))
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(value.as_chunks::<2>().0)
         {
             destination.copy_from_slice(&[source[1], source[0]]);
         }

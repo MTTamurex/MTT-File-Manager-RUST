@@ -106,7 +106,7 @@ impl OneDriveIoPool {
                             } else {
                                 // Successful fast completion: decay the stall counter so the
                                 // pool can recover after a transient congestion episode.
-                                let _ = STALLED_IO_WORKERS.fetch_update(
+                                let _ = STALLED_IO_WORKERS.try_update(
                                     Ordering::AcqRel,
                                     Ordering::Acquire,
                                     |v| if v > 0 { Some(v - 1) } else { None },
@@ -182,7 +182,7 @@ impl OneDriveIoPool {
 
     fn try_acquire_overflow_slot(&self) -> bool {
         self.overflow_workers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 if current < self.max_overflow_workers {
                     Some(current + 1)
                 } else {

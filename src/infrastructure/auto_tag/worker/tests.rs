@@ -67,14 +67,14 @@ fn applied(fixture: &ScanFixture) -> FxHashSet<PathBuf> {
 #[test]
 fn startup_scan_without_subfolders_tags_files_only() {
     let f = scan_fixture(false);
-    scan_and_apply(&f.context, &[f.rule.clone()], &f.defs, None);
+    scan_and_apply(&f.context, std::slice::from_ref(&f.rule), &f.defs, None);
     assert_eq!(applied(&f), [f.file].into_iter().collect());
 }
 
 #[test]
 fn startup_scan_with_subfolders_covers_the_tree_but_not_the_root() {
     let f = scan_fixture(true);
-    scan_and_apply(&f.context, &[f.rule.clone()], &f.defs, None);
+    scan_and_apply(&f.context, std::slice::from_ref(&f.rule), &f.defs, None);
     assert_eq!(
         applied(&f),
         [f.file, f.folder, f.nested_file].into_iter().collect()
@@ -89,7 +89,7 @@ fn arriving_directory_also_tags_its_existing_contents() {
         .collect();
     assert!(process_stable_files(
         &f.context,
-        &[f.rule.clone()],
+        std::slice::from_ref(&f.rule),
         &f.defs,
         &mut pending
     ));
@@ -126,7 +126,7 @@ fn overlapping_scans_do_not_tag_rule_roots() {
 fn cancelled_scan_does_not_apply_assignments() {
     let f = scan_fixture(true);
     f.context.shutdown.store(true, Ordering::Release);
-    scan_and_apply(&f.context, &[f.rule.clone()], &f.defs, None);
+    scan_and_apply(&f.context, std::slice::from_ref(&f.rule), &f.defs, None);
     assert!(applied(&f).is_empty());
     assert!(f.context.app_state_db.get_all_tag_assignments().is_empty());
 }
@@ -134,13 +134,18 @@ fn cancelled_scan_does_not_apply_assignments() {
 #[test]
 fn unknown_tags_do_not_produce_applied_events() {
     let f = scan_fixture(true);
-    scan_and_apply(&f.context, &[f.rule.clone()], &FxHashMap::default(), None);
+    scan_and_apply(
+        &f.context,
+        std::slice::from_ref(&f.rule),
+        &FxHashMap::default(),
+        None,
+    );
     let mut pending = [(f.file.clone(), Instant::now() - STABILITY_DELAY)]
         .into_iter()
         .collect();
     assert!(!process_stable_files(
         &f.context,
-        &[f.rule.clone()],
+        std::slice::from_ref(&f.rule),
         &FxHashMap::default(),
         &mut pending
     ));
@@ -153,7 +158,12 @@ fn root_metadata_events_do_not_tag_the_watched_folder_itself() {
     let mut pending = [(f.rule.folder_path.clone(), Instant::now() - STABILITY_DELAY)]
         .into_iter()
         .collect();
-    process_stable_files(&f.context, &[f.rule.clone()], &f.defs, &mut pending);
+    process_stable_files(
+        &f.context,
+        std::slice::from_ref(&f.rule),
+        &f.defs,
+        &mut pending,
+    );
     let paths = applied(&f);
     assert!(!paths.contains(&f.rule.folder_path));
     assert!(paths.contains(&f.nested_file));

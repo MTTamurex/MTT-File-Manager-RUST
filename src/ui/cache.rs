@@ -140,7 +140,7 @@ impl ThumbnailTraceCounters {
     pub fn take_snapshot(&mut self) -> ThumbnailTraceSnapshot {
         // Compute top-3 by frequency before clearing.
         let mut entries: Vec<(PathBuf, u64)> = self.request_freq.drain().collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         let unique_request_paths = entries.len();
         entries.truncate(3);
 

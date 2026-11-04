@@ -11,6 +11,16 @@ mod group_controls;
 mod sort_controls;
 mod view_zoom_controls;
 
+#[cfg(test)]
+mod menu_tests;
+
+fn menu_popup_style(style: &mut egui::Style) {
+    // Floating bars otherwise share their expanded hit target with menu rows.
+    // Reserve a lane only when the ComboBox actually needs to scroll.
+    let scroll = &mut style.spacing.scroll;
+    scroll.floating_allocated_width = scroll.bar_width + 4.0;
+}
+
 pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
     let dark_mode = root_ui.visuals().dark_mode;
     let separator_color = if dark_mode {

@@ -3829,14 +3829,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mtt-explorer-command"
-version = "0.2.11"
-dependencies = [
- "windows",
- "windows-core",
-]
-
-[[package]]
 name = "mtt-file-manager"
 version = "0.2.11"
 dependencies = [

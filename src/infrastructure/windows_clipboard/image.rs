@@ -92,7 +92,7 @@ fn encode_cf_dibv5(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Stri
     write_u32(&mut dib, 56, 0x7352_4742); // LCS_sRGB
     write_u32(&mut dib, 108, 4); // LCS_GM_IMAGES
 
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         dib.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
     }
     Ok(dib)

@@ -301,6 +301,9 @@ pub(crate) fn set_scale(
     }
     let selected = state.selected.clone();
     let scale = sizing::normalize(scale);
+    if state.sizes.get(&selected) == scale {
+        return;
+    }
     state.save_failed = db
         .set_preference(&sizing::preference_key(&selected), &scale.to_string())
         .is_err();

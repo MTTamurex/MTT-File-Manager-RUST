@@ -342,11 +342,15 @@ mod tests {
         assert_eq!(page.skipped_images, 0);
         assert!(page
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel[0] < 128 && pixel[1] < 128 && pixel[2] < 128));
         assert!(page
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel[0] > 200 && pixel[1] < 80 && pixel[2] < 80));
     }
 }

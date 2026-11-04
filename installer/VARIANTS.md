@@ -46,7 +46,8 @@ The script uses separate Cargo target directories:
 
 Each directory receives verified runtime DLLs staged from `target/release` if
 they are not already present. The existing DLL hash checks remain mandatory.
-MSIX signing configuration and the classic context-menu fallback are unchanged.
+The installer no longer builds or registers a signed MSIX package or Explorer
+command DLL. Cleanup of older integrations is retained.
 
 The script passes the selected build directory to Inno Setup. Neither package
 includes a helper, even if an unrelated helper exists elsewhere.
@@ -62,11 +63,12 @@ Outputs in `installer/output`:
 Both installers use the same application identity and installation location.
 Only one edition is installed at a time. Existing update preferences are left
 untouched when switching; the no-update edition neither reads nor acts on them.
-The previous automatic-install preference is ignored, not erased. An old helper
-file from an earlier installation may remain on disk, but neither edition has
-code to invoke it. The standard target directory remains separate from earlier
-integrated-updater builds. The standard installer retains its original asset
-name so already-installed integrated updaters can find this release.
+The previous automatic-install preference is ignored, not erased. Both editions
+remove `mtt-updater.exe` left in the application directory by older installations;
+neither edition builds, packages, or invokes it. The standard target directory
+remains separate from earlier integrated-updater builds. The standard installer
+retains its original asset name so already-installed integrated updaters can
+find this release.
 
 ## Validation and release hashes
 

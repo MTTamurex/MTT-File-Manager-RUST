@@ -120,7 +120,11 @@ fn does_not_resize_large_images_or_convert_near_gray_pixels() {
     );
     let pixels = stream.decompressed_content().unwrap();
     assert_eq!(pixels.len(), width as usize * height as usize * 3);
-    assert!(pixels.chunks_exact(3).all(|pixel| pixel == expected));
+    assert!(pixels
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == expected));
 }
 
 #[test]
