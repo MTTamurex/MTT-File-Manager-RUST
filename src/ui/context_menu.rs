@@ -765,8 +765,10 @@ fn render_single_item(
 
         // Show submenu if this is the active item at this depth
         if is_active {
-            // Signal lazy load if submenu is active but empty
-            if item.has_pending_submenu && item.sub_items.is_empty() {
+            // Local fallback actions can already be visible while native items are pending.
+            // Keep requesting on hover so a full worker queue can be retried; the menu
+            // state deduplicates requests until their response arrives.
+            if item.has_pending_submenu {
                 *lazy_load = Some(item.id);
             }
 

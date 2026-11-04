@@ -2,6 +2,7 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
+pub(crate) mod background;
 mod computer;
 mod local_open;
 mod new_submenu;
@@ -471,7 +472,9 @@ impl ImageViewerApp {
                     .is_some()))
         {
             if !sidebar_computer {
+                items.extend(background::view_items(self));
                 items.push(grouping_menu_item(self));
+                items.push(background::refresh_item(self));
             }
             if sidebar_computer || self.navigation_state.is_computer_view {
                 if !items.is_empty() {
@@ -524,7 +527,9 @@ impl ImageViewerApp {
                     .with_svg_icon("broom"),
             );
             items.push(ContextMenuItem::separator());
+            items.extend(background::view_items(self));
             items.push(grouping_menu_item(self));
+            items.push(background::refresh_item(self));
             self.context_menu.items = items;
             self.context_menu.partition_items(); // M-5
             return;
@@ -598,17 +603,9 @@ impl ImageViewerApp {
                         .enabled(false),
                 );
                 items.push(ContextMenuItem::separator());
-                items.push(
-                    ContextMenuItem::new(-1, t!("context_menu.create_folder"))
-                        .with_svg_icon("folder_new")
-                        .with_shortcut(
-                            self.shortcuts
-                                .label(crate::app::shortcuts::ShortcutAction::CreateFolder),
-                        )
-                        .enabled(false),
-                );
-                items.push(ContextMenuItem::separator());
+                items.extend(background::view_items(self));
                 items.push(grouping_menu_item(self));
+                items.push(background::refresh_item(self));
             }
 
             self.context_menu.items = items;
@@ -837,26 +834,17 @@ impl ImageViewerApp {
             super::file_operation_policy::path_accepts_file_children(operation_location);
         if is_empty_area {
             items.push(ContextMenuItem::separator());
+            items.extend(background::view_items(self));
             items.push(grouping_menu_item(self));
-            items.push(
-                ContextMenuItem::new(-1, t!("context_menu.create_folder"))
-                    .with_svg_icon("folder_new")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::CreateFolder),
-                    )
-                    .enabled(can_create_folder),
-            );
+            items.push(background::refresh_item(self));
             if can_create_folder {
-                items.push(ContextMenuItem {
-                    id: -110,
-                    text: t!("context_menu.new").to_string(),
-                    is_enabled: false,
-                    svg_icon_name: Some("folder_new".to_string()),
-                    is_loading_placeholder: true,
-                    ..Default::default()
-                });
+                items.push(ContextMenuItem::separator());
+                items.push(new_submenu::menu(
+                    self.shortcuts
+                        .label(crate::app::shortcuts::ShortcutAction::CreateFolder),
+                ));
             }
+            items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
                     .with_svg_icon("terminal")
@@ -867,6 +855,9 @@ impl ImageViewerApp {
                     .with_svg_icon("terminal")
                     .enabled(!is_server_background),
             );
+            if can_create_folder {
+                items.extend(background::folder_items(self));
+            }
         } else {
             items.push(ContextMenuItem::separator());
             if saved_network_locations && is_sidebar_tree {
@@ -1251,6 +1242,11 @@ impl ImageViewerApp {
         let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
+            if self.context_menu.is_empty_area
+                && background::is_owned_shell_item(raw.command_string.as_deref(), &raw.text)
+            {
+                continue;
+            }
             let is_open_with = crate::application::context_menu::is_generic_open_with_command(
                 raw.command_string.as_deref(),
                 &raw.text,
@@ -1324,16 +1320,8 @@ impl ImageViewerApp {
 
         promote_extract_all_shell_item(items, &mut all_shell_items);
 
-        if let Some(mut new_submenu) = new_submenu_item {
-            new_submenu.text = t!("context_menu.new").to_string();
-            if new_submenu.icon.is_none() {
-                new_submenu.svg_icon_name = Some("folder_new".to_string());
-            }
-            if let Some(idx) = items.iter().position(|item| item.id == -1) {
-                items.insert(idx + 1, new_submenu);
-            } else {
-                items.push(new_submenu);
-            }
+        if let Some(new_submenu) = new_submenu_item {
+            new_submenu::merge_shell(items, new_submenu);
         }
 
         if !all_shell_items.is_empty() {
@@ -1570,20 +1558,20 @@ impl ImageViewerApp {
             false
         }
 
-        fn is_new_submenu(items: &[ContextMenuItem], id: i32) -> bool {
-            items.iter().any(|item| {
-                (item.id == id && is_new_shell_item(item)) || is_new_submenu(&item.sub_items, id)
-            })
-        }
-
-        let hide_native_folder = is_new_submenu(&self.context_menu.items, item_id as i32);
+        let folder = self
+            .context_menu
+            .items
+            .iter()
+            .find(|item| item.id == item_id as i32 && is_new_shell_item(item))
+            .and_then(|item| item.sub_items.iter().find(|child| child.id == -1))
+            .cloned();
         self.context_menu.finish_submenu_load(item_id as i32);
         let mut new_subitems: Vec<ContextMenuItem> = sub_items
             .iter()
             .map(|item| convert_item(ctx, item))
             .collect();
-        if hide_native_folder {
-            new_submenu::remove_duplicate_folder(&mut new_subitems);
+        if let Some(folder) = folder {
+            new_submenu::unify_folder(&mut new_subitems, folder);
         }
         update_ui_item(&mut self.context_menu.items, item_id as i32, new_subitems);
     }

@@ -7,6 +7,7 @@ pub mod bitmap_conversion;
 pub mod codec_registry;
 pub(crate) mod column_properties;
 pub mod com_scope;
+pub mod command_prompt;
 pub mod default_file_manager;
 pub mod device_change;
 pub(crate) mod directory_entry_filter;

@@ -353,7 +353,15 @@ fn main() -> eframe::Result<()> {
 
     // Dispatch the elevated helper before opening preferences or diagnostic logs.
     let mut helper_args = std::env::args_os().skip(1);
-    if helper_args.next().is_some_and(|arg| {
+    let helper_flag = helper_args.next();
+    if helper_flag.as_ref().is_some_and(|arg| {
+        arg == mtt_file_manager::infrastructure::windows::command_prompt::HELPER_FLAG
+    }) {
+        let code =
+            mtt_file_manager::infrastructure::windows::command_prompt::run_helper(helper_args);
+        std::process::exit(code);
+    }
+    if helper_flag.is_some_and(|arg| {
         arg == mtt_file_manager::infrastructure::windows::folder_access::HELPER_FLAG
     }) {
         let code =

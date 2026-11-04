@@ -365,6 +365,12 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Fixar pasta atual no Acesso Rápido"
 context_menu:
+  view: "Exibir"
+  sort_by: "Classificar por"
+  refresh: "Atualizar"
+  open_cmd: "Abrir no CMD"
+  open_cmd_admin: "Abrir no CMD (Administrador)"
+  cmd_error: "Não foi possível abrir o Prompt de Comando: %{error}"
   expand: "Expandir"
   collapse: "Recolher"
   add_network_location: "Adicionar um local de rede"

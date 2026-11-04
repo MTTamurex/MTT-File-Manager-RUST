@@ -1,4 +1,5 @@
 //! Shared column preferences and bounded, asynchronous display-property cache.
+pub(crate) mod choices;
 mod display_source;
 mod display_worker;
 pub(crate) mod folder_widths;

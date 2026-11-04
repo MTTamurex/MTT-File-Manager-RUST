@@ -255,6 +255,10 @@ impl ImageViewerApp {
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {
         // L-12: into_owned() converts Cow<[PathBuf]> to Vec<PathBuf>
         let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
+        self.show_properties_for_paths(paths);
+    }
+
+    pub(crate) fn show_properties_for_paths(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }

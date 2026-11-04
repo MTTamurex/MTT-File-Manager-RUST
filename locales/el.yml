@@ -365,6 +365,12 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Καρφίτσωμα τρέχοντος φακέλου στη γρήγορη πρόσβαση"
 context_menu:
+  view: "Προβολή"
+  sort_by: "Ταξινόμηση κατά"
+  refresh: "Ανανέωση"
+  open_cmd: "Άνοιγμα στο CMD"
+  open_cmd_admin: "Άνοιγμα στο CMD (Διαχειριστής)"
+  cmd_error: "Δεν ήταν δυνατό το άνοιγμα της γραμμής εντολών: %{error}"
   expand: "Ανάπτυξη"
   collapse: "Σύμπτυξη"
   add_network_location: "Προσθήκη θέσης δικτύου"

@@ -365,6 +365,12 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Закрепить текущую папку в быстром доступе"
 context_menu:
+  view: "Вид"
+  sort_by: "Сортировать по"
+  refresh: "Обновить"
+  open_cmd: "Открыть в CMD"
+  open_cmd_admin: "Открыть в CMD (администратор)"
+  cmd_error: "Не удалось открыть командную строку: %{error}"
   expand: "Развернуть"
   collapse: "Свернуть"
   add_network_location: "Добавить сетевое расположение"

@@ -365,6 +365,12 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Pin current folder to quick access"
 context_menu:
+  view: "View"
+  sort_by: "Sort by"
+  refresh: "Refresh"
+  open_cmd: "Open in CMD"
+  open_cmd_admin: "Open in CMD (Admin)"
+  cmd_error: "Could not open Command Prompt: %{error}"
   expand: "Expand"
   collapse: "Collapse"
   add_network_location: "Add a network location"

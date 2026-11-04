@@ -158,22 +158,10 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                         app.update_video_visibility();
                     }
                     ToolbarAction::ChangeSortMode(mode) => {
-                        app.sort_mode = mode;
-                        if app.navigation_state.is_computer_view {
-                            app.sort_mode_computer = mode;
-                        } else {
-                            app.sort_mode_normal = mode;
-                        }
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(mode);
                     }
                     ToolbarAction::ToggleSortDescending => {
-                        app.sort_descending = !app.sort_descending;
-                        if !app.current_folder_locked {
-                            app.sort_descending_normal = app.sort_descending;
-                        }
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_direction(!app.sort_descending);
                     }
                     ToolbarAction::Search(query) => {
                         app.filter_items();

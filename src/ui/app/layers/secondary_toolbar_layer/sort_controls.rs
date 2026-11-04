@@ -38,12 +38,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             .on_hover_text(t!("secondary_toolbar.reverse_order"))
             .clicked()
         {
-            app.sort_descending = !app.sort_descending;
-            if !app.current_folder_locked {
-                app.sort_descending_normal = app.sort_descending;
-            }
-            app.sort_items();
-            app.save_preferences();
+            app.change_sort_direction(!app.sort_descending);
         }
     });
 
@@ -112,14 +107,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     )
                     .clicked()
                 {
-                    app.sort_mode = SortMode::Name;
-                    if app.navigation_state.is_computer_view {
-                        app.sort_mode_computer = SortMode::Name;
-                    } else {
-                        app.sort_mode_normal = SortMode::Name;
-                    }
-                    app.sort_items();
-                    app.save_preferences();
+                    app.change_sort_mode(SortMode::Name);
                 }
 
                 if app.navigation_state.is_computer_view {
@@ -131,10 +119,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::DriveTotalSpace;
-                        app.sort_mode_computer = SortMode::DriveTotalSpace;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::DriveTotalSpace);
                     }
                     if ui
                         .selectable_value(
@@ -144,10 +129,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::DriveFreeSpace;
-                        app.sort_mode_computer = SortMode::DriveFreeSpace;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::DriveFreeSpace);
                     }
                     if ui
                         .selectable_value(
@@ -157,10 +139,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::DriveLetter;
-                        app.sort_mode_computer = SortMode::DriveLetter;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::DriveLetter);
                     }
                 } else {
                     if ui
@@ -171,10 +150,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::Date;
-                        app.sort_mode_normal = SortMode::Date;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::Date);
                     }
                     if ui
                         .selectable_value(
@@ -184,10 +160,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::Size;
-                        app.sort_mode_normal = SortMode::Size;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::Size);
                     }
                     if ui
                         .selectable_value(
@@ -197,23 +170,13 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         )
                         .clicked()
                     {
-                        app.sort_mode = SortMode::Type;
-                        app.sort_mode_normal = SortMode::Type;
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(SortMode::Type);
                     }
                 }
                 for (id, label) in super::column_options::for_app(app) {
                     let mode = SortMode::Column(id);
                     if ui.selectable_label(app.sort_mode == mode, label).clicked() {
-                        app.sort_mode = mode;
-                        if app.navigation_state.is_computer_view {
-                            app.sort_mode_computer = mode;
-                        } else {
-                            app.sort_mode_normal = mode;
-                        }
-                        app.sort_items();
-                        app.save_preferences();
+                        app.change_sort_mode(mode);
                     }
                 }
             });

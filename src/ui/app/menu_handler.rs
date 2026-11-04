@@ -19,6 +19,7 @@ use windows::{
     },
 };
 
+mod background_actions;
 mod folder_tabs;
 
 #[derive(Debug, PartialEq)]
@@ -591,6 +592,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 },
             );
             if let Some(command) = selected_command.as_deref() {
+                if background_actions::handle(app, &context_menu, command) {
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
                 if command == "network_location_expand" {
                     if let Some(path) = context_menu.target_paths.first() {
                         let destination = app.resolve_network_location_path(path);

@@ -365,6 +365,12 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "将当前文件夹固定到快速访问"
 context_menu:
+  view: "查看"
+  sort_by: "排序方式"
+  refresh: "刷新"
+  open_cmd: "在 CMD 中打开"
+  open_cmd_admin: "在 CMD 中打开（管理员）"
+  cmd_error: "无法打开命令提示符：%{error}"
   expand: "展开"
   collapse: "折叠"
   add_network_location: "添加网络位置"

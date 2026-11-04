@@ -3,7 +3,7 @@ use crate::app::ImageViewerApp;
 use crate::domain::list_columns::{ColumnId, ColumnLayout, ColumnScope};
 use crate::infrastructure::windows::column_properties::PropertyColumn;
 
-pub(super) fn label(id: ColumnId, catalog: &[PropertyColumn]) -> String {
+pub(crate) fn label(id: ColumnId, catalog: &[PropertyColumn]) -> String {
     match id {
         ColumnId::Tags => rust_i18n::t!("column_headers.app_tags").to_string(),
         ColumnId::OriginalLocation => rust_i18n::t!("column_headers.original_location").to_string(),
@@ -30,7 +30,7 @@ fn additional(layout: &ColumnLayout, catalog: &[PropertyColumn]) -> Vec<(ColumnI
         .collect()
 }
 
-pub(super) fn for_app(app: &ImageViewerApp) -> Vec<(ColumnId, String)> {
+pub(crate) fn for_app(app: &ImageViewerApp) -> Vec<(ColumnId, String)> {
     let scope = ColumnScope::from_view(
         app.navigation_state.is_computer_view,
         app.navigation_state.is_recycle_bin_view,
