@@ -141,7 +141,6 @@ $requiredFiles = @(
     "$RepoRoot\third_party_licenses\MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt",
     "$RepoRoot\appicon.ico",
     "$RepoRoot\appicon.png",
-    "$RepoRoot\installer\unregister_sparse_package.ps1",
     "$RepoRoot\installer\cleanup_context_menu.ps1",
     "$RepoRoot\installer\restore_folder_integration.ps1",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",

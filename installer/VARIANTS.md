@@ -47,7 +47,10 @@ The script uses separate Cargo target directories:
 Each directory receives verified runtime DLLs staged from `target/release` if
 they are not already present. The existing DLL hash checks remain mandatory.
 The installer no longer builds or registers a signed MSIX package or Explorer
-command DLL. Cleanup of older integrations is retained.
+command DLL. Obsolete integration files are removed during installation; no MSIX
+registration or unregistration scripts are packaged or executed.
+An inert `RunOnceId` override prevents older uninstall logs from invoking the
+removed package-cleanup script during a later uninstall.
 
 The script passes the selected build directory to Inno Setup. Neither package
 includes a helper, even if an unrelated helper exists elsewhere.
@@ -76,10 +79,15 @@ find this release.
 cargo check --workspace --all-targets --locked
 cargo check --workspace --all-targets --locked --no-default-features --features notify-watcher
 .\installer\tests\test_update_variants.ps1
+.\installer\tests\test_retired_cleanup.ps1
 ```
 
 The installer test uses temporary stand-in files and disables installer output;
 it never installs MTT or changes Windows integration.
+The retired-cleanup test runs minimal installers only inside its temporary
+directory, without registering an installed application or creating services.
+It checks missing files, repeated installation, removal of retired files, and
+suppression of the obsolete command retained in an earlier uninstall log.
 
 Rebuilding changes the artifact hashes. Recompute SHA-256 values and scan the
 exact final installers before referring to their results in release notes.

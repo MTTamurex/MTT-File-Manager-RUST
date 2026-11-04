@@ -67,6 +67,7 @@ Type: files; Name: "{app}\mtt-updater.exe"
 ; Remove obsolete modern-menu artifacts from older installations.
 Type: files; Name: "{app}\mtt_explorer_command.dll"
 Type: files; Name: "{app}\mtt-file-manager.identity.msix"
+Type: files; Name: "{app}\unregister_sparse_package.ps1"
 
 [Files]
 ; Main executable
@@ -87,10 +88,9 @@ Source: "{#BuildOutputDir}\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; Search service
 Source: "{#BuildOutputDir}\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
 
-; Context-menu cleanup and legacy sparse-package unregistration
+; Restore the current folder integration and clean up legacy context-menu entries.
 Source: "{#SrcRoot}\installer\cleanup_context_menu.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\installer\restore_folder_integration.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\installer\unregister_sparse_package.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; mpv portable config (scripts, settings)
 Source: "{#SrcRoot}\mpv_ui\portable_config\mpv.conf";            DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
@@ -106,7 +106,6 @@ Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; Working
 Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\unregister_sparse_package.ps1"" -PackageName ""MTT.FileManager"" -AllUsers"; Flags: runhidden waituntilterminated
 ; (Re)install and start the search indexer Windows service.
 ; The service was already stopped in CurStepChanged(ssInstall) before files
 ; were copied, so "install" here is idempotent for fresh installs and safe
@@ -115,12 +114,14 @@ Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "{cm:Install
 Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "{cm:StartSearchService}"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
+; Older uninstall logs retain the removed MSIX command. The latest entry with
+; this RunOnceId supersedes it without invoking any package or script cleanup.
+Filename: "{sys}\cmd.exe"; Parameters: "/d /c exit /b 0"; RunOnceId: "UnregisterMttSparsePackage"; Flags: runhidden waituntilterminated
 ; Use the app's transactional restoration, including canonical Open backups,
 ; while the executable is still present. The guard prevents an accumulated entry
 ; from opening an older application's UI after an upgrade/downgrade.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\restore_folder_integration.ps1"" -ApplicationPath ""{app}\{#MyAppExeName}"" -ExpectedSha256 ""{#MyAppExeHash}"""; RunOnceId: "RestoreMttFolderIntegration"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\cleanup_context_menu.ps1"" -ApplicationPath ""{app}\{#MyAppExeName}"""; RunOnceId: "CleanupMttContextMenu"; Flags: runhidden waituntilterminated
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\unregister_sparse_package.ps1"" -PackageName ""MTT.FileManager"" -AllUsers"; RunOnceId: "UnregisterMttSparsePackage"; Flags: runhidden waituntilterminated
 ; Stop and remove the search service before files are deleted
 Filename: "{sys}\sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchService"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
