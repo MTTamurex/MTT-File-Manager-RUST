@@ -1,5 +1,5 @@
 use super::{column_choices, columns, ListViewContext};
-use crate::domain::list_columns::{ColumnId, ColumnLayout};
+use crate::domain::list_columns::{ColumnId, ColumnLayout, ColumnScope};
 use eframe::egui::{self, Ui};
 use rust_i18n::t;
 
@@ -18,10 +18,12 @@ fn checkbox(ui: &mut Ui, ctx: &mut ListViewContext, id: ColumnId, label: &str) {
     }
 }
 
-fn menu_ids(layout: &ColumnLayout, is_onedrive_folder: bool) -> Vec<ColumnId> {
+fn menu_ids(layout: &ColumnLayout, scope: ColumnScope, is_onedrive_folder: bool) -> Vec<ColumnId> {
+    let defaults = ColumnLayout::defaults(scope);
     let mut columns: Vec<_> = layout
         .columns
         .iter()
+        .filter(|column| column.visible || defaults.is_visible(column.id))
         .filter(|column| column.id != ColumnId::Status || is_onedrive_folder)
         .collect();
     // Sort only the menu, retaining the saved order within each visibility group.
@@ -33,6 +35,7 @@ pub(super) fn menu(ui: &mut Ui, ctx: &mut ListViewContext, owner: egui::Id) {
     let scope = columns::scope(ctx);
     let ids = menu_ids(
         ctx.columns.preferences.layout(scope),
+        scope,
         ctx.is_onedrive_folder,
     );
     egui::ScrollArea::vertical()

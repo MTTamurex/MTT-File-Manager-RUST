@@ -14,7 +14,7 @@ fn menu_groups_active_columns_without_changing_the_saved_layout() {
         layout.set_visible(hidden, false);
         layout.set_visible(ColumnId::Tags, true);
         let saved = layout.clone();
-        let ids = menu_ids(&layout, true);
+        let ids = menu_ids(&layout, scope, true);
         let expected: Vec<_> = layout
             .columns
             .iter()
@@ -29,22 +29,77 @@ fn menu_groups_active_columns_without_changing_the_saved_layout() {
 
         layout.set_visible(hidden, true);
         assert_eq!(
-            menu_ids(&layout, true),
+            menu_ids(&layout, scope, true),
             layout.columns.iter().map(|c| c.id).collect::<Vec<_>>()
         );
     }
 }
 
 #[test]
-fn menu_retains_hidden_columns_and_filters_status_outside_onedrive() {
+fn menu_retains_hidden_defaults_and_filters_status_outside_onedrive() {
     use crate::domain::list_columns::ColumnScope;
     let mut layout = ColumnLayout::defaults(ColumnScope::Files);
     layout.set_visible(ColumnId::Status, false);
     layout.set_visible(ColumnId::Type, false);
-    let ids = menu_ids(&layout, false);
+    let ids = menu_ids(&layout, ColumnScope::Files, false);
     assert!(!ids.contains(&ColumnId::Status));
     assert!(ids.contains(&ColumnId::Type));
-    assert!(menu_ids(&layout, true).contains(&ColumnId::Status));
+    assert!(menu_ids(&layout, ColumnScope::Files, true).contains(&ColumnId::Status));
+}
+
+#[test]
+fn hidden_extras_leave_the_menu_but_remain_available_in_the_picker() {
+    use crate::domain::list_columns::PropertyId;
+    let property = ColumnId::Property(PropertyId { fmtid: 0, pid: 42 });
+    for scope in [
+        ColumnScope::Files,
+        ColumnScope::Computer,
+        ColumnScope::RecycleBin,
+    ] {
+        let mut layout = ColumnLayout::defaults(scope);
+        let defaults = layout.clone();
+        for extra in [ColumnId::Tags, ColumnId::OriginalLocation, property] {
+            layout.set_visible(extra, true);
+            assert!(menu_ids(&layout, scope, true).contains(&extra));
+            layout.set_visible(extra, false);
+        }
+        let saved = layout.clone();
+        assert_eq!(
+            menu_ids(&layout, scope, true),
+            defaults
+                .columns
+                .iter()
+                .map(|column| column.id)
+                .collect::<Vec<_>>()
+        );
+        let choices = column_choices::choices(&layout, &[], scope, |_| "Label".into());
+        for extra in [ColumnId::Tags, ColumnId::OriginalLocation, property] {
+            assert!(choices.iter().any(|(id, _, _)| *id == extra));
+        }
+        assert_eq!(layout, saved);
+
+        layout.set_visible(property, true);
+        assert!(menu_ids(&layout, scope, true).contains(&property));
+    }
+}
+
+#[test]
+fn default_menu_columns_are_specific_to_each_scope() {
+    for scope in [
+        ColumnScope::Files,
+        ColumnScope::Computer,
+        ColumnScope::RecycleBin,
+    ] {
+        let mut layout = ColumnLayout::defaults(scope);
+        let defaults = layout.clone();
+        for id in [ColumnId::Date, ColumnId::TotalSpace, ColumnId::Status] {
+            layout.set_visible(id, false);
+            assert_eq!(
+                menu_ids(&layout, scope, true).contains(&id),
+                defaults.is_visible(id)
+            );
+        }
+    }
 }
 
 #[test]
