@@ -45,6 +45,7 @@ fn view_menu(current: ViewMode, locked: bool) -> ContextMenuItem {
         (ViewMode::Miller, t!("secondary_toolbar.miller_columns")),
     ];
     ContextMenuItem::new(-400, t!("context_menu.view"))
+        .with_svg_icon("view_grid")
         .enabled(!locked)
         .with_subitems(
             modes
@@ -89,6 +90,7 @@ fn sort_menu(
         );
     }
     ContextMenuItem::new(-403, t!("context_menu.sort_by"))
+        .with_svg_icon("sort")
         .with_subitems(sort_items)
         .enabled(!locked)
 }

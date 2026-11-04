@@ -332,6 +332,7 @@ fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu:
     );
 
     ContextMenuItem::new(-299, t!("secondary_toolbar.group_by"))
+        .with_svg_icon("group")
         .with_subitems(sub_items)
         .enabled(!app.current_folder_locked && !app.navigation_state.is_computer_view)
 }

@@ -49,6 +49,8 @@ pub const ICON_PIN: &[u8] = include_bytes!("../assets/icons/pin.svg");
 pub const ICON_PLAY: &[u8] = include_bytes!("../assets/icons/play.svg");
 pub const ICON_PROPERTIES: &[u8] = include_bytes!("../assets/icons/properties.svg");
 pub const ICON_REFRESH: &[u8] = include_bytes!("../assets/icons/refresh.svg");
+pub const ICON_SORT: &[u8] = include_bytes!("../assets/icons/sort.svg");
+pub const ICON_GROUP: &[u8] = include_bytes!("../assets/icons/group.svg");
 pub const ICON_RENAME: &[u8] =
     include_bytes!("../assets/icons/rename_duotone_black_blue_lighter2.svg");
 pub const ICON_SEARCH: &[u8] = include_bytes!("../assets/icons/search.svg");
@@ -105,6 +107,8 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "play" => Some(ICON_PLAY),
         "properties" => Some(ICON_PROPERTIES),
         "refresh" => Some(ICON_REFRESH),
+        "sort" => Some(ICON_SORT),
+        "group" => Some(ICON_GROUP),
         "rename" => Some(ICON_RENAME),
         "search" => Some(ICON_SEARCH),
         "search_computer" => Some(ICON_SEARCH_COMPUTER),

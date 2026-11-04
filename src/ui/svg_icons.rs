@@ -276,6 +276,23 @@ mod tests {
     use super::{is_duotone_icon, render_svg_to_image};
 
     #[test]
+    fn background_menu_icons_render_in_light_dark_and_disabled_colors() {
+        for name in ["view_grid", "sort", "group"] {
+            let svg = crate::embedded_assets::get_icon(name).expect("registered menu icon");
+            for color in [
+                [60, 60, 60, 255],
+                [220, 220, 220, 255],
+                [128, 128, 128, 180],
+            ] {
+                let image =
+                    render_svg_to_image(svg, 20, color, 1.0, false).expect("valid menu SVG");
+                assert_eq!(image.size, [20, 20]);
+                assert!(image.pixels.iter().any(|pixel| pixel.a() > 0));
+            }
+        }
+    }
+
+    #[test]
     fn embedded_tag_icon_renders() {
         let image = render_svg_to_image(
             crate::embedded_assets::ICON_TAG,
