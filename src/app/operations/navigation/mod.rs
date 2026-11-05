@@ -4,6 +4,7 @@
 
 mod folder_timestamps;
 pub mod keyboard;
+mod path_normalization;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
@@ -84,31 +85,10 @@ impl ImageViewerApp {
             crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
                 "navigation_resolve",
             );
-        let destination = self.resolve_network_location_path(Path::new(path));
-        let path = destination.to_string_lossy();
-        let path = path.as_ref();
-        // Virtual paths (::computer::, ::recycle_bin::, ::tag::N) must skip
-        // the drive-letter normalization below — its heuristic "second char
-        // is ':'" misinterprets "::tag::9" as a drive path and rewrites it
-        // to "::\\tag::9", which then fails tag_id_from_view_path and
-        // silently falls through to the real-folder flow → load_folder
-        // fails → navigate_to_nearest_valid_ancestor → navigate_to_computer.
-        let normalized_path = if is_virtual_path(path) {
-            path.to_string()
-        } else if path.len() >= 2 && path.chars().nth(1) == Some(':') {
-            // It's a Windows path with a drive letter
-            if path.len() == 2 {
-                // Just "Z:" -> "Z:\"
-                format!("{}\\", path)
-            } else if path.chars().nth(2) != Some('\\') {
-                // "Z:folder" -> "Z:\folder" (fix malformed path)
-                format!("{}\\{}", &path[0..2], &path[2..])
-            } else {
-                path.to_string()
-            }
-        } else {
-            path.to_string()
-        };
+        let path = path_normalization::normalize_navigation_path(path);
+        let destination = self.resolve_network_location_path(Path::new(&path));
+        let normalized_path =
+            path_normalization::normalize_navigation_path(&destination.to_string_lossy());
 
         // If we're already at this path, do nothing
         if self.navigation_state.current_path == normalized_path {
