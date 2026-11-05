@@ -1,7 +1,9 @@
 //! Real local pipes with unique names; never connects to the installed service.
 //! Uses the current test process as both peers, without spawning executables.
 
+mod candidate_acl;
 mod fixture;
+mod restricted_token;
 
 use std::io::{Read, Write};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};

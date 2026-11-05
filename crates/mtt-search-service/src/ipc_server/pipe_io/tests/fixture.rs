@@ -48,6 +48,10 @@ impl Connection {
             .open(&name)
             .expect("connect to isolated pipe");
 
+        Self::from_parts(server, client)
+    }
+
+    pub fn from_parts(server: OwnedHandle, client: File) -> Self {
         let watchdog_server = server.try_clone().expect("duplicate watchdog handle");
         let (done, receiver) = mpsc::channel();
         let watchdog = std::thread::spawn(move || {

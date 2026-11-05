@@ -6,7 +6,8 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     AllocateAndInitializeSid, FreeSid, InitializeSecurityDescriptor, SetSecurityDescriptorDacl,
-    ACL, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SID_IDENTIFIER_AUTHORITY,
+    ACL, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
+    SID_IDENTIFIER_AUTHORITY,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_WAIT};
@@ -24,8 +25,9 @@ mod tests;
 /// if a pipe with this name already exists. Prevents pre-emptive pipe squatting
 /// where an attacker creates the pipe before the service starts.
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x00080000;
-const ACCESS_MASK_USERS: u32 = 0x0012019F;
-const ACCESS_MASK_SYSTEM: u32 = 0x001F01FF;
+// No FILE_GENERIC_WRITE/FILE_APPEND_DATA: the latter aliases server-instance creation.
+const ACCESS_MASK_USERS: u32 = PIPE_CLIENT_ACCESS;
+const ACCESS_MASK_SERVER: u32 = 0x001F01FF;
 const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
 const SECURITY_NT_AUTHORITY: SID_IDENTIFIER_AUTHORITY = SID_IDENTIFIER_AUTHORITY {
     Value: [0, 0, 0, 0, 0, 5],
@@ -46,6 +48,10 @@ impl SidGuard {
 
     fn local_system() -> Result<Self, String> {
         Self::allocate(1, 18, 0)
+    }
+
+    fn administrators() -> Result<Self, String> {
+        Self::allocate(2, 32, 544)
     }
 
     fn allocate(sub_authority_count: u8, sub0: u32, sub1: u32) -> Result<Self, String> {
@@ -121,38 +127,70 @@ pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
 
 // Keep the production endpoint fixed; tests supply a separate, unique name.
 fn create_pipe_named(name: &str, first_instance: bool) -> Result<HANDLE, String> {
+    with_pipe_access_entries(|entries| create_pipe_with_entries(name, first_instance, entries))
+}
+
+fn with_pipe_access_entries<T>(
+    operation: impl FnOnce(&[EXPLICIT_ACCESS_W]) -> Result<T, String>,
+) -> Result<T, String> {
+    let users_sid = SidGuard::authenticated_users()?;
+    let system_sid = SidGuard::local_system()?;
+    let admins_sid = SidGuard::administrators()?;
+
+    let entries = [
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: ACCESS_MASK_USERS,
+            grfAccessMode: SET_ACCESS,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                ptstrName: users_sid.as_trustee_name(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: ACCESS_MASK_SERVER,
+            grfAccessMode: SET_ACCESS,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: system_sid.as_trustee_name(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        // Elevated run-console is an administrator, not LocalSystem. Keep its
+        // ability to create subsequent instances without granting that ability
+        // to ordinary processes of the same interactive account.
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: ACCESS_MASK_SERVER,
+            grfAccessMode: SET_ACCESS,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                ptstrName: admins_sid.as_trustee_name(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    operation(&entries)
+}
+
+// Keep OS pipe creation shared with isolated tests; no runtime policy switch.
+fn create_pipe_with_entries(
+    name: &str,
+    first_instance: bool,
+    entries: &[EXPLICIT_ACCESS_W],
+) -> Result<HANDLE, String> {
     unsafe {
-        let users_sid = SidGuard::authenticated_users()?;
-        let system_sid = SidGuard::local_system()?;
+        let acl = AclGuard::from_entries(entries)?;
 
-        let entries = [
-            EXPLICIT_ACCESS_W {
-                grfAccessPermissions: ACCESS_MASK_USERS,
-                grfAccessMode: SET_ACCESS,
-                Trustee: TRUSTEE_W {
-                    TrusteeForm: TRUSTEE_IS_SID,
-                    TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                    ptstrName: users_sid.as_trustee_name(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            EXPLICIT_ACCESS_W {
-                grfAccessPermissions: ACCESS_MASK_SYSTEM,
-                grfAccessMode: SET_ACCESS,
-                Trustee: TRUSTEE_W {
-                    TrusteeForm: TRUSTEE_IS_SID,
-                    TrusteeType: TRUSTEE_IS_USER,
-                    ptstrName: system_sid.as_trustee_name(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        ];
-        let acl = AclGuard::from_entries(&entries)?;
-
-        let mut security_descriptor = [0u8; 256];
-        let sd_ptr = PSECURITY_DESCRIPTOR(security_descriptor.as_mut_ptr().cast());
+        // Use the native type so its pointer fields have the required alignment.
+        let mut security_descriptor = SECURITY_DESCRIPTOR::default();
+        let sd_ptr =
+            PSECURITY_DESCRIPTOR((&mut security_descriptor as *mut SECURITY_DESCRIPTOR).cast());
         InitializeSecurityDescriptor(sd_ptr, SECURITY_DESCRIPTOR_REVISION)
             .map_err(|e| format!("InitializeSecurityDescriptor: {}", e))?;
 
