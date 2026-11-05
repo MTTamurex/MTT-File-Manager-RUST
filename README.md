@@ -13,9 +13,17 @@
 3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
 4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
 
-### Antivirus alerts on VirusTotal
+### AntiVirus Alerts - False Positive
 
-Some antivirus engines on VirusTotal may flag the installer. Each detection is submitted to the respective antivirus vendor for review. Refer to the release notes for details and review results.
+Some antivirus engines may flag the installer or the `mtt-updater.exe` module. The integrated updater was designed to download and verify the installer, close MTT, run the installer, reopen the application, and then attempt to delete the downloaded installer.
+
+Although this behavior is legitimate, it can resemble malware activity to antivirus heuristic detection systems, resulting in false positives.
+
+While these detections have been confirmed as false positives by antivirus vendors, repeatedly submitting review requests and waiting for detection databases to be updated with every new release is impractical for an independent developer.
+
+For this reason, **starting with v0.2.10, the automatic updater module has been removed**. The application will now only check whether a new version is available and, if so, open the release page where users can manually download and install the update.
+
+You can safely delete the file `mtt-updater.exe`.
 
 ### Installation help
 
