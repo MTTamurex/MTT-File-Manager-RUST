@@ -2,7 +2,11 @@ use super::{
     inspect_client_with, query_client_image_with_fallback, verify_sibling_directories,
     ClientIdentityError,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn no_directory_retry(_: &Path, _: &Path) -> Result<(), ClientIdentityError> {
+    panic!("this identity outcome must not reach directory retry")
+}
 
 struct Images {
     root: tempfile::TempDir,
@@ -34,6 +38,7 @@ fn trusted_sibling_remains_accepted_without_retry() {
             || Ok(images.client.clone()),
             || panic!("successful inspection must not retry"),
             || Ok(images.service.clone()),
+            no_directory_retry,
         ),
         Ok(())
     );
@@ -47,6 +52,7 @@ fn trusted_sibling_remains_case_insensitive() {
             || Ok(images.client.to_ascii_uppercase()),
             || panic!("successful inspection must not retry"),
             || Ok(images.service.clone()),
+            no_directory_retry,
         ),
         Ok(())
     );
@@ -60,6 +66,7 @@ fn impersonated_retry_can_recover_a_legitimate_client() {
             || Err("service context unavailable".into()),
             || Ok(images.client.clone()),
             || Ok(images.service.clone()),
+            no_directory_retry,
         ),
         Ok(())
     );
@@ -72,6 +79,7 @@ fn foreign_basename_is_rejected_without_retry_or_service_lookup() {
             || Ok(r"Z:\Example\Install\other.exe".into()),
             || panic!("foreign image is not an inspection failure"),
             || panic!("known foreign basename needs no service lookup"),
+            no_directory_retry,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -84,6 +92,7 @@ fn foreign_image_found_by_retry_is_still_rejected() {
             || Err("service context unavailable".into()),
             || Ok(r"Z:\Example\Install\other.exe".into()),
             || panic!("foreign retry needs no service lookup"),
+            no_directory_retry,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -103,6 +112,7 @@ fn correct_basename_in_a_different_directory_is_rejected() {
             || Ok(foreign.to_str().unwrap().to_owned()),
             || panic!("a directory mismatch must not retry"),
             || Ok(images.service.clone()),
+            no_directory_retry,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -136,6 +146,7 @@ fn rejection_reason_does_not_expose_client_paths_or_filenames() {
         || Ok(client.to_str().unwrap().to_owned()),
         || panic!("known foreign image must not retry"),
         || panic!("known foreign basename needs no service lookup"),
+        no_directory_retry,
     )
     .unwrap_err()
     .to_string();
@@ -149,6 +160,7 @@ fn both_query_failures_are_unavailable_not_rejected_or_trusted() {
         || Err("service context unavailable".into()),
         || Err("client context unavailable".into()),
         || panic!("failed inspection needs no service lookup"),
+        no_directory_retry,
     ) {
         Err(ClientIdentityError::Unavailable(reason)) => {
             assert!(reason.contains("service context unavailable"));
@@ -165,6 +177,7 @@ fn missing_service_image_is_unavailable_after_a_matching_basename() {
             || Ok(r"Z:\Example\Install\mtt-file-manager.exe".into()),
             || panic!("successful inspection must not retry"),
             || Err("service image unavailable".into()),
+            no_directory_retry,
         ),
         Err(ClientIdentityError::Unavailable(_))
     ));
@@ -204,4 +217,75 @@ fn client_image_query_fails_when_both_security_contexts_fail() {
     .unwrap_err();
     assert!(error.contains("service token denied"));
     assert!(error.contains("client token denied"));
+}
+
+#[test]
+fn unavailable_directory_comparison_retries_once_with_the_observed_paths() {
+    let images = images();
+    let parent = images.root.path().join("unresolved");
+    let image = parent.join("mtt-file-manager.exe");
+    let retried = std::cell::Cell::new(false);
+    let result = inspect_client_with(
+        || Ok(image.to_str().unwrap().to_owned()),
+        || panic!("successful image query must not retry"),
+        || Ok(images.service.clone()),
+        |service_dir, client_dir| {
+            assert!(!retried.replace(true));
+            assert!(service_dir == images.root.path());
+            assert!(client_dir == parent);
+            Ok(())
+        },
+    );
+    assert_eq!(result, Ok(()));
+    assert!(retried.get());
+}
+
+#[test]
+fn confirmed_directory_mismatch_on_retry_is_rejected_not_unavailable() {
+    let images = images();
+    let image = images
+        .root
+        .path()
+        .join("unresolved")
+        .join("mtt-file-manager.exe");
+    assert_eq!(
+        inspect_client_with(
+            || Ok(image.to_str().unwrap().to_owned()),
+            || panic!("successful image query must not retry"),
+            || Ok(images.service.clone()),
+            |_, _| Err(ClientIdentityError::Rejected(
+                "confirmed directory mismatch".into()
+            )),
+        ),
+        Err(ClientIdentityError::Rejected(
+            "confirmed directory mismatch".into()
+        ))
+    );
+}
+
+#[test]
+fn directory_retry_failure_keeps_both_context_reasons_and_stays_unavailable() {
+    let images = images();
+    let image = images
+        .root
+        .path()
+        .join("unresolved")
+        .join("mtt-file-manager.exe");
+    match inspect_client_with(
+        || Ok(image.to_str().unwrap().to_owned()),
+        || panic!("successful image query must not retry"),
+        || Ok(images.service.clone()),
+        |_, _| {
+            Err(ClientIdentityError::Unavailable(
+                "synthetic retry failure".into(),
+            ))
+        },
+    ) {
+        Err(ClientIdentityError::Unavailable(reason)) => {
+            assert!(reason.contains("directory verification unavailable as service:"));
+            assert!(reason.contains("client retry unavailable: synthetic retry failure"));
+            assert!(!reason.contains(images.root.path().to_str().unwrap()));
+        }
+        _ => panic!("failed directory retry must remain unavailable"),
+    }
 }

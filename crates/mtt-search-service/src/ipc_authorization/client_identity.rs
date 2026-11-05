@@ -5,6 +5,8 @@ use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 
 use super::PipeImpersonationGuard;
 
+mod directory_retry;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ClientIdentityError {
     /// An inspected image does not satisfy the existing MTT image policy.
@@ -42,6 +44,7 @@ pub(crate) fn inspect_file_manager_client(pipe: HANDLE) -> Result<(), ClientIden
             query_process_image_path(client_pid)
         },
         || std::env::current_exe().map_err(|error| format!("current_exe failed: {error}")),
+        |service_dir, client_dir| directory_retry::verify_as_client(pipe, service_dir, client_dir),
     )
 }
 
@@ -54,6 +57,7 @@ fn inspect_client_with(
     primary: impl FnOnce() -> Result<String, String>,
     impersonated_retry: impl FnOnce() -> Result<String, String>,
     service_exe: impl FnOnce() -> Result<PathBuf, String>,
+    directory_retry: impl FnOnce(&Path, &Path) -> Result<(), ClientIdentityError>,
 ) -> Result<(), ClientIdentityError> {
     let image = query_client_image_with_fallback(primary, impersonated_retry)
         .map_err(ClientIdentityError::Unavailable)?;
@@ -74,7 +78,19 @@ fn inspect_client_with(
     let client_dir = Path::new(&image).parent().ok_or_else(|| {
         ClientIdentityError::Rejected("Client executable has no parent directory".into())
     })?;
-    verify_sibling_directories(service_dir, client_dir)
+    match verify_sibling_directories(service_dir, client_dir) {
+        Err(ClientIdentityError::Unavailable(primary_error)) => {
+            match directory_retry(service_dir, client_dir) {
+                Err(ClientIdentityError::Unavailable(retry_error)) => {
+                    Err(ClientIdentityError::Unavailable(format!(
+                        "directory verification unavailable as service: {primary_error}; client retry unavailable: {retry_error}"
+                    )))
+                }
+                result => result,
+            }
+        }
+        result => result,
+    }
 }
 
 fn query_process_image_path(client_pid: u32) -> Result<String, String> {
@@ -149,3 +165,8 @@ fn verify_sibling_directories(left: &Path, right: &Path) -> Result<(), ClientIde
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod os_fixture;
+#[cfg(test)]
+mod os_tests;
