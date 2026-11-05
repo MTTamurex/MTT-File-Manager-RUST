@@ -18,14 +18,15 @@ use windows::Win32::Storage::FileSystem::{
 use crate::file_index::IndexState;
 use crate::indexing_progress::IndexingProgress;
 use crate::ipc_authorization::{
-    collect_authorized_search_page, current_client_can_read_path, trusted_file_manager_client,
-    PipeImpersonationGuard,
+    collect_authorized_search_page, current_client_can_read_path, inspect_file_manager_client,
+    ClientIdentityError, PipeImpersonationGuard,
 };
 use crate::security_policy::IpcSecurityPolicy;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::volume_lifecycle::VolumeLifecycle;
 use mtt_search_protocol::*;
 
+use super::client_access::{require_index_client, require_trusted_metadata_client};
 use super::folder_size_snapshot::summary as indexed_folder_summary;
 use super::pipe_io::{read_message, send_response};
 use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
@@ -350,6 +351,31 @@ pub(super) fn handle_client(
     volume_lifecycle: &VolumeLifecycle,
     watchdog: &std::sync::mpsc::Sender<super::WatchdogEvent>,
 ) {
+    handle_client_with_verifier(
+        pipe,
+        indices,
+        indexing_progress,
+        warming,
+        security_policy,
+        volume_lifecycle,
+        watchdog,
+        inspect_file_manager_client,
+    );
+}
+
+// Dependency injection is internal Rust code, not a protocol option or runtime
+// policy switch. The production entry above always supplies the real verifier.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_client_with_verifier(
+    pipe: HANDLE,
+    indices: &SharedVolumeIndices,
+    indexing_progress: &Arc<IndexingProgress>,
+    warming: WarmIndexState<'_>,
+    security_policy: &IpcSecurityPolicy,
+    volume_lifecycle: &VolumeLifecycle,
+    watchdog: &std::sync::mpsc::Sender<super::WatchdogEvent>,
+    verify: impl FnOnce(HANDLE) -> Result<(), ClientIdentityError>,
+) {
     let WarmIndexState {
         is_warming,
         last_warm_epoch_secs,
@@ -475,6 +501,9 @@ pub(super) fn handle_client(
             offset,
             limit,
         } => {
+            if !require_index_client(pipe, "Query", None, verify) {
+                return;
+            }
             // Input validation: cap offset/limit and text length.
             let offset = (offset as usize).min(MAX_QUERY_OFFSET);
             let limit = (limit as usize).min(MAX_QUERY_RESULTS);
@@ -531,6 +560,9 @@ pub(super) fn handle_client(
             paths,
             threshold_secs,
         } => {
+            if !require_index_client(pipe, "CheckPathsModified", None, verify) {
+                return;
+            }
             let volume_access = volume_lifecycle.acquire_search_access();
 
             // SEC: Impersonate the connecting client before checking any paths.
@@ -609,7 +641,7 @@ pub(super) fn handle_client(
             else {
                 return;
             };
-            if !require_authorized_folder_size_client(pipe, &path) {
+            if !require_index_client(pipe, "FolderSize", Some(&path), verify) {
                 return;
             }
             let _active_operation =
@@ -618,6 +650,7 @@ pub(super) fn handle_client(
             // The installed app normally passes the client-image trust check.
             // If LocalSystem cannot inspect the client process, authorization
             // falls back to an impersonated read check for this exact path.
+            // A positively rejected image cannot enter that fallback.
             // The impersonation guard is dropped before any index operation.
 
             // Compute folder size from in-memory index.
@@ -885,86 +918,6 @@ pub(super) fn handle_client(
     }
 }
 
-fn require_trusted_metadata_client(pipe: HANDLE, operation: &str) -> bool {
-    match trusted_file_manager_client(pipe) {
-        Ok(()) => true,
-        Err(error) => {
-            eprintln!(
-                "[IPC] {} rejected unauthorized client: {}",
-                operation,
-                crate::redact_paths(&error),
-            );
-            let _ = send_response(
-                pipe,
-                &SearchResponse::Error("Authorization failed".to_string()),
-            );
-            false
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum FolderSizeClientAuthorization {
-    TrustedClient,
-    ClientAclFallback { trust_error: String },
-}
-
-fn authorize_folder_size_client_with<F>(
-    trusted_client: Result<(), String>,
-    acl_fallback: F,
-) -> Result<FolderSizeClientAuthorization, String>
-where
-    F: FnOnce() -> Result<bool, String>,
-{
-    match trusted_client {
-        Ok(()) => Ok(FolderSizeClientAuthorization::TrustedClient),
-        Err(trust_error) => match acl_fallback() {
-            Ok(true) => Ok(FolderSizeClientAuthorization::ClientAclFallback { trust_error }),
-            Ok(false) => Err(format!(
-                "trusted client check failed: {trust_error}; client cannot read requested path"
-            )),
-            Err(fallback_error) => Err(format!(
-                "trusted client check failed: {trust_error}; ACL fallback failed: {fallback_error}"
-            )),
-        },
-    }
-}
-
-fn require_authorized_folder_size_client(pipe: HANDLE, path: &str) -> bool {
-    // SECURITY REGRESSION NOTE: Do not replace this with either an unconditional
-    // allow or a strict image-query-only gate. The former exposes indexed
-    // metadata; the latter failed under LocalSystem for legitimate clients.
-    // The fallback remains fail-closed and authorizes only an exact path that
-    // the impersonated caller can read.
-    let authorization =
-        authorize_folder_size_client_with(trusted_file_manager_client(pipe), || {
-            let _guard = PipeImpersonationGuard::new(pipe)?;
-            Ok(current_client_can_read_path(path))
-        });
-
-    match authorization {
-        Ok(FolderSizeClientAuthorization::TrustedClient) => true,
-        Ok(FolderSizeClientAuthorization::ClientAclFallback { trust_error }) => {
-            eprintln!(
-                "[IPC] FolderSize client-image check unavailable; authorized by client ACL: {}",
-                crate::redact_paths(&trust_error),
-            );
-            true
-        }
-        Err(error) => {
-            eprintln!(
-                "[IPC] FolderSize rejected unauthorized client: {}",
-                crate::redact_paths(&error),
-            );
-            let _ = send_response(
-                pipe,
-                &SearchResponse::Error("Authorization failed".to_string()),
-            );
-            false
-        }
-    }
-}
-
 fn build_status_response(
     handles: &[VolumeIndexHandle],
     indexing_progress: &IndexingProgress,
@@ -1124,56 +1077,6 @@ mod tests {
 
         assert!(error.contains("service access denied"));
         assert!(error.contains("client access denied"));
-    }
-
-    #[test]
-    fn trusted_folder_size_client_does_not_use_acl_fallback() {
-        let fallback_called = std::cell::Cell::new(false);
-
-        let authorization = authorize_folder_size_client_with(Ok(()), || {
-            fallback_called.set(true);
-            Ok(false)
-        })
-        .unwrap();
-
-        assert_eq!(authorization, FolderSizeClientAuthorization::TrustedClient);
-        assert!(!fallback_called.get());
-    }
-
-    #[test]
-    fn readable_folder_size_path_recovers_failed_client_image_check() {
-        let authorization = authorize_folder_size_client_with(
-            Err("client process unavailable".to_string()),
-            || Ok(true),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            authorization,
-            FolderSizeClientAuthorization::ClientAclFallback { .. }
-        ));
-    }
-
-    #[test]
-    fn unreadable_folder_size_path_remains_fail_closed() {
-        let error = authorize_folder_size_client_with(
-            Err("client process unavailable".to_string()),
-            || Ok(false),
-        )
-        .unwrap_err();
-
-        assert!(error.contains("client cannot read requested path"));
-    }
-
-    #[test]
-    fn failed_folder_size_impersonation_remains_fail_closed() {
-        let error = authorize_folder_size_client_with(
-            Err("client process unavailable".to_string()),
-            || Err("impersonation unavailable".to_string()),
-        )
-        .unwrap_err();
-
-        assert!(error.contains("ACL fallback failed"));
     }
 
     #[test]

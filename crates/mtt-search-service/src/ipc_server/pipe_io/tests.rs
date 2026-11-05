@@ -2,6 +2,9 @@
 //! Uses the current test process as both peers, without spawning executables.
 
 mod candidate_acl;
+mod endpoint_acl;
+mod endpoint_fixture;
+mod endpoint_policy;
 mod fixture;
 mod flush_behavior;
 mod flush_worker;

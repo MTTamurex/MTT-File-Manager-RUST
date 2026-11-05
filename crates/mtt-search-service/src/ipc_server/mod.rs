@@ -1,3 +1,4 @@
+mod client_access;
 mod connection_lifecycle;
 mod connection_rejection;
 mod folder_size_snapshot;

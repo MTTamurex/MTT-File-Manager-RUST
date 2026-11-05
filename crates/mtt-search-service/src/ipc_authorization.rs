@@ -10,13 +10,17 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     INVALID_FILE_ATTRIBUTES, OPEN_EXISTING,
 };
-use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
 use crate::file_index;
 use crate::volume_indices::VolumeIndexHandle;
 use mtt_search_protocol::SearchResultItem;
+
+mod client_identity;
+pub(crate) use client_identity::{
+    inspect_file_manager_client, trusted_file_manager_client, ClientIdentityError,
+};
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
 const AUTHZ_MAX_BATCHES: usize = 64;
@@ -105,130 +109,6 @@ fn exact_path_exists(full_path: &str) -> bool {
         .collect();
 
     unsafe { GetFileAttributesW(PCWSTR(wide_path.as_ptr())) != INVALID_FILE_ATTRIBUTES }
-}
-
-pub(crate) fn trusted_file_manager_client(pipe: HANDLE) -> Result<(), String> {
-    let mut client_pid = 0u32;
-    unsafe {
-        GetNamedPipeClientProcessId(pipe, &mut client_pid)
-            .map_err(|e| format!("GetNamedPipeClientProcessId failed: {}", e))?;
-    }
-    if client_pid == 0 {
-        return Err("Client PID is 0".to_string());
-    }
-
-    // SECURITY/COMPATIBILITY REGRESSION NOTE:
-    // A LocalSystem service can fail to open an ordinary interactive user's
-    // process even though an elevated run-console instance (same user SID as
-    // the app) succeeds. Rejecting immediately here made GetStatus fail, which
-    // caused the app to mark the whole service offline and disabled search and
-    // folder sizes. Retry only the process-image query while impersonating the
-    // pipe client. The basename and protected sibling-directory checks below
-    // still run unchanged, so this is not a trust bypass.
-    let image_path = query_client_image_with_fallback(
-        || query_process_image_path(client_pid),
-        || {
-            let _impersonation = PipeImpersonationGuard::new(pipe)?;
-            query_process_image_path(client_pid)
-        },
-    )?;
-
-    let basename = std::path::Path::new(&image_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.to_ascii_lowercase())
-        .unwrap_or_default();
-    if basename != "mtt-file-manager.exe" {
-        return Err(format!(
-            "Client image basename is '{}', expected 'mtt-file-manager.exe'",
-            basename
-        ));
-    }
-
-    ensure_client_image_is_sibling(&image_path)
-}
-
-fn query_process_image_path(client_pid: u32) -> Result<String, String> {
-    use windows::core::PWSTR;
-    use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-        PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, client_pid) }
-        .map_err(|e| format!("OpenProcess(client pid {}) failed: {}", client_pid, e))?;
-    struct ProcGuard(HANDLE);
-    impl Drop for ProcGuard {
-        fn drop(&mut self) {
-            unsafe {
-                let _ = CloseHandle(self.0);
-            }
-        }
-    }
-    let _guard = ProcGuard(process);
-
-    let mut path_buf = [0u16; 4096];
-    let mut path_len = path_buf.len() as u32;
-    unsafe {
-        QueryFullProcessImageNameW(
-            process,
-            PROCESS_NAME_FORMAT(0),
-            PWSTR(path_buf.as_mut_ptr()),
-            &mut path_len,
-        )
-        .map_err(|e| {
-            format!(
-                "QueryFullProcessImageNameW(client pid {}) failed: {}",
-                client_pid, e
-            )
-        })?;
-    }
-    Ok(String::from_utf16_lossy(&path_buf[..path_len as usize]))
-}
-
-fn query_client_image_with_fallback<P, F>(
-    primary: P,
-    impersonated_fallback: F,
-) -> Result<String, String>
-where
-    P: FnOnce() -> Result<String, String>,
-    F: FnOnce() -> Result<String, String>,
-{
-    match primary() {
-        Ok(path) => Ok(path),
-        Err(primary_error) => impersonated_fallback().map_err(|fallback_error| {
-            format!(
-                "client image query failed as service: {primary_error}; impersonated retry failed: {fallback_error}"
-            )
-        }),
-    }
-}
-
-fn ensure_client_image_is_sibling(client_image_path: &str) -> Result<(), String> {
-    let service_exe = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
-    let service_dir = service_exe
-        .parent()
-        .ok_or_else(|| "Service executable has no parent directory".to_string())?;
-    let client_dir = std::path::Path::new(client_image_path)
-        .parent()
-        .ok_or_else(|| "Client executable has no parent directory".to_string())?;
-
-    if paths_equivalent_case_insensitive(service_dir, client_dir) {
-        return Ok(());
-    }
-
-    Err(format!(
-        "Client executable is not in the service directory: {}",
-        crate::redact_paths(client_image_path)
-    ))
-}
-
-fn paths_equivalent_case_insensitive(left: &std::path::Path, right: &std::path::Path) -> bool {
-    let left_norm = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right_norm = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    left_norm
-        .to_string_lossy()
-        .eq_ignore_ascii_case(&right_norm.to_string_lossy())
 }
 
 /// Check if the impersonated client can read a parent directory.
@@ -434,46 +314,6 @@ mod regression_tests;
 mod tests {
     use super::*;
     use crate::file_index::{IndexState, SearchPage, SearchResult};
-
-    #[test]
-    fn client_image_query_uses_primary_result_without_impersonation() {
-        let fallback_called = std::cell::Cell::new(false);
-
-        let path = query_client_image_with_fallback(
-            || Ok(r"C:\Program Files\MTT File Manager\mtt-file-manager.exe".to_string()),
-            || {
-                fallback_called.set(true);
-                Err("fallback must not run".to_string())
-            },
-        )
-        .unwrap();
-
-        assert!(path.ends_with("mtt-file-manager.exe"));
-        assert!(!fallback_called.get());
-    }
-
-    #[test]
-    fn client_image_query_retries_under_impersonation() {
-        let path = query_client_image_with_fallback(
-            || Err("service token denied".to_string()),
-            || Ok(r"C:\Program Files\MTT File Manager\mtt-file-manager.exe".to_string()),
-        )
-        .unwrap();
-
-        assert!(path.ends_with("mtt-file-manager.exe"));
-    }
-
-    #[test]
-    fn client_image_query_fails_when_both_security_contexts_fail() {
-        let error = query_client_image_with_fallback(
-            || Err("service token denied".to_string()),
-            || Err("client token denied".to_string()),
-        )
-        .unwrap_err();
-
-        assert!(error.contains("service token denied"));
-        assert!(error.contains("client token denied"));
-    }
 
     #[test]
     fn returns_empty_for_zero_limit_or_empty_query() {
