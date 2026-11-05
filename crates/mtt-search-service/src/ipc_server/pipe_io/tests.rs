@@ -3,6 +3,11 @@
 
 mod candidate_acl;
 mod fixture;
+mod flush_behavior;
+mod flush_worker;
+mod lifecycle_regression;
+mod lifecycle_worker;
+mod rejection_regression;
 mod restricted_token;
 
 use std::io::{Read, Write};

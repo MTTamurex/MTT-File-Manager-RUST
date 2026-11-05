@@ -88,6 +88,12 @@ impl Connection {
     pub fn server(&self) -> HANDLE {
         HANDLE(self.server.as_raw_handle())
     }
+
+    pub fn clone_server(&self) -> OwnedHandle {
+        self.server
+            .try_clone()
+            .expect("duplicate isolated server handle")
+    }
 }
 
 impl Drop for Connection {

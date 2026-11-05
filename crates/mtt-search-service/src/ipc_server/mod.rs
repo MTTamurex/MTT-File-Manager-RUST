@@ -1,19 +1,20 @@
+mod connection_lifecycle;
+mod connection_rejection;
 mod folder_size_snapshot;
 mod handler;
 mod pipe_io;
 mod volume_access;
 
 use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::os::windows::io::{FromRawHandle, OwnedHandle};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows::Win32::Storage::FileSystem::FlushFileBuffers;
+use windows::Win32::System::Pipes::ConnectNamedPipe;
 use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
-use windows::Win32::System::Pipes::{ConnectNamedPipe, DisconnectNamedPipe};
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::IO::OVERLAPPED;
 
@@ -39,10 +40,25 @@ const MAX_QUERY_RESULTS: usize = 10_000;
 const MAX_QUERY_OFFSET: usize = 5_000_000;
 /// Per-connection I/O timeout in seconds (prevents slowloris DoS).
 const IO_TIMEOUT_SECS: u64 = 30;
+const MAX_ACTIVE_REJECTIONS: u32 = 2;
+const REJECTION_TIMEOUT_SECS: u64 = 2;
 
 pub(super) enum WatchdogEvent {
     Extend(Duration),
     Done,
+}
+
+struct ClientSlot {
+    active: Arc<AtomicU32>,
+    by_pid: Arc<Mutex<HashMap<u32, u32>>>,
+    pid: u32,
+}
+
+impl Drop for ClientSlot {
+    fn drop(&mut self) {
+        release_pid_slot(&self.by_pid, self.pid);
+        self.active.fetch_sub(1, Ordering::Release);
+    }
 }
 
 /// Start the IPC server loop.
@@ -57,6 +73,10 @@ pub fn run_ipc_server(
     let active_clients = Arc::new(AtomicU32::new(0));
     let active_clients_by_pid = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
     let security_policy = Arc::new(IpcSecurityPolicy::from_env());
+    let rejections = connection_rejection::RejectionPool::new(
+        MAX_ACTIVE_REJECTIONS,
+        Duration::from_secs(REJECTION_TIMEOUT_SECS),
+    );
 
     if security_policy.redact_status_metrics {
         eprintln!("[IPC] Security policy: status metrics redaction is enabled");
@@ -90,13 +110,11 @@ pub fn run_ipc_server(
                 continue;
             }
         };
+        let owned_pipe = unsafe { OwnedHandle::from_raw_handle(pipe.0) };
 
         // Wait for client with overlapped I/O so we can check shutdown periodically
         let client_connected = wait_for_client(pipe, &shutdown);
         if !client_connected {
-            unsafe {
-                let _ = CloseHandle(pipe);
-            }
             if shutdown.load(Ordering::Relaxed) {
                 break;
             }
@@ -104,9 +122,6 @@ pub fn run_ipc_server(
         }
 
         if shutdown.load(Ordering::Relaxed) {
-            unsafe {
-                let _ = CloseHandle(pipe);
-            }
             break;
         }
 
@@ -114,14 +129,11 @@ pub fn run_ipc_server(
             Ok(pid) => pid,
             Err(error) => {
                 eprintln!("[IPC] Failed to identify client process: {}", error);
-                let _ = pipe_io::send_response(
-                    pipe,
-                    &mtt_search_protocol::SearchResponse::Error("Authorization failed".to_string()),
-                );
-                unsafe {
-                    let _ = FlushFileBuffers(pipe);
-                    let _ = DisconnectNamedPipe(pipe);
-                    let _ = CloseHandle(pipe);
+                if let Err(error) = rejections.reject(
+                    owned_pipe,
+                    mtt_search_protocol::SearchResponse::Error("Authorization failed".to_string()),
+                ) {
+                    eprintln!("[IPC] Cannot schedule rejection: {error}");
                 }
                 continue;
             }
@@ -132,16 +144,13 @@ pub fn run_ipc_server(
                 "[IPC] Rate limit: rejecting pid {} (>{} active)",
                 client_pid, MAX_ACTIVE_CLIENTS_PER_PID
             );
-            let _ = pipe_io::send_response(
-                pipe,
-                &mtt_search_protocol::SearchResponse::Error(
+            if let Err(error) = rejections.reject(
+                owned_pipe,
+                mtt_search_protocol::SearchResponse::Error(
                     "Server busy, try again later".to_string(),
                 ),
-            );
-            unsafe {
-                let _ = FlushFileBuffers(pipe);
-                let _ = DisconnectNamedPipe(pipe);
-                let _ = CloseHandle(pipe);
+            ) {
+                eprintln!("[IPC] Cannot schedule rejection: {error}");
             }
             continue;
         }
@@ -157,17 +166,13 @@ pub fn run_ipc_server(
                 "[IPC] Rate limit: rejecting connection ({}/{} active)",
                 prev, MAX_ACTIVE_CLIENTS
             );
-            // Try to send an error response before disconnecting
-            let _ = pipe_io::send_response(
-                pipe,
-                &mtt_search_protocol::SearchResponse::Error(
+            if let Err(error) = rejections.reject(
+                owned_pipe,
+                mtt_search_protocol::SearchResponse::Error(
                     "Server busy, try again later".to_string(),
                 ),
-            );
-            unsafe {
-                let _ = FlushFileBuffers(pipe);
-                let _ = DisconnectNamedPipe(pipe);
-                let _ = CloseHandle(pipe);
+            ) {
+                eprintln!("[IPC] Cannot schedule rejection: {error}");
             }
             continue;
         }
@@ -177,69 +182,49 @@ pub fn run_ipc_server(
         let progress_for_client = indexing_progress.clone();
         let warming_for_client = is_warming.clone();
         let warm_epoch_for_client = last_warm_epoch_secs.clone();
-        let active_for_client = active_clients.clone();
-        let active_pids_for_client = active_clients_by_pid.clone();
+        let slot = ClientSlot {
+            active: Arc::clone(&active_clients),
+            by_pid: Arc::clone(&active_clients_by_pid),
+            pid: client_pid,
+        };
         let policy_for_client = security_policy.clone();
         let lifecycle_for_client = volume_lifecycle.clone();
-        let pipe_raw = pipe.0 as usize;
-        std::thread::spawn(move || {
-            let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
-
-            // The watchdog may disconnect a slow client to unblock its handler,
-            // but the handler remains the sole owner responsible for CloseHandle.
-            let (watchdog_tx, watchdog_rx) = mpsc::channel();
-            let watchdog_pipe = pipe_raw;
-            let watchdog = std::thread::spawn(move || {
-                let timed_out =
-                    watchdog_timed_out(&watchdog_rx, Duration::from_secs(IO_TIMEOUT_SECS));
-                if timed_out {
-                    eprintln!(
-                        "[IPC] Client timeout after {}s, disconnecting",
-                        IO_TIMEOUT_SECS
-                    );
-                    unsafe {
-                        let handle = HANDLE(watchdog_pipe as *mut core::ffi::c_void);
-                        let _ = DisconnectNamedPipe(handle);
-                    }
-                }
-                timed_out
-            });
-
-            if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handler::handle_client(
-                    pipe,
-                    &indices_for_client,
-                    &progress_for_client,
-                    handler::WarmIndexState {
-                        is_warming: &warming_for_client,
-                        last_warm_epoch_secs: &warm_epoch_for_client,
+        if let Err(error) = std::thread::Builder::new()
+            .name("search-ipc-client".into())
+            .spawn(move || {
+                let _slot = slot;
+                if let Err(error) = connection_lifecycle::serve(
+                    owned_pipe,
+                    Duration::from_secs(IO_TIMEOUT_SECS),
+                    |pipe, watchdog| {
+                        handler::handle_client(
+                            pipe,
+                            &indices_for_client,
+                            &progress_for_client,
+                            handler::WarmIndexState {
+                                is_warming: &warming_for_client,
+                                last_warm_epoch_secs: &warm_epoch_for_client,
+                            },
+                            &policy_for_client,
+                            &lifecycle_for_client,
+                            watchdog,
+                        )
                     },
-                    &policy_for_client,
-                    &lifecycle_for_client,
-                    &watchdog_tx,
-                )
-            })) {
-                eprintln!("[IPC] Client handler panic: {:?}", e);
-            }
-            let _ = watchdog_tx.send(WatchdogEvent::Done);
-            let watchdog_disconnected = watchdog.join().unwrap_or(false);
-            unsafe {
-                if !watchdog_disconnected {
-                    let _ = FlushFileBuffers(pipe);
-                    let _ = DisconnectNamedPipe(pipe);
+                ) {
+                    eprintln!("[IPC] Connection lifecycle startup failed: {error}");
                 }
-                let _ = CloseHandle(pipe);
-            }
-            active_for_client.fetch_sub(1, Ordering::Release);
-            release_pid_slot(&active_pids_for_client, client_pid);
-        });
+            })
+        {
+            // Dropping the unstarted closure releases the owned pipe and slot.
+            eprintln!("[IPC] Cannot start client worker: {error}");
+        }
     }
 
     // Graceful shutdown: wait up to 5 seconds for active client threads to finish.
     // Windows SCM has a 120s timeout, but we should not block that long.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        let remaining = active_clients.load(Ordering::Relaxed);
+        let remaining = active_clients.load(Ordering::Acquire) + rejections.active_count();
         if remaining == 0 {
             break;
         }
@@ -375,6 +360,32 @@ mod tests {
     use super::{watchdog_timed_out, WatchdogEvent};
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn client_slot_drop_releases_global_and_per_pid_capacity() {
+        use super::{ClientSlot, HashMap};
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let active = Arc::new(AtomicU32::new(2));
+        let by_pid = Arc::new(Mutex::new(HashMap::from([(123, 2)])));
+        let first = ClientSlot {
+            active: Arc::clone(&active),
+            by_pid: Arc::clone(&by_pid),
+            pid: 123,
+        };
+        let second = ClientSlot {
+            active: Arc::clone(&active),
+            by_pid: Arc::clone(&by_pid),
+            pid: 123,
+        };
+        drop(first);
+        assert_eq!(active.load(Ordering::Acquire), 1);
+        assert_eq!(by_pid.lock().unwrap().get(&123), Some(&1));
+        drop(second);
+        assert_eq!(active.load(Ordering::Acquire), 0);
+        assert!(by_pid.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn watchdog_stops_when_handler_finishes() {
