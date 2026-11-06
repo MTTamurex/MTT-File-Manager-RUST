@@ -38,6 +38,9 @@ pub(in crate::app) fn build_layout_state(
         saved_is_maximized,
         saved_is_minimized: false,
         saved_is_fullscreen: false,
+        settings_window_geometry: super::settings_window_geometry::SettingsWindowGeometry::load(
+            app_state_db,
+        ),
         sidebar_left_width,
         sidebar_right_width,
         list_col_name_width: load_width_pref(app_state_db, "list_col_name_width", 300.0),

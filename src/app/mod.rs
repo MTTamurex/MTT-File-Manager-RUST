@@ -41,6 +41,7 @@ pub mod operations;
 pub(crate) mod organizer_conflict_state;
 pub(crate) mod organizer_history_state;
 pub mod organizer_state;
+pub mod settings_window_geometry;
 pub mod shortcuts;
 pub mod startup_folder;
 pub mod startup_location;

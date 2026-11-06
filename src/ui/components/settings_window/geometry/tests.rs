@@ -1,6 +1,15 @@
 use super::*;
 
 fn frame(ctx: &egui::Context, events: Vec<egui::Event>, size: egui::Vec2) -> egui::Rect {
+    frame_with_saved(ctx, events, size, None)
+}
+
+fn frame_with_saved(
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+    size: egui::Vec2,
+    saved: Option<SettingsWindowGeometry>,
+) -> egui::Rect {
     let mut rect = egui::Rect::NOTHING;
     let _ = ctx.run_ui(
         egui::RawInput {
@@ -9,7 +18,7 @@ fn frame(ctx: &egui::Context, events: Vec<egui::Event>, size: egui::Vec2) -> egu
             ..Default::default()
         },
         |ui| {
-            rect = window(ui.ctx())
+            rect = window(ui.ctx(), saved)
                 .frame(egui::Frame::new().stroke(egui::Stroke::new(1.0, egui::Color32::GRAY)))
                 .show(ui.ctx(), |ui| {
                     ui.allocate_exact_size(
@@ -35,6 +44,55 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
         button: egui::PointerButton::Primary,
         pressed,
         modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn saved_geometry_is_restored_in_a_new_session_and_on_reopen() {
+    let db = crate::infrastructure::app_state_db::AppStateDb::new_in_memory().unwrap();
+    let expected = egui::Rect::from_min_size(egui::pos2(140.0, 90.0), egui::vec2(780.0, 570.0));
+    let geometry = SettingsWindowGeometry::from_rect(expected).unwrap();
+    db.set_preferences_batch(&[geometry.preference().unwrap()])
+        .unwrap();
+
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1600.0, 1200.0);
+    let mut saved = SettingsWindowGeometry::load(&db);
+    let mut rect = egui::Rect::NOTHING;
+    for _ in 0..4 {
+        rect = frame_with_saved(&ctx, vec![], size, saved);
+        saved = SettingsWindowGeometry::from_rect(rect);
+    }
+    assert!(rect.min.distance(expected.min) < 2.0, "{rect:?}");
+    assert!(rect.max.distance(expected.max) < 2.0, "{rect:?}");
+
+    for _ in 0..2 {
+        let _ = ctx.run_ui(Default::default(), |_| {});
+    }
+    for _ in 0..4 {
+        rect = frame_with_saved(&ctx, vec![], size, saved);
+        saved = SettingsWindowGeometry::from_rect(rect);
+    }
+    assert!(rect.min.distance(expected.min) < 2.0, "{rect:?}");
+    assert!(rect.max.distance(expected.max) < 2.0, "{rect:?}");
+}
+
+#[test]
+fn saved_geometry_is_constrained_to_a_smaller_viewport() {
+    for position in [egui::pos2(1200.0, 900.0), egui::pos2(-500.0, -300.0)] {
+        let ctx = egui::Context::default();
+        let size = egui::vec2(640.0, 360.0);
+        let mut saved = SettingsWindowGeometry::from_rect(egui::Rect::from_min_size(
+            position,
+            egui::vec2(900.0, 700.0),
+        ));
+        let mut rect = egui::Rect::NOTHING;
+        for _ in 0..4 {
+            rect = frame_with_saved(&ctx, vec![], size, saved);
+            saved = SettingsWindowGeometry::from_rect(rect);
+        }
+        assert!(rect.min.x >= 0.0 && rect.min.y >= 0.0, "{rect:?}");
+        assert!(rect.max.x <= size.x && rect.max.y <= size.y, "{rect:?}");
     }
 }
 
@@ -102,7 +160,7 @@ fn resizing_edges_and_corners_tracks_the_pointer_and_keeps_opposite_edges_fixed(
 }
 
 #[test]
-fn settings_center_on_open_and_reopen_but_not_during_resize() {
+fn settings_center_only_on_first_open_and_preserve_geometry_on_reopen() {
     let ctx = egui::Context::default();
     let size = egui::vec2(1600.0, 1200.0);
     let mut rect = egui::Rect::NOTHING;
@@ -119,6 +177,7 @@ fn settings_center_on_open_and_reopen_but_not_during_resize() {
     frame(&ctx, vec![button(end, false)], size);
     rect = frame(&ctx, vec![], size);
     assert!(rect.center().distance((size * 0.5).to_pos2()) > 20.0);
+    let before_close = rect;
 
     for _ in 0..2 {
         let _ = ctx.run_ui(Default::default(), |_| {});
@@ -126,7 +185,8 @@ fn settings_center_on_open_and_reopen_but_not_during_resize() {
     for _ in 0..3 {
         rect = frame(&ctx, vec![], size);
     }
-    assert!(rect.center().distance((size * 0.5).to_pos2()) < 2.0);
+    assert!(rect.min.distance(before_close.min) < 2.0);
+    assert!(rect.max.distance(before_close.max) < 2.0);
 }
 
 #[test]
@@ -191,6 +251,13 @@ fn dragging_the_content_does_not_move_the_settings_window() {
 fn dragging_the_header_moves_the_window_without_resizing_or_jumping_on_release() {
     let ctx = egui::Context::default();
     let size = egui::vec2(1600.0, 1200.0);
+    // Mirror the application: capture the rendered geometry after each frame.
+    let mut saved = None;
+    let mut frame = |ctx: &egui::Context, events, size| {
+        let rect = frame_with_saved(ctx, events, size, saved);
+        saved = SettingsWindowGeometry::from_rect(rect);
+        rect
+    };
     let mut before = egui::Rect::NOTHING;
     for _ in 0..4 {
         before = frame(&ctx, vec![], size);
@@ -231,7 +298,8 @@ fn dragging_the_header_moves_the_window_without_resizing_or_jumping_on_release()
     for _ in 0..3 {
         reopened = frame(&ctx, vec![], size);
     }
-    assert!(reopened.center().distance((size * 0.5).to_pos2()) < 2.0);
+    assert!(reopened.min.distance(resized.min) < 2.0);
+    assert!(reopened.max.distance(resized.max) < 2.0);
 }
 
 #[test]
@@ -252,7 +320,7 @@ fn content_drag_blocker_preserves_checkbox_clicks_and_slider_drags() {
                 ..Default::default()
             },
             |ui| {
-                window(ui.ctx()).show(ui.ctx(), |ui| {
+                window(ui.ctx(), None).show(ui.ctx(), |ui| {
                     block_content_drag(ui);
                     checkbox.set(ui.checkbox(&mut checked, "Example setting").rect);
                     slider.set(

@@ -32,7 +32,7 @@ fn small_windows_scroll_both_axes_without_expanding_the_window_or_moving_the_hea
                     ..Default::default()
                 },
                 |ui| {
-                    let response = super::super::geometry::window(ui.ctx())
+                    let response = super::super::geometry::window(ui.ctx(), None)
                         .fixed_size(size)
                         .show(ui.ctx(), |ui| {
                             let current_header = ui

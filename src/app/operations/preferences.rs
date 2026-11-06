@@ -253,6 +253,11 @@ impl ImageViewerApp {
         // Window state persistence
         prefs.push(("window_width", self.layout.saved_window_width.to_string()));
         prefs.push(("window_height", self.layout.saved_window_height.to_string()));
+        prefs.extend(
+            self.layout
+                .settings_window_geometry
+                .and_then(|geometry| geometry.preference()),
+        );
         prefs.push((
             "window_is_maximized",
             (if self.layout.saved_is_maximized {

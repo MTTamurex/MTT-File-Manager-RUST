@@ -126,7 +126,7 @@ pub fn render_settings_window(
     window_style.visuals.widgets.active.bg_stroke = Stroke::NONE;
     ctx.set_global_style(window_style);
 
-    geometry::window(ctx)
+    let window_response = geometry::window(ctx, app.layout.settings_window_geometry)
         .frame(frame)
         .show(ctx, |ui| {
             ui.visuals_mut().widgets.hovered.bg_stroke =
@@ -273,6 +273,16 @@ pub fn render_settings_window(
                 );
             }));
         });
+
+    if let Some(response) = window_response {
+        let geometry = crate::app::settings_window_geometry::SettingsWindowGeometry::from_rect(
+            response.response.rect,
+        );
+        if geometry.is_some() && app.layout.settings_window_geometry != geometry {
+            app.layout.settings_window_geometry = geometry;
+            app.save_preferences();
+        }
+    }
 
     ctx.set_global_style(original_style);
 
