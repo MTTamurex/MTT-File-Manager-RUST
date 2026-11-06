@@ -696,10 +696,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     let mode = crate::domain::file_entry::GroupMode::from_preference(value);
                     let origin_panel = context_menu.origin_panel_is_left;
                     run_in_context_panel(app, origin_panel, move |app| {
-                        app.group_mode = mode;
-                        if !app.current_folder_locked {
-                            app.group_mode_normal = mode;
+                        if app.current_folder_locked || app.navigation_state.is_computer_view {
+                            return;
                         }
+                        app.group_mode = mode;
+                        app.group_mode_normal = mode;
                         app.rebuild_group_projection();
                         app.scroll_offset_y = 0.0;
                         app.scroll_offset_x = 0.0;
@@ -713,10 +714,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     let descending = value == "descending";
                     let origin_panel = context_menu.origin_panel_is_left;
                     run_in_context_panel(app, origin_panel, move |app| {
-                        app.group_descending = descending;
-                        if !app.current_folder_locked {
-                            app.group_descending_normal = descending;
+                        if app.current_folder_locked || app.navigation_state.is_computer_view {
+                            return;
                         }
+                        app.group_descending = descending;
+                        app.group_descending_normal = descending;
                         app.rebuild_group_projection();
                         app.save_preferences();
                     });

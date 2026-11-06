@@ -4,6 +4,7 @@
 
 pub(crate) mod background;
 mod computer;
+mod grouping;
 mod local_open;
 mod new_submenu;
 mod open_with;
@@ -300,41 +301,11 @@ fn promote_extract_all_shell_item(
 }
 
 fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu::ContextMenuItem {
-    use crate::application::context_menu::ContextMenuItem;
-    use crate::domain::file_entry::GroupMode;
-
-    let mut sub_items = Vec::new();
-    for (index, mode, label) in [
-        (0, GroupMode::None, t!("secondary_toolbar.group_none")),
-        (1, GroupMode::Name, t!("secondary_toolbar.group_name")),
-        (2, GroupMode::Date, t!("secondary_toolbar.group_date")),
-        (3, GroupMode::Type, t!("secondary_toolbar.group_type")),
-        (4, GroupMode::Size, t!("secondary_toolbar.group_size")),
-    ] {
-        sub_items.push(
-            ContextMenuItem::new(-300 - index, label)
-                .with_command(format!("group:{}", mode.preference_value()))
-                .checked(app.group_mode == mode),
-        );
-    }
-    sub_items.push(ContextMenuItem::separator());
-    sub_items.push(
-        ContextMenuItem::new(-306, t!("grouping.ascending"))
-            .with_command("group_direction:ascending")
-            .checked(!app.group_descending)
-            .enabled(app.group_mode != GroupMode::None),
-    );
-    sub_items.push(
-        ContextMenuItem::new(-307, t!("grouping.descending"))
-            .with_command("group_direction:descending")
-            .checked(app.group_descending)
-            .enabled(app.group_mode != GroupMode::None),
-    );
-
-    ContextMenuItem::new(-299, t!("secondary_toolbar.group_by"))
-        .with_svg_icon("group")
-        .with_subitems(sub_items)
-        .enabled(!app.current_folder_locked && !app.navigation_state.is_computer_view)
+    grouping::menu(
+        app.group_mode,
+        app.group_descending,
+        !app.current_folder_locked && !app.navigation_state.is_computer_view,
+    )
 }
 
 impl ImageViewerApp {

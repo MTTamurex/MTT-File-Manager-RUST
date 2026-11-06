@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn disabled_submenu_never_opens_or_requests_children() {
+    for already_active in [false, true] {
+        let ctx = egui::Context::default();
+        let mut icons = SvgIconManager::new();
+        let item = ContextMenuItem {
+            has_pending_submenu: true,
+            ..ContextMenuItem::new(-299, "Group by")
+                .with_subitems(vec![ContextMenuItem::new(-300, "Name")])
+                .enabled(false)
+        };
+        let mut hover_position = egui::Pos2::ZERO;
+        SUBMENU_HIERARCHY.with(|hierarchy| hierarchy.borrow_mut().clear());
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(220.0);
+            hover_position = ui.cursor().min + egui::vec2(50.0, 15.0);
+            render_single_item(ui, &item, &mut None, 0, &mut None, &mut icons);
+        });
+        if already_active {
+            SUBMENU_HIERARCHY.with(|hierarchy| {
+                *hierarchy.borrow_mut() = vec![Some(item.id), Some(-300)];
+            });
+        }
+        SUBMENU_RECTS.with(|rects| rects.borrow_mut().clear());
+        let mut lazy_load = None;
+        let mut action = None;
+        let input = egui::RawInput {
+            events: vec![egui::Event::PointerMoved(hover_position)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            ui.set_width(220.0);
+            render_single_item(ui, &item, &mut action, 0, &mut lazy_load, &mut icons);
+        });
+        assert_eq!(action, None);
+        assert_eq!(lazy_load, None);
+        SUBMENU_HIERARCHY.with(|hierarchy| assert!(hierarchy.borrow().is_empty()));
+        SUBMENU_RECTS.with(|rects| assert!(rects.borrow().is_empty()));
+    }
+}
+
+#[test]
 fn direct_hover_switches_away_from_a_sibling_with_active_descendants() {
     let ctx = egui::Context::default();
     let mut icons = SvgIconManager::new();

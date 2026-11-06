@@ -651,7 +651,16 @@ fn render_single_item(
     }
 
     // Handle submenu on hover - stable approach with expanded hit area
-    if has_submenu {
+    if has_submenu && !item.is_enabled {
+        SUBMENU_HIERARCHY.with(|hierarchy| {
+            let mut h = hierarchy.borrow_mut();
+            if h.get(depth).copied().flatten() == Some(item.id) {
+                h.truncate(depth);
+            }
+        });
+    }
+
+    if has_submenu && item.is_enabled {
         let pointer_pos = ui.ctx().pointer_latest_pos();
 
         // Calculate submenu position: RIGHT by default, LEFT only at the viewport edge.
