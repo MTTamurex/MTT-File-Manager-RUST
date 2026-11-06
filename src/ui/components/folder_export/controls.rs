@@ -17,12 +17,14 @@ pub(super) fn render(ui: &mut egui::Ui, state: &mut FolderExportState) {
     ui.separator();
     egui::CollapsingHeader::new(egui::RichText::new(t!("export_listing.columns")).strong())
         .id_salt("export_columns_section")
+        .icon(crate::ui::disclosure::collapsing_icon)
         .default_open(false)
         .show(ui, |ui| super::columns::render(ui, state))
         .header_response
         .on_hover_text(t!("export_listing.columns_hint"));
     egui::CollapsingHeader::new(egui::RichText::new(t!("export_listing.sorting")).strong())
         .id_salt("export_sorting_section")
+        .icon(crate::ui::disclosure::collapsing_icon)
         .default_open(false)
         .show(ui, |ui| super::sorting::render(ui, state));
 }

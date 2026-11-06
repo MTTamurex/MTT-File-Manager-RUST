@@ -114,17 +114,16 @@ pub fn render_tags_section(
             Color32::from_gray(120),
         );
 
-        let toggle_icon = if ctx.collapse_tags { "v" } else { "^" };
         let toggle_color = if toggle_response.hovered() {
             ui.visuals().text_color()
         } else {
             Color32::from_gray(140)
         };
-        ui.painter().text(
+        crate::ui::disclosure::paint(
+            ui.painter(),
             toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            toggle_icon,
-            egui::FontId::proportional(14.0),
+            !ctx.collapse_tags,
+            crate::ui::disclosure::SECTION_SIZE,
             toggle_color,
         );
     }
@@ -275,11 +274,11 @@ fn render_tag_level(
                 } else {
                     Color32::from_gray(140)
                 };
-                ui.painter().text(
+                crate::ui::disclosure::paint(
+                    ui.painter(),
                     chevron_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if is_collapsed { "v" } else { "^" },
-                    egui::FontId::proportional(11.0),
+                    !is_collapsed,
+                    crate::ui::disclosure::SIDEBAR_SIZE,
                     chevron_color,
                 );
             }

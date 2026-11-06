@@ -96,6 +96,11 @@ sidebar:
   collapse_section: "Σύμπτυξη ενότητας"
   expand_section: "Ανάπτυξη ενότητας"
 tags:
+  browser_search: "Αναζήτηση ετικετών ή φακέλων…"
+  browser_select: "Επιλέξτε ένα στοιχείο για προβολή ή επεξεργασία λεπτομερειών."
+  browser_details: "Λεπτομέρειες"
+  browser_no_results: "Δεν βρέθηκαν στοιχεία."
+  auto_status_disabled: "Ανενεργός"
   section: "Ετικέτες"
   assign: "Ετικέτα"
   manage: "Διαχείριση ετικετών..."

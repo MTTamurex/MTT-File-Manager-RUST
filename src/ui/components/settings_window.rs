@@ -192,7 +192,7 @@ pub fn render_settings_window(
                             })
                             .show(ui, |ui| {
                                 let current_section = app.navigation_state.active_settings_section;
-                                content_scroll::show(ui, |ui| {
+                                let mut render_content = |ui: &mut egui::Ui| {
                                         match current_section {
                                         SettingsSection::General => {
                                             let general = crate::ui::components::general_settings::render_general_settings_section(ui, app);
@@ -267,7 +267,14 @@ pub fn render_settings_window(
                                             crate::ui::components::about_settings::render_about_settings_section(ui, app);
                                         }
                                         }
-                                    });
+                                    };
+                                // Tags owns separate list/detail scroll areas;
+                                // an outer scroll would move its search toolbar.
+                                if current_section == SettingsSection::Tags {
+                                    render_content(ui);
+                                } else {
+                                    content_scroll::show(ui, render_content);
+                                }
                             });
                     },
                 );

@@ -284,17 +284,16 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
             Color32::from_gray(120),
         );
 
-        let toggle_icon = if ctx.collapse_quick_access { "v" } else { "^" };
         let toggle_color = if toggle_response.hovered() {
             ui.visuals().text_color()
         } else {
             Color32::from_gray(140)
         };
-        ui.painter().text(
+        crate::ui::disclosure::paint(
+            ui.painter(),
             toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            toggle_icon,
-            egui::FontId::proportional(14.0),
+            !ctx.collapse_quick_access,
+            crate::ui::disclosure::SECTION_SIZE,
             toggle_color,
         );
     }
@@ -504,17 +503,16 @@ pub fn render_sidebar_drives(
                 Color32::from_gray(120),
             );
 
-            let toggle_icon = if collapsed { "v" } else { "^" };
             let toggle_color = if toggle_response.hovered() {
                 ui.visuals().text_color()
             } else {
                 Color32::from_gray(140)
             };
-            ui.painter().text(
+            crate::ui::disclosure::paint(
+                ui.painter(),
                 toggle_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                toggle_icon,
-                egui::FontId::proportional(14.0),
+                !collapsed,
+                crate::ui::disclosure::SECTION_SIZE,
                 toggle_color,
             );
         }
@@ -606,13 +604,6 @@ pub fn render_sidebar_drives(
 
                 // ── Expand/collapse arrow ──
                 {
-                    let arrow_text = if is_tree_loading {
-                        "…"
-                    } else if is_expanded {
-                        "▾"
-                    } else {
-                        "▸"
-                    };
                     let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
                     let arrow_hovered =
                         pointer_pos.map(|p| arrow_zone.contains(p)).unwrap_or(false);
@@ -621,13 +612,24 @@ pub fn render_sidebar_drives(
                     } else {
                         Color32::from_gray(140)
                     };
-                    ui.painter().text(
-                        Pos2::new(cursor_x + 8.0, rect.center().y),
-                        egui::Align2::CENTER_CENTER,
-                        arrow_text,
-                        egui::FontId::proportional(10.0),
-                        arrow_color,
-                    );
+                    let center = Pos2::new(cursor_x + 8.0, rect.center().y);
+                    if is_tree_loading {
+                        ui.painter().text(
+                            center,
+                            egui::Align2::CENTER_CENTER,
+                            "…",
+                            egui::FontId::proportional(10.0),
+                            arrow_color,
+                        );
+                    } else {
+                        crate::ui::disclosure::paint(
+                            ui.painter(),
+                            center,
+                            is_expanded,
+                            crate::ui::disclosure::SIDEBAR_SIZE,
+                            arrow_color,
+                        );
+                    }
                     cursor_x += 18.0;
                 }
 

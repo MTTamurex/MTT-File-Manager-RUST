@@ -5,9 +5,12 @@ pub(super) fn settings_escape_closes_window(
     ctx: &egui::Context,
     editor: &mut ShortcutEditorState,
 ) -> bool {
-    // Combo boxes used inside settings own Escape while their popup is open.
-    // The window runs before those widgets, so leave the event for the popup.
-    if !editor.is_capturing() && egui::Popup::is_any_open(ctx) {
+    // Popups and creation dialogs own Escape while they are open. Settings
+    // runs before those widgets, so leave the event for the topmost one.
+    if !editor.is_capturing()
+        && (egui::Popup::is_any_open(ctx)
+            || ctx.memory(|memory| memory.top_modal_layer().is_some()))
+    {
         return false;
     }
     let pressed = ctx.input_mut(|input| {

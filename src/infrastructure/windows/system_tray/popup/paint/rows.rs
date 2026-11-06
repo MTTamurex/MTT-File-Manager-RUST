@@ -2,8 +2,31 @@ use super::super::super::labels;
 use super::super::model::Action;
 use super::super::State;
 use super::{bitmap, fill, measure, rounded, text};
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{COLORREF, POINT, RECT};
 use windows::Win32::Graphics::Gdi::*;
+
+fn disclosure(dc: HDC, rect: RECT, expanded: bool, color: COLORREF, size: f32) {
+    let center = eframe::egui::pos2(
+        (rect.left + rect.right) as f32 / 2.0,
+        (rect.top + rect.bottom) as f32 / 2.0,
+    );
+    let points = crate::ui::disclosure::points(center, expanded, size).map(|point| POINT {
+        x: point.x.round() as i32,
+        y: point.y.round() as i32,
+    });
+    unsafe {
+        let brush = CreateSolidBrush(color);
+        if brush.is_invalid() {
+            return;
+        }
+        let previous_brush = SelectObject(dc, brush.into());
+        let previous_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let _ = Polygon(dc, &points);
+        SelectObject(dc, previous_pen);
+        SelectObject(dc, previous_brush);
+        let _ = DeleteObject(brush.into());
+    }
+}
 
 pub(super) fn paint(dc: HDC, state: &State, index: usize, y: i32, title: &str) {
     let l = &state.layout;
@@ -91,13 +114,12 @@ pub(super) fn paint(dc: HDC, state: &State, index: usize, y: i32, title: &str) {
         };
         text(dc, &subtitle, subtitle_rect, r.font.0, muted, DT_LEFT);
         if let Some(expanded) = row.expanded {
-            text(
+            disclosure(
                 dc,
-                if expanded { "⌄" } else { "›" },
                 rect(l.width - 60, y + 27, 20, 18),
-                r.bold.0,
+                expanded,
                 color,
-                DT_CENTER,
+                l.px(crate::ui::disclosure::SECTION_SIZE as i32) as f32,
             );
         }
         let close = rect(l.width - 34, y + 4, 26, row.height - 8);

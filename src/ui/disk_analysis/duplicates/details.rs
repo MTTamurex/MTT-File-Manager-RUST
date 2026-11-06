@@ -18,6 +18,7 @@ pub(super) fn warnings(ui: &mut egui::Ui, inaccessible: u64, changed: u64, unava
             .color(ui.visuals().warn_fg_color),
     )
     .id_salt("duplicate_coverage_warning")
+    .icon(crate::ui::disclosure::collapsing_icon)
     .default_open(false)
     .show(ui, |ui| {
         for (count, key) in [
@@ -40,6 +41,7 @@ pub(super) fn render(
 ) {
     egui::CollapsingHeader::new(t!("disk_analysis.dup_search_details").to_string())
         .id_salt("duplicate_search_details")
+        .icon(crate::ui::disclosure::collapsing_icon)
         .default_open(false)
         .show(ui, |ui| {
             ui.label(

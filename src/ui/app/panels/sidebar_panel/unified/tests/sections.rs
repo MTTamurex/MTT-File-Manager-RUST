@@ -215,7 +215,14 @@ fn wide_folder_trees_do_not_push_section_toggles_outside_the_viewport() {
             .shapes
             .iter()
             .filter_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.text() == "^" => {
+                egui::epaint::Shape::Path(path)
+                    if path.closed
+                        && path.points.len() == 3
+                        && shape.shape.visual_bounding_rect().width()
+                            > crate::ui::disclosure::SIDEBAR_SIZE
+                        && shape.shape.visual_bounding_rect().height()
+                            > crate::ui::disclosure::SIDEBAR_SIZE =>
+                {
                     Some(shape.shape.visual_bounding_rect())
                 }
                 _ => None,

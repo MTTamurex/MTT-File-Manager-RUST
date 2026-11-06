@@ -45,15 +45,11 @@ pub(super) fn render_network_locations(
             egui::FontId::proportional(10.0),
             Color32::from_gray(120),
         );
-        ui.painter().text(
+        crate::ui::disclosure::paint(
+            ui.painter(),
             toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if ctx.collapse_network_locations {
-                "v"
-            } else {
-                "^"
-            },
-            egui::FontId::proportional(14.0),
+            !ctx.collapse_network_locations,
+            crate::ui::disclosure::SECTION_SIZE,
             if toggle_response.hovered() {
                 ui.visuals().text_color()
             } else {
@@ -103,11 +99,11 @@ pub(super) fn render_network_locations(
                     crate::ui::theme::selection_hover_color(ui.ctx()),
                 );
             }
-            ui.painter().text(
+            crate::ui::disclosure::paint(
+                ui.painter(),
                 arrow_zone.center(),
-                egui::Align2::CENTER_CENTER,
-                if expanded { "v" } else { ">" },
-                egui::FontId::proportional(10.0),
+                expanded,
+                crate::ui::disclosure::SIDEBAR_SIZE,
                 Color32::from_gray(140),
             );
             let icon = ctx
@@ -300,7 +296,7 @@ mod tests {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.text() == "v" => {
+                egui::epaint::Shape::Path(path) if path.closed && path.points.len() == 3 => {
                     Some(shape.shape.visual_bounding_rect().center())
                 }
                 _ => None,

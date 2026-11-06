@@ -178,14 +178,6 @@ fn render_tree_node(
                 egui::vec2(ARROW_WIDTH, rect.height()),
             );
 
-            let arrow_text = if is_loading {
-                "…"
-            } else if is_expanded {
-                "▾"
-            } else {
-                "▸"
-            };
-
             let arrow_color = if response.hovered() {
                 ui.visuals().text_color()
             } else {
@@ -193,13 +185,23 @@ fn render_tree_node(
             }
             .gamma_multiply(hidden_opacity);
 
-            ui.painter().text(
-                arrow_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                arrow_text,
-                egui::FontId::proportional(11.0),
-                arrow_color,
-            );
+            if is_loading {
+                ui.painter().text(
+                    arrow_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "…",
+                    egui::FontId::proportional(11.0),
+                    arrow_color,
+                );
+            } else {
+                crate::ui::disclosure::paint(
+                    ui.painter(),
+                    arrow_rect.center(),
+                    is_expanded,
+                    crate::ui::disclosure::SIDEBAR_SIZE,
+                    arrow_color,
+                );
+            }
         }
         cursor_x += ARROW_WIDTH;
 

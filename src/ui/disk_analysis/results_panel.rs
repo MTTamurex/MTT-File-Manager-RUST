@@ -138,13 +138,32 @@ fn render_panel_chrome(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let glyph = if state.results_collapsed { "^" } else { "v" };
                 let hint = if state.results_collapsed {
                     t!("disk_analysis.panel_expand")
                 } else {
                     t!("disk_analysis.panel_collapse")
                 };
-                if ui.button(glyph).on_hover_text(hint.to_string()).clicked() {
+                let response = ui
+                    .add(
+                        egui::Button::new("")
+                            .min_size(egui::Vec2::splat(ui.spacing().interact_size.y)),
+                    )
+                    .on_hover_text(hint.to_string());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        hint.as_ref(),
+                    )
+                });
+                crate::ui::disclosure::paint(
+                    ui.painter(),
+                    response.rect.center(),
+                    !state.results_collapsed,
+                    crate::ui::disclosure::SECTION_SIZE,
+                    ui.style().interact(&response).text_color(),
+                );
+                if response.clicked() {
                     state.results_collapsed = !state.results_collapsed;
                 }
             });

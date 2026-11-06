@@ -2,6 +2,27 @@ use crate::app::ImageViewerApp;
 use crate::ui::components::settings_ui;
 use rust_i18n::t;
 
+mod browser;
+mod creation;
+pub(crate) mod form;
+mod layout;
+mod model;
+mod rule_list;
+mod rule_row;
+mod tag_list;
+mod toolbar;
+mod tree_row;
+
+pub(crate) use browser::render_browser;
+
+pub(crate) fn tag_options(app: &ImageViewerApp) -> Vec<(i64, String)> {
+    let labels = model::tag_labels(&app.tag_definitions);
+    app.sorted_tag_ids()
+        .iter()
+        .filter_map(|id| labels.get(id).map(|label| (*id, label.clone())))
+        .collect()
+}
+
 pub struct TagSettingsOutput {
     pub show_tags_changed: bool,
 }
@@ -18,13 +39,7 @@ pub fn render_tag_settings_section(
     }
     ui.add_space(16.0);
 
-    crate::ui::components::tag_manager_modal::render_tag_create_form(app, ui);
-
-    ui.add_space(16.0);
-    crate::ui::components::auto_tag_settings::render_auto_tag_settings(app, ui);
-
-    ui.add_space(16.0);
-    crate::ui::components::tag_manager_modal::render_tag_list(app, ui);
+    render_browser(app, ui);
 
     TagSettingsOutput { show_tags_changed }
 }

@@ -60,17 +60,16 @@ pub fn render_cloud_roots(
             Color32::from_gray(120),
         );
 
-        let toggle_icon = if ctx.collapse_cloud_drives { "v" } else { "^" };
         let toggle_color = if toggle_response.hovered() {
             ui.visuals().text_color()
         } else {
             Color32::from_gray(140)
         };
-        ui.painter().text(
+        crate::ui::disclosure::paint(
+            ui.painter(),
             toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            toggle_icon,
-            egui::FontId::proportional(14.0),
+            !ctx.collapse_cloud_drives,
+            crate::ui::disclosure::SECTION_SIZE,
             toggle_color,
         );
     }
@@ -148,13 +147,6 @@ pub fn render_cloud_roots(
             }
 
             let mut cursor_x = rect.min.x + 2.0;
-            let arrow_text = if is_tree_loading {
-                "..."
-            } else if is_expanded {
-                "v"
-            } else {
-                ">"
-            };
             let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
             let arrow_hovered = pointer_pos.map(|p| arrow_zone.contains(p)).unwrap_or(false);
             let arrow_color = if arrow_hovered {
@@ -162,13 +154,24 @@ pub fn render_cloud_roots(
             } else {
                 Color32::from_gray(140)
             };
-            ui.painter().text(
-                Pos2::new(cursor_x + 8.0, rect.center().y),
-                egui::Align2::CENTER_CENTER,
-                arrow_text,
-                egui::FontId::proportional(10.0),
-                arrow_color,
-            );
+            let center = Pos2::new(cursor_x + 8.0, rect.center().y);
+            if is_tree_loading {
+                ui.painter().text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    "...",
+                    egui::FontId::proportional(10.0),
+                    arrow_color,
+                );
+            } else {
+                crate::ui::disclosure::paint(
+                    ui.painter(),
+                    center,
+                    is_expanded,
+                    crate::ui::disclosure::SIDEBAR_SIZE,
+                    arrow_color,
+                );
+            }
             cursor_x += 18.0;
 
             let icon = ctx.icon_loader.get_or_load_cloud_root_icon(

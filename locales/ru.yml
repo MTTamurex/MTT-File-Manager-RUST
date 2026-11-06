@@ -96,6 +96,11 @@ sidebar:
   collapse_section: "Свернуть раздел"
   expand_section: "Развернуть раздел"
 tags:
+  browser_search: "Поиск тегов или папок…"
+  browser_select: "Выберите элемент для просмотра или изменения его свойств."
+  browser_details: "Свойства"
+  browser_no_results: "Ничего не найдено."
+  auto_status_disabled: "Отключено"
   section: "Теги"
   assign: "Тег"
   manage: "Управление тегами..."

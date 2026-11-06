@@ -96,6 +96,11 @@ sidebar:
   collapse_section: "Recolher seção"
   expand_section: "Expandir seção"
 tags:
+  browser_search: "Buscar tags ou pastas…"
+  browser_select: "Selecione um item para ver ou editar seus detalhes."
+  browser_details: "Detalhes"
+  browser_no_results: "Nenhum item encontrado."
+  auto_status_disabled: "Desativada"
   section: "Tags"
   assign: "Tag"
   manage: "Gerenciar tags..."

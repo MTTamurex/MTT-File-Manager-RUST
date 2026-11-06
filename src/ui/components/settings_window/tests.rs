@@ -115,6 +115,38 @@ fn escape_without_capture_closes_settings() {
 }
 
 #[test]
+fn escape_dismisses_a_creation_modal_without_closing_settings() {
+    let ctx = egui::Context::default();
+    let mut editor = ShortcutEditorState::default();
+    for frame in 0..3 {
+        let events = if frame == 2 {
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        } else {
+            Vec::new()
+        };
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                assert!(!settings_escape_closes_window(ui.ctx(), &mut editor));
+                let modal = egui::Modal::new(egui::Id::new("test_creation")).show(ui.ctx(), |ui| {
+                    ui.label("Create item");
+                });
+                assert_eq!(modal.should_close(), frame == 2);
+            },
+        );
+    }
+}
+
+#[test]
 fn escape_dismisses_a_settings_combo_popup_before_closing_the_window() {
     let ctx = egui::Context::default();
     let mut editor = ShortcutEditorState::default();

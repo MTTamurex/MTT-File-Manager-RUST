@@ -189,6 +189,7 @@ fn render_report(
                 );
                 egui::CollapsingHeader::new(egui::RichText::new(header).strong())
                     .id_salt(header_id)
+                    .icon(crate::ui::disclosure::collapsing_icon)
                     .show(ui, |ui| {
                         if ui
                             .button(t!("disk_analysis.dup_compare").to_string())

@@ -96,6 +96,11 @@ sidebar:
   collapse_section: "Collapse section"
   expand_section: "Expand section"
 tags:
+  browser_search: "Search tags or folders…"
+  browser_select: "Select an item to view or edit its details."
+  browser_details: "Details"
+  browser_no_results: "No items found."
+  auto_status_disabled: "Disabled"
   section: "Tags"
   assign: "Tag"
   manage: "Manage Tags..."

@@ -7,6 +7,7 @@ pub mod cache;
 pub(crate) mod clipboard_feedback;
 pub mod components;
 pub mod context_menu;
+pub(crate) mod disclosure;
 pub(crate) mod disk_analysis;
 pub(crate) mod drive_health_badge;
 pub(crate) mod folder_appearance;

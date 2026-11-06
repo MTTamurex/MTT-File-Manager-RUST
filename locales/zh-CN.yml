@@ -96,6 +96,11 @@ sidebar:
   collapse_section: "折叠分区"
   expand_section: "展开分区"
 tags:
+  browser_search: "搜索标签或文件夹…"
+  browser_select: "选择项目以查看或编辑详情。"
+  browser_details: "详情"
+  browser_no_results: "未找到项目。"
+  auto_status_disabled: "已禁用"
   section: "标签"
   assign: "标记"
   manage: "管理标签..."
