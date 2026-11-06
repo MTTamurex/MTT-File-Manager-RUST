@@ -38,14 +38,9 @@ fn assert_own_process_query_denied() {
     }
 }
 
-fn assert_both_queries_unavailable(result: Result<(), ClientIdentityError>) {
-    match result {
-        Err(ClientIdentityError::Unavailable(reason)) => {
-            assert!(reason.starts_with("client image query failed as service:"));
-            assert!(reason.contains("impersonated retry failed:"));
-        }
-        _ => panic!("both actual security contexts should leave identity unavailable"),
-    }
+fn assert_snapshot_rejected(result: Result<(), ClientIdentityError>) {
+    assert!(matches!(result, Err(ClientIdentityError::Rejected(reason))
+        if reason == "Client process snapshot identifies a different executable basename"));
 }
 
 #[test]
@@ -75,25 +70,25 @@ fn real_primary_access_denial_is_recovered_by_pipe_impersonation() {
 }
 
 #[test]
-fn real_primary_denial_and_anonymous_client_leave_identity_unavailable() {
+fn real_primary_denial_and_anonymous_client_are_rejected_by_snapshot() {
     let pipe = IdentityPipe::new(ANONYMOUS);
     let result = with_restricting_sid(|| {
         assert_own_process_query_denied();
         assert_eq!(pipe.client_pid(), std::process::id());
         inspect_file_manager_client(pipe.raw())
     });
-    assert_both_queries_unavailable(result);
+    assert_snapshot_rejected(result);
     assert_no_thread_token();
 }
 
 #[test]
-fn real_primary_denial_and_identification_client_leave_identity_unavailable() {
+fn real_primary_denial_and_identification_client_are_rejected_by_snapshot() {
     let pipe = IdentityPipe::new(IDENTIFICATION);
     let result = with_restricting_sid(|| {
         assert_own_process_query_denied();
         inspect_file_manager_client(pipe.raw())
     });
-    assert_both_queries_unavailable(result);
+    assert_snapshot_rejected(result);
     assert_no_thread_token();
 }
 
@@ -112,6 +107,7 @@ fn actual_impersonation_api_failure_is_not_treated_as_a_trusted_client() {
         },
         || panic!("unavailable image must not reach sibling checks"),
         |_, _| panic!("unavailable image must not retry directories"),
+        || Err("synthetic inconclusive snapshot"),
     );
     match result {
         Err(ClientIdentityError::Unavailable(reason)) => {

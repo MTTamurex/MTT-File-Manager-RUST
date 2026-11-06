@@ -8,6 +8,10 @@ fn no_directory_retry(_: &Path, _: &Path) -> Result<(), ClientIdentityError> {
     panic!("this identity outcome must not reach directory retry")
 }
 
+fn no_snapshot() -> Result<super::snapshot_rejection::BasenameEvidence, &'static str> {
+    panic!("available image must never trigger process snapshot lookup")
+}
+
 struct Images {
     root: tempfile::TempDir,
     client: String,
@@ -39,6 +43,7 @@ fn trusted_sibling_remains_accepted_without_retry() {
             || panic!("successful inspection must not retry"),
             || Ok(images.service.clone()),
             no_directory_retry,
+            no_snapshot,
         ),
         Ok(())
     );
@@ -53,6 +58,7 @@ fn trusted_sibling_remains_case_insensitive() {
             || panic!("successful inspection must not retry"),
             || Ok(images.service.clone()),
             no_directory_retry,
+            no_snapshot,
         ),
         Ok(())
     );
@@ -67,6 +73,7 @@ fn impersonated_retry_can_recover_a_legitimate_client() {
             || Ok(images.client.clone()),
             || Ok(images.service.clone()),
             no_directory_retry,
+            no_snapshot,
         ),
         Ok(())
     );
@@ -80,6 +87,7 @@ fn foreign_basename_is_rejected_without_retry_or_service_lookup() {
             || panic!("foreign image is not an inspection failure"),
             || panic!("known foreign basename needs no service lookup"),
             no_directory_retry,
+            no_snapshot,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -93,6 +101,7 @@ fn foreign_image_found_by_retry_is_still_rejected() {
             || Ok(r"Z:\Example\Install\other.exe".into()),
             || panic!("foreign retry needs no service lookup"),
             no_directory_retry,
+            no_snapshot,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -113,6 +122,7 @@ fn correct_basename_in_a_different_directory_is_rejected() {
             || panic!("a directory mismatch must not retry"),
             || Ok(images.service.clone()),
             no_directory_retry,
+            no_snapshot,
         ),
         Err(ClientIdentityError::Rejected(_))
     ));
@@ -147,6 +157,7 @@ fn rejection_reason_does_not_expose_client_paths_or_filenames() {
         || panic!("known foreign image must not retry"),
         || panic!("known foreign basename needs no service lookup"),
         no_directory_retry,
+        no_snapshot,
     )
     .unwrap_err()
     .to_string();
@@ -161,12 +172,52 @@ fn both_query_failures_are_unavailable_not_rejected_or_trusted() {
         || Err("client context unavailable".into()),
         || panic!("failed inspection needs no service lookup"),
         no_directory_retry,
+        || Err("snapshot unavailable"),
     ) {
         Err(ClientIdentityError::Unavailable(reason)) => {
             assert!(reason.contains("service context unavailable"));
             assert!(reason.contains("client context unavailable"));
         }
         _ => panic!("failed inspection must remain explicitly unavailable"),
+    }
+}
+
+#[test]
+fn snapshot_runs_once_after_both_queries_fail_and_never_grants_trust() {
+    use super::snapshot_rejection::BasenameEvidence;
+    for evidence in [
+        Ok(BasenameEvidence::Foreign),
+        Ok(BasenameEvidence::MatchesExpected),
+        Err("snapshot unavailable"),
+    ] {
+        let foreign = evidence == Ok(BasenameEvidence::Foreign);
+        let stage = std::cell::Cell::new(0);
+        let result = inspect_client_with(
+            || {
+                assert_eq!(stage.replace(1), 0);
+                Err("primary failure".into())
+            },
+            || {
+                assert_eq!(stage.replace(2), 1);
+                Err("retry failure".into())
+            },
+            || panic!("a snapshot must never reach service directory checks"),
+            no_directory_retry,
+            || {
+                assert_eq!(stage.replace(3), 2);
+                evidence
+            },
+        );
+        assert_eq!(stage.get(), 3);
+        match result {
+            Err(ClientIdentityError::Rejected(_)) => assert!(foreign),
+            Err(ClientIdentityError::Unavailable(reason)) => {
+                assert!(!foreign);
+                assert!(reason.contains("primary failure"));
+                assert!(reason.contains("retry failure"));
+            }
+            Ok(()) => panic!("snapshot evidence must never authenticate the client"),
+        }
     }
 }
 
@@ -178,6 +229,7 @@ fn missing_service_image_is_unavailable_after_a_matching_basename() {
             || panic!("successful inspection must not retry"),
             || Err("service image unavailable".into()),
             no_directory_retry,
+            no_snapshot,
         ),
         Err(ClientIdentityError::Unavailable(_))
     ));
@@ -235,6 +287,7 @@ fn unavailable_directory_comparison_retries_once_with_the_observed_paths() {
             assert!(client_dir == parent);
             Ok(())
         },
+        no_snapshot,
     );
     assert_eq!(result, Ok(()));
     assert!(retried.get());
@@ -256,6 +309,7 @@ fn confirmed_directory_mismatch_on_retry_is_rejected_not_unavailable() {
             |_, _| Err(ClientIdentityError::Rejected(
                 "confirmed directory mismatch".into()
             )),
+            no_snapshot,
         ),
         Err(ClientIdentityError::Rejected(
             "confirmed directory mismatch".into()
@@ -280,6 +334,7 @@ fn directory_retry_failure_keeps_both_context_reasons_and_stays_unavailable() {
                 "synthetic retry failure".into(),
             ))
         },
+        no_snapshot,
     ) {
         Err(ClientIdentityError::Unavailable(reason)) => {
             assert!(reason.contains("directory verification unavailable as service:"));

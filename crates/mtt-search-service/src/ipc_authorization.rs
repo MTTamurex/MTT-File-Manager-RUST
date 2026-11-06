@@ -22,6 +22,9 @@ pub(crate) use client_identity::{
     inspect_file_manager_client, trusted_file_manager_client, ClientIdentityError,
 };
 
+#[cfg(test)]
+pub(crate) use client_identity::os_fixture::with_restricting_sid;
+
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
 const AUTHZ_MAX_BATCHES: usize = 64;
 const CLIENT_CONNECTION_CHECK_INTERVAL: usize = 16;

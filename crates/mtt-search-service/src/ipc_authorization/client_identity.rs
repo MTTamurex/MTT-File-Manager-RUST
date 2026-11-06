@@ -6,10 +6,13 @@ use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use super::PipeImpersonationGuard;
 
 mod directory_retry;
+mod snapshot_rejection;
+
+const EXPECTED_CLIENT_BASENAME: &str = "mtt-file-manager.exe";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ClientIdentityError {
-    /// An inspected image does not satisfy the existing MTT image policy.
+    /// Image/directory inspection or unambiguous snapshot evidence rejects the client.
     Rejected(String),
     /// Inspection failed; this is not evidence that the client is MTT.
     Unavailable(String),
@@ -45,6 +48,7 @@ pub(crate) fn inspect_file_manager_client(pipe: HANDLE) -> Result<(), ClientIden
         },
         || std::env::current_exe().map_err(|error| format!("current_exe failed: {error}")),
         |service_dir, client_dir| directory_retry::verify_as_client(pipe, service_dir, client_dir),
+        || snapshot_rejection::inspect_pid(client_pid),
     )
 }
 
@@ -58,14 +62,17 @@ fn inspect_client_with(
     impersonated_retry: impl FnOnce() -> Result<String, String>,
     service_exe: impl FnOnce() -> Result<PathBuf, String>,
     directory_retry: impl FnOnce(&Path, &Path) -> Result<(), ClientIdentityError>,
+    snapshot: impl FnOnce() -> Result<snapshot_rejection::BasenameEvidence, &'static str>,
 ) -> Result<(), ClientIdentityError> {
-    let image = query_client_image_with_fallback(primary, impersonated_retry)
-        .map_err(ClientIdentityError::Unavailable)?;
+    let image = match query_client_image_with_fallback(primary, impersonated_retry) {
+        Ok(image) => image,
+        Err(reason) => return Err(snapshot_rejection::after_image_failure(reason, snapshot())),
+    };
     let basename = Path::new(&image)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if !basename.eq_ignore_ascii_case("mtt-file-manager.exe") {
+    if !basename.eq_ignore_ascii_case(EXPECTED_CLIENT_BASENAME) {
         return Err(ClientIdentityError::Rejected(
             "Client image basename is '<redacted>', expected 'mtt-file-manager.exe'".into(),
         ));
@@ -167,6 +174,6 @@ fn verify_sibling_directories(left: &Path, right: &Path) -> Result<(), ClientIde
 mod tests;
 
 #[cfg(test)]
-mod os_fixture;
+pub(crate) mod os_fixture;
 #[cfg(test)]
 mod os_tests;

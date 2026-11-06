@@ -40,7 +40,7 @@ pub(super) fn assert_no_thread_token() {
     }
 }
 
-pub(super) fn with_restricting_sid<T>(action: impl FnOnce() -> T) -> T {
+pub(crate) fn with_restricting_sid<T>(action: impl FnOnce() -> T) -> T {
     assert_no_thread_token();
     let mut process_token = HANDLE::default();
     unsafe {

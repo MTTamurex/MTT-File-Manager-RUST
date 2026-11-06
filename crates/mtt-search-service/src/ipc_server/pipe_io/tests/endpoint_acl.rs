@@ -1,4 +1,4 @@
-//! Deny data/list access only on objects inside a test-owned temporary directory.
+//! Edit access only on objects inside a test-owned temporary directory.
 //! Keep an open WRITE_DAC handle and restore the original ACL before cleanup.
 
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -7,13 +7,14 @@ use std::path::{Component, Path};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{LocalFree, HANDLE, HLOCAL};
 use windows::Win32::Security::Authorization::{
-    GetSecurityInfo, SetEntriesInAclW, SetSecurityInfo, DENY_ACCESS, EXPLICIT_ACCESS_W,
-    SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
+    GetSecurityInfo, SetEntriesInAclW, SetSecurityInfo, ACCESS_MODE, DENY_ACCESS,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP,
+    TRUSTEE_W,
 };
 use windows::Win32::Security::{ACE_FLAGS, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING,
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_READ, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 
 use super::super::SidGuard;
@@ -29,15 +30,70 @@ impl Drop for Allocation {
 }
 
 pub(super) struct DenyRead {
+    _acl: FixtureAcl,
+}
+
+impl DenyRead {
+    pub fn new(root: &tempfile::TempDir, relative: &str) -> Self {
+        assert!(!relative.is_empty());
+        Self {
+            _acl: FixtureAcl::edit(
+                root,
+                relative,
+                SidGuard::authenticated_users().unwrap(),
+                DENY_ACCESS,
+                1,
+            ),
+        }
+    }
+}
+
+pub(super) struct RestrictedRead {
+    _acl: FixtureAcl,
+}
+
+impl RestrictedRead {
+    pub fn root(root: &tempfile::TempDir) -> Self {
+        Self {
+            _acl: FixtureAcl::edit(
+                root,
+                "",
+                SidGuard::allocate(1, 12, 0).unwrap(),
+                GRANT_ACCESS,
+                FILE_GENERIC_READ.0,
+            ),
+        }
+    }
+
+    pub fn attributes(root: &tempfile::TempDir, relative: &str) -> Self {
+        assert!(!relative.is_empty());
+        Self {
+            _acl: FixtureAcl::edit(
+                root,
+                relative,
+                SidGuard::allocate(1, 12, 0).unwrap(),
+                GRANT_ACCESS,
+                FILE_READ_ATTRIBUTES.0,
+            ),
+        }
+    }
+}
+
+struct FixtureAcl {
     handle: OwnedHandle,
     original_acl: *mut ACL,
     _descriptor: Allocation,
 }
 
-impl DenyRead {
-    pub fn new(root: &tempfile::TempDir, relative: &str) -> Self {
+impl FixtureAcl {
+    fn edit(
+        root: &tempfile::TempDir,
+        relative: &str,
+        sid: SidGuard,
+        mode: ACCESS_MODE,
+        access: u32,
+    ) -> Self {
         let relative = Path::new(relative);
-        assert!(relative.components().next().is_some());
         assert!(relative
             .components()
             .all(|part| matches!(part, Component::Normal(_))));
@@ -83,21 +139,20 @@ impl DenyRead {
             _descriptor: Allocation(HLOCAL(descriptor.0)),
         };
         assert!(!guard.original_acl.is_null());
-        let users = SidGuard::authenticated_users().unwrap();
         let entries = [EXPLICIT_ACCESS_W {
-            grfAccessPermissions: 1, // FILE_READ_DATA / FILE_LIST_DIRECTORY only.
-            grfAccessMode: DENY_ACCESS,
-            grfInheritance: ACE_FLAGS(0), // No inherited deny on descendants.
+            grfAccessPermissions: access,
+            grfAccessMode: mode,
+            grfInheritance: ACE_FLAGS(0), // No inherited access change on descendants.
             Trustee: TRUSTEE_W {
                 TrusteeForm: TRUSTEE_IS_SID,
                 TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                ptstrName: users.as_trustee_name(),
+                ptstrName: sid.as_trustee_name(),
                 ..Default::default()
             },
         }];
         let mut acl = std::ptr::null_mut();
         let status = unsafe { SetEntriesInAclW(Some(&entries), Some(original_acl), &mut acl) };
-        assert_eq!(status.0, 0, "build synthetic deny ACL");
+        assert_eq!(status.0, 0, "build synthetic fixture ACL");
         let _acl = Allocation(HLOCAL(acl.cast()));
         let status = unsafe {
             SetSecurityInfo(
@@ -110,12 +165,12 @@ impl DenyRead {
                 None,
             )
         };
-        assert_eq!(status.0, 0, "apply synthetic deny ACL");
+        assert_eq!(status.0, 0, "apply synthetic fixture ACL");
         guard
     }
 }
 
-impl Drop for DenyRead {
+impl Drop for FixtureAcl {
     fn drop(&mut self) {
         let status = unsafe {
             SetSecurityInfo(

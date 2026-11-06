@@ -135,6 +135,7 @@ fn pipeline_accepts_a_directory_retry_confirmed_by_actual_handles() {
                 assert!(service_dir == root.path());
                 verify_with_anchor(pipe.raw(), &anchor, client_dir)
             },
+            || panic!("available image must not trigger a snapshot"),
         )
     });
     assert_eq!(result, Ok(()));

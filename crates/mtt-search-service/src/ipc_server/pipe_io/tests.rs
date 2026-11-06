@@ -12,6 +12,8 @@ mod lifecycle_regression;
 mod lifecycle_worker;
 mod rejection_regression;
 mod restricted_token;
+mod unavailable_client;
+mod unavailable_identity;
 
 use std::io::{Read, Write};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};

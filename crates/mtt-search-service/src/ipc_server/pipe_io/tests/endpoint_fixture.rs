@@ -21,7 +21,9 @@ use windows::Win32::Storage::FileSystem::{
 
 use crate::file_index::{IndexState, VolumeIndex};
 use crate::indexing_progress::IndexingProgress;
-use crate::ipc_authorization::{inspect_file_manager_client, ClientIdentityError};
+use crate::ipc_authorization::{
+    inspect_file_manager_client, with_restricting_sid, ClientIdentityError,
+};
 use crate::security_policy::IpcSecurityPolicy;
 use crate::usn_journal::DiscoveredVolume;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
@@ -128,7 +130,7 @@ impl EndpointFixture {
     }
 
     pub fn request(&self, request: SearchRequest) -> SearchResponse {
-        self.request_inner(request, None)
+        self.request_inner(request, None, false)
     }
 
     // Only the identity result is simulated. Framing, impersonation, ACL checks,
@@ -138,7 +140,7 @@ impl EndpointFixture {
         request: SearchRequest,
         identity: Result<(), ClientIdentityError>,
     ) -> SearchResponse {
-        self.request_inner(request, Some(identity))
+        self.request_inner(request, Some(identity), false)
     }
 
     pub fn request_with_unavailable_identity(&self, request: SearchRequest) -> SearchResponse {
@@ -150,32 +152,49 @@ impl EndpointFixture {
         )
     }
 
+    // No injected identity result: both process queries really fail under the
+    // restricting contexts while the pipe retains normal Impersonation SQOS.
+    pub fn request_with_restricted_contexts(&self, request: SearchRequest) -> SearchResponse {
+        self.request_inner(request, None, true)
+    }
+
     fn request_inner(
         &self,
         request: SearchRequest,
         simulated_identity: Option<Result<(), ClientIdentityError>>,
+        restricted_contexts: bool,
     ) -> SearchResponse {
-        let name = unique_name();
-        assert_ne!(name, mtt_search_protocol::PIPE_NAME);
-        let raw = create_pipe_named(&name, true).unwrap();
-        let server = unsafe { OwnedHandle::from_raw_handle(raw.0) };
-        let client = without_admin_rights(|| {
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .access_mode(mtt_search_protocol::PIPE_CLIENT_ACCESS)
-                // Static client context, impersonation allowed as in the app.
-                .custom_flags(0x00100000 | 0x00020000)
-                .open(&name)
-                .expect("open unique endpoint test pipe")
-        });
-        let mut connection = Connection::from_parts(server, client);
-        without_admin_rights(|| {
+        assert!(!restricted_contexts || simulated_identity.is_none());
+        let mut connection = if restricted_contexts {
+            super::unavailable_client::connection()
+        } else {
+            let name = unique_name();
+            assert_ne!(name, mtt_search_protocol::PIPE_NAME);
+            let raw = create_pipe_named(&name, true).unwrap();
+            let server = unsafe { OwnedHandle::from_raw_handle(raw.0) };
+            let client = without_admin_rights(|| {
+                OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .access_mode(mtt_search_protocol::PIPE_CLIENT_ACCESS)
+                    // Static client context, impersonation allowed as in the app.
+                    .custom_flags(0x00100000 | 0x00020000)
+                    .open(&name)
+                    .expect("open unique endpoint test pipe")
+            });
+            Connection::from_parts(server, client)
+        };
+        let write_request = || {
             connection
                 .client
                 .write_all(&encode_message(&request).unwrap())
                 .unwrap();
-        });
+        };
+        if restricted_contexts {
+            with_restricting_sid(write_request);
+        } else {
+            without_admin_rights(write_request);
+        }
         let indices = Arc::clone(&self.indices);
         let progress = Arc::clone(&self.progress);
         let lifecycle = Arc::clone(&self.lifecycle);
@@ -189,6 +208,9 @@ impl EndpointFixture {
                     matches!(error, ClientIdentityError::Rejected(_)),
                     "must reject a known foreign image, not fail to inspect its process"
                 );
+                if restricted_contexts {
+                    super::unavailable_client::assert_queries_denied_and_snapshot_rejects(pipe);
+                }
                 let warming = Arc::new(AtomicBool::new(false));
                 let epoch = Arc::new(AtomicU64::new(0));
                 let warming = WarmIndexState {
@@ -199,9 +221,18 @@ impl EndpointFixture {
                     redact_status_metrics: false,
                 };
                 match simulated_identity {
-                    None => handler::handle_client(
-                        pipe, &indices, &progress, warming, &policy, &lifecycle, events,
-                    ),
+                    None => {
+                        let handle = || {
+                            handler::handle_client(
+                                pipe, &indices, &progress, warming, &policy, &lifecycle, events,
+                            )
+                        };
+                        if restricted_contexts {
+                            with_restricting_sid(handle);
+                        } else {
+                            handle();
+                        }
+                    }
                     Some(identity) => handler::handle_client_with_verifier(
                         pipe,
                         &indices,
