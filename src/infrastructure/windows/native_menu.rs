@@ -358,7 +358,14 @@ unsafe fn extract_item_info(
 ) -> Option<ShellMenuItem> {
     let mut info = MENUITEMINFOW {
         cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-        fMask: MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_BITMAP | MIIM_SUBMENU | MIIM_STRING,
+        fMask: MIIM_FTYPE
+            | MIIM_ID
+            | MIIM_STATE
+            | MIIM_BITMAP
+            | MIIM_CHECKMARKS
+            | MIIM_DATA
+            | MIIM_SUBMENU
+            | MIIM_STRING,
         dwTypeData: PWSTR::default(),
         cch: 0,
         ..Default::default()
@@ -392,12 +399,51 @@ unsafe fn extract_item_info(
 
     let skip_icon =
         command_string.as_deref().is_some_and(is_known_verb) || is_filtered_shell_text(&text);
-    let icon_rgba = if !skip_icon
-        && !info.hbmpItem.0.is_null()
-        && !std::ptr::eq(info.hbmpItem.0, HBMMENU_CALLBACK.0)
-    {
-        hbitmap_to_rgba(info.hbmpItem).ok()
+    let icon_rgba = if skip_icon {
+        None
+    } else if !info.hbmpItem.0.is_null() && !std::ptr::eq(info.hbmpItem.0, HBMMENU_CALLBACK.0) {
+        match hbitmap_to_rgba(info.hbmpItem) {
+            Ok(icon) => Some(icon),
+            Err(error) => {
+                log::debug!(
+                    "[ShellMenu] Icon conversion failed for '{}' (index {index}): {error}",
+                    text
+                );
+                None
+            }
+        }
+    } else if !info.hbmpUnchecked.0.is_null() {
+        // Legacy extensions (FastCopy, IDrive, Malwarebytes) publish their icon
+        // as the unchecked check-mark bitmap; Explorer renders it as the item
+        // icon when hbmpItem is absent, so mirror that here.
+        match hbitmap_to_rgba(info.hbmpUnchecked) {
+            Ok(icon) => Some(icon),
+            Err(error) => {
+                log::debug!(
+                    "[ShellMenu] Unchecked-bitmap icon conversion failed for '{}' (index {index}): {error}",
+                    text
+                );
+                None
+            }
+        }
+    } else if !info.hbmpChecked.0.is_null() {
+        match hbitmap_to_rgba(info.hbmpChecked) {
+            Ok(icon) => Some(icon),
+            Err(error) => {
+                log::debug!(
+                    "[ShellMenu] Checked-bitmap icon conversion failed for '{}' (index {index}): {error}",
+                    text
+                );
+                None
+            }
+        }
     } else {
+        if !is_separator {
+            log::debug!(
+                "[ShellMenu] Item '{}' (index {index}) has no icon source",
+                text
+            );
+        }
         None
     };
 
