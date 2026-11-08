@@ -3830,7 +3830,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-file-manager"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "base64 0.22.1",
  "betteroffice-docx-edit",
@@ -3917,7 +3917,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "bincode",
  "serde",
@@ -3925,7 +3925,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "bincode",
  "libmimalloc-sys",
