@@ -81,10 +81,8 @@ pub(super) fn render(
                     if left || right {
                         ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
                     }
-                    if left {
-                        if parents.contains(id) {
-                            collapsed.insert(*id);
-                        }
+                    if left && parents.contains(id) {
+                        collapsed.insert(*id);
                     }
                     if right {
                         collapsed.remove(id);

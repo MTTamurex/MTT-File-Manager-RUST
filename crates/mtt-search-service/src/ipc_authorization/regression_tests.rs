@@ -138,8 +138,7 @@ fn raw_scan_cap_with_results_allows_the_client_to_advance() {
 #[test]
 fn deadline_keeps_collected_results_and_stops_authorization_work() {
     let candidate_count = CLIENT_CONNECTION_CHECK_INTERVAL * 2;
-    let items =
-        (0..candidate_count).map(|index| result(&format!("file{index}.txt"), r"C:\Data"));
+    let items = (0..candidate_count).map(|index| result(&format!("file{index}.txt"), r"C:\Data"));
     let mut checked = 0;
     let mut authorized = 0;
     let page = collect_existing_authorized_page(
@@ -190,8 +189,7 @@ fn disconnected_client_stops_before_filesystem_authorization() {
 #[test]
 fn disconnected_client_does_not_receive_a_partially_collected_page() {
     let candidate_count = CLIENT_CONNECTION_CHECK_INTERVAL * 2;
-    let items =
-        (0..candidate_count).map(|index| result(&format!("file{index}.txt"), r"C:\Data"));
+    let items = (0..candidate_count).map(|index| result(&format!("file{index}.txt"), r"C:\Data"));
     let mut checked = 0;
     let response = collect_existing_authorized_page(
         items,
