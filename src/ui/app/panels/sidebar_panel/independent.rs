@@ -53,18 +53,46 @@ pub(super) fn render(
     }
     let scroll_offset = app.sidebar_tree.scroll_visual_y;
     let manually_sized = app.layout.sidebar_drives_height.is_some();
+    let automatic_height_id = ui.id().with((
+        "sidebar_automatic_drives_height",
+        [
+            app.collapse_cloud_drives,
+            app.collapse_local_disks,
+            app.collapse_network_drives,
+            app.collapse_network_locations,
+        ],
+        // Discovery and mounting may add roots after the first frame. Those
+        // changes need a fresh automatic size, unlike folder expansion.
+        (
+            app.drive_state.disks.len(),
+            app.drive_state.cloud_roots.len(),
+            app.drive_state.network_locations.len(),
+        ),
+    ));
     let mut sidebar_ctx = context(app, can_drop);
-    let drives_scope = sidebar_layout::render_drives_block(
-        ui,
-        drives_scroll_h,
-        manually_sized,
-        scroll_offset,
-        |ui| {
-            let viewport_width = ui.available_width();
-            ui.set_min_width(viewport_width);
-            render_sidebar_drives(ui, &mut sidebar_ctx, viewport_width)
-        },
-    );
+    let render_drives = |ui: &mut egui::Ui| {
+        let viewport_width = ui.available_width();
+        ui.set_min_width(viewport_width);
+        render_sidebar_drives(ui, &mut sidebar_ctx, viewport_width)
+    };
+    let drives_scope = if tags_visible {
+        sidebar_layout::render_stable_drives_block(
+            ui,
+            drives_scroll_h,
+            manually_sized,
+            scroll_offset,
+            automatic_height_id,
+            render_drives,
+        )
+    } else {
+        sidebar_layout::render_drives_block(
+            ui,
+            drives_scroll_h,
+            manually_sized,
+            scroll_offset,
+            render_drives,
+        )
+    };
     let drives_rendered_h = drives_scope.response.rect.height();
     let output = drives_scope.inner;
 
@@ -92,6 +120,8 @@ pub(super) fn render(
         tags_action = tags.inner;
         if tags.reset_drives_height {
             app.layout.sidebar_drives_height = None;
+            ui.ctx()
+                .data_mut(|data| data.remove::<f32>(automatic_height_id));
         } else if let Some(height) = tags.resized_drives_height {
             app.layout.sidebar_drives_height = Some(height);
         }

@@ -615,6 +615,7 @@ settings:
   graphics_interpolation: "Плавная прокрутка"
   graphics_interpolation_description: "Плавная прокрутка файлов и папок. Этот параметр применяется ко всем графическим бэкендам."
   graphics_interpolation_toggle: "Включить плавную прокрутку"
+  graphics_interpolation_opengl_warning: "⚠ При включённой плавной прокрутке OpenGL может вызывать рывки. В таком случае рекомендуется отключить плавную прокрутку."
   shortcut_new_tab: "Новая вкладка"
   shortcut_close_tab: "Закрыть вкладку"
   shortcut_reopen_closed_tab: "Открыть закрытую вкладку"

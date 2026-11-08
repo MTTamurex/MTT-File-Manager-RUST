@@ -89,6 +89,13 @@ pub fn render_backend_settings_section(
         interpolation_changed = true;
     }
 
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(t!("settings.graphics_interpolation_opengl_warning"))
+            .size(12.0)
+            .color(ui.visuals().warn_fg_color),
+    );
+
     ui.add_space(12.0);
     ui.label(
         RichText::new(t!("settings.backend_restart_warning"))

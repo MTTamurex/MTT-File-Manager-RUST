@@ -615,6 +615,7 @@ settings:
   graphics_interpolation: "滚动插值"
   graphics_interpolation_description: "平滑滚动文件和文件夹。此设置适用于所有图形后端。"
   graphics_interpolation_toggle: "启用滚动插值"
+  graphics_interpolation_opengl_warning: "⚠ 启用滚动插值时，OpenGL 可能出现卡顿。如果遇到此问题，建议关闭滚动插值。"
   shortcut_new_tab: "新建标签页"
   shortcut_close_tab: "关闭标签页"
   shortcut_reopen_closed_tab: "重新打开关闭的标签页"

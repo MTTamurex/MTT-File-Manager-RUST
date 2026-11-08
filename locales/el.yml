@@ -615,6 +615,7 @@ settings:
   graphics_interpolation: "Ομαλό κύλισμα"
   graphics_interpolation_description: "Ομαλό κύλισμα αρχείων και φακέλων. Η ρύθμιση εφαρμόζεται σε όλα τα backend γραφικών."
   graphics_interpolation_toggle: "Ενεργοποίηση του ομαλού κυλίσματος"
+  graphics_interpolation_opengl_warning: "⚠ Το OpenGL ενδέχεται να παρουσιάσει κομπιάσματα όταν είναι ενεργοποιημένο το ομαλό κύλισμα. Αν συμβεί αυτό, συνιστάται να απενεργοποιήσετε το ομαλό κύλισμα."
   shortcut_new_tab: "Νέα καρτέλα"
   shortcut_close_tab: "Κλείσιμο καρτέλας"
   shortcut_reopen_closed_tab: "Επαναφορά κλειστής καρτέλας"

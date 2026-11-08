@@ -615,6 +615,7 @@ settings:
   graphics_interpolation: "Scroll interpolation"
   graphics_interpolation_description: "Smooth scrolling of files and folders. This setting applies to all graphics backends."
   graphics_interpolation_toggle: "Enable scroll interpolation"
+  graphics_interpolation_opengl_warning: "⚠ OpenGL may stutter when scroll interpolation is enabled. If this occurs, disabling scroll interpolation is recommended."
   shortcut_new_tab: "New tab"
   shortcut_close_tab: "Close tab"
   shortcut_reopen_closed_tab: "Reopen closed tab"

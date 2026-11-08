@@ -32,6 +32,36 @@ pub(super) fn render_drives_block<R>(
     })
 }
 
+/// Keep the automatic divider stable as folder trees grow. Store this separately
+/// from the user's saved height so manual resizing and section collapse still
+/// retain their own sizing rules.
+pub(super) fn render_stable_drives_block<R>(
+    ui: &mut egui::Ui,
+    height: f32,
+    manually_sized: bool,
+    scroll_offset: f32,
+    automatic_height_id: egui::Id,
+    render: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<egui::scroll_area::ScrollAreaOutput<R>> {
+    let automatic_height = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(automatic_height_id));
+    let height = if manually_sized {
+        height
+    } else {
+        height.min(automatic_height.unwrap_or(height))
+    };
+    let output = render_drives_block(ui, height, manually_sized, scroll_offset, render);
+    if !manually_sized && automatic_height.is_none() {
+        // Remember content size rather than the clipped viewport, so opening in
+        // a short window does not permanently constrain a taller window.
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(automatic_height_id, output.inner.content_size.y.max(24.0));
+        });
+    }
+    output
+}
+
 pub(super) fn quick_access_content_height(
     collapsed: bool,
     pinned_count: usize,
@@ -81,6 +111,9 @@ pub(super) fn section_height(content: f32, saved: Option<f32>, min: f32, max: f3
         .min(saved.unwrap_or(max).clamp(min, max))
         .min(max)
 }
+
+#[cfg(test)]
+mod stable_drives_tests;
 
 #[cfg(test)]
 mod tests {
