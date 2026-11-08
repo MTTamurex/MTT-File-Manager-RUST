@@ -58,6 +58,16 @@ pub fn hbitmap_to_rgba(
             pixel.swap(0, 2);
         }
 
+        // Legacy GDI bitmaps (24-bpp DIBs, monochrome check-mark bitmaps) carry
+        // no alpha channel; GetDIBits leaves those bytes zeroed, which egui
+        // renders as a fully transparent texture. Promote to opaque when no
+        // pixel carries any alpha at all.
+        if buffer.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+            for pixel in buffer.as_chunks_mut::<4>().0 {
+                pixel[3] = 255;
+            }
+        }
+
         Ok((buffer, width as u32, height as u32))
     }
 }
