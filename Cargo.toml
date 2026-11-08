@@ -184,3 +184,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[profile.dev]
+# Full debug info (~1 GB PDB per test binary) makes each MSVC link.exe
+# allocate ~3 GB; several parallel test links then exhaust system RAM.
+# Line tables keep backtraces and breakpoints while shrinking links drastically.
+debug = "line-tables-only"
