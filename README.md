@@ -13,18 +13,6 @@
 3. If the installer shows **Required Microsoft component**, click **Download from Microsoft**, open the downloaded Visual C++ Redistributable **x64** installer, and finish its installation. Restart Windows first if requested, then return to MTT setup and click **Check again** and **Next**.
 4. Finish setup and open **MTT File Manager** from the Start menu. Global Search builds its index in the background; its initial results may be incomplete until indexing finishes.
 
-### AntiVirus Alerts - False Positive
-
-Some antivirus engines may flag the installer or the `mtt-updater.exe` module. The integrated updater was designed to download and verify the installer, close MTT, run the installer, reopen the application, and then attempt to delete the downloaded installer.
-
-Although this behavior is legitimate, it can resemble malware activity to antivirus heuristic detection systems, resulting in false positives.
-
-While these detections have been confirmed as false positives by antivirus vendors, repeatedly submitting review requests and waiting for detection databases to be updated with every new release is impractical for an independent developer.
-
-For this reason, **starting with v0.2.10, the automatic updater module has been removed**. The application will now only check whether a new version is available and, if so, open the release page where users can manually download and install the update.
-
-You can safely delete the file `mtt-updater.exe`.
-
 ### Installation help
 
 - **Offline installation:** download the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) beforehand, install it on the target computer, then run MTT setup.
@@ -48,13 +36,14 @@ You can safely delete the file `mtt-updater.exe`.
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
 - **File grouping** — Group items by name, date, type, or size, including in Miller's Columns; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions. Enabled additional property and tag columns are also available as sorting and grouping criteria
 - **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings, including Back, Forward, and Up navigation with support for assigning Backspace. Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
-- **Customizable columns** — Drag List view headers to reorder columns, right-click to show or hide columns, or use the searchable picker to add Windows file properties and tags; column layouts are saved separately for regular folders, This PC, and the Recycle Bin
+- **Customizable columns** — Drag List view headers to reorder columns, right-click to show or hide columns, or use the searchable picker to add Windows file properties and tags; active columns appear first in the menu and picker without changing the saved layout. Column layouts are saved separately for regular folders, This PC, and the Recycle Bin
 - **File-list preferences** — In **Settings > General**, choose automatic content sizing, manual column widths remembered per folder, or **Fit columns to panel**; wider layouts support horizontal scrolling. Hover previews can be disabled independently. Enable optional alternating row colors in **Settings > Appearance**
 - **Date formats** — Choose DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD for displayed dates and Global Search date filters
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs; activating path editing selects the full path for copying or replacement. Recognized Windows folders use shorter breadcrumb labels, and supported cloud roots show provider and account labels while editing retains the filesystem path
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin; sections reclaim space when collapsed, with an adjustable drives area and a separate collapsible Network Locations section. Choose independent section scrolling or an optional unified scrollbar in **Settings > General**. Right-click empty space or section headers to collapse or expand all sections; tab context menus can reveal a folder in the tree or collapse the expansion created by that action
 - **Sidebar renaming** — Rename folders directly in the sidebar tree
+- **Settings window** — Remembers its size and position between launches, stays within the application window, and provides scrollable content at smaller sizes
 - **Network browsing** — Enter a UNC server address to list its shares; browse saved Windows Network Locations from the sidebar or This PC, and launch the Windows Add Network Location wizard. Use native Windows dialogs to map network shares to drive letters or disconnect mapped network drives
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; pin/unpin supported folder locations directly from tab context menus; reorder via drag; choose a vertical sidebar section or horizontal bar in Settings > General
@@ -62,9 +51,11 @@ You can safely delete the file `mtt-updater.exe`.
 
 ### Tags
 - **Persistent color tags** — Assign custom color tags to files and folders from the context menu
-- **Dedicated Tag views** — Browse every item assigned to a tag from the resizable Tags section in the sidebar
-- **Tag management** — Create, rename, recolor, and delete tags from Settings, with usage counts shown before deletion; choose custom RGB colors for new or existing tags, saved between sessions
-- **Global Search filters** — Show any tagged item or narrow search results to specific tags
+- **Hierarchical tags** — Organize tags under parents, expand or collapse sub-tags in the sidebar, and assign them through nested context menus. Assigning a sub-tag also assigns its parents; removing a parent assignment asks for confirmation when sub-tag assignments would also be removed
+- **Dedicated Tag views** — Browse items assigned to a tag and its sub-tags from the resizable Tags section in the sidebar
+- **Tag management** — Search tags, select one to edit its name, color, or parent, and create tags in a dedicated dialog from Settings or Manage Tags. Choose custom RGB colors saved between sessions; deleting a parent tag also deletes its sub-tags and assignments after confirmation, without deleting files or folders
+- **Automatic tagging** — Configure watched-folder rules in **Settings > Tags > Auto-tag**, optionally include subfolders, enable or disable each rule, and use **Apply now** for existing items. Enabled rules also scan at startup, so manually removed matching tags can return on the next launch; deleting a rule keeps existing assignments
+- **Global Search filters** — Show any tagged item or narrow search results to specific tags, including their sub-tags
 - **File operation tracking** — Preserve tags across supported renames and moves, and clear them when files are deleted
 - **Scalable browsing** — Load large Tag views in pages using cached file metadata while limiting thumbnail work to visible items
 
@@ -120,7 +111,7 @@ Deletion validation and the native, path-based Windows operation are not an atom
 - **Paginated results** — Offset/limit pagination with incremental loading
 - **Category filters** — Show all results or narrow them to files, folders, images, videos, audio, documents, or applications; Applications includes executables, installers, application shortcuts, and scripts
 - **Drive, size, and date filters** — Narrow results to a drive, set minimum and maximum file sizes, or specify a creation-date range
-- **Tag filters** — Narrow global search results to any tagged item or to specific tags
+- **Tag filters** — Narrow global search results to any tagged item or to specific tags and their sub-tags
 - **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 - **Initial indexing feedback** — After an installer-driven index rebuild, a persistent notification reports preparation and live item counts until every indexed volume is ready
@@ -136,7 +127,7 @@ Deletion validation and the native, path-based Windows operation are not an atom
 - **Folder access assistance** — For access-denied folders, request permanent full control for your Windows account through an administrator-authorized helper; the main file manager stays unelevated. A warning explains that the grant also applies to inheriting files/subfolders and can be used by other programs running under your account
 - **Batch rename** — Select 2+ eligible files or folders and press F2 or click the toolbar's Rename button to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Folder listing export** — Export all items or a selection from a filesystem folder to CSV, TSV, TXT, or HTML, saved to a file or copied to the clipboard. Choose columns and sorting, optionally include subfolders and calculate folder sizes, and use a tree layout for recursive TXT exports
-- **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
+- **Windows Shell context menu** — Integrates native Shell entries with MTT actions. Right-click an empty folder area for **View**, **Sort by**, **Refresh**, **Open in CMD**, **Open in CMD (Admin)**, and folder **Properties**; **New > Folder** retains its keyboard shortcut alongside available Windows document-creation entries
 - **Archive creation** — Compress selected files and folders to ZIP or 7Z from the context menu, with byte-level progress, cancellation, conflict-free archive naming, and temporary output cleanup after failures
 - **Archive extraction** — Access the Windows Shell **Extract All** action directly from the context menu for supported archive files
 - **External drag-and-drop** — Drag files from MTT File Manager to Windows Explorer and other compatible Windows applications
@@ -152,7 +143,7 @@ Deletion validation and the native, path-based Windows operation are not an atom
 - **Conflict policies** — Resolve destination conflicts manually, skip them, automatically rename the source, or redirect it to a designated conflict folder; existing files are never overwritten
 - **Pending conflict management** — Keep collisions pending, safely rename the source, rename the occupied destination after confirmation, or cancel the conflict with file identity checks before every change
 - **Operation history** — Track organizer moves and their status with configurable retention, retry eligible operations using the current rule, and safely undo completed moves while file identities remain valid
-- **Rule controls and recovery** — Pause or resume rules, inspect live monitoring status, create missing source or destination folders with confirmation, and recover automatically from watcher failures and event queue overflow
+- **Rule controls and recovery** — Enable or disable individual rules, or use **Enable/disable all rules** to suspend organizer moves across launches while letting an ongoing move finish. Re-enabling preserves individually disabled rules; inspect live monitoring status, create missing folders with confirmation, and recover automatically from watcher failures and event queue overflow
 - **Safe folder monitoring** — Existing and newly created matching files are processed only after remaining stable for two seconds; source, destination, and conflict folders are monitored so resolved collisions can be reprocessed automatically
 - **Protected moves and rule validation** — Cyclic rules are rejected, source files are checked before moving, and cross-drive copies are verified before their sources are removed
 - **Preview and notifications** — Preview how many files match a disabled rule and receive batched details about completed moves, policy-based skips, pending conflicts, and failures
@@ -170,6 +161,8 @@ Deletion validation and the native, path-based Windows operation are not an atom
 ## Optional Windows Integration
 
 These options are available in **Settings > General**. They modify the current user's Registry settings without requiring administrator privileges or UAC confirmation.
+
+Windows Explorer integration uses classic context-menu entries; the optional Windows 11 compact-menu package is no longer included.
 
 > **Warning:** Both options are experimental. Some antivirus software may detect this Registry-modifying behavior as malware and report a false positive.
 
@@ -202,6 +195,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gra
 - Fallback when DirectX 12 or Vulkan is unavailable or unstable on your system.
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
 - OpenGL texture uploads can be synchronous on the CPU thread, leading to some stutter.
+- If scrolling stutters with OpenGL, try disabling **Scroll interpolation** in **Settings > Graphics**.
 
 Dedicated image, PDF, DOCX, XLSX, and text viewer windows start with Glow independently of the main window's backend setting. If OpenGL initialization fails before the viewer is created, they retry with Wgpu (DirectX 12 on Windows).
 
@@ -214,6 +208,12 @@ Dedicated image, PDF, DOCX, XLSX, and text viewer windows start with Glow indepe
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).
 
 The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated service access is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
+
+### Search-service security
+
+- **Connection permissions** — Ordinary local processes can connect as clients but cannot create additional server endpoints on the service's communication channel; remote clients are rejected.
+- **Client verification** — Search, folder-size, and change-check requests reject clients identified as using an unexpected executable or installation directory. When identity inspection is unavailable, existing caller-permission checks remain in effect; this is not a guarantee that only MTT can access these requests. Previously strict endpoints continue to reject unverifiable clients.
+- **Bounded connections** — Connection limits, timeouts, and bounded rejection handling prevent clients that stop reading responses from blocking new connections or indefinitely occupying connection slots.
 
 ## Technologies
 
@@ -231,7 +231,7 @@ The main file manager does not need to run as administrator for normal file brow
 | **XLSX** | BetterOffice XLSX model/parse/render/raster | 0.3.0 | Native workbook reading and read-only sheet rendering |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
 | **Images** | image crate | 0.25 | Image processing |
-| **Archives** | zip + sevenz-rust/sevenz-rust2 + tar + flate2/bzip2/xz2/zstd | 2 / 0.6/0.20 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive browsing plus ZIP/7Z creation |
+| **Archives** | zip + sevenz-rust/sevenz-rust2 + tar + flate2/bzip2/xz2/zstd | 9 / 0.6/0.20 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive browsing plus ZIP/7Z creation |
 | **RAR** | unrar | 0.5 | Native RAR handling via the upstream UnRAR source |
 | **Parallelism** | rayon | 1.10 | Parallel processing |
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
