@@ -104,6 +104,6 @@ mod tests {
                 assert!((bounds.width().max(bounds.height()) - size).abs() < 0.01);
             }
         }
-        assert!(GROUP_SIZE > SIDEBAR_SIZE);
+        const { assert!(GROUP_SIZE > SIDEBAR_SIZE) };
     }
 }

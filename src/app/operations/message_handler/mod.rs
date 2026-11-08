@@ -30,6 +30,7 @@ mod helpers;
 mod panel_tab_cache;
 mod probe_paths;
 mod rebuild_events;
+mod shell_transfer_events;
 mod thumbnail_events;
 mod thumbnail_rebuild;
 mod thumbnail_uploads;

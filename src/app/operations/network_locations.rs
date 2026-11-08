@@ -55,6 +55,7 @@ impl ImageViewerApp {
         let needs_refresh = match result {
             FileOperationResult::RenameCompleted { parent_folder, .. } => affected(parent_folder),
             FileOperationResult::DeleteCompleted { parent_folders, .. }
+            | FileOperationResult::ShellTransferReturned { parent_folders, .. }
             | FileOperationResult::RestoreCompleted { parent_folders } => {
                 parent_folders.iter().any(|path| affected(path))
             }

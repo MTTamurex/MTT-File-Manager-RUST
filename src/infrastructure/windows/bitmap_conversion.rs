@@ -62,7 +62,7 @@ pub fn hbitmap_to_rgba(
         // no alpha channel; GetDIBits leaves those bytes zeroed, which egui
         // renders as a fully transparent texture. Promote to opaque when no
         // pixel carries any alpha at all.
-        if buffer.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        if buffer.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0) {
             for pixel in buffer.as_chunks_mut::<4>().0 {
                 pixel[3] = 255;
             }

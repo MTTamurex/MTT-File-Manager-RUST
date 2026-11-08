@@ -70,6 +70,16 @@ impl ImageViewerApp {
                     processed += 1;
                     self.refresh_network_locations_after_operation(&res);
                     match res {
+                        FileOperationResult::ShellTransferReturned {
+                            parent_folders,
+                            clipboard_paste_token,
+                            dispatch_failed,
+                        } => self.handle_shell_transfer_returned(
+                            parent_folders,
+                            clipboard_paste_token,
+                            dispatch_failed,
+                            current_path_norm,
+                        ),
                         FileOperationResult::RenameCompleted {
                             path,
                             new_name,
@@ -102,7 +112,7 @@ impl ImageViewerApp {
                             self.restore_app_focus();
                         }
                         FileOperationResult::ClipboardMoveFailed { token, message } => {
-                            crate::app::file_operation_state::fail_pending_clipboard_move(
+                            crate::app::file_operation_state::release_pending_clipboard_move(
                                 &mut self.file_operation_state.pending_clipboard_move,
                                 token,
                             );
@@ -828,7 +838,7 @@ impl ImageViewerApp {
         }
     }
 
-    fn handle_parent_folder_updates(
+    pub(super) fn handle_parent_folder_updates(
         &mut self,
         parent_folders: Vec<PathBuf>,
         current_path_norm: &str,

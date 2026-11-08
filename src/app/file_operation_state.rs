@@ -47,11 +47,13 @@ pub(crate) fn complete_pending_clipboard_move(
     current.clipboard_sequence.is_some() && current.clipboard_sequence == current_sequence
 }
 
-pub(crate) fn fail_pending_clipboard_move(
+/// Release a local dispatch lock after failure or external handoff. This never
+/// returns a clipboard-cleanup sequence: only verified native completion does.
+pub(crate) fn release_pending_clipboard_move(
     pending: &mut Option<PendingClipboardMove>,
-    failed_token: u64,
+    token: u64,
 ) -> bool {
-    if pending.is_some_and(|current| current.token == failed_token) {
+    if pending.is_some_and(|current| current.token == token) {
         *pending = None;
         true
     } else {
@@ -97,8 +99,8 @@ impl FileOperationState {
 #[cfg(test)]
 mod tests {
     use super::{
-        complete_pending_clipboard_move, fail_pending_clipboard_move,
-        pending_clipboard_move_after_dispatch, PendingClipboardMove,
+        complete_pending_clipboard_move, pending_clipboard_move_after_dispatch,
+        release_pending_clipboard_move, PendingClipboardMove,
     };
 
     fn pending(token: u64, sequence: u32) -> PendingClipboardMove {
@@ -169,8 +171,19 @@ mod tests {
     #[test]
     fn matching_failure_releases_pending_move_without_clearing_clipboard() {
         let mut current = Some(pending(7, 70));
-        assert!(fail_pending_clipboard_move(&mut current, 7));
+        assert!(release_pending_clipboard_move(&mut current, 7));
         assert_eq!(current, None);
+    }
+
+    #[test]
+    fn delegated_move_releases_only_its_dispatch_lock() {
+        let newer = pending(10, 100);
+        let mut current = Some(newer);
+        assert!(!release_pending_clipboard_move(&mut current, 9));
+        assert_eq!(current, Some(newer));
+        assert!(release_pending_clipboard_move(&mut current, 10));
+        assert_eq!(current, None);
+        // No sequence is returned for clearing: delegation is not completion.
     }
 
     #[test]

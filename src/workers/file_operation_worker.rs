@@ -9,6 +9,8 @@ use windows::Win32::Foundation::HWND;
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerConflictPolicy;
 mod handlers;
+mod message_pump;
+mod shell_transfers;
 mod shortcuts;
 
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
@@ -20,6 +22,13 @@ use crate::infrastructure::windows::ComScope;
 use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
 
 pub enum FileOperationResult {
+    /// A Shell handoff returned, not a transfer-completion notification. The
+    /// external handler owns progress/errors; filesystem events update views.
+    ShellTransferReturned {
+        parent_folders: Vec<PathBuf>,
+        clipboard_paste_token: Option<u64>,
+        dispatch_failed: bool,
+    },
     /// Generic notification that a file operation finished
     Finished,
     /// Operation finished, but a specific completion handler already updated the affected views.
@@ -687,6 +696,7 @@ fn run_file_operation_loop(
     // Initialize COM as Single-Threaded Apartment (STA)
     // RAII guard ensures CoUninitialize even on panic.
     let _com = ComScope::sta();
+    let _ole = crate::infrastructure::windows::shell_transfer::OleScope::initialize().ok();
 
     // Create a proxy HWND ON THE WORKER THREAD so that Shell progress
     // dialogs (shown by SHFileOperationW / IFileOperation) are owned by a
@@ -713,7 +723,7 @@ fn run_file_operation_loop(
         );
     }
 
-    while let Ok(request) = receiver.recv() {
+    while let Some(request) = message_pump::receive(&receiver) {
         // Substitute the UI-thread HWND with the worker-thread proxy.
         // Falls back to the original HWND if proxy creation failed.
         let request = match worker_proxy_hwnd {
@@ -725,6 +735,9 @@ fn run_file_operation_loop(
         let is_organizer_operation = organizer_operation.is_some();
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if shell_transfers::try_delegate(&request, &result_sender) {
+                return CompletionBehavior::NoFinished;
+            }
             match request {
                 FileOperationRequest::Delete { paths, hwnd } => {
                     handlers::handle_delete(paths, hwnd, &result_sender);

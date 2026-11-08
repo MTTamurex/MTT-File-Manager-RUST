@@ -44,6 +44,7 @@ pub mod recycle_bin;
 pub mod shell_folder;
 pub mod shell_new;
 pub mod shell_operations;
+pub(crate) mod shell_transfer;
 pub mod shortcuts;
 pub mod sync_roots;
 pub mod system_info;
