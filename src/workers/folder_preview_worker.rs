@@ -594,6 +594,11 @@ fn try_custom_compose(
             }
             return ComposeOutcome::NoMedia;
         }
+        #[cfg(feature = "mpv-thumbnails-poc")]
+        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Cancelled
+        | crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::TransientFailure => {
+            return ComposeOutcome::MediaUnsafe;
+        }
     };
 
     if let Err(err) = disk_cache.put(

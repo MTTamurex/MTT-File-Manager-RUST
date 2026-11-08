@@ -338,7 +338,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     // store is in fallback would rewrite a primary DB the app is not using.
     if app_state_db.is_on_primary_path() && disk_cache.is_on_primary_path() {
         if let Err(error) = migrate_legacy_tables(
-            &cache_dir.join("thumbnails.db"),
+            &disk_cache.primary_database_path(),
             &state_dir.join("app_state.db"),
         ) {
             log::error!(

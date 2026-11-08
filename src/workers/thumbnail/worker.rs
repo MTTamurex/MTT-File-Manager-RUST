@@ -125,6 +125,8 @@ pub fn spawn_thumbnail_workers(
     let cpu_count = available_cpu_count();
     let worker_count = compute_thumbnail_worker_count(cpu_count);
     let decode_limit = compute_decode_limit(worker_count);
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    log::warn!("[MPV-THUMB] experimental isolated video backend enabled; embedded MKV covers then adaptive frame selection; separate mpv-poc-v3 thumbnail cache; no Windows video fallback");
 
     // Semaphore for RAM limiter
     let semaphore = Arc::new(Semaphore::new(decode_limit));
@@ -544,6 +546,13 @@ fn thumbnail_worker_loop(
                 &pending_deletions,
                 &mut last_repaint,
                 &cache_write_tx,
+                &|| {
+                    if participates_in_bulk_scan {
+                        active_bulk_session != Some(bulk_thumbnail_session.load(Ordering::Relaxed))
+                    } else {
+                        !generation_gate.accepts(req_gen)
+                    }
+                },
             );
 
             if is_virtual_bulk_scan {

@@ -19,6 +19,8 @@ impl ImageViewerApp {
         self.thumbnail_pipeline_shutdown
             .store(true, Ordering::Release);
         self.thumbnail_queue.shutdown();
+        #[cfg(feature = "mpv-thumbnails-poc")]
+        crate::infrastructure::mpv_thumbnails::shutdown();
 
         // Invalidate queued context-menu work before disconnecting the channels.
         // Workers will skip stale queued requests instead of starting new COM calls.

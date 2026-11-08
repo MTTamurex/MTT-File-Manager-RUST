@@ -7,7 +7,7 @@ use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::infrastructure::windows::is_mpeg_ts_file;
 use crate::workers::thumbnail::extraction::{
-    generate_thumbnail_hybrid_detailed_with_target, ThumbnailExtractionOutcome,
+    generate_thumbnail_hybrid_cancellable, ThumbnailExtractionOutcome,
 };
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
 use crossbeam_channel::Sender;
@@ -68,6 +68,7 @@ pub(super) fn process_thumbnail_request(
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     last_repaint: &mut Instant,
     cache_write_tx: &Sender<ThumbnailCacheWriteRequest>,
+    cancelled: &dyn Fn() -> bool,
 ) {
     let request_start = Instant::now();
 
@@ -380,12 +381,20 @@ pub(super) fn process_thumbnail_request(
             // every later request straight from the DB.
             let extract_bucket = upload_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
             let extract_start = std::time::Instant::now();
-            match generate_thumbnail_hybrid_detailed_with_target(
+            let outcome = generate_thumbnail_hybrid_cancellable(
                 path,
                 req_priority,
                 pending_deletions,
                 Some(extract_bucket),
-            ) {
+                cancelled,
+            );
+            #[cfg(feature = "mpv-thumbnails-poc")]
+            let outcome = if cancelled() {
+                ThumbnailExtractionOutcome::Cancelled
+            } else {
+                outcome
+            };
+            match outcome {
                 ThumbnailExtractionOutcome::Success((raw_data, w, h)) => {
                     let extract_ms = extract_start.elapsed().as_millis();
                     // Persist the high-resolution extraction; only the GPU-bound
@@ -447,19 +456,31 @@ pub(super) fn process_thumbnail_request(
                 }
                 ThumbnailExtractionOutcome::Failed => {
                     request_outcome = "permanent_failure";
-                    // All 5 extraction stages failed — the system likely lacks
-                    // the required codec (e.g., HEVC/MKV without K-Lite).
-                    // Mark as permanent failure immediately so neither the
-                    // worker nor the UI waste cycles retrying on every folder
-                    // visit.  The user can press F5 to retry after installing
-                    // a codec pack.
+                    // A decode failure is per-path, unlike a supervisor failure.
+                    // Avoid repeated attempts until refresh/restart; F5 can retry
+                    // after the source or decoder environment has changed.
                     mark_as_failed(path.clone());
                     diag_warn("thumbnail_extraction", "permanent_failure", &[]);
+                }
+                #[cfg(feature = "mpv-thumbnails-poc")]
+                ThumbnailExtractionOutcome::Cancelled => {
+                    request_outcome = "cancelled";
+                }
+                #[cfg(feature = "mpv-thumbnails-poc")]
+                ThumbnailExtractionOutcome::TransientFailure => {
+                    request_outcome = "extractor_unavailable";
+                    mark_as_transient_failure(path.clone());
                 }
             }
         }
     }
 
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    if cancelled() {
+        final_result = None;
+        cache_write_request = None;
+        request_outcome = "cancelled";
+    }
     let permanently_failed = final_result.is_none() && is_permanent_failure(path);
     if permanently_failed {
         request_outcome = "permanent_failure";
@@ -483,6 +504,10 @@ pub(super) fn process_thumbnail_request(
     );
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    if cancelled() {
+        cache_write_request = None;
+    }
     if let Some(request) = cache_write_request {
         let width = request.width;
         let height = request.height;

@@ -1,0 +1,16 @@
+[package]
+name = "mtt-mpv-thumbnail"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99"
+publish = false
+
+[dependencies]
+anyhow = "1"
+blake3 = "1"
+image = { version = "0.25", default-features = false }
+libloading = "0.8"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

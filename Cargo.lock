@@ -3863,6 +3863,7 @@ dependencies = [
  "lopdf",
  "lru",
  "memmap2",
+ "mtt-mpv-thumbnail",
  "mtt-search-protocol",
  "natord",
  "notify",
@@ -3900,6 +3901,18 @@ dependencies = [
  "yrs",
  "zip",
  "zstd 0.13.3",
+]
+
+[[package]]
+name = "mtt-mpv-thumbnail"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "image",
+ "libloading",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

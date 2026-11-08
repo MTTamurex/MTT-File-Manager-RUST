@@ -1,0 +1,16 @@
+[package]
+name = "mpv-thumbnail-poc"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+mtt-mpv-thumbnail = { path = "../../crates/mtt-mpv-thumbnail" }
+serde_json = "1"
+windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }

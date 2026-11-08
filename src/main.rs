@@ -351,6 +351,14 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == mtt_file_manager::infrastructure::mpv_thumbnails::HELPER_FLAG)
+    {
+        std::process::exit(mtt_file_manager::infrastructure::mpv_thumbnails::run_helper());
+    }
+
     // Dispatch the elevated helper before opening preferences or diagnostic logs.
     let mut helper_args = std::env::args_os().skip(1);
     let helper_flag = helper_args.next();

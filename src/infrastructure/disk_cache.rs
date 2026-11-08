@@ -18,6 +18,7 @@ mod cleanup;
 mod folder_previews;
 pub use folder_previews::{FolderPreviewPixels, FolderPreviewSource};
 mod gc;
+mod namespace;
 mod thumbnail_freshness;
 mod thumbnails_repo;
 
@@ -84,7 +85,6 @@ impl ThumbnailCacheEntry {
 pub struct ThumbnailDiskCache {
     writer: Arc<Mutex<Connection>>, // For put, set_*, garbage_collect (DELETE)
     reader: Arc<Mutex<Connection>>, // For get, get_*, check existence
-    #[allow(dead_code)]
     cache_dir: PathBuf,
     /// True when the active writer connection is the primary on-disk database.
     /// False for a temp/in-memory fallback.
@@ -94,6 +94,7 @@ pub struct ThumbnailDiskCache {
 impl ThumbnailDiskCache {
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
+        let cache_dir = namespace::directory(cache_dir);
         let startup_start = Instant::now();
         let mut last_step = startup_start;
         macro_rules! log_step {
@@ -138,7 +139,7 @@ impl ThumbnailDiskCache {
         let db_path = cache_dir.join("thumbnails.db");
         let temp_fallback_path = std::env::temp_dir()
             .join("MTT-File-Manager")
-            .join("thumbnails_fallback.db");
+            .join(namespace::fallback_file_name());
 
         // 1. Open WRITER connection (Primary -> Temp fallback -> Memory fallback)
         let (writer_conn, active_db_path) = if primary_hardened {
@@ -251,6 +252,12 @@ impl ThumbnailDiskCache {
     /// Returns true when the active writer is the primary on-disk database.
     pub fn is_on_primary_path(&self) -> bool {
         self.on_primary_path
+    }
+
+    /// Expected primary database path, including this build's cache namespace.
+    /// Callers performing legacy migration must not reconstruct the normal path.
+    pub(crate) fn primary_database_path(&self) -> PathBuf {
+        self.cache_dir.join("thumbnails.db")
     }
 
     fn marker_path(cache_dir: &Path, marker_name: &str) -> PathBuf {

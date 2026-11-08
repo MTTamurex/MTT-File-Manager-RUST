@@ -35,6 +35,10 @@ pub enum ThumbnailExtractionOutcome {
     Success((Vec<u8>, u32, u32)),
     UnsafeToRead(crate::infrastructure::windows::file_flags::FileReadSafety),
     Failed,
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    Cancelled,
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    TransientFailure,
 }
 
 /// Hybrid thumbnail extraction pipeline
@@ -53,7 +57,7 @@ pub fn generate_thumbnail_hybrid(
 ) -> Option<(Vec<u8>, u32, u32)> {
     match generate_thumbnail_hybrid_detailed_with_target(path, priority, pending_deletions, None) {
         ThumbnailExtractionOutcome::Success(data) => Some(data),
-        ThumbnailExtractionOutcome::UnsafeToRead(_) | ThumbnailExtractionOutcome::Failed => None,
+        _ => None,
     }
 }
 
@@ -71,6 +75,26 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     image_target_max_side: Option<u32>,
 ) -> ThumbnailExtractionOutcome {
+    generate_thumbnail_hybrid_cancellable(
+        path,
+        priority,
+        pending_deletions,
+        image_target_max_side,
+        &|| false,
+    )
+}
+
+pub fn generate_thumbnail_hybrid_cancellable(
+    path: &Path,
+    priority: IOPriority,
+    pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
+    image_target_max_side: Option<u32>,
+    _cancelled: &dyn Fn() -> bool,
+) -> ThumbnailExtractionOutcome {
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    if _cancelled() {
+        return ThumbnailExtractionOutcome::Cancelled;
+    }
     // DEFENSE IN DEPTH: Early exit for non-media files
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if !crate::infrastructure::windows::is_media_extension(ext) {
@@ -95,6 +119,18 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     let read_safety = crate::infrastructure::windows::file_flags::classify_file_read_safety(path);
     if read_safety != crate::infrastructure::windows::file_flags::FileReadSafety::Safe {
         return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
+    }
+
+    #[cfg(feature = "mpv-thumbnails-poc")]
+    if is_video_path(path) {
+        // Experimental videos never reach Shell/MF, including on failure.
+        return crate::infrastructure::mpv_thumbnails::pipeline::extract(
+            path,
+            image_target_max_side
+                .unwrap_or(MAX_THUMBNAIL_SIDE)
+                .clamp(1, MAX_THUMBNAIL_SIDE),
+            &|| _cancelled() || pending_deletions.contains_key(path),
+        );
     }
 
     if let Some(max_side) = embedded_exif_thumbnail_target(path, image_target_max_side) {
