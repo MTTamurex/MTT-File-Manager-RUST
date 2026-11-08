@@ -1,7 +1,6 @@
-//! Experimental video-only backend, isolated in a supervised same-exe process.
+//! Video-only backend, isolated in a supervised same-executable process.
 mod client;
 mod helper;
-pub(crate) mod pipeline;
 mod process;
 mod protocol;
 #[cfg(test)]
@@ -25,6 +24,7 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 pub enum Error {
     Cancelled,
     Timeout,
+    QueueTimeout,
     Transport,
     Unavailable,
     Decode,
@@ -39,6 +39,10 @@ struct Service {
 static SERVICE: OnceLock<Service> = OnceLock::new();
 static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+pub(crate) fn is_stopped() -> bool {
+    STOPPED.load(std::sync::atomic::Ordering::Acquire)
+}
+
 pub fn extract(path: &Path, max_side: u32, cancelled: &dyn Fn() -> bool) -> Result<Frame, Error> {
     use std::sync::atomic::Ordering;
     if STOPPED.load(Ordering::Acquire) {
@@ -51,20 +55,40 @@ pub fn extract(path: &Path, max_side: u32, cancelled: &dyn Fn() -> bool) -> Resu
             client: Mutex::new(client),
         }
     });
-    let deadline = Instant::now() + REQUEST_TIMEOUT;
-    loop {
-        if STOPPED.load(Ordering::Acquire) || cancelled() {
-            return Err(Error::Cancelled);
-        }
-        if Instant::now() >= deadline {
-            return Err(Error::Timeout);
-        }
-        if let Some(mut client) = service.client.try_lock_for(Duration::from_millis(20)) {
-            // Includes queue wait in the deadline. Re-check shutdown after acquiring.
-            if STOPPED.load(Ordering::Acquire) {
+    service.extract_until(
+        path,
+        max_side,
+        &|| STOPPED.load(Ordering::Acquire) || cancelled(),
+        Instant::now() + REQUEST_TIMEOUT,
+    )
+}
+
+impl Service {
+    fn extract_until(
+        &self,
+        path: &Path,
+        max_side: u32,
+        cancelled: &dyn Fn() -> bool,
+        deadline: Instant,
+    ) -> Result<Frame, Error> {
+        loop {
+            if self.control.stopped() || cancelled() {
                 return Err(Error::Cancelled);
             }
-            return client.extract_until(path, max_side, cancelled, deadline);
+            if Instant::now() >= deadline {
+                return Err(Error::QueueTimeout);
+            }
+            if let Some(mut client) = self.client.try_lock_for(Duration::from_millis(20)) {
+                // Includes queue wait in the deadline. Do not touch a healthy helper
+                // if the request expired/cancelled before obtaining its slot.
+                if self.control.stopped() || cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                if Instant::now() >= deadline {
+                    return Err(Error::QueueTimeout);
+                }
+                return client.extract_until(path, max_side, cancelled, deadline);
+            }
         }
     }
 }

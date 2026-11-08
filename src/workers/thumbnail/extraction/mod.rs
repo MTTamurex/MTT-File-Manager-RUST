@@ -8,6 +8,8 @@
 //! 3. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
 //! 4. **Shell API** (Universal) - IThumbnailCache with WTS_EXTRACTDONOTCACHE
 //! 5. **Media Foundation** (Fallback only) - Direct video frame extraction
+//!
+//! Videos use an isolated libmpv helper first, with Shell/MF only on failure.
 
 pub mod orientation;
 pub mod stage0_embedded_exif_thumbnail;
@@ -15,6 +17,8 @@ pub mod stage1_image_crate;
 pub mod stage2_wic;
 pub mod stage3_shell_api;
 pub mod stage5_media_foundation;
+mod video;
+mod windows_fallback;
 
 use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use crate::infrastructure::diagnostic_logger::{
@@ -35,15 +39,14 @@ pub enum ThumbnailExtractionOutcome {
     Success((Vec<u8>, u32, u32)),
     UnsafeToRead(crate::infrastructure::windows::file_flags::FileReadSafety),
     Failed,
-    #[cfg(feature = "mpv-thumbnails-poc")]
     Cancelled,
-    #[cfg(feature = "mpv-thumbnails-poc")]
     TransientFailure,
 }
 
 /// Hybrid thumbnail extraction pipeline
 ///
 /// Attempts extraction in order of speed/reliability:
+/// - Videos: isolated libmpv, then Windows Shell/Media Foundation on failure
 /// - Stages 1-2: Fast paths for images
 /// - Stage 3: Universal Shell fallback without populating Explorer's cache
 /// - Stage 5: Direct video frame extraction when Windows thumbnail providers fail
@@ -89,10 +92,9 @@ pub fn generate_thumbnail_hybrid_cancellable(
     priority: IOPriority,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     image_target_max_side: Option<u32>,
-    _cancelled: &dyn Fn() -> bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> ThumbnailExtractionOutcome {
-    #[cfg(feature = "mpv-thumbnails-poc")]
-    if _cancelled() {
+    if cancelled() || pending_deletions.contains_key(path) {
         return ThumbnailExtractionOutcome::Cancelled;
     }
     // DEFENSE IN DEPTH: Early exit for non-media files
@@ -121,15 +123,13 @@ pub fn generate_thumbnail_hybrid_cancellable(
         return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
     }
 
-    #[cfg(feature = "mpv-thumbnails-poc")]
     if is_video_path(path) {
-        // Experimental videos never reach Shell/MF, including on failure.
-        return crate::infrastructure::mpv_thumbnails::pipeline::extract(
+        return video::extract(
             path,
             image_target_max_side
                 .unwrap_or(MAX_THUMBNAIL_SIDE)
                 .clamp(1, MAX_THUMBNAIL_SIDE),
-            &|| _cancelled() || pending_deletions.contains_key(path),
+            &|| cancelled() || pending_deletions.contains_key(path),
         );
     }
 
@@ -186,37 +186,11 @@ pub fn generate_thumbnail_hybrid_cancellable(
         return ThumbnailExtractionOutcome::Failed;
     }
 
-    // Shell API fallback (Universal/Video)
-    {
-        let t0 = std::time::Instant::now();
-        match stage3_shell_api::extract_with_size(path, image_target_max_side) {
-            Ok(result) => {
-                log_extraction_perf(path, "stage3_shell", t0, &result);
-                return ThumbnailExtractionOutcome::Success(result);
-            }
-            Err(e) => {
-                log_extraction_stage_failure(path, "stage3_shell", t0);
-                let err_str = e.to_string();
-                if !err_str.contains("0x80070002") {
-                    log::trace!(
-                        "[Thumbnail] Stage 3 failed for {:?}: {}",
-                        path.file_name(),
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    // Media Foundation fallback only. It can return a technically valid but poor
-    // thumbnail frame (black/wrong frame), so keep it behind Windows providers.
-    {
-        let t0 = std::time::Instant::now();
-        if let Some(result) = stage5_media_foundation::extract(path) {
-            log_extraction_perf(path, "stage5_mf", t0, &result);
-            return ThumbnailExtractionOutcome::Success(result);
-        }
-        log_extraction_stage_failure(path, "stage5_mf", t0);
+    let outcome = windows_fallback::extract(path, image_target_max_side, &|| {
+        cancelled() || pending_deletions.contains_key(path)
+    });
+    if !matches!(outcome, ThumbnailExtractionOutcome::Failed) {
+        return outcome;
     }
 
     let total_ms = pipeline_start.elapsed().as_millis();

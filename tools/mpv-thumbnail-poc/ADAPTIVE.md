@@ -1,8 +1,9 @@
-# Embedded covers and adaptive thumbnail selection (experimental v3)
+# Embedded covers and adaptive thumbnail selection
 
-The application remains opt-in (`mpv-thumbnails-poc`), uses the same isolated
-helper, and **never falls back to Windows video thumbnail providers**. There are
-no added decoder DLLs or installed tools. FFmpeg below is a fixture generator only.
+The application uses this backend by default in an isolated helper, with Windows
+Shell/Media Foundation as fallback on extraction failure. The standalone diagnostic
+tool uses libmpv only. There are no added decoder DLLs or installed tools. FFmpeg
+below is a fixture generator only. See [INTEGRATION.md](INTEGRATION.md) for routing.
 
 ## Selection and quality
 
@@ -69,14 +70,15 @@ The parent retains its 15-second hard request deadline, including queue wait and
 process startup. IPC v2 forwards the remaining milliseconds to the child, which
 also accounts for initialization and safety probes. The backend reserves 200 ms
 for source release, and does not start another optional probe with less than
-200 ms left before its soft deadline. A native hang is still handled by killing
-the helper, not by trying a Windows provider.
+200 ms left before its soft deadline. A native hang is handled by killing/reaping
+the helper before allowing the application's Windows fallback. Cancellation,
+unsafe files, and shared-slot queue timeouts do not trigger Windows extraction.
 
-The application now writes to `mpv-poc-v3/thumbnails.db` under its thumbnail cache
-directory. The normal cache and prior `mpv-poc-v1`/`mpv-poc-v2` stores are not opened,
-cleared, or migrated into v3. Its temporary fallback DB has a distinct v3 filename
-too. This regenerates thumbnails so v2 frames cannot mask restored embedded covers.
-Image/folder-preview cache entries in this experimental build share that namespace.
+Production retains the normal `thumbnails.db` location, cache keys, and temporary
+fallback filename. Valid existing thumbnails are reused without source extraction;
+no regeneration is triggered just by changing the backend. Experimental POC stores
+are not read, imported, or deleted. Consequently an existing cached video frame
+is not automatically replaced by newly supported embedded cover art.
 
 ## Reproduction and A/B testing
 

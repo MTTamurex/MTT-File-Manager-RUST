@@ -229,3 +229,43 @@ fn oversized_request_cannot_block_pipe_writer_past_deadline() {
     assert!(start.elapsed() < Duration::from_secs(5));
     assert_exited(&handle);
 }
+
+#[test]
+fn queued_timeout_and_cancellation_do_not_discard_the_healthy_helper() {
+    let mut client = extractor();
+    client.install_test_process(echo_peer());
+    client.extract(fixture(), 256, &|| false).unwrap();
+    let pid = client.process_id();
+    let service = Service {
+        control: client.control.clone(),
+        client: parking_lot::Mutex::new(client),
+    };
+    let owner = service.client.lock();
+    assert_eq!(
+        service
+            .extract_until(
+                fixture(),
+                256,
+                &|| false,
+                Instant::now() + Duration::from_millis(50)
+            )
+            .unwrap_err(),
+        Error::QueueTimeout
+    );
+    assert_eq!(
+        service
+            .extract_until(
+                fixture(),
+                256,
+                &|| true,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .unwrap_err(),
+        Error::Cancelled
+    );
+    drop(owner);
+    assert_eq!(service.client.lock().process_id(), pid);
+    assert!(service
+        .extract_until(fixture(), 256, &|| false, Instant::now() + REQUEST_TIMEOUT)
+        .is_ok());
+}

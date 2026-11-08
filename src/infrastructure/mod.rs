@@ -18,7 +18,6 @@ pub mod icon_disk_cache;
 pub mod io_priority;
 pub mod io_trace;
 pub mod media;
-#[cfg(feature = "mpv-thumbnails-poc")]
 pub mod mpv_thumbnails;
 pub mod ntfs_reader;
 pub mod onedrive;

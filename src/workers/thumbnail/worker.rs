@@ -125,8 +125,7 @@ pub fn spawn_thumbnail_workers(
     let cpu_count = available_cpu_count();
     let worker_count = compute_thumbnail_worker_count(cpu_count);
     let decode_limit = compute_decode_limit(worker_count);
-    #[cfg(feature = "mpv-thumbnails-poc")]
-    log::warn!("[MPV-THUMB] experimental isolated video backend enabled; embedded MKV covers then adaptive frame selection; separate mpv-poc-v3 thumbnail cache; no Windows video fallback");
+    log::info!("[MPV-THUMB] isolated video backend enabled; embedded MKV covers then adaptive frames; Windows fallback on extraction failure; existing thumbnail cache preserved");
 
     // Semaphore for RAM limiter
     let semaphore = Arc::new(Semaphore::new(decode_limit));

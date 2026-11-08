@@ -1,4 +1,3 @@
-#![cfg(feature = "mpv-thumbnails-poc")]
 //! Opt-in tests of the REAL same-executable helper, without launching the GUI.
 use mtt_file_manager::{
     domain::thumbnail::is_valid_rgba_buffer,

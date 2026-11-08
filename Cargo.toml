@@ -73,7 +73,7 @@ xlsx_model = { package = "betteroffice-xlsx-model", version = "=0.3.0" }
 # Pin the patched BetterOffice Yrs version used by the local stable-Rust compatibility copy.
 yrs = "=0.27.3"
 mtt-search-protocol = { path = "crates/mtt-search-protocol" }
-mtt-mpv-thumbnail = { path = "crates/mtt-mpv-thumbnail", optional = true }
+mtt-mpv-thumbnail = { path = "crates/mtt-mpv-thumbnail" }
 bincode = { workspace = true }
 serde = { workspace = true }
 rust-i18n = "3"
@@ -162,7 +162,6 @@ wgpu = { version = "29.0", default-features = false, features = ["std", "dx12"] 
 default = ["notify-watcher", "online-updates"]
 notify-watcher = ["notify"]
 online-updates = ["dep:reqwest", "dep:semver", "dep:egui_commonmark"]
-mpv-thumbnails-poc = ["dep:mtt-mpv-thumbnail"]
 
 [build-dependencies]
 winresource = "0.1"

@@ -17,8 +17,9 @@ use super::db_utils;
 mod cleanup;
 mod folder_previews;
 pub use folder_previews::{FolderPreviewPixels, FolderPreviewSource};
+#[cfg(test)]
+mod compatibility_tests;
 mod gc;
-mod namespace;
 mod thumbnail_freshness;
 mod thumbnails_repo;
 
@@ -94,7 +95,6 @@ pub struct ThumbnailDiskCache {
 impl ThumbnailDiskCache {
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
-        let cache_dir = namespace::directory(cache_dir);
         let startup_start = Instant::now();
         let mut last_step = startup_start;
         macro_rules! log_step {
@@ -139,7 +139,7 @@ impl ThumbnailDiskCache {
         let db_path = cache_dir.join("thumbnails.db");
         let temp_fallback_path = std::env::temp_dir()
             .join("MTT-File-Manager")
-            .join(namespace::fallback_file_name());
+            .join("thumbnails_fallback.db");
 
         // 1. Open WRITER connection (Primary -> Temp fallback -> Memory fallback)
         let (writer_conn, active_db_path) = if primary_hardened {
@@ -254,8 +254,7 @@ impl ThumbnailDiskCache {
         self.on_primary_path
     }
 
-    /// Expected primary database path, including this build's cache namespace.
-    /// Callers performing legacy migration must not reconstruct the normal path.
+    /// Stable primary database path, also used by legacy settings migration.
     pub(crate) fn primary_database_path(&self) -> PathBuf {
         self.cache_dir.join("thumbnails.db")
     }

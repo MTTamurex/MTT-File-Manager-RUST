@@ -1,4 +1,3 @@
-#![cfg(feature = "mpv-thumbnails-poc")]
 //! Synthetic cover pixels through the real same-executable helper.
 use mtt_file_manager::infrastructure::mpv_thumbnails::Extractor;
 use std::{os::windows::fs::OpenOptionsExt, path::PathBuf, process::Command};

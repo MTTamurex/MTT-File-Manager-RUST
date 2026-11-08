@@ -19,6 +19,9 @@ use super::{Semaphore, ThumbnailCacheWriteRequest};
 
 const SLOW_WORKER_REQUEST_THRESHOLD: Duration = Duration::from_secs(2);
 
+#[cfg(test)]
+mod cache_compatibility_tests;
+
 fn try_decode_latest_cache_entry(
     disk_cache: &ThumbnailDiskCache,
     path: &std::path::Path,
@@ -388,7 +391,6 @@ pub(super) fn process_thumbnail_request(
                 Some(extract_bucket),
                 cancelled,
             );
-            #[cfg(feature = "mpv-thumbnails-poc")]
             let outcome = if cancelled() {
                 ThumbnailExtractionOutcome::Cancelled
             } else {
@@ -462,11 +464,9 @@ pub(super) fn process_thumbnail_request(
                     mark_as_failed(path.clone());
                     diag_warn("thumbnail_extraction", "permanent_failure", &[]);
                 }
-                #[cfg(feature = "mpv-thumbnails-poc")]
                 ThumbnailExtractionOutcome::Cancelled => {
                     request_outcome = "cancelled";
                 }
-                #[cfg(feature = "mpv-thumbnails-poc")]
                 ThumbnailExtractionOutcome::TransientFailure => {
                     request_outcome = "extractor_unavailable";
                     mark_as_transient_failure(path.clone());
@@ -475,7 +475,6 @@ pub(super) fn process_thumbnail_request(
         }
     }
 
-    #[cfg(feature = "mpv-thumbnails-poc")]
     if cancelled() {
         final_result = None;
         cache_write_request = None;
@@ -504,7 +503,6 @@ pub(super) fn process_thumbnail_request(
     );
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 
-    #[cfg(feature = "mpv-thumbnails-poc")]
     if cancelled() {
         cache_write_request = None;
     }

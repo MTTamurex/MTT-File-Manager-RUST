@@ -1,5 +1,9 @@
 # libmpv thumbnail POC
 
+The shared backend is now the application's default video thumbnail extractor.
+This standalone executable remains a diagnostic/A-B tool: it has no application
+cache or Windows fallback. See [INTEGRATION.md](INTEGRATION.md) for production use.
+
 Standalone Windows development tool. Running this tool does **not** modify the
 application's thumbnail pipeline, cache, player, or installer. The separate
 opt-in application integration is described in [INTEGRATION.md](INTEGRATION.md).
@@ -133,7 +137,7 @@ Automatic MKV capture now prefers the embedded attachment named exactly
 `cover.jpg` or `cover.jpeg`, using the existing DLL's internal FFmpeg demuxer.
 Missing/unreadable covers use the adaptive frame policy; `--at` and `--legacy`
 still capture video frames. See [ADAPTIVE.md](ADAPTIVE.md) for probe budgets,
-fallback behavior, and the separate v3 application cache.
+fallback behavior, and production cache compatibility.
 
 ## Not production-ready
 
