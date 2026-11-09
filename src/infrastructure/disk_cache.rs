@@ -23,7 +23,7 @@ mod gc;
 mod thumbnail_freshness;
 mod thumbnails_repo;
 
-const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 2;
+const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 3;
 const ACL_HARDENED_MARKER: &str = ".acl_hardened_v1";
 const LEGACY_CLEANUP_MARKER: &str = ".legacy_cleanup_v1";
 const OVERSIZED_CLEANUP_MARKER: &str = ".oversized_cleanup_v1";

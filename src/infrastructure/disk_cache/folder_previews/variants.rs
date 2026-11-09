@@ -121,6 +121,52 @@ mod tests {
     }
 
     #[test]
+    fn folder_previews_reject_overflow_artwork_without_deleting_old_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ThumbnailDiskCache::new(dir.path().to_path_buf()).unwrap();
+        let folder = dir.path().join("folder");
+        let pixels = [230, 210, 140, 255].repeat(16 * 16);
+        let data = webp::Encoder::from_rgba(&pixels, 16, 16)
+            .encode_lossless()
+            .to_vec();
+        for table in ["folder_previews", "folder_preview_variants"] {
+            for appearance in FolderAppearance::ALL {
+                cache
+                    .writer
+                    .lock()
+                    .execute(
+                        &format!(
+                            "INSERT OR REPLACE INTO {table}
+                        (folder_path, data, width, height, bucket_size, format_version, created_at)
+                        VALUES (?, ?, 16, 16, 16, ?, 1)"
+                        ),
+                        params![folder.to_string_lossy(), data, appearance.cache_version(2)],
+                    )
+                    .unwrap();
+                assert!(cache
+                    .get_folder_preview_for_appearance(&folder, 16, appearance)
+                    .is_none());
+                let count: i64 = cache
+                    .reader
+                    .lock()
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE format_version = ?"),
+                        [appearance.cache_version(2)],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(count, 1, "old artwork must remain stored but not reused");
+            }
+        }
+        put_variants(&cache, &folder);
+        for appearance in FolderAppearance::ALL {
+            assert!(cache
+                .get_folder_preview_for_appearance(&folder, 16, appearance)
+                .is_some());
+        }
+    }
+
+    #[test]
     fn folder_preview_reads_legacy_cached_artwork_without_recomposition() {
         let dir = tempfile::tempdir().unwrap();
         let cache = ThumbnailDiskCache::new(dir.path().to_path_buf()).unwrap();

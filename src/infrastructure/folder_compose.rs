@@ -25,6 +25,9 @@ use std::sync::Arc;
 
 mod appearance;
 
+#[cfg(test)]
+mod clipping_tests;
+
 /// Default output width used for the static folder icon.
 pub const DEFAULT_OUTPUT_W: u32 = 256;
 
@@ -268,7 +271,11 @@ impl FolderComposer {
                 .resize_exact(gap_w, scaled_h, imageops::FilterType::CatmullRom)
                 .to_rgba8();
 
-            let max_h = layers.canvas_h.saturating_sub(gap_top);
+            // Keep overlap behind the flap's sloped top, but stop inside its body.
+            // The front PNG is slightly translucent, so extending media to the
+            // canvas bottom leaks its colors through the lower shell and edge.
+            let content_bottom = layers.front_y + layers.front.height() / 2;
+            let max_h = content_bottom.saturating_sub(gap_top);
             let crop_h = scaled_h.min(max_h);
             let cropped = imageops::crop_imm(&scaled, 0, 0, gap_w, crop_h).to_image();
 
