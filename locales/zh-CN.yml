@@ -331,6 +331,11 @@ file_types:
   archive_rar: "RAR 压缩包"
   archive_gz: "GZ 压缩包"
 operations:
+  error_delete_confirmation: "无法显示删除确认对话框。未删除任何项目。"
+  search_delete_confirm: "删除选中的 %{count} 个项目？Windows 将在各来源位置的回收站可用且已启用时使用回收站。部分或全部项目可能被永久删除，无法从回收站恢复。是否继续？"
+  search_delete_permanent_confirm: "永久删除选中的 %{count} 个项目？所有项目都不会放入回收站。是否继续？"
+  selection_operation_blocked: "所选项目中包含无法安全删除或移动的项目。未启动任何操作。"
+  invalid_move_destination: "请选择不在所选项目内部的可写目标文件夹。"
   new_folder: "新建文件夹"
   new_folder_n: "新建文件夹 (%{n})"
   shortcut_suffix: "%{name} ‑ 快捷方式"
@@ -370,6 +375,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "将当前文件夹固定到快速访问"
 context_menu:
+  move_to: "移动到…"
   view: "查看"
   sort_by: "排序方式"
   refresh: "刷新"

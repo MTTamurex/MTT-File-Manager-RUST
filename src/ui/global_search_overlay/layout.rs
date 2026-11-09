@@ -2,7 +2,7 @@ use eframe::egui;
 
 pub(super) fn centered_modal_area(viewport: egui::Rect) -> egui::Area {
     // Anchor using the measured size: translated filters can exceed the preferred width.
-    egui::Area::new(egui::Id::new("global_search_modal"))
+    egui::Area::new(super::modal_layer_id().id)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .constrain_to(viewport)
         .order(egui::Order::Foreground)

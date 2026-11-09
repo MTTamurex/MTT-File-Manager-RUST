@@ -18,6 +18,7 @@ use std::time::Duration;
 pub(crate) mod actions;
 pub(crate) mod date_filter;
 pub(crate) mod filters;
+mod keyboard;
 mod layout;
 mod result_row;
 mod results_panel;
@@ -28,6 +29,13 @@ const BACKDROP_ALPHA: u8 = 72;
 const SEARCH_INPUT_DEBOUNCE_MS: u64 = 180;
 const SEARCH_LOADING_TIMEOUT_MS: u64 = 12_000;
 const SERVICE_STARTUP_GRACE_SECS: u64 = 8;
+
+pub(crate) fn modal_layer_id() -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("global_search_modal"),
+    )
+}
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {

@@ -5,7 +5,6 @@ use crate::workers::tagged_results_worker::{normalize_search_path_key, TaggedRes
 use eframe::egui;
 use rust_i18n::t;
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use super::actions::{self, ResultAction};
 use super::result_row;
@@ -468,30 +467,12 @@ pub(super) fn render_results_panel(
         && app.global_search.interaction_target
             == crate::app::global_search_state::GlobalSearchInteractionTarget::Results
     {
-        if app.shortcuts.is_triggered(ShortcutAction::SelectAll, ctx) {
-            app.global_search.selected_indices.clear();
-            app.global_search
-                .selected_indices
-                .extend(filtered_indices.iter().copied());
-            app.global_search.selected_index = filtered_indices.first().copied();
-            app.global_search.selection_anchor = app.global_search.selected_index;
-        } else if app.shortcuts.is_triggered(ShortcutAction::Copy, ctx) {
-            activate_result = Some(ResultAction::Copy(selected_result_paths(
-                app,
-                &filtered_indices,
-            )));
-        } else if app.shortcuts.is_triggered(ShortcutAction::Cut, ctx) {
-            activate_result = Some(ResultAction::Cut(selected_result_paths(
-                app,
-                &filtered_indices,
-            )));
-        } else if app.shortcuts.is_triggered(ShortcutAction::Rename, ctx)
-            && app.global_search.selected_indices.len() == 1
-        {
-            if let Some(source_index) = app.global_search.selected_index {
-                activate_result = Some(ResultAction::BeginRename(source_index));
-            }
-        }
+        activate_result = super::keyboard::selection_action(
+            &mut app.global_search,
+            &app.shortcuts,
+            ctx,
+            &filtered_indices,
+        );
     }
 
     // Preview shortcut (Space by default) opens the file with the internal viewer.
@@ -567,6 +548,9 @@ pub(super) fn render_results_panel(
             }
             ResultAction::Copy(paths) => actions::copy_search_results(app, &paths),
             ResultAction::Cut(paths) => actions::cut_search_results(app, &paths),
+            ResultAction::Delete(paths, permanently) => {
+                app.delete_global_search_paths(&paths, permanently)
+            }
             ResultAction::BeginRename(source_index) => {
                 actions::begin_search_result_rename(app, source_index);
             }
@@ -575,15 +559,6 @@ pub(super) fn render_results_panel(
             }
         }
     }
-}
-
-fn selected_result_paths(app: &ImageViewerApp, ordered_indices: &[usize]) -> Vec<PathBuf> {
-    ordered_indices
-        .iter()
-        .filter(|idx| app.global_search.selected_indices.contains(idx))
-        .filter_map(|idx| app.global_search.results.get(*idx))
-        .map(|result| PathBuf::from(&result.full_path))
-        .collect()
 }
 
 fn keyboard_actions_allowed(context_menu_open: bool, rename_active: bool) -> bool {

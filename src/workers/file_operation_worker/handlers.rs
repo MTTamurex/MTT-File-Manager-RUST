@@ -1230,18 +1230,27 @@ pub(super) fn handle_move_batch(
             // Prefer IFileOperation for all copy/move paths. It matches modern
             // Explorer behavior better than SHFileOperationW, especially for
             // virtual filesystem providers such as Cryptomator.
+            let existing = super::batch_outcome::existing_paths(&paths);
             let success = shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0);
+            let moved_files = super::batch_outcome::completed_sources(existing);
+            let fully_completed = success && moved_files.len() == paths.len();
+            let moved_sources: HashSet<_> = moved_files.iter().collect();
+            let known_moved_pairs = known_moved_pairs
+                .into_iter()
+                .filter(|(source, _)| moved_sources.contains(source))
+                .collect();
             log::debug!("[FileOps] handle_move_batch result: success={}", success);
 
-            if success && !source_folders.is_empty() {
+            if !moved_files.is_empty() && !source_folders.is_empty() {
                 let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {
                     source_folders: source_folders.into_iter().collect(),
                     dest_folder,
-                    moved_files: paths,
+                    moved_files,
                     known_moved_pairs,
-                    clipboard_paste_token,
+                    clipboard_paste_token: clipboard_paste_token.filter(|_| fully_completed),
                 });
-            } else if !success {
+            }
+            if !success || (clipboard_paste_token.is_some() && !fully_completed) {
                 send_failure(rust_i18n::t!("operations.error_cancelled").to_string());
             }
             HandlerCompletion::CompletedSynchronously

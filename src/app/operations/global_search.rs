@@ -4,6 +4,8 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::app_state_db::PreferenceWriteOutcome;
 use crate::workers::global_search_worker::GlobalSearchRequest;
 
+mod file_operations;
+
 const DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT: u32 = 500;
 const INITIAL_INDEXING_NOTIFICATION_KEY: &str = "initial_indexing";
 const INITIAL_INDEXING_COMPLETED_GENERATION_KEY: &str = "initial_indexing_completed_generation";

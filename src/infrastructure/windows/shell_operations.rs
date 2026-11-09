@@ -3,6 +3,7 @@
 mod context_menu;
 mod file_op;
 mod organizer_move;
+mod search_delete;
 mod shfile_ops;
 mod working_directory;
 
@@ -26,6 +27,7 @@ pub use organizer_move::{
 pub(crate) use organizer_move::{
     move_organizer_file_without_replace_journaled, remove_organizer_file_if_matches,
 };
+pub(crate) use search_delete::delete_search_selection;
 pub use shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, delete_item_with_shell,
     delete_items_permanently_with_shell, delete_items_with_shell, move_item_with_shell,

@@ -109,6 +109,7 @@ impl ImageViewerApp {
                         } => self.handle_drive_rename_failed(drive_path, error, cancelled),
                         FileOperationResult::OperationFailed { message } => {
                             self.notifications.warning(message);
+                            self.request_global_search_refresh();
                             self.restore_app_focus();
                         }
                         FileOperationResult::ClipboardMoveFailed { token, message } => {

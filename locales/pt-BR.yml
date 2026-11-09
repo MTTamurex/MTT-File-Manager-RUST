@@ -331,6 +331,11 @@ file_types:
   archive_rar: "Arquivo RAR"
   archive_gz: "Arquivo GZ"
 operations:
+  error_delete_confirmation: "Não foi possível exibir a confirmação de exclusão. Nenhum item foi excluído."
+  search_delete_confirm: "Excluir %{count} itens selecionados? O Windows usará a Lixeira onde ela estiver disponível e habilitada para cada origem. Alguns ou todos os itens poderão ser excluídos permanentemente, sem recuperação pela Lixeira. Continuar?"
+  search_delete_permanent_confirm: "Excluir permanentemente %{count} itens selecionados? Nenhum será enviado à Lixeira. Continuar?"
+  selection_operation_blocked: "A seleção contém itens que não podem ser excluídos ou movidos com segurança. Nenhuma operação foi iniciada."
+  invalid_move_destination: "Escolha uma pasta de destino gravável fora dos itens selecionados."
   new_folder: "Nova Pasta"
   new_folder_n: "Nova Pasta (%{n})"
   shortcut_suffix: "%{name} - Atalho"
@@ -370,6 +375,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Fixar pasta atual no Acesso Rápido"
 context_menu:
+  move_to: "Mover para…"
   view: "Exibir"
   sort_by: "Classificar por"
   refresh: "Atualizar"

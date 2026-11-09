@@ -801,13 +801,21 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -6 | -34 => {
                     if !context_menu.target_paths.is_empty() {
-                        if ctx.input(|input| input.modifiers.shift) {
+                        if context_menu.origin
+                            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                        {
+                            app.delete_global_search_paths(
+                                &context_menu.target_paths,
+                                ctx.input(|input| input.modifiers.shift),
+                            );
+                        } else if ctx.input(|input| input.modifiers.shift) {
                             app.delete_permanently_for_paths(&context_menu.target_paths);
                         } else {
                             app.delete_with_shell_for_paths(&context_menu.target_paths);
                         }
                     }
                 }
+                -92 => app.move_paths_to_folder(&context_menu.target_paths),
                 -20 | crate::application::context_menu::OPEN_IN_MTT_ID => {
                     let ctrl = ctx.input(|input| input.modifiers.ctrl);
                     if context_menu.target_paths.len() > 1
@@ -846,11 +854,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -21 => {
                     folder_tabs::open(app, &context_menu, ctx.input(|input| input.modifiers.ctrl));
                 }
-                -24 => {
-                    if let Some(path) = context_menu.target_paths.first() {
-                        app.copy_path_to_clipboard(path);
-                    }
-                }
+                -24 => app.copy_paths_as_text_to_clipboard(&context_menu.target_paths),
                 -26 => {
                     if let Some(path) = context_menu.target_paths.first() {
                         let destination = context_menu

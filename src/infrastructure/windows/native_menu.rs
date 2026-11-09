@@ -137,7 +137,7 @@ pub fn is_filtered_shell_text(text: &str) -> bool {
     FILTERED_TEXT.iter().any(|entry| lower.contains(entry))
 }
 
-fn selection_has_single_parent(paths: &[std::path::PathBuf]) -> bool {
+pub(crate) fn selection_has_single_parent(paths: &[std::path::PathBuf]) -> bool {
     // Drive roots have no filesystem parent, but share the Shell's This PC folder.
     // The resolved PIDL parents are still checked before GetUIObjectOf below.
     if !paths.is_empty() && paths.iter().all(|path| super::is_drive_root_path(path)) {

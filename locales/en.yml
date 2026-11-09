@@ -331,6 +331,11 @@ file_types:
   archive_rar: "RAR Archive"
   archive_gz: "GZ Archive"
 operations:
+  error_delete_confirmation: "Unable to display the deletion confirmation. No items were deleted."
+  search_delete_confirm: "Delete %{count} selected items? Windows will use the Recycle Bin where available and enabled for each origin. Some or all items may be permanently deleted and cannot be recovered from the Recycle Bin. Continue?"
+  search_delete_permanent_confirm: "Permanently delete %{count} selected items? None will be sent to the Recycle Bin. Continue?"
+  selection_operation_blocked: "The selection contains items that cannot be deleted or moved safely. No operation was started."
+  invalid_move_destination: "Choose a writable folder outside the selected items."
   new_folder: "New Folder"
   new_folder_n: "New Folder (%{n})"
   shortcut_suffix: "%{name} - Shortcut"
@@ -370,6 +375,7 @@ operations:
 quick_access_bar:
   pin_current_folder_tooltip: "Pin current folder to quick access"
 context_menu:
+  move_to: "Move to…"
   view: "View"
   sort_by: "Sort by"
   refresh: "Refresh"

@@ -12,6 +12,7 @@ pub(super) enum ResultAction {
     PreviewFile(String),
     Copy(Vec<PathBuf>),
     Cut(Vec<PathBuf>),
+    Delete(Vec<PathBuf>, bool),
     BeginRename(usize),
     CommitRename(PathBuf, String),
 }

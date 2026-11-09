@@ -1,4 +1,3 @@
-use clipboard_win::{formats, Clipboard, Setter};
 use rust_i18n::t;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -17,6 +16,9 @@ use crate::infrastructure::security::{
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
+
+mod path_clipboard;
+pub use path_clipboard::{copy_path_to_clipboard, copy_paths_as_text_to_clipboard};
 
 /// Error type for file operations.
 type OpResult<T> = Result<T, String>;
@@ -139,20 +141,6 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
             Err(e) => return Err(t!("operations.error_folder_create", error = e).to_string()),
         }
     }
-}
-
-/// Copy path to clipboard as text.
-pub fn copy_path_to_clipboard(path: &Path) -> OpResult<()> {
-    let valid_path = sanitize_operation_path(path)?;
-    if let Ok(_clip) = Clipboard::new_attempts(10) {
-        if formats::Unicode
-            .write_clipboard(&valid_path.to_string_lossy())
-            .is_ok()
-        {
-            return Ok(());
-        }
-    }
-    Err(t!("operations.error_clipboard").to_string())
 }
 
 /// Restores file from Recycle Bin.

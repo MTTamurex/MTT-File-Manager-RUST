@@ -8,8 +8,10 @@ use windows::Win32::Foundation::HWND;
 
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerConflictPolicy;
+mod batch_outcome;
 mod handlers;
 mod message_pump;
+mod search_delete;
 mod shell_transfers;
 mod shortcuts;
 
@@ -299,6 +301,11 @@ fn organizer_path_key(path: &Path) -> String {
 /// Requests that can be sent to the file operation worker.
 #[allow(dead_code)] // Copy/Move variants intentionally kept for single-file operations
 pub(crate) enum FileOperationRequest {
+    SearchDelete {
+        paths: Vec<PathBuf>,
+        permanently: bool,
+        hwnd: SendHwnd,
+    },
     Delete {
         paths: Vec<PathBuf>,
         hwnd: SendHwnd,
@@ -412,6 +419,13 @@ impl FileOperationRequest {
     }
 
     // Helper to wrap HWND
+    pub fn search_delete(paths: Vec<PathBuf>, permanently: bool, hwnd: HWND) -> Self {
+        Self::SearchDelete {
+            paths,
+            permanently,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
     pub fn delete(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
         Self::Delete {
             paths,
@@ -481,6 +495,13 @@ impl FileOperationRequest {
     fn substitute_hwnd(self, hwnd: SendHwnd) -> Self {
         match self {
             Self::Delete { paths, .. } => Self::Delete { paths, hwnd },
+            Self::SearchDelete {
+                paths, permanently, ..
+            } => Self::SearchDelete {
+                paths,
+                permanently,
+                hwnd,
+            },
             Self::Rename { path, new_name, .. } => Self::Rename {
                 path,
                 new_name,
@@ -739,6 +760,14 @@ fn run_file_operation_loop(
                 return CompletionBehavior::NoFinished;
             }
             match request {
+                FileOperationRequest::SearchDelete {
+                    paths,
+                    permanently,
+                    hwnd,
+                } => {
+                    search_delete::handle(paths, permanently, hwnd, &result_sender);
+                    return CompletionBehavior::SendFinishedNoRefresh;
+                }
                 FileOperationRequest::Delete { paths, hwnd } => {
                     handlers::handle_delete(paths, hwnd, &result_sender);
                 }

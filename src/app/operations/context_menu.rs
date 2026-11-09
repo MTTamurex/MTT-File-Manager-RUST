@@ -745,6 +745,14 @@ impl ImageViewerApp {
         }
 
         if !is_empty_area {
+            if super::move_to::supports_sources(paths) {
+                items.push(
+                    ContextMenuItem::new(-92, t!("context_menu.move_to"))
+                        .with_command("move_to")
+                        .with_svg_icon("folder")
+                        .enabled(can_cut_target),
+                );
+            }
             items.push(
                 ContextMenuItem::primary(-5, t!("context_menu.rename"))
                     .with_command("rename")
@@ -1013,7 +1021,12 @@ impl ImageViewerApp {
         // Dispatch to the STA worker so Shell extensions cannot block the UI thread.
         // Results arrive via `shell_menu_res_rx`; the app polls them in its update loop
         // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
-        if let Some(hwnd) = self.native_hwnd.filter(|_| !is_server_background) {
+        let shell_selection_supported = is_empty_area
+            || crate::infrastructure::windows::native_menu::selection_has_single_parent(paths);
+        if let Some(hwnd) = self
+            .native_hwnd
+            .filter(|_| !is_server_background && shell_selection_supported)
+        {
             let target = if is_empty_area {
                 crate::infrastructure::shell_menu_worker::ShellMenuTarget::FolderBackground(
                     paths

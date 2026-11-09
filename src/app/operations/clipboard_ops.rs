@@ -7,7 +7,7 @@ use crate::application::file_operations;
 use crate::domain::network_path::{is_network_location_root, unc_server_name};
 use std::path::{Path, PathBuf};
 
-fn normalize_path_for_hierarchy(path: &Path) -> String {
+pub(super) fn normalize_path_for_hierarchy(path: &Path) -> String {
     let lower = path.to_string_lossy().replace('/', "\\").to_lowercase();
     let normalized = if let Some(stripped) = lower.strip_prefix(r"\\?\unc\") {
         format!(r"\\{stripped}")
@@ -25,7 +25,7 @@ fn path_is_same_or_ancestor(ancestor: &Path, descendant: &Path) -> bool {
     descendant == ancestor || descendant.starts_with(&format!(r"{ancestor}\"))
 }
 
-fn paste_target_is_valid_for_sources(sources: &[PathBuf], target: &Path) -> bool {
+pub(super) fn paste_target_is_valid_for_sources(sources: &[PathBuf], target: &Path) -> bool {
     !sources
         .iter()
         .any(|source| is_network_location_root(source) || path_is_same_or_ancestor(source, target))
@@ -429,9 +429,9 @@ impl ImageViewerApp {
         }
     }
 
-    pub fn copy_path_to_clipboard(&self, path: &Path) {
-        if let Err(e) = file_operations::copy_path_to_clipboard(path) {
-            log::error!("Erro clipboard: {}", e);
+    pub(crate) fn copy_paths_as_text_to_clipboard(&mut self, paths: &[PathBuf]) {
+        if let Err(error) = file_operations::copy_paths_as_text_to_clipboard(paths) {
+            self.notifications.warning(error);
         }
     }
 }

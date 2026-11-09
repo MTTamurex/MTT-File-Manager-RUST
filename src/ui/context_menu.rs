@@ -7,6 +7,7 @@ use std::cell::RefCell;
 pub use crate::application::context_menu::{ContextMenuItem, ContextMenuState};
 use crate::ui::svg_icons::SvgIconManager;
 
+mod layering;
 mod sizing;
 mod viewport;
 
@@ -209,6 +210,7 @@ pub fn render_context_menu(
 
     // Render the menu popup
     let menu_id = egui::Id::new("context_menu");
+    layering::attach_menu(ctx, menu_id, menu_state.origin);
     let response = egui::Area::new(menu_id)
         .fixed_pos(menu_pos)
         .order(egui::Order::Foreground)
@@ -782,6 +784,7 @@ fn render_single_item(
             }
 
             let submenu_id = egui::Id::new(format!("submenu_{}", item.id));
+            layering::attach_submenu(ui.ctx(), ui.layer_id(), submenu_id);
             let area_response = egui::Area::new(submenu_id)
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
