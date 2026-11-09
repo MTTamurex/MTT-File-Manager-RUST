@@ -15,6 +15,8 @@ use crate::workers::thumbnail::processing::get_bucket_size;
 
 use super::ImageViewerApp;
 
+pub(super) mod startup_memory_trim;
+
 const BASE_PENDING_THUMBNAILS: usize = 64;
 const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
 const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
@@ -1136,6 +1138,13 @@ impl ImageViewerApp {
     }
 
     fn working_set_trim_blocker_reason(&self) -> Option<&'static str> {
+        self.working_set_trim_blocker_reason_with_activity_grace(true)
+    }
+
+    fn working_set_trim_blocker_reason_with_activity_grace(
+        &self,
+        include_activity_grace: bool,
+    ) -> Option<&'static str> {
         let video_playing = self
             .media_preview
             .as_ref()
@@ -1163,7 +1172,9 @@ impl ImageViewerApp {
 
         if self.is_in_restore_burst() {
             Some("restore-burst")
-        } else if self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE {
+        } else if include_activity_grace
+            && self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE
+        {
             Some("recent-user-activity")
         } else if video_playing {
             Some("video-playing")
@@ -1932,6 +1943,7 @@ impl ImageViewerApp {
     }
 
     fn run_memory_maintenance_impl(&mut self, force: bool) {
+        self.run_startup_memory_trim();
         if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
             self.refresh_working_set_trim_blocker(false);
             return;
@@ -2384,6 +2396,15 @@ fn request_process_working_set_trim_series(
     delays: &'static [Duration],
     require_minimized: bool,
 ) -> bool {
+    request_process_working_set_trim_series_with_completion(reason, delays, require_minimized, None)
+}
+
+fn request_process_working_set_trim_series_with_completion(
+    reason: String,
+    delays: &'static [Duration],
+    require_minimized: bool,
+    completion: Option<std::sync::mpsc::Sender<bool>>,
+) -> bool {
     if process_working_set_trim_disabled() {
         return false;
     }
@@ -2440,6 +2461,15 @@ fn request_process_working_set_trim_series(
                     }
                     break;
                 }
+            }
+            if let Some(completion) = completion {
+                let completed = trimmed_any
+                    || !working_set_trim_cancelled(
+                        WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
+                        WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
+                        trim_epoch,
+                    );
+                let _ = completion.send(completed);
             }
         });
 

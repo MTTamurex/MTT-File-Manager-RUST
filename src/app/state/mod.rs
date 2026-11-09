@@ -740,6 +740,7 @@ pub struct ImageViewerApp {
     pub last_memory_trace_log: Instant,
     pub last_texture_cache_retune: Instant,
     pub last_user_activity: Instant,
+    pub(crate) startup_memory_trim: helpers::startup_memory_trim::StartupMemoryTrim,
     /// The monitor remains active for the full minimized lifetime. `pending`
     /// tracks whether the current rise still needs a successful trim.
     pub background_memory_trim_active: bool,

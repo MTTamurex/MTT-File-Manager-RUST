@@ -420,6 +420,7 @@ impl ImageViewerApp {
         initial_navigation_state.is_recycle_bin_view =
             initial_path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 
+        let initial_restore_time = Instant::now();
         let mut app = Self {
             navigation_state: initial_navigation_state,
             current_folder_modified_hint: None,
@@ -837,9 +838,10 @@ impl ImageViewerApp {
             last_memory_trace_log: Instant::now(),
             last_texture_cache_retune: Instant::now(),
             last_user_activity: Instant::now(),
+            startup_memory_trim: initial_restore_time.into(),
 
             // INACTIVITY RECOVERY
-            last_restore_time: Instant::now(),
+            last_restore_time: initial_restore_time,
             minimized_duration_secs: 0.0,
             restore_burst_until: None,
 
