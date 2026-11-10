@@ -41,8 +41,8 @@ fn shortcut_text_stays_clear_of_the_expanded_scrollbar_and_help_uses_body_font()
                 let modal = ctx
                     .memory(|memory| memory.area_rect(egui::Id::new("command_palette_modal")))
                     .unwrap();
-                // The modal frame uses 16-point inner margins plus its border.
-                let scrollbar_left = modal.right() - 17.0 - bar_width;
+                // The left column retains 640 points; the description has its own 320-point column.
+                let scrollbar_left = modal.left() + 17.0 + 640.0 - bar_width;
                 pointer = egui::pos2(scrollbar_left + bar_width / 2.0, modal.center().y);
                 if frame == 7 {
                     let mut found_inputs = false;
@@ -145,6 +145,14 @@ fn every_description_keeps_the_help_area_and_dialog_size_stable() {
                     matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text() == expected_help)
                 });
+                for shape in &output.shapes {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        if text.galley.text() == expected_help {
+                            let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                            assert!(shape.clip_rect.expand(1.0).contains_rect(bounds), "{command:?}: description must fit without scrolling: {bounds:?}, clip={:?}", shape.clip_rect);
+                        }
+                    }
+                }
             }
             assert!(painted, "{command:?} must have a rendered description");
             let rect = ctx

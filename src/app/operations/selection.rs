@@ -562,6 +562,13 @@ impl ImageViewerApp {
         }
     }
 
+    pub(crate) fn can_open_selected_preview(&self) -> bool {
+        !matches!(
+            self.selected_preview_overlay_action(),
+            SelectedPreviewOverlayAction::None | SelectedPreviewOverlayAction::BlockedInArchive
+        )
+    }
+
     pub(crate) fn should_consume_space_for_selected_preview_overlay_action(&self) -> bool {
         !matches!(
             self.selected_preview_overlay_action(),

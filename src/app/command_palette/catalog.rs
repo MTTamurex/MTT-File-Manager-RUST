@@ -27,6 +27,12 @@ pub(crate) enum Command {
     Rename,
     Properties,
     Settings,
+    PreviewSelected,
+    Copy,
+    Cut,
+    Paste,
+    Delete,
+    DiskAnalysis,
 }
 
 pub(crate) const COMMANDS: &[Command] = &[
@@ -51,10 +57,16 @@ pub(crate) const COMMANDS: &[Command] = &[
     Command::SelectAll,
     Command::ClearSelection,
     Command::InvertSelection,
+    Command::PreviewSelected,
+    Command::Copy,
+    Command::Cut,
+    Command::Paste,
     Command::CreateFolder,
     Command::Rename,
+    Command::Delete,
     Command::Properties,
     Command::Settings,
+    Command::DiskAnalysis,
 ];
 
 impl Command {
@@ -93,6 +105,12 @@ impl Command {
             Self::Rename => "command_palette.rename",
             Self::Properties => "command_palette.properties",
             Self::Settings => "command_palette.settings",
+            Self::PreviewSelected => "command_palette.preview_selected",
+            Self::Copy => "command_palette.copy",
+            Self::Cut => "command_palette.cut",
+            Self::Paste => "command_palette.paste",
+            Self::Delete => "command_palette.delete",
+            Self::DiskAnalysis => "command_palette.disk_analysis",
         }
     }
 
@@ -123,6 +141,12 @@ impl Command {
             Self::Rename => "command_help.rename",
             Self::Properties => "command_help.properties",
             Self::Settings => "command_help.settings",
+            Self::PreviewSelected => "command_help.preview_selected",
+            Self::Copy => "command_help.copy",
+            Self::Cut => "command_help.cut",
+            Self::Paste => "command_help.paste",
+            Self::Delete => "command_help.delete",
+            Self::DiskAnalysis => "command_help.disk_analysis",
         }
     }
 
@@ -145,8 +169,15 @@ impl Command {
             Self::SelectAll | Self::ClearSelection | Self::InvertSelection => {
                 "command_palette.selection"
             }
-            Self::CreateFolder | Self::Rename | Self::Properties => "command_palette.files",
-            Self::Settings => "command_palette.tools",
+            Self::CreateFolder
+            | Self::Rename
+            | Self::Properties
+            | Self::PreviewSelected
+            | Self::Copy
+            | Self::Cut
+            | Self::Paste
+            | Self::Delete => "command_palette.files",
+            Self::Settings | Self::DiskAnalysis => "command_palette.tools",
         }
     }
 
@@ -171,6 +202,11 @@ impl Command {
             Self::InvertSelection => ShortcutAction::InvertSelection,
             Self::Preview => ShortcutAction::TogglePreviewPanel,
             Self::Sidebar => ShortcutAction::ToggleLeftSidebar,
+            Self::PreviewSelected => ShortcutAction::PreviewSelected,
+            Self::Copy => ShortcutAction::Copy,
+            Self::Cut => ShortcutAction::Cut,
+            Self::Paste => ShortcutAction::Paste,
+            Self::Delete => ShortcutAction::Delete,
             _ => return None,
         })
     }

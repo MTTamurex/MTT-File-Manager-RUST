@@ -11,9 +11,45 @@ pub(super) fn render(
     // Otherwise egui centers the label and every row starts at a different position.
     let mut shortcut_font = egui::TextStyle::Body.resolve(ui.style());
     shortcut_font.size *= 0.9;
-    let button = egui::Button::selectable(selected, &entry.label)
-        .shortcut_text(egui::RichText::new(&entry.inputs).font(shortcut_font))
-        .wrap();
+    let label_font = egui::TextStyle::Button.resolve(ui.style());
+    let text_width = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), ui.visuals().text_color())
+            .size()
+            .x
+    };
+    let required_width = text_width(&entry.label, &label_font)
+        + text_width(&entry.inputs, &shortcut_font)
+        + ui.spacing().button_padding.x * 2.0
+        + 24.0;
+    let button = if !entry.inputs.is_empty() && required_width > ui.available_width() {
+        // A long right-hand shortcut can otherwise leave less than one glyph of
+        // space for the label. Stack both texts without shrinking either font.
+        let mut text = egui::text::LayoutJob::default();
+        text.append(
+            &format!("{}\n", entry.label),
+            0.0,
+            egui::TextFormat {
+                font_id: label_font,
+                color: egui::Color32::PLACEHOLDER,
+                ..Default::default()
+            },
+        );
+        text.append(
+            &entry.inputs,
+            0.0,
+            egui::TextFormat {
+                font_id: shortcut_font,
+                color: egui::Color32::PLACEHOLDER,
+                ..Default::default()
+            },
+        );
+        egui::Button::selectable(selected, text).shortcut_text("")
+    } else {
+        egui::Button::selectable(selected, &entry.label)
+            .shortcut_text(egui::RichText::new(&entry.inputs).font(shortcut_font))
+    }
+    .wrap();
     ui.scope(|ui| {
         // A stationary pointer must not add a second highlight after keyboard navigation.
         if !selected {

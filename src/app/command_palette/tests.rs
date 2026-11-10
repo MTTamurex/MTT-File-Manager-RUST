@@ -37,6 +37,11 @@ fn commands_show_current_bindings_including_the_fixed_panel_shortcut() {
         (Command::InvertSelection, ShortcutAction::InvertSelection),
         (Command::Preview, ShortcutAction::TogglePreviewPanel),
         (Command::Sidebar, ShortcutAction::ToggleLeftSidebar),
+        (Command::PreviewSelected, ShortcutAction::PreviewSelected),
+        (Command::Copy, ShortcutAction::Copy),
+        (Command::Cut, ShortcutAction::Cut),
+        (Command::Paste, ShortcutAction::Paste),
+        (Command::Delete, ShortcutAction::Delete),
     ] {
         assert_eq!(command.binding(&bindings), Some(action.default_binding()));
         bindings.set(action, custom);
@@ -138,4 +143,104 @@ fn transient_state_resets_and_keyboard_selection_is_bounded() {
     state.open(None);
     assert!(state.request_focus);
     assert!(state.query.is_empty());
+}
+
+#[test]
+fn file_commands_require_selection_and_operation_capabilities() {
+    let mut context = CommandContext::default();
+    for command in [
+        Command::PreviewSelected,
+        Command::Copy,
+        Command::Cut,
+        Command::Delete,
+    ] {
+        assert_eq!(
+            disabled_reason(command, &context),
+            Some("command_palette.no_selection")
+        );
+    }
+    context.has_selection = true;
+    assert_eq!(
+        disabled_reason(Command::PreviewSelected, &context),
+        Some("command_palette.preview_unavailable")
+    );
+    for command in [Command::Copy, Command::Cut, Command::Delete] {
+        assert_eq!(
+            disabled_reason(command, &context),
+            Some("command_palette.unavailable")
+        );
+    }
+    context.can_preview_selected = true;
+    context.can_copy = true;
+    context.can_cut = true;
+    context.can_delete = true;
+    for command in [
+        Command::PreviewSelected,
+        Command::Copy,
+        Command::Cut,
+        Command::Delete,
+    ] {
+        assert_eq!(disabled_reason(command, &context), None);
+    }
+    context.can_cut = false;
+    context.can_delete = false;
+    assert_eq!(disabled_reason(Command::Copy, &context), None);
+    assert!(disabled_reason(Command::Cut, &context).is_some());
+    assert!(disabled_reason(Command::Delete, &context).is_some());
+}
+
+#[test]
+fn paste_requires_clipboard_files_and_a_supported_current_destination_not_selection() {
+    let mut context = CommandContext::default();
+    assert_eq!(
+        disabled_reason(Command::Paste, &context),
+        Some("command_palette.clipboard_empty")
+    );
+    context.has_clipboard_files = true;
+    assert_eq!(
+        disabled_reason(Command::Paste, &context),
+        Some("command_palette.unavailable")
+    );
+    context.can_paste = true;
+    assert_eq!(disabled_reason(Command::Paste, &context), None);
+    context.has_selection = true;
+    assert_eq!(disabled_reason(Command::Paste, &context), None);
+    for locale in ["en", "pt-BR", "ru", "el", "zh-CN"] {
+        for key in [
+            "command_palette.preview_unavailable",
+            "command_palette.clipboard_empty",
+        ] {
+            assert_ne!(rust_i18n::t!(key, locale = locale).as_ref(), key);
+        }
+    }
+}
+
+#[test]
+fn disk_analysis_requires_an_eligible_current_drive_but_not_a_selection_or_shortcut() {
+    use crate::app::shortcuts::ShortcutBindings;
+    let mut context = CommandContext::default();
+    assert_eq!(
+        disabled_reason(Command::DiskAnalysis, &context),
+        Some("command_palette.disk_analysis_unavailable")
+    );
+    // A selected item alone is not a current drive, notably in virtual views.
+    context.has_selection = true;
+    assert!(disabled_reason(Command::DiskAnalysis, &context).is_some());
+    context.has_selection = false;
+    context.disk_analysis_drive = Some('D');
+    assert_eq!(disabled_reason(Command::DiskAnalysis, &context), None);
+    assert_eq!(Command::DiskAnalysis.shortcut(), None);
+    assert_eq!(
+        Command::DiskAnalysis.binding(&ShortcutBindings::default()),
+        None
+    );
+    assert!(
+        super::input_hints::summary(Command::DiskAnalysis, &ShortcutBindings::default()).is_empty()
+    );
+    for locale in ["en", "pt-BR", "ru", "el", "zh-CN"] {
+        assert_ne!(
+            rust_i18n::t!("command_palette.disk_analysis_unavailable", locale = locale).as_ref(),
+            "command_palette.disk_analysis_unavailable"
+        );
+    }
 }

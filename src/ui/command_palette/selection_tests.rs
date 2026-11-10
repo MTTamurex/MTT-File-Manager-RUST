@@ -128,7 +128,7 @@ fn mouse_and_keyboard_share_one_selection_and_stationary_mouse_does_not_override
 }
 
 #[test]
-fn disabled_commands_follow_mouse_and_show_help_and_reason_without_execution() {
+fn disabled_commands_follow_mouse_and_show_only_help_without_execution() {
     let mut palette = Palette::new();
     palette.context.has_closed_tabs = false;
     let output = palette.settle();
@@ -136,7 +136,7 @@ fn disabled_commands_follow_mouse_and_show_help_and_reason_without_execution() {
     let (_, output) = palette.frame(vec![egui::Event::PointerMoved(pointer)]);
     assert_eq!(palette.state.selected, 2);
     palette.assert_help(&output, Command::ReopenTab);
-    assert!(has_text(&output, &t!("command_palette.no_closed_tabs")));
+    assert!(!has_text(&output, &t!("command_palette.no_closed_tabs")));
     assert_eq!(
         palette.frame(vec![super::tests::key(egui::Key::Enter)]).0,
         None
@@ -210,4 +210,61 @@ fn editing_the_query_resets_selection_without_stationary_pointer_interference() 
         None
     );
     assert!(palette.state.active);
+}
+
+#[test]
+fn unavailable_reason_remains_in_the_tooltip_not_the_description() {
+    let mut palette = Palette::new();
+    palette.context.has_closed_tabs = false;
+    palette.ctx.global_style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let output = palette.settle();
+    let pointer = row_position(&output, Command::ReopenTab);
+    let mut output = palette.frame(vec![egui::Event::PointerMoved(pointer)]).1;
+    for _ in 0..6 {
+        output = palette.frame(Vec::new()).1;
+    }
+    let help = input_hints::help(Command::ReopenTab, &palette.shortcuts);
+    assert!(has_text(&output, &help));
+    let reason = t!("command_palette.no_closed_tabs");
+    assert!(has_text(&output, &reason));
+    assert!(!has_text(&output, &format!("{reason}\n\n{help}")));
+    assert_eq!(
+        output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == help))
+            .count(),
+        1,
+        "the description must appear only in the right column"
+    );
+}
+
+#[test]
+fn enabled_commands_do_not_repeat_the_description_in_a_tooltip() {
+    let mut palette = Palette::new();
+    palette.ctx.global_style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let output = palette.settle();
+    let pointer = row_position(&output, Command::CloseTab);
+    let mut output = palette.frame(vec![egui::Event::PointerMoved(pointer)]).1;
+    for _ in 0..6 {
+        output = palette.frame(Vec::new()).1;
+    }
+    let help = input_hints::help(Command::CloseTab, &palette.shortcuts);
+    assert_eq!(
+        output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == help))
+            .count(),
+        1,
+        "enabled commands must not show a duplicate description tooltip"
+    );
 }

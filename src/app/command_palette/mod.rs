@@ -1,7 +1,9 @@
 //! Transient command discovery; execution reuses the application's existing operations.
 pub(crate) mod availability;
 pub(crate) mod catalog;
+mod disk_analysis;
 mod execution;
+mod file_actions;
 pub(crate) mod input_hints;
 pub(crate) mod search;
 

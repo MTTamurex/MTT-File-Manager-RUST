@@ -194,3 +194,179 @@ fn help_does_not_move_the_palette_when_selection_changes() {
         "{rectangles:?}"
     );
 }
+
+#[test]
+fn space_types_in_the_query_instead_of_executing_selected_preview() {
+    let ctx = egui::Context::default();
+    let mut state = CommandPaletteState::default();
+    state.open(None);
+    let context = CommandContext {
+        has_selection: true,
+        can_preview_selected: true,
+        ..Default::default()
+    };
+    for _ in 0..4 {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = render_dialog(ui.ctx(), &mut state, &context, &ShortcutBindings::default());
+        });
+    }
+    state.selected = crate::app::command_palette::catalog::COMMANDS
+        .iter()
+        .position(|command| *command == Command::PreviewSelected)
+        .unwrap();
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![key(egui::Key::Space), egui::Event::Text(" ".into())],
+            ..Default::default()
+        },
+        |ui| {
+            assert_eq!(
+                render_dialog(ui.ctx(), &mut state, &context, &ShortcutBindings::default()),
+                None
+            );
+            assert_eq!(state.query, " ");
+            assert!(state.active);
+            block_background_input(ui.ctx());
+            assert!(!ui.input(|input| input.key_pressed(egui::Key::Space)));
+        },
+    );
+}
+
+#[test]
+fn new_file_commands_execute_only_when_enabled_and_explicitly_confirmed() {
+    let shortcuts = ShortcutBindings::default();
+    for command in [
+        Command::PreviewSelected,
+        Command::Copy,
+        Command::Cut,
+        Command::Paste,
+        Command::Delete,
+    ] {
+        for enabled in [true, false] {
+            let ctx = egui::Context::default();
+            let mut state = CommandPaletteState::default();
+            state.open(None);
+            state.selected = crate::app::command_palette::catalog::COMMANDS
+                .iter()
+                .position(|candidate| *candidate == command)
+                .unwrap();
+            let context = CommandContext {
+                has_selection: enabled,
+                can_preview_selected: enabled,
+                can_copy: enabled,
+                can_cut: enabled,
+                has_clipboard_files: enabled,
+                can_paste: enabled,
+                can_delete: enabled,
+                ..Default::default()
+            };
+            for _ in 0..4 {
+                let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    assert_eq!(
+                        render_dialog(ui.ctx(), &mut state, &context, &shortcuts),
+                        None
+                    );
+                });
+            }
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![key(egui::Key::Enter)],
+                    ..Default::default()
+                },
+                |ui| {
+                    assert_eq!(
+                        render_dialog(ui.ctx(), &mut state, &context, &shortcuts),
+                        enabled.then_some(command)
+                    );
+                    assert_eq!(state.active, !enabled);
+                },
+            );
+        }
+    }
+}
+
+#[test]
+fn clipboard_and_delete_events_in_search_do_not_execute_file_commands() {
+    for event in [
+        egui::Event::Copy,
+        egui::Event::Cut,
+        egui::Event::Paste("filter text".into()),
+        key(egui::Key::Delete),
+    ] {
+        let ctx = egui::Context::default();
+        let mut state = CommandPaletteState::default();
+        state.open(None);
+        let context = CommandContext {
+            has_selection: true,
+            can_copy: true,
+            can_cut: true,
+            has_clipboard_files: true,
+            can_paste: true,
+            can_delete: true,
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let _ = render_dialog(ui.ctx(), &mut state, &context, &ShortcutBindings::default());
+            });
+        }
+        state.selected = crate::app::command_palette::catalog::COMMANDS
+            .iter()
+            .position(|command| *command == Command::Delete)
+            .unwrap();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![event.clone()],
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(
+                    render_dialog(ui.ctx(), &mut state, &context, &ShortcutBindings::default()),
+                    None
+                );
+                assert!(state.active);
+                if matches!(event, egui::Event::Paste(_)) {
+                    assert_eq!(state.query, "filter text");
+                }
+                block_background_input(ui.ctx());
+                assert!(ui.input(|input| input.events.is_empty()));
+            },
+        );
+    }
+}
+
+#[test]
+fn disk_analyzer_command_obeys_eligibility_before_accepting_enter() {
+    for drive in [None, Some('D')] {
+        let ctx = egui::Context::default();
+        let mut state = CommandPaletteState::default();
+        state.open(None);
+        state.query = t!(Command::DiskAnalysis.label_key()).to_string();
+        let context = CommandContext {
+            disk_analysis_drive: drive,
+            ..Default::default()
+        };
+        let shortcuts = ShortcutBindings::default();
+        for _ in 0..4 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                assert_eq!(
+                    render_dialog(ui.ctx(), &mut state, &context, &shortcuts),
+                    None
+                );
+            });
+        }
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![key(egui::Key::Enter)],
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(
+                    render_dialog(ui.ctx(), &mut state, &context, &shortcuts),
+                    drive.map(|_| Command::DiskAnalysis)
+                );
+                assert_eq!(state.active, drive.is_none());
+            },
+        );
+    }
+}

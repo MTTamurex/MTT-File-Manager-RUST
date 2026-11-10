@@ -1,6 +1,7 @@
 use super::{
     availability::{disabled_reason, CommandContext},
     catalog::Command,
+    file_actions,
 };
 use crate::app::{navigation_state::SettingsSection, ImageViewerApp};
 use crate::domain::file_entry::ViewMode;
@@ -15,7 +16,8 @@ impl ImageViewerApp {
         {
             return;
         }
-        if let Some(reason) = disabled_reason(command, &CommandContext::from_app(self)) {
+        let context = CommandContext::from_app(self);
+        if let Some(reason) = disabled_reason(command, &context) {
             self.notifications
                 .warning(rust_i18n::t!(reason).to_string());
             return;
@@ -89,6 +91,17 @@ impl ImageViewerApp {
                 self.show_properties_for_paths(paths);
             }
             Command::Settings => self.open_settings(SettingsSection::General),
+            Command::PreviewSelected => {
+                self.trigger_selected_preview_overlay_action();
+            }
+            Command::Copy | Command::Cut | Command::Paste | Command::Delete => {
+                file_actions::execute(self, command)
+            }
+            Command::DiskAnalysis => {
+                if let Some(letter) = context.disk_analysis_drive {
+                    self.open_disk_analysis(letter);
+                }
+            }
         }
         ctx.request_repaint();
     }
