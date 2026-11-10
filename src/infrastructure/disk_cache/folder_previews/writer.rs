@@ -1,4 +1,7 @@
-use super::{FolderPreviewSource, ThumbnailDiskCache, FOLDER_PREVIEW_CACHE_FORMAT_VERSION};
+use super::{
+    FolderPreviewSource, ThumbnailDiskCache, FOLDER_PREVIEW_CACHE_FORMAT_VERSION,
+    FOLDER_PREVIEW_WEBP_QUALITY,
+};
 use crate::domain::folder_appearance::FolderAppearance;
 use crate::domain::folder_preview_validity::FolderPreviewValidity;
 use rusqlite::params;
@@ -40,7 +43,7 @@ impl ThumbnailDiskCache {
         rgba: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> bool {
         self.put_folder_preview_for_appearance(
             path,
             bucket,
@@ -48,7 +51,7 @@ impl ThumbnailDiskCache {
             width,
             height,
             FolderAppearance::Original,
-        );
+        )
     }
 
     pub fn put_folder_preview_for_appearance(
@@ -59,7 +62,7 @@ impl ThumbnailDiskCache {
         width: u32,
         height: u32,
         appearance: FolderAppearance,
-    ) {
+    ) -> bool {
         let source = FolderPreviewSource::capture(path, None);
         self.put_folder_preview_inner(
             path,
@@ -72,10 +75,11 @@ impl ThumbnailDiskCache {
             appearance,
             source.as_ref(),
             None,
-        );
+        )
     }
 
-    /// Commit only if the source and request are still current after acquiring the writer lock.
+    /// Returns source freshness after all writer-lock waits have completed.
+    /// Filesystem metadata is checked only after the writer lock is released.
     pub fn put_folder_preview_checked(
         &self,
         path: &Path,
@@ -84,8 +88,8 @@ impl ThumbnailDiskCache {
         appearance: FolderAppearance,
         source: &FolderPreviewSource,
         validity: &FolderPreviewValidity,
-    ) {
-        self.put_folder_preview_inner(
+    ) -> bool {
+        let fresh_before_commit = self.put_folder_preview_inner(
             path,
             bucket,
             pixels,
@@ -93,6 +97,7 @@ impl ThumbnailDiskCache {
             Some(source),
             Some(validity),
         );
+        fresh_before_commit && source.is_current()
     }
 
     fn put_folder_preview_inner(
@@ -103,7 +108,7 @@ impl ThumbnailDiskCache {
         appearance: FolderAppearance,
         source: Option<&FolderPreviewSource>,
         validity: Option<&FolderPreviewValidity>,
-    ) {
+    ) -> bool {
         let FolderPreviewPixels {
             rgba,
             width,
@@ -113,14 +118,16 @@ impl ThumbnailDiskCache {
             .checked_mul(height as usize)
             .and_then(|n| n.checked_mul(4));
         if expected != Some(rgba.len()) || width == 0 || height == 0 {
-            return;
+            return true;
         }
         let version = appearance.cache_version(FOLDER_PREVIEW_CACHE_FORMAT_VERSION);
         let fingerprint = source.map(FolderPreviewSource::fingerprint);
-        if validity.is_some_and(|token| !token.is_current())
-            || source.is_some_and(|source| !source.is_current())
-        {
-            return;
+        let source_fresh = source.is_none_or(FolderPreviewSource::is_current);
+        if !source_fresh {
+            return false;
+        }
+        if validity.is_some_and(|token| !token.is_current()) {
+            return true;
         }
 
         {
@@ -128,23 +135,27 @@ impl ThumbnailDiskCache {
             if validity.is_some_and(|token| !token.is_current())
                 || preserves_larger_variant(&db, path, version, bucket, fingerprint)
             {
-                return;
+                return true;
             }
         }
 
-        let data = webp::Encoder::from_rgba(rgba, width, height).encode_lossless();
+        // Lossy q90: several times faster to decode on the warm DB-hit path than
+        // lossless, with far smaller blobs. Alpha stays lossless (alpha_quality=100).
+        let data =
+            webp::Encoder::from_rgba(rgba, width, height).encode(FOLDER_PREVIEW_WEBP_QUALITY);
         // Invalidation can occur while encoding; never resurrect its old cache entry.
-        if validity.is_some_and(|token| !token.is_current())
-            || source.is_some_and(|source| !source.is_current())
-        {
-            return;
+        if source.is_some_and(|source| !source.is_current()) {
+            return false;
+        }
+        if validity.is_some_and(|token| !token.is_current()) {
+            return true;
         }
         // Metadata I/O and compression must not hold the shared SQLite writer lock.
         let db = self.writer.lock();
         if validity.is_some_and(|token| !token.is_current())
             || preserves_larger_variant(&db, path, version, bucket, fingerprint)
         {
-            return;
+            return true;
         }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -156,5 +167,6 @@ impl ThumbnailDiskCache {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![path.to_string_lossy(), data.to_vec(), width, height, bucket, version, now, fingerprint],
         );
+        true
     }
 }

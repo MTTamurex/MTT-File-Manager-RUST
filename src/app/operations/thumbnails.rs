@@ -345,12 +345,17 @@ impl ImageViewerApp {
             return;
         }
 
+        // Retained pixels can be displayed before background source validation.
+        let cached_preview = self.cache_manager.get_folder_preview_rgba(&path).cloned();
+        let require_validation = self.cache_manager.folder_preview_requires_validation(&path);
         let request = crate::workers::folder_preview_worker::FolderPreviewRequest::new(
             path.clone(),
             size_px,
             cover_path,
         )
-        .with_validity(self.cache_manager.folder_preview_requests.begin(&path));
+        .with_validity(self.cache_manager.folder_preview_requests.begin(&path))
+        .with_cached_preview(cached_preview)
+        .require_validation(require_validation);
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
                 // Only NOW the request is committed to the worker pipeline —
@@ -392,6 +397,9 @@ impl ImageViewerApp {
             return;
         }
 
+        // Cancel speculative/background results before an explicit refresh,
+        // without dropping the texture currently shown to the user.
+        self.cache_manager.require_folder_preview_validation(&path);
         self.pending_folder_preview_replace.insert(path.clone());
         self.suppress_next_folder_preview_invalidation
             .insert(path.clone());
@@ -401,6 +409,7 @@ impl ImageViewerApp {
             self.effective_folder_preview_request_size_px(),
             cover_path,
         )
+        .require_validation(true)
         .with_validity(self.cache_manager.folder_preview_requests.begin(&path));
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {

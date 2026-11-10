@@ -1210,7 +1210,7 @@ impl ImageViewerApp {
                         .is_some_and(|cover| moved_files.iter().any(|file| file == cover))
                     {
                         self.remove_folder_cover_without_blocking(source_folder, true);
-                        self.cache_manager.folder_preview_cache.pop(source_folder);
+                        self.cache_manager.invalidate_folder_preview(source_folder);
                         #[cfg(debug_assertions)]
                         log::debug!(
                             "[MOVE-BATCH] Moved file was folder cover for {:?}, requesting recalculation",

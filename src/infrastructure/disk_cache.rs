@@ -23,7 +23,14 @@ mod gc;
 mod thumbnail_freshness;
 mod thumbnails_repo;
 
-const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 3;
+// Bumped 3 -> 4: composed previews are now stored as lossy WebP (q90) instead of
+// lossless — several times faster to decode on the warm path. Old lossless rows
+// are invalidated by the version mismatch and recomposed once.
+const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 4;
+/// Lossy quality for stored folder previews. Alpha is still compressed
+/// losslessly by libwebp (alpha_quality=100), so transparency is exact; only the
+/// RGB channels see q90 loss, which is imperceptible at grid display sizes.
+pub(crate) const FOLDER_PREVIEW_WEBP_QUALITY: f32 = 90.0;
 const ACL_HARDENED_MARKER: &str = ".acl_hardened_v1";
 const LEGACY_CLEANUP_MARKER: &str = ".legacy_cleanup_v1";
 const OVERSIZED_CLEANUP_MARKER: &str = ".oversized_cleanup_v1";

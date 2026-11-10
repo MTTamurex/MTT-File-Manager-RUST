@@ -87,13 +87,13 @@ impl Drop for SemaphorePermit<'_> {
     }
 }
 
-fn available_cpu_count() -> usize {
+pub(crate) fn available_cpu_count() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
 }
 
-fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
+pub(crate) fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
     // Decode parallelism is bounded by `compute_decode_limit` (max 4) via the
     // shared semaphore, so worker counts above 4 only add idle threads waiting
     // on the semaphore — each costing ~1 MB of committed stack RAM by default.

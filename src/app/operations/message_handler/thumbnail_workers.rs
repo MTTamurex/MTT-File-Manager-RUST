@@ -107,13 +107,22 @@ impl ImageViewerApp {
         let t0 = Instant::now();
 
         // Cap per-frame processing to keep message handling responsive under heavy cover streams.
-        const MAX_COVER_EVENTS_PER_FRAME: usize = 48;
+        // Cover events are in-memory item updates (no I/O), so the non-conservative
+        // path can drain a cold grid's discovery results in fewer frames — each
+        // frame that waits here also delays the preview requests they enqueue.
+        const MAX_COVER_EVENTS_PER_FRAME: usize = 128;
+        const COVER_EVENT_BUDGET: Duration = Duration::from_millis(6);
         const CONSERVATIVE_MAX_COVER_EVENTS_PER_FRAME: usize = 12;
-        let max_cover_events_per_frame = if self.uses_conservative_folder_preview_policy() {
-            CONSERVATIVE_MAX_COVER_EVENTS_PER_FRAME
-        } else {
-            MAX_COVER_EVENTS_PER_FRAME
-        };
+        const CONSERVATIVE_COVER_EVENT_BUDGET: Duration = Duration::from_millis(3);
+        let (max_cover_events_per_frame, cover_event_budget) =
+            if self.uses_conservative_folder_preview_policy() {
+                (
+                    CONSERVATIVE_MAX_COVER_EVENTS_PER_FRAME,
+                    CONSERVATIVE_COVER_EVENT_BUDGET,
+                )
+            } else {
+                (MAX_COVER_EVENTS_PER_FRAME, COVER_EVENT_BUDGET)
+            };
         let mut cover_updates: std::collections::HashMap<
             std::path::PathBuf,
             Option<std::path::PathBuf>,
@@ -122,7 +131,7 @@ impl ImageViewerApp {
         let mut has_more = false;
 
         while processed < max_cover_events_per_frame {
-            if processed > 0 && t0.elapsed() >= Duration::from_millis(3) {
+            if processed > 0 && t0.elapsed() >= cover_event_budget {
                 has_more = true;
                 break;
             }
@@ -255,6 +264,10 @@ impl ImageViewerApp {
                 folder_path.clone(),
                 self.effective_folder_preview_request_size_px(),
                 Some(cover_path),
+            )
+            .require_validation(
+                self.cache_manager
+                    .folder_preview_requires_validation(&folder_path),
             )
             .with_validity(
                 self.cache_manager

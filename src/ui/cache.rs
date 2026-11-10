@@ -15,9 +15,10 @@ use std::time::{Duration, Instant};
 pub use rustc_hash::FxHashSet;
 
 const DEFAULT_TEXTURE_CACHE_ITEMS: usize = 64;
+mod folder_preview_rgba;
 #[cfg(test)]
 mod folder_preview_validity_tests;
-const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 48;
+const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 192;
 const DEFAULT_RGBA_CACHE_ITEMS: usize = 32;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -30,6 +31,10 @@ pub(crate) const LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 256;
 pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 24 * 1024 * 1024;
 pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+/// Ceiling for composed-preview RGBA behind `folder_preview_cache`.
+/// The actual allowance shares the dynamic RGBA budget with file thumbnails.
+const DEFAULT_FOLDER_PREVIEW_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_FOLDER_PREVIEW_RGBA_CACHE_ITEMS: usize = 64;
 pub(crate) const MAX_THUMBNAIL_LOADING_SET_ITEMS: usize = 1024;
 const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
 
@@ -38,7 +43,7 @@ const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
 /// without this, an evicted preview would be re-requested every frame and
 /// each `ctx.load_texture` call accumulates GPU staging that is not freed
 /// at the same rate, producing a steady working-set leak.
-const FOLDER_PREVIEW_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
+const FOLDER_PREVIEW_REQUEST_COOLDOWN: Duration = Duration::from_millis(1000);
 const FOLDER_PREVIEW_LOADING_STALE_AFTER: Duration = Duration::from_secs(15);
 /// Bounded LRU for the cooldown map; ~96B/entry → ~400KB ceiling.
 const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
@@ -247,6 +252,13 @@ pub struct CacheManager {
     pub rgba_data_cache: LruCache<PathBuf, (Arc<Vec<u8>>, u32, u32)>,
     rgba_data_bytes: usize,
     max_rgba_data_bytes: usize,
+    /// Retained pixels are source-validated by a worker before reuse.
+    folder_preview_rgba_cache:
+        LruCache<PathBuf, crate::workers::folder_preview_worker::CachedFolderPreview>,
+    folder_preview_rgba_bytes: usize,
+    max_folder_preview_rgba_bytes: usize,
+    /// Explicit invalidations must not immediately redisplay stale disk artwork.
+    folder_preview_refresh_required: LruCache<PathBuf, ()>,
 
     config: TextureCacheConfig,
 }
@@ -308,6 +320,16 @@ impl CacheManager {
             )),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES,
+            folder_preview_rgba_cache: LruCache::new(nz_cache_size(
+                DEFAULT_FOLDER_PREVIEW_RGBA_CACHE_ITEMS,
+                "folder_preview_rgba_cache",
+            )),
+            folder_preview_rgba_bytes: 0,
+            max_folder_preview_rgba_bytes: DEFAULT_FOLDER_PREVIEW_RGBA_BUDGET_BYTES,
+            folder_preview_refresh_required: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_refresh_required",
+            )),
 
             config: TextureCacheConfig::default(),
         }
@@ -371,6 +393,16 @@ impl CacheManager {
             rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: rgba_budget_bytes,
+            folder_preview_rgba_cache: LruCache::new(nz_cache_size(
+                DEFAULT_FOLDER_PREVIEW_RGBA_CACHE_ITEMS,
+                "folder_preview_rgba_cache",
+            )),
+            folder_preview_rgba_bytes: 0,
+            max_folder_preview_rgba_bytes: DEFAULT_FOLDER_PREVIEW_RGBA_BUDGET_BYTES,
+            folder_preview_refresh_required: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_refresh_required",
+            )),
 
             config,
         }
@@ -575,6 +607,7 @@ impl CacheManager {
             self.max_rgba_data_bytes = target_bytes;
             self.enforce_rgba_budget(target_bytes);
         }
+        self.enforce_folder_preview_rgba_budget(target_bytes.saturating_sub(self.rgba_data_bytes));
         target_bytes
     }
 
@@ -661,6 +694,8 @@ impl CacheManager {
         self.pending_upload_set.clear();
         self.rgba_data_cache.clear();
         self.rgba_data_bytes = 0;
+        self.folder_preview_rgba_cache.clear();
+        self.folder_preview_rgba_bytes = 0;
         self.attempted_thumbnail_bucket.clear();
         self.thumbnail_request_debounce.clear();
         self.folder_preview_request_debounce.clear();
@@ -690,8 +725,8 @@ impl CacheManager {
     ) -> (usize, usize, usize, usize) {
         let textures_removed = self.texture_cache.len();
         let folder_previews_removed = self.folder_preview_cache.len();
-        let rgba_removed = self.rgba_data_cache.len();
-        let rgba_bytes_removed = self.rgba_data_bytes;
+        let rgba_removed = self.rgba_data_cache.len() + self.folder_preview_rgba_cache.len();
+        let rgba_bytes_removed = self.estimate_ram_cache_usage();
 
         self.texture_cache = LruCache::new(nz_cache_size(texture_capacity, "texture_cache(idle)"));
         self.folder_preview_cache = LruCache::new(nz_cache_size(
@@ -701,6 +736,11 @@ impl CacheManager {
         self.rgba_data_cache = LruCache::new(nz_cache_size(rgba_capacity, "rgba_data_cache(idle)"));
         self.rgba_data_bytes = 0;
         self.max_rgba_data_bytes = rgba_budget_bytes;
+        self.folder_preview_rgba_cache = LruCache::new(nz_cache_size(
+            folder_preview_capacity,
+            "folder_preview_rgba_cache(idle)",
+        ));
+        self.folder_preview_rgba_bytes = 0;
 
         self.loading_set.clear();
         self.loading_set.shrink_to_fit();
@@ -741,8 +781,8 @@ impl CacheManager {
     ) -> (usize, usize, usize, usize) {
         let textures_removed = self.texture_cache.len();
         let folder_previews_removed = self.folder_preview_cache.len();
-        let rgba_removed = self.rgba_data_cache.len();
-        let rgba_bytes_removed = self.rgba_data_bytes;
+        let rgba_removed = self.rgba_data_cache.len() + self.folder_preview_rgba_cache.len();
+        let rgba_bytes_removed = self.estimate_ram_cache_usage();
 
         self.texture_cache =
             LruCache::new(nz_cache_size(texture_capacity, "texture_cache(background)"));
@@ -754,6 +794,11 @@ impl CacheManager {
             LruCache::new(nz_cache_size(rgba_capacity, "rgba_data_cache(background)"));
         self.rgba_data_bytes = 0;
         self.max_rgba_data_bytes = rgba_budget_bytes;
+        self.folder_preview_rgba_cache = LruCache::new(nz_cache_size(
+            folder_preview_capacity,
+            "folder_preview_rgba_cache(background)",
+        ));
+        self.folder_preview_rgba_bytes = 0;
 
         (
             textures_removed,
@@ -790,6 +835,10 @@ impl CacheManager {
         }
         self.rgba_data_bytes = self.rgba_data_bytes.saturating_add(new_bytes);
         self.enforce_rgba_budget(self.max_rgba_data_bytes);
+        self.enforce_folder_preview_rgba_budget(
+            self.max_rgba_data_bytes
+                .saturating_sub(self.rgba_data_bytes),
+        );
     }
 
     /// Removes RGBA data for a specific path and updates memory accounting.
@@ -845,6 +894,10 @@ impl CacheManager {
                 break;
             }
         }
+
+        rgba_removed += self.enforce_folder_preview_rgba_budget(
+            target_rgba_bytes.saturating_sub(self.rgba_data_bytes),
+        );
 
         (textures_removed, rgba_removed, folder_previews_removed)
     }
@@ -1014,9 +1067,10 @@ impl CacheManager {
     /// Invalidates a folder preview (removes from cache and loading set)
     /// Called when folder contents change to trigger reload
     pub fn invalidate_folder_preview(&mut self, path: &PathBuf) {
-        self.folder_preview_requests.invalidate(path);
+        self.require_folder_preview_validation(path);
         self.folder_preview_trace.record_invalidation();
         self.folder_preview_cache.pop(path);
+        self.remove_folder_preview_rgba(path);
         self.folder_preview_loading.remove(path);
         self.folder_preview_loading_started.pop(path);
         self.forget_folder_preview_request_cooldown(path);
@@ -1062,9 +1116,10 @@ impl CacheManager {
         texture_usage + folder_preview_usage + icon_usage + drive_icon_usage
     }
 
-    /// Estimates RAM usage by the RGBA data cache in bytes
+    /// Estimates retained RGBA bytes for both files and composed folder previews.
     pub fn estimate_ram_cache_usage(&self) -> usize {
         self.rgba_data_bytes
+            .saturating_add(self.folder_preview_rgba_bytes)
     }
 
     /// Gets or creates a drive icon

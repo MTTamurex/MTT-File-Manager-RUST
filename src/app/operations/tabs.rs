@@ -108,7 +108,8 @@ impl ImageViewerApp {
                         ) => {
                             if covers.get(&current_folder) == Some(&removed_path) {
                                 confirmed_folder_cover_removals.push(current_folder.clone());
-                                self.cache_manager.folder_preview_cache.pop(&current_folder);
+                                self.cache_manager
+                                    .invalidate_folder_preview(&current_folder);
                             }
                         }
                         crate::infrastructure::app_state_db::FolderCoverReadOutcome::Busy

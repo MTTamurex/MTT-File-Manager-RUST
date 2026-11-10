@@ -22,6 +22,7 @@ pub use progress::{
 pub use queue::PriorityThumbnailQueue;
 pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
+pub(crate) use worker::{available_cpu_count, compute_thumbnail_worker_count};
 
 /// Generations accepted by visual workers for the two currently visible
 /// physical panels. Updated together so switching panel focus never briefly

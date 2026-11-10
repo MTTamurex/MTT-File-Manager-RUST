@@ -155,7 +155,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
         if has_cover && needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
-            const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+            const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 6;
             if !scroll_lod
                 || *ctx.folder_preview_requests_this_frame
                     < MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME
@@ -213,7 +213,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 // NORMAL FOLDER: request composed preview only after cover discovery.
                 // Folders without media use the shared generic folder icon below.
                 if has_cover && ctx.allow_thumbnail_requests && !is_loading {
-                    const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+                    const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 6;
                     if !scroll_lod
                         || *ctx.folder_preview_requests_this_frame
                             < MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME

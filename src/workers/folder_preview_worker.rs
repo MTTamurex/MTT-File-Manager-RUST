@@ -1,16 +1,16 @@
-//! Folder preview worker — custom composition + Shell API fallback
+//! Folder previews: cache-first display and asynchronous source validation.
 //!
-//! PRIMARY: Extracts a thumbnail from the first media file inside the folder
-//! using the existing 5-stage hybrid pipeline, then composes it with
-//! folder_back.png and folder_front.png layers for a clean preview.
-//!
-//! FALLBACK: If no media is found or composition fails, falls back to
-//! Windows Shell API (IThumbnailCache with no Explorer-cache writes).
-//!
-//! PERFORMANCE: Checks SQLite disk cache first (NVMe fast path, ~1ms).
-//! Custom composition ~2ms vs Shell API 20-200ms.
+//! `cache_first` reads only RAM/SQLite. This source worker validates snapshots
+//! and composes missing/changed artwork through the content-thumbnail pipeline.
 
+mod cache_first;
 mod content_thumbnail_cache;
+mod types;
+pub use cache_first::spawn_folder_preview_cache_worker;
+use types::FolderPreviewRequestMode;
+pub use types::{FolderPreviewData, FolderPreviewRequest};
+mod ram_preview;
+pub use ram_preview::CachedFolderPreview;
 
 use crate::infrastructure::disk_cache::{FolderPreviewPixels, ThumbnailDiskCache};
 use crate::infrastructure::folder_compose::FolderComposer;
@@ -129,70 +129,6 @@ impl FolderPreviewTraceCounters {
     }
 }
 
-/// Data returned from folder preview worker
-pub struct FolderPreviewData {
-    pub retry_after_source_change: bool,
-    pub cover_path: Option<PathBuf>,
-    pub validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
-    pub appearance: crate::domain::folder_appearance::FolderAppearance,
-    pub path: PathBuf,
-    pub rgba_data: std::sync::Arc<Vec<u8>>,
-    pub width: u32,
-    pub height: u32,
-    /// When `true`, `rgba_data` contains premultiplied-alpha pixels
-    /// and should be uploaded with `ColorImage::from_rgba_premultiplied`.
-    pub premultiplied: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FolderPreviewRequestMode {
-    Load,
-    RecomposeIfCacheMiss,
-}
-
-#[derive(Clone, Debug)]
-pub struct FolderPreviewRequest {
-    validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
-    pub path: PathBuf,
-    pub size_px: u32,
-    pub cover_path: Option<PathBuf>,
-    mode: FolderPreviewRequestMode,
-}
-
-impl FolderPreviewRequest {
-    pub fn with_validity(
-        mut self,
-        validity: crate::domain::folder_preview_validity::FolderPreviewValidity,
-    ) -> Self {
-        self.validity = validity;
-        self
-    }
-
-    pub fn new(path: PathBuf, size_px: u32, cover_path: Option<PathBuf>) -> Self {
-        Self {
-            validity: Default::default(),
-            path,
-            size_px,
-            cover_path,
-            mode: FolderPreviewRequestMode::Load,
-        }
-    }
-
-    pub fn recompose_if_cache_miss(
-        path: PathBuf,
-        size_px: u32,
-        cover_path: Option<PathBuf>,
-    ) -> Self {
-        Self {
-            path,
-            size_px,
-            cover_path,
-            mode: FolderPreviewRequestMode::RecomposeIfCacheMiss,
-            validity: Default::default(),
-        }
-    }
-}
-
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
 /// Tracks whether `CoInitializeEx` succeeded to avoid calling `CoUninitialize`
 /// on a failed init (which is UB per COM contract).
@@ -251,6 +187,8 @@ pub fn spawn_folder_preview_worker(
 
             while let Ok(request) = rx.recv() {
                 let FolderPreviewRequest {
+                    cached_preview: _,
+                    validation_source,
                     validity,
                     path,
                     size_px,
@@ -280,6 +218,9 @@ pub fn spawn_folder_preview_worker(
                         composer.compose_empty_for_size(bucket_size);
                     crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                     let _ = tx.send(FolderPreviewData {
+                        validation_pending: false,
+                        replace_existing: mode == FolderPreviewRequestMode::ValidateCached,
+                        cache_source: None,
                         retry_after_source_change: false,
                         cover_path: None,
                         validity,
@@ -310,6 +251,9 @@ pub fn spawn_folder_preview_worker(
                     && !crate::infrastructure::onedrive::is_locally_available(&path)
                 {
                     let _ = tx.send(FolderPreviewData {
+                        validation_pending: false,
+                        replace_existing: mode == FolderPreviewRequestMode::ValidateCached,
+                        cache_source: None,
                         retry_after_source_change: false,
                         cover_path: None,
                         validity,
@@ -331,6 +275,28 @@ pub fn spawn_folder_preview_worker(
                     &path,
                     cover_path.as_deref(),
                 );
+                // An unchanged snapshot only needs a terminal completion, not
+                // another SQLite read, decode, or GPU upload.
+                if mode == FolderPreviewRequestMode::ValidateCached {
+                    if source.is_some() && source == validation_source {
+                        let _ = tx.send(FolderPreviewData {
+                            validation_pending: false,
+                            replace_existing: true,
+                            cache_source: source,
+                            retry_after_source_change: false,
+                            cover_path,
+                            validity,
+                            appearance,
+                            path,
+                            rgba_data: Arc::new(Vec::new()),
+                            width: 0,
+                            height: 0,
+                            premultiplied: true,
+                        });
+                        throttle_repaint(&ctx, &mut last_repaint);
+                        continue;
+                    }
+                }
                 let cache_start = Instant::now();
                 if let Some((rgba_data, width, height, _created_at)) =
                     source.as_ref().and_then(|source| {
@@ -342,13 +308,16 @@ pub fn spawn_folder_preview_worker(
                         )
                     })
                 {
-                    let is_stale = source.as_ref().is_none_or(|source| !source.is_current());
-                    if !is_stale && mode == FolderPreviewRequestMode::RecomposeIfCacheMiss {
+                    // The cache API validates source freshness after decoding.
+                    if mode == FolderPreviewRequestMode::RecomposeIfCacheMiss {
                         log::debug!(
                             "[FOLDER PREVIEW] DB HIT {:?}; re-compose not needed",
                             path.file_name().unwrap_or_default(),
                         );
                         let _ = tx.send(FolderPreviewData {
+                            validation_pending: false,
+                            replace_existing: false,
+                            cache_source: None,
                             retry_after_source_change: false,
                             cover_path: cover_path.clone(),
                             validity,
@@ -363,36 +332,33 @@ pub fn spawn_folder_preview_worker(
                         continue;
                     }
 
-                    if !is_stale {
-                        log::debug!(
-                            "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
-                            path.file_name().unwrap_or_default(),
-                            width,
-                            height,
-                            cache_start.elapsed().as_secs_f64() * 1000.0
-                        );
-                        // Disk cache stores straight-alpha RGBA losslessly.
-                        // Premultiply only for the GPU upload path.
-                        let mut rgba_data = rgba_data;
-                        crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
-                        let _ = tx.send(FolderPreviewData {
-                            retry_after_source_change: false,
-                            cover_path: cover_path.clone(),
-                            validity,
-                            appearance,
-                            path,
-                            rgba_data: std::sync::Arc::new(rgba_data),
-                            width,
-                            height,
-                            premultiplied: true,
-                        });
-                        throttle_repaint(&ctx, &mut last_repaint);
-                        continue;
-                    }
                     log::debug!(
-                        "[FOLDER PREVIEW] DB STALE {:?} (folder modified after cache)",
+                        "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
                         path.file_name().unwrap_or_default(),
+                        width,
+                        height,
+                        cache_start.elapsed().as_secs_f64() * 1000.0
                     );
+                    // Disk cache stores straight-alpha RGBA.
+                    // Premultiply only for the GPU upload path.
+                    let mut rgba_data = rgba_data;
+                    crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
+                    let _ = tx.send(FolderPreviewData {
+                        validation_pending: false,
+                        replace_existing: mode == FolderPreviewRequestMode::ValidateCached,
+                        cache_source: source,
+                        retry_after_source_change: false,
+                        cover_path: cover_path.clone(),
+                        validity,
+                        appearance,
+                        path,
+                        rgba_data: std::sync::Arc::new(rgba_data),
+                        width,
+                        height,
+                        premultiplied: true,
+                    });
+                    throttle_repaint(&ctx, &mut last_repaint);
+                    continue;
                 } else {
                     log::debug!(
                         "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms)",
@@ -441,30 +407,40 @@ pub fn spawn_folder_preview_worker(
                     }
                 };
 
-                if should_cache {
-                    if let Some(source) = source.as_ref() {
-                        trace.record_db_write();
-                        disk_cache.put_folder_preview_checked(
-                            &path,
-                            bucket_size,
-                            FolderPreviewPixels {
-                                rgba: &rgba_data,
-                                width,
-                                height,
-                            },
-                            appearance,
-                            source,
-                            &validity,
-                        );
+                // The checked write validates again after releasing the writer
+                // lock, including early returns that preserve a larger variant.
+                let retry_after_source_change = match source.as_ref() {
+                    // Capture failed (folder vanished mid-flight) — nothing to re-validate.
+                    None => mode == FolderPreviewRequestMode::ValidateCached,
+                    Some(source) => {
+                        let source_fresh = if should_cache {
+                            trace.record_db_write();
+                            disk_cache.put_folder_preview_checked(
+                                &path,
+                                bucket_size,
+                                FolderPreviewPixels {
+                                    rgba: &rgba_data,
+                                    width,
+                                    height,
+                                },
+                                appearance,
+                                source,
+                                &validity,
+                            )
+                        } else {
+                            source.is_current()
+                        };
+                        !source_fresh
                     }
-                }
-                let retry_after_source_change =
-                    source.as_ref().is_some_and(|source| !source.is_current());
+                };
                 if retry_after_source_change {
                     rgba_data.clear();
                 }
                 crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                 let _ = tx.send(FolderPreviewData {
+                    validation_pending: false,
+                    replace_existing: mode == FolderPreviewRequestMode::ValidateCached,
+                    cache_source: source.filter(|_| should_cache && !retry_after_source_change),
                     retry_after_source_change,
                     cover_path,
                     validity,

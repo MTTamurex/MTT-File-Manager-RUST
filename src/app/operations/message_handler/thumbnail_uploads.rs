@@ -1211,6 +1211,145 @@ impl ImageViewerApp {
         updated_any
     }
 
+    /// Uploads cached artwork immediately; revalidated corrections replace it
+    /// later. Known invalidations and appearance changes still cancel old jobs.
+    fn upload_folder_preview_data(
+        &mut self,
+        ctx: &egui::Context,
+        data: crate::workers::folder_preview_worker::FolderPreviewData,
+        is_opengl: bool,
+        is_vulkan: bool,
+        use_conservative_policy: bool,
+        is_scrolling: bool,
+        visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>>,
+    ) -> bool {
+        if data.appearance != self.folder_appearance || !data.validity.is_current() {
+            return false;
+        }
+        // Background validation must not finish a newer foreground load (e.g.
+        // a larger bucket requested after the cached image was displayed).
+        if !data.replace_existing {
+            self.cache_manager.finish_folder_preview_loading(&data.path);
+        }
+        let requested_replace =
+            !data.validation_pending && self.pending_folder_preview_replace.remove(&data.path);
+        let force_replace = data.replace_existing || requested_replace;
+
+        if !self.is_folder_preview_result_relevant(&data.path) {
+            return false;
+        }
+        if data.retry_after_source_change
+            || self
+                .folder_preview_cover_for_known_item(&data.path)
+                .is_some_and(|cover| cover != data.cover_path)
+        {
+            // Reuse the existing debounced refresh path; a changing media
+            // file must not cause either a stale texture or a busy retry loop.
+            self.schedule_folder_cover_refresh(&data.path);
+            return false;
+        }
+        if !data.validation_pending && data.cache_source.is_some() {
+            self.cache_manager.mark_folder_preview_validated(&data.path);
+        }
+
+        let offscreen_during_scroll_lod = use_conservative_policy
+            && is_scrolling
+            && !force_replace
+            && visible_paths.is_some_and(|visible| !visible.contains(&data.path));
+        if offscreen_during_scroll_lod {
+            return false;
+        }
+
+        if data.rgba_data.is_empty() {
+            return false;
+        }
+        // Validate the composed folder-preview buffer before upload.
+        if !crate::domain::thumbnail::is_valid_rgba_buffer(
+            data.width,
+            data.height,
+            crate::domain::thumbnail::MAX_FOLDER_PREVIEW_SIDE,
+            data.rgba_data.len(),
+        ) {
+            log::warn!(
+                "[FOLDER PREVIEW] Rejected invalid RGBA buffer for {:?} (w={} h={} len={})",
+                data.path.file_name().unwrap_or_default(),
+                data.width,
+                data.height,
+                data.rgba_data.len()
+            );
+            return false;
+        }
+
+        let cached_size = self
+            .cache_manager
+            .folder_preview_cache
+            .peek(&data.path)
+            .map(|existing| existing.size());
+        if data.replace_existing
+            && cached_size
+                .is_some_and(|size| size[0] > data.width as usize || size[1] > data.height as usize)
+        {
+            // A low-resolution validation must not downgrade a newer LOD load.
+            // Refresh at the current display size instead.
+            self.schedule_folder_cover_refresh(&data.path);
+            return false;
+        }
+        match cached_size {
+            Some(size) if data.should_keep_texture(size, force_replace) => {
+                return false;
+            }
+            Some(_) => {
+                self.cache_manager
+                    .folder_preview_trace
+                    .record_upload_size_diff();
+            }
+            None => {
+                self.cache_manager
+                    .folder_preview_trace
+                    .record_upload_no_cache();
+            }
+        }
+
+        let mut texture_name = String::from("folder_preview_");
+        texture_name.push_str(data.path.to_string_lossy().as_ref());
+        self.cache_manager.folder_preview_trace.record_upload();
+        let color_image = if data.premultiplied {
+            egui::ColorImage::from_rgba_premultiplied(
+                [data.width as usize, data.height as usize],
+                &data.rgba_data,
+            )
+        } else {
+            egui::ColorImage::from_rgba_unmultiplied(
+                [data.width as usize, data.height as usize],
+                &data.rgba_data,
+            )
+        };
+        let texture_upload_start = Instant::now();
+        let texture = ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
+        log_slow_texture_upload(
+            "folder_preview",
+            texture_upload_start.elapsed(),
+            data.width,
+            data.height,
+            is_opengl,
+            is_vulkan,
+        );
+
+        if let Some(visible_paths) = visible_paths {
+            self.cache_manager.promote_visible(visible_paths);
+        }
+        // Keep the composed pixels in RAM so a later texture eviction re-uploads
+        // without a SQLite read + WebP decode round-trip.
+        if let Some(preview) = data.cached_preview() {
+            self.cache_manager
+                .put_folder_preview_rgba(data.path.clone(), preview);
+        } else {
+            self.cache_manager.remove_folder_preview_rgba(&data.path);
+        }
+        self.cache_manager.put_folder_preview(data.path, texture);
+        true
+    }
+
     fn process_folder_preview_uploads(
         &mut self,
         ctx: &egui::Context,
@@ -1224,6 +1363,11 @@ impl ImageViewerApp {
         let is_vulkan = self.is_vulkan_backend();
         let use_conservative_policy = self.uses_conservative_folder_preview_policy();
 
+        // When no file-thumbnail uploads are pending (cold folder navigation),
+        // folder previews may use a larger share of the per-frame upload cap;
+        // with a backlog the existing file-first policy applies unchanged.
+        // The time budget below remains the real latency guard either way.
+        let file_upload_backlog = !self.pending_thumbnails.is_empty();
         let max_folder_uploads: usize = if is_burst && use_conservative_policy && is_scrolling {
             1
         } else if is_burst && use_conservative_policy {
@@ -1231,16 +1375,20 @@ impl ImageViewerApp {
         } else if is_performance_critical {
             if use_conservative_policy {
                 1
-            } else {
+            } else if file_upload_backlog {
                 2
+            } else {
+                6
             }
         } else if use_conservative_policy && is_scrolling {
             1
         } else if is_video_playing {
             if use_conservative_policy {
                 1
-            } else {
+            } else if file_upload_backlog {
                 6
+            } else {
+                12
             }
         } else if use_conservative_policy {
             2
@@ -1272,113 +1420,22 @@ impl ImageViewerApp {
             if folder_uploads > 0 && start.elapsed() >= budget {
                 break;
             }
-            if let Ok(data) = self.folder_preview_receiver.try_recv() {
-                processed_results += 1;
-                if data.appearance != self.folder_appearance || !data.validity.is_current() {
-                    continue;
-                }
-                self.cache_manager.finish_folder_preview_loading(&data.path);
-                let force_replace = self.pending_folder_preview_replace.remove(&data.path);
-
-                if !self.is_folder_preview_result_relevant(&data.path) {
-                    continue;
-                }
-                if data.retry_after_source_change
-                    || self
-                        .folder_preview_cover_for_known_item(&data.path)
-                        .is_some_and(|cover| cover != data.cover_path)
-                {
-                    // Reuse the existing debounced refresh path; a changing media
-                    // file must not cause either a stale texture or a busy retry loop.
-                    self.schedule_folder_cover_refresh(&data.path);
-                    continue;
-                }
-
-                let offscreen_during_scroll_lod = use_conservative_policy
-                    && is_scrolling
-                    && !force_replace
-                    && visible_paths.is_some_and(|visible| !visible.contains(&data.path));
-                if offscreen_during_scroll_lod {
-                    continue;
-                }
-
-                if !data.rgba_data.is_empty() {
-                    // Validate the composed folder-preview buffer before upload.
-                    if !crate::domain::thumbnail::is_valid_rgba_buffer(
-                        data.width,
-                        data.height,
-                        crate::domain::thumbnail::MAX_FOLDER_PREVIEW_SIDE,
-                        data.rgba_data.len(),
-                    ) {
-                        log::warn!(
-                            "[FOLDER PREVIEW] Rejected invalid RGBA buffer for {:?} (w={} h={} len={})",
-                            data.path.file_name().unwrap_or_default(),
-                            data.width,
-                            data.height,
-                            data.rgba_data.len()
-                        );
-                        continue;
-                    }
-
-                    let cached_size = self
-                        .cache_manager
-                        .folder_preview_cache
-                        .peek(&data.path)
-                        .map(|existing| existing.size());
-                    match cached_size {
-                        Some(size)
-                            if size[0] >= data.width as usize
-                                && size[1] >= data.height as usize
-                                && !force_replace =>
-                        {
-                            continue;
-                        }
-                        Some(_) => {
-                            self.cache_manager
-                                .folder_preview_trace
-                                .record_upload_size_diff();
-                        }
-                        None => {
-                            self.cache_manager
-                                .folder_preview_trace
-                                .record_upload_no_cache();
-                        }
-                    }
-
-                    let mut texture_name = String::from("folder_preview_");
-                    texture_name.push_str(data.path.to_string_lossy().as_ref());
-                    self.cache_manager.folder_preview_trace.record_upload();
-                    let color_image = if data.premultiplied {
-                        egui::ColorImage::from_rgba_premultiplied(
-                            [data.width as usize, data.height as usize],
-                            &data.rgba_data,
-                        )
-                    } else {
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [data.width as usize, data.height as usize],
-                            &data.rgba_data,
-                        )
-                    };
-                    let texture_upload_start = Instant::now();
-                    let texture =
-                        ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
-                    log_slow_texture_upload(
-                        "folder_preview",
-                        texture_upload_start.elapsed(),
-                        data.width,
-                        data.height,
+            match self.folder_preview_receiver.try_recv() {
+                Ok(data) => {
+                    processed_results += 1;
+                    if self.upload_folder_preview_data(
+                        ctx,
+                        data,
                         is_opengl,
                         is_vulkan,
-                    );
-
-                    if let Some(visible_paths) = visible_paths {
-                        self.cache_manager.promote_visible(visible_paths);
+                        use_conservative_policy,
+                        is_scrolling,
+                        visible_paths,
+                    ) {
+                        folder_uploads += 1;
                     }
-                    self.cache_manager.put_folder_preview(data.path, texture);
-                    folder_uploads += 1;
                 }
-            } else {
-                break;
+                Err(_) => break,
             }
         }
 

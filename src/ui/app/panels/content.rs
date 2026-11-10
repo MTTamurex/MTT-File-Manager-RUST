@@ -272,7 +272,7 @@ pub(super) fn render_preview_panel_layout(
                                                 path
                                             );
                                             // Clear folder preview cache
-                                            app.cache_manager.folder_preview_cache.pop(&path);
+                                            app.cache_manager.invalidate_folder_preview(&path);
                                             log::debug!("[REFRESH FOLDER PREVIEW] Folder preview cache cleared");
                                             app.cache_manager.finish_folder_preview_loading(&path);
                                             log::debug!("[REFRESH FOLDER PREVIEW] Loading state cleared");

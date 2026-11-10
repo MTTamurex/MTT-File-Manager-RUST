@@ -78,7 +78,19 @@ fn folder_preview_editing_cover_in_same_second_invalidates_every_color() {
     let (decoded, _, _, _) = cache
         .get_folder_preview_for_source(&folder, 16, FolderAppearance::Original, &current)
         .unwrap();
-    assert_eq!(decoded, replacement);
+    assert_eq!(decoded.len(), replacement.len());
+    // Stored lossy (q90): solid colors round-trip within a small RGB delta;
+    // alpha is lossless and stays exact.
+    for (decoded_px, expected_px) in decoded.chunks_exact(4).zip(replacement.chunks_exact(4)) {
+        assert_eq!(decoded_px[3], expected_px[3], "alpha must stay exact");
+        for channel in 0..3 {
+            let delta = i32::from(decoded_px[channel]) - i32::from(expected_px[channel]);
+            assert!(
+                delta.abs() <= 8,
+                "solid color channel {channel} drifted by {delta}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -224,4 +236,57 @@ fn folder_preview_invalidation_while_writer_is_busy_prevents_late_commit() {
     assert!(cache
         .get_folder_preview_for_source(&folder, 16, FolderAppearance::Original, &source)
         .is_none());
+}
+
+#[test]
+fn folder_preview_source_change_while_writer_is_busy_requests_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = std::sync::Arc::new(ThumbnailDiskCache::new(dir.path().to_path_buf()).unwrap());
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    let cover = folder.join("cover.jpg");
+    std::fs::write(&cover, b"image").unwrap();
+    set_cover_time(&cover, 100_100);
+    let source = FolderPreviewSource::capture(&folder, Some(&cover)).unwrap();
+    let pixels = [230, 210, 140, 255].repeat(32 * 32);
+    assert!(cache.put_folder_preview_checked(
+        &folder,
+        32,
+        FolderPreviewPixels {
+            rgba: &pixels,
+            width: 32,
+            height: 32
+        },
+        FolderAppearance::Original,
+        &source,
+        &FolderPreviewValidity::default(),
+    ));
+    let lock = cache.writer.lock();
+    let worker_cache = cache.clone();
+    let worker_folder = folder.clone();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        worker_cache.put_folder_preview_checked(
+            &worker_folder,
+            16,
+            FolderPreviewPixels {
+                rgba: &pixels,
+                width: 32,
+                height: 32,
+            },
+            FolderAppearance::Original,
+            &source,
+            &FolderPreviewValidity::default(),
+        )
+    });
+    started_rx.recv().unwrap();
+    // Keep the writer busy while the request reaches the larger-variant check.
+    std::thread::sleep(Duration::from_millis(50));
+    set_cover_time(&cover, 100_200);
+    drop(lock);
+    assert!(
+        !worker.join().unwrap(),
+        "source changed during the writer wait"
+    );
 }

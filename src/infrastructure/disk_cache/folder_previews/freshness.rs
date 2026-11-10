@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// Exact source metadata captured before cache lookup/composition, not its completion time.
-#[derive(Clone, Debug)]
+/// Exact source identity attached to preview pixels. Fingerprints read from
+/// SQLite remain snapshots until background source validation completes.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FolderPreviewSource {
     folder: PathBuf,
     cover: Option<PathBuf>,
@@ -10,6 +11,24 @@ pub struct FolderPreviewSource {
 }
 
 impl FolderPreviewSource {
+    /// Reconstructs the identity stored with cached pixels, without filesystem I/O.
+    /// It is only a snapshot until `capture`/`is_current` validates it.
+    pub(crate) fn from_cached_fingerprint(
+        folder: &Path,
+        cover: Option<&Path>,
+        fingerprint: String,
+    ) -> Self {
+        Self {
+            folder: folder.to_path_buf(),
+            cover: cover.map(Path::to_path_buf),
+            fingerprint,
+        }
+    }
+
+    pub(crate) fn matches_paths(&self, folder: &Path, cover: Option<&Path>) -> bool {
+        self.folder == folder && self.cover.as_deref() == cover
+    }
+
     pub fn capture(folder: &Path, cover: Option<&Path>) -> Option<Self> {
         let mut hash = blake3::Hasher::new();
         for path in std::iter::once(folder).chain(cover) {

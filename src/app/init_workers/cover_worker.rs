@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 const MAX_BATCH: usize = 32;
+/// Directory scans (read_dir + perceived-type lookups) dominate cover discovery,
+/// so two resolvers keep one slow directory from delaying the rest of a batch.
+/// Results are keyed by path downstream, so interleave order is irrelevant.
+const COVER_RESOLVER_COUNT: usize = 2;
 
 pub(in crate::app) fn spawn_cover_worker(
     db: Arc<AppStateDb>,
@@ -17,29 +21,55 @@ pub(in crate::app) fn spawn_cover_worker(
 ) {
     let (requests, rx) = mpsc::channel::<PathBuf>();
     let (results, received) = mpsc::channel();
+    // A single dispatcher owns the request receiver (std mpsc receivers are not
+    // Sync) and hands batches to the resolver pool over a clone-shared crossbeam
+    // channel — the same pattern the folder-preview workers use.
+    let (batch_tx, batch_rx) = crossbeam_channel::unbounded::<Vec<PathBuf>>();
     if std::thread::Builder::new()
         .name("folder-covers".into())
         .spawn(move || {
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
             while let Ok(first) = rx.recv() {
                 let batch = collect_batch(first, &rx);
-                // Waiting for the reader is safe here. Treating a busy cache as a
-                // miss would cause unnecessary filesystem scans under contention.
-                let cached = db.get_folder_covers(&batch);
-                for folder in batch {
-                    let cover = resolve_cover(&db, &folder, cached.get(&folder));
-                    if results.send((folder, cover)).is_err() {
+                let chunk_len = batch.len().div_ceil(COVER_RESOLVER_COUNT);
+                for chunk in batch.chunks(chunk_len) {
+                    if batch_tx.send(chunk.to_vec()).is_err() {
                         return;
                     }
-                    ctx.request_repaint();
                 }
             }
         })
         .is_err()
     {
         log::error!("[FOLDER-COVERS] Failed to start worker");
+    }
+    for resolver_id in 0..COVER_RESOLVER_COUNT {
+        let batch_rx = batch_rx.clone();
+        let db = db.clone();
+        let results = results.clone();
+        let ctx = ctx.clone();
+        if std::thread::Builder::new()
+            .name(format!("folder-covers-{resolver_id}"))
+            .spawn(move || {
+                crate::infrastructure::io_priority::set_thread_priority(
+                    crate::infrastructure::io_priority::IOPriority::Background,
+                );
+                while let Ok(batch) = batch_rx.recv() {
+                    // Waiting for the reader is safe here. Treating a busy cache as a
+                    // miss would cause unnecessary filesystem scans under contention.
+                    let cached = db.get_folder_covers(&batch);
+                    for folder in batch {
+                        let cover = resolve_cover(&db, &folder, cached.get(&folder));
+                        if results.send((folder, cover)).is_err() {
+                            return;
+                        }
+                        ctx.request_repaint();
+                    }
+                }
+            })
+            .is_err()
+        {
+            log::warn!("[FOLDER-COVERS] Failed to start resolver {resolver_id}");
+        }
     }
     (requests, received)
 }

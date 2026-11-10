@@ -302,12 +302,13 @@ pub(in crate::app) fn spawn_folder_preview_workers(
 ) {
     // M-18: crossbeam Receiver is Clone + Send + Sync — workers share it directly
     // without the Arc<Mutex<>> serialisation bottleneck.
-    // Bounded(60): inherent backpressure prevents unbounded growth during rapid
+    // Bounded(128): inherent backpressure prevents unbounded growth during rapid
     // navigation — preview is best-effort so dropping overflow is safe.
     let (folder_preview_tx, folder_preview_rx) = crossbeam_channel::bounded::<
         crate::workers::folder_preview_worker::FolderPreviewRequest,
-    >(60);
+    >(128);
     let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
+    let (source_tx, source_rx) = crossbeam_channel::bounded(128);
 
     // When the folder composer failed to initialise, folder preview is disabled:
     // return the channels so callers keep the same contract, but spawn no worker.
@@ -318,14 +319,35 @@ pub(in crate::app) fn spawn_folder_preview_workers(
     };
 
     {
-        use crate::workers::folder_preview_worker::spawn_folder_preview_worker;
-        // Folder-preview composition is dominated by Shell COM calls + SQLite
-        // cache hits; 2 workers fully cover scroll bursts while keeping the
-        // committed stack footprint low (each OS thread commits ~1 MB by default).
-        let worker_count: usize = 2;
+        use crate::workers::folder_preview_worker::{
+            spawn_folder_preview_cache_worker, spawn_folder_preview_worker,
+        };
+        // Cache hits never share workers with filesystem validation/composition.
+        for _ in 0..2 {
+            spawn_folder_preview_cache_worker(
+                folder_preview_rx.clone(),
+                source_tx.clone(),
+                folder_preview_res_tx.clone(),
+                ctx.clone(),
+                disk_cache.clone(),
+            );
+        }
+        // This pool handles source validation and cold composition only;
+        // cached artwork is never queued behind its filesystem operations. Sizing
+        // mirrors the thumbnail workers but never below 2, so compose work stays
+        // concurrent while keeping the committed stack footprint low (each OS
+        // thread commits ~1 MB by default).
+        let cpu_count = crate::workers::thumbnail::available_cpu_count();
+        let worker_count =
+            crate::workers::thumbnail::compute_thumbnail_worker_count(cpu_count).max(2);
+        log::info!(
+            "[FolderPreview] worker_count={} cpu_count={}",
+            worker_count,
+            cpu_count
+        );
         for _ in 0..worker_count {
             spawn_folder_preview_worker(
-                folder_preview_rx.clone(),
+                source_rx.clone(),
                 folder_preview_res_tx.clone(),
                 ctx.clone(),
                 disk_cache.clone(),

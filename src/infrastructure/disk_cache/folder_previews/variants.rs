@@ -68,7 +68,19 @@ mod tests {
             let (decoded, _, _, _) = cache
                 .get_folder_preview_for_appearance(&folder, size, appearance)
                 .expect("switching colors must reuse the matching variant");
-            assert_eq!(decoded, expected);
+            assert_eq!(decoded.len(), expected.len());
+            // Stored lossy (q90): solid colors round-trip within a small RGB
+            // delta; alpha is lossless and stays exact.
+            for (decoded_px, expected_px) in decoded.chunks_exact(4).zip(expected.chunks_exact(4)) {
+                assert_eq!(decoded_px[3], expected_px[3], "alpha must stay exact");
+                for channel in 0..3 {
+                    let delta = i32::from(decoded_px[channel]) - i32::from(expected_px[channel]);
+                    assert!(
+                        delta.abs() <= 8,
+                        "solid color channel {channel} drifted by {delta}"
+                    );
+                }
+            }
         }
     }
 
