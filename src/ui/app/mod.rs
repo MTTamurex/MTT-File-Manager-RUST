@@ -1,4 +1,5 @@
 mod delete_feedback;
+mod dual_panel_input;
 pub mod input;
 mod interface_input;
 pub mod layers;

@@ -419,21 +419,15 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // ── DUAL PANEL SHORTCUTS ──
         // Tab (no modifiers) = switch active panel when dual panel is enabled
         // Ctrl+Shift+D = toggle dual panel on/off
-        if !text_input_active {
-            let tab_pressed = ctx.input(|i| {
-                i.events.iter().any(|e| {
-                    matches!(
-                        e,
-                        egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
-                        if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
-                    )
-                })
-            });
-            if tab_pressed && app.dual_panel_enabled {
-                app.dual_panel_switch_active();
-                user_active = true;
-            }
+        if super::dual_panel_input::consume_panel_tab(
+            ctx,
+            app.dual_panel_enabled && !app.command_palette_blocked(),
+        ) {
+            app.dual_panel_switch_active();
+            user_active = true;
+        }
 
+        if !text_input_active {
             let ctrl_shift_d = ctx.input(|i| {
                 i.events.iter().any(|e| {
                     matches!(
