@@ -599,6 +599,19 @@ impl eframe::App for ImageViewerApp {
             app::input::handle_input(self, ctx);
         }
 
+        // Render first so the modal owns input before any file view sees this frame.
+        // Defer execution until the underlying UI has finished rendering.
+        let palette_blocks_frame = self.command_palette.active;
+        let palette_command = if palette_blocks_frame {
+            let command = crate::ui::command_palette::render(self, ctx);
+            crate::ui::command_palette::block_background_input(ctx);
+            ui.disable();
+            self.reset_external_drop_state();
+            command
+        } else {
+            None
+        };
+
         // 6. Layout: Status Bar (Bottom) - lightweight, always render
         app::layers::render_status_bar_layer(self, ui);
 
@@ -637,7 +650,7 @@ impl eframe::App for ImageViewerApp {
         }
 
         // 10. Operations: Context Menu (Rendering & Actions)
-        if !self.global_search.active {
+        if !self.global_search.active && !palette_blocks_frame {
             app::menu_handler::handle_context_menu(self, ctx);
         }
         // Menu actions happen after the panels; publish them and repaint promptly.
@@ -831,6 +844,10 @@ impl eframe::App for ImageViewerApp {
         }
         crate::ui::video_overlay::finish_frame(ctx);
         crate::ui::tab_drag_preview::finish_frame(ctx);
+
+        if let Some(command) = palette_command {
+            self.execute_palette_command(command, ctx);
+        }
 
         diagnostic_frame.checkpoint("frame_overlays_and_actions");
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)

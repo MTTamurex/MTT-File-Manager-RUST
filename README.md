@@ -1,6 +1,6 @@
 # MTT File Manager
 
-**Native Windows file manager** built in Rust with a modern UI, disk usage analysis, archive browsing and creation, advanced media preview, and Windows integration.
+**MTT File Manager** is a native Windows file manager built in Rust. Browse folders in tabs or side by side, find files with indexed search, and preview images, documents, and media without opening another application. Built-in tools for tags, archives, disk usage analysis, and automatic file organization help keep things in order.
 
 <img width="3840" height="2064" alt="main_app" src="https://github.com/user-attachments/assets/a0d6a2e2-798c-4fde-97f9-08bb62381f93" />
 

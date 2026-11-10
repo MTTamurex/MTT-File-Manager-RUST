@@ -789,6 +789,7 @@ pub struct ImageViewerApp {
     // Configurable keyboard shortcuts
     pub shortcuts: ShortcutBindings,
     pub shortcut_editor: ShortcutEditorState,
+    pub(crate) command_palette: crate::app::command_palette::CommandPaletteState,
 
     // Per-folder locked view preferences
     pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,

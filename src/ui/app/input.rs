@@ -118,6 +118,32 @@ fn handle_delete_permanently_shortcut(
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    if app.command_palette.active {
+        if ctx.input(|input| !input.events.is_empty()) {
+            app.last_user_activity = std::time::Instant::now();
+            app.refresh_working_set_trim_blocker(false);
+            let _ = app
+                .file_operation_state
+                .idle_warmup_sender
+                .send(IdleWarmupMessage::UserActive);
+        }
+        return;
+    }
+    if ctx.input(|input| input.viewport().focused.unwrap_or(false))
+        && app.can_open_command_palette(ctx)
+        && crate::ui::command_palette::consume_toggle(&app.shortcuts, ctx)
+    {
+        app.command_palette
+            .open(ctx.memory(|memory| memory.focused()));
+        app.last_user_activity = std::time::Instant::now();
+        app.refresh_working_set_trim_blocker(false);
+        let _ = app
+            .file_operation_state
+            .idle_warmup_sender
+            .send(IdleWarmupMessage::UserActive);
+        ctx.request_repaint();
+        return;
+    }
     if app.folder_export.is_some() {
         return;
     }

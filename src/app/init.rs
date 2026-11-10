@@ -866,6 +866,7 @@ impl ImageViewerApp {
             diagnostic_mode_enabled_at,
             shortcuts,
             shortcut_editor: crate::app::shortcuts::ShortcutEditorState::default(),
+            command_palette: crate::app::command_palette::CommandPaletteState::default(),
 
             folder_locks,
             current_folder_locked: false,

@@ -144,6 +144,7 @@ pub fn render_shortcut_settings_section(
 
 fn action_label(action: ShortcutAction) -> String {
     match action {
+        ShortcutAction::CommandPalette => t!("command_palette.title").to_string(),
         ShortcutAction::NewTab => t!("settings.shortcut_new_tab").to_string(),
         ShortcutAction::CloseTab => t!("settings.shortcut_close_tab").to_string(),
         ShortcutAction::ReopenClosedTab => t!("settings.shortcut_reopen_closed_tab").to_string(),

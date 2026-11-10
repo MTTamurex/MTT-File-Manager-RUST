@@ -5,6 +5,7 @@ pub mod app; // NEW - Modular sub-apps
 pub mod app_impl; // NEW - eframe::App implementation
 pub mod cache;
 pub(crate) mod clipboard_feedback;
+pub(crate) mod command_palette;
 pub mod components;
 pub mod context_menu;
 pub(crate) mod disclosure;
