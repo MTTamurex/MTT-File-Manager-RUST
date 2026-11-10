@@ -45,6 +45,7 @@ mod folder_timestamps;
 pub mod global_search;
 pub mod icons;
 pub mod image_conversion;
+mod interface_actions;
 pub mod message_handler;
 pub mod metadata;
 pub(crate) mod move_to;

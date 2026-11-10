@@ -159,7 +159,11 @@ pub fn render_toolbar(
                 svg_manager,
                 theme::ICON_DETAILS,
                 show_preview_panel,
-                &t!("toolbar.details"),
+                &format!(
+                    "{} ({})",
+                    t!("toolbar.details"),
+                    shortcuts.label(crate::app::shortcuts::ShortcutAction::TogglePreviewPanel)
+                ),
             )
             .clicked()
             {

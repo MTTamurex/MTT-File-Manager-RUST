@@ -116,6 +116,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                 video_preview_active,
                 active_tag_filter_name.as_deref(),
                 compact_status_layout,
+                &app.shortcuts,
             );
             if app.interface_scale != previous_scale {
                 crate::ui::interface_scale::apply(&ctx, app.interface_scale);
@@ -123,9 +124,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
             }
             match action {
                 StatusBarAction::OpenSettings => {
-                    app.navigation_state.show_settings_window = true;
-                    app.navigation_state.active_settings_section =
-                        crate::app::navigation_state::SettingsSection::General;
+                    app.open_settings(crate::app::navigation_state::SettingsSection::General);
                 }
                 StatusBarAction::BulkThumbnailScan => {
                     if crate::domain::special_paths::is_virtual_path(

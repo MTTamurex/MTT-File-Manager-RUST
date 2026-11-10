@@ -82,6 +82,7 @@ impl ShortcutBinding {
                         "pgup" => ShortcutTrigger::Key(egui::Key::PageUp),
                         "pgdn" => ShortcutTrigger::Key(egui::Key::PageDown),
                         "del" => ShortcutTrigger::Key(egui::Key::Delete),
+                        "," => ShortcutTrigger::Key(egui::Key::Comma),
                         _ => ShortcutTrigger::Key(
                             egui::Key::ALL
                                 .iter()
@@ -125,6 +126,7 @@ impl std::fmt::Display for ShortcutBinding {
             write!(f, "Shift+")?;
         }
         f.write_str(match self.trigger {
+            ShortcutTrigger::Key(egui::Key::Comma) => ",",
             ShortcutTrigger::Key(key) => key.name(),
             ShortcutTrigger::ScrollUp => "ScrollUp",
             ShortcutTrigger::ScrollDown => "ScrollDown",
@@ -257,6 +259,7 @@ fn is_supported_key(key: egui::Key) -> bool {
             | egui::Key::Num7
             | egui::Key::Num8
             | egui::Key::Num9
+            | egui::Key::Comma
             | egui::Key::Tab
             | egui::Key::Enter
             | egui::Key::PageUp

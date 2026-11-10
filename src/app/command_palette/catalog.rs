@@ -19,6 +19,7 @@ pub(crate) enum Command {
     NextView,
     PreviousView,
     Preview,
+    Sidebar,
     DualPanel,
     GlobalSearch,
     SelectAll,
@@ -49,6 +50,7 @@ pub(crate) const COMMANDS: &[Command] = &[
     Command::NextView,
     Command::PreviousView,
     Command::Preview,
+    Command::Sidebar,
     Command::DualPanel,
     Command::GlobalSearch,
     Command::SelectAll,
@@ -89,6 +91,7 @@ impl Command {
             Self::NextView => "command_palette.next_view",
             Self::PreviousView => "command_palette.previous_view",
             Self::Preview => "command_palette.preview",
+            Self::Sidebar => "command_palette.sidebar",
             Self::DualPanel => "command_palette.dual_panel",
             Self::GlobalSearch => "command_palette.global_search",
             Self::SelectAll => "command_palette.select_all",
@@ -116,6 +119,7 @@ impl Command {
             | Self::NextView
             | Self::PreviousView
             | Self::Preview
+            | Self::Sidebar
             | Self::DualPanel => "command_palette.views",
             Self::GlobalSearch => "command_palette.search",
             Self::SelectAll | Self::ClearSelection | Self::InvertSelection => {
@@ -143,6 +147,10 @@ impl Command {
             Self::CreateFolder => ShortcutAction::CreateFolder,
             Self::Rename => ShortcutAction::Rename,
             Self::Properties => ShortcutAction::Properties,
+            Self::Settings => ShortcutAction::OpenSettings,
+            Self::InvertSelection => ShortcutAction::InvertSelection,
+            Self::Preview => ShortcutAction::TogglePreviewPanel,
+            Self::Sidebar => ShortcutAction::ToggleLeftSidebar,
             _ => return None,
         })
     }

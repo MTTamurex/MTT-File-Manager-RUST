@@ -42,6 +42,7 @@ command_palette:
   columns: "Switch to Column List view"
   miller: "Switch to Miller's Columns view"
   preview: "Toggle details preview panel"
+  sidebar: "Toggle left drive sidebar"
   dual_panel: "Toggle dual panel"
   global_search: "Open global search"
   select_all: "Select all items"

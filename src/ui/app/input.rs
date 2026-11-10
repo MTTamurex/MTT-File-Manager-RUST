@@ -150,6 +150,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if crate::app::operations::tabs::transfer_pending(ctx) {
         return;
     }
+    if super::interface_input::handle_interface_input(app, ctx) {
+        return;
+    }
     let mut user_active = false;
     if app.renaming_state.is_none()
         && app.sidebar_renaming.is_none()

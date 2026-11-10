@@ -42,6 +42,7 @@ command_palette:
   columns: "切换到分栏列表视图"
   miller: "切换到米勒列视图"
   preview: "切换详细信息和预览面板"
+  sidebar: "切换左侧驱动器栏"
   dual_panel: "切换双面板"
   global_search: "打开全局搜索"
   select_all: "选择所有项目"

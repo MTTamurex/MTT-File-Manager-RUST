@@ -64,6 +64,12 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: 
                 } else {
                     rust_i18n::t!("secondary_toolbar.show_sidebar")
                 };
+                let sidebar_tooltip = format!(
+                    "{} ({})",
+                    sidebar_tooltip,
+                    app.shortcuts
+                        .label(crate::app::shortcuts::ShortcutAction::ToggleLeftSidebar)
+                );
 
                 if widgets::toggle_icon_button_sized(
                     ui,
@@ -77,9 +83,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: 
                 )
                 .clicked()
                 {
-                    app.show_left_sidebar = !app.show_left_sidebar;
-                    app.tab_manager.active_mut().show_left_sidebar = app.show_left_sidebar;
-                    app.save_preferences();
+                    app.toggle_left_sidebar();
                 }
 
                 ui.add_space(toggle_gap);

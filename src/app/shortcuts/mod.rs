@@ -4,6 +4,8 @@ use std::collections::HashMap;
 mod action;
 mod binding;
 #[cfg(test)]
+mod interface_tests;
+#[cfg(test)]
 mod palette_tests;
 #[cfg(test)]
 mod reopen_tests;
@@ -75,24 +77,30 @@ impl ShortcutBindings {
             bindings[action.index()] = candidate;
             customized[action.index()] = candidate != action.default_binding();
         }
-        // Older installations could already assign the new palette's default to
-        // another action. Preserve that choice and give only the new action a free binding.
-        let palette = ShortcutAction::CommandPalette;
-        if !prefs.contains_key(palette.preference_key())
-            && ShortcutAction::ALL.iter().any(|&action| {
-                action != palette && bindings[action.index()] == bindings[palette.index()]
-            })
-        {
-            let fallback = std::iter::once(egui::Key::P)
-                .chain(egui::Key::ALL.iter().copied())
-                .map(|key| ShortcutBinding::new(true, true, true, key))
-                .find(|candidate| {
-                    validate_action_binding(palette, *candidate).is_ok()
-                        && !bindings.contains(candidate)
-                });
-            if let Some(fallback) = fallback {
-                bindings[palette.index()] = fallback;
-                customized[palette.index()] = true;
+        // Preserve existing assignments when an installation gains a new action.
+        for new_action in [
+            ShortcutAction::CommandPalette,
+            ShortcutAction::OpenSettings,
+            ShortcutAction::InvertSelection,
+            ShortcutAction::TogglePreviewPanel,
+            ShortcutAction::ToggleLeftSidebar,
+        ] {
+            if !prefs.contains_key(new_action.preference_key())
+                && ShortcutAction::ALL.iter().any(|&action| {
+                    action != new_action && bindings[action.index()] == bindings[new_action.index()]
+                })
+            {
+                let fallback = std::iter::once(egui::Key::P)
+                    .chain(egui::Key::ALL.iter().copied())
+                    .map(|key| ShortcutBinding::new(true, true, true, key))
+                    .find(|candidate| {
+                        validate_action_binding(new_action, *candidate).is_ok()
+                            && !bindings.contains(candidate)
+                    });
+                if let Some(fallback) = fallback {
+                    bindings[new_action.index()] = fallback;
+                    customized[new_action.index()] = true;
+                }
             }
         }
         let mut changed = true;

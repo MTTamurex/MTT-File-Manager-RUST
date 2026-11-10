@@ -59,14 +59,8 @@ impl ImageViewerApp {
             Command::PreviousView => {
                 self.change_view_mode(self.view_mode.cycle(false));
             }
-            Command::Preview => {
-                self.show_preview_panel = !self.show_preview_panel;
-                self.tab_manager.active_mut().show_preview_panel = self.show_preview_panel;
-                if self.show_preview_panel && self.needs_selected_preview_preparation() {
-                    self.update_selected_thumbnail();
-                }
-                self.update_video_visibility();
-            }
+            Command::Preview => self.toggle_preview_panel(),
+            Command::Sidebar => self.toggle_left_sidebar(),
             Command::DualPanel => self.dual_panel_toggle(),
             Command::GlobalSearch => self.toggle_global_search(),
             Command::SelectAll => {
@@ -97,12 +91,11 @@ impl ImageViewerApp {
                 self.show_properties_for_paths(paths);
             }
             Command::Settings | Command::Organizer => {
-                self.navigation_state.active_settings_section = if command == Command::Organizer {
+                self.open_settings(if command == Command::Organizer {
                     SettingsSection::Organizer
                 } else {
                     SettingsSection::General
-                };
-                self.navigation_state.show_settings_window = true;
+                });
             }
         }
         ctx.request_repaint();

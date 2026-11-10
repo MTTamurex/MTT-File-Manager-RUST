@@ -32,7 +32,16 @@ fn commands_show_current_bindings_including_the_fixed_panel_shortcut() {
         Command::DualPanel.binding(&bindings),
         Some(ShortcutBinding::ctrl_shift(eframe::egui::Key::D))
     );
-    assert_eq!(Command::Settings.binding(&bindings), None);
+    for (command, action) in [
+        (Command::Settings, ShortcutAction::OpenSettings),
+        (Command::InvertSelection, ShortcutAction::InvertSelection),
+        (Command::Preview, ShortcutAction::TogglePreviewPanel),
+        (Command::Sidebar, ShortcutAction::ToggleLeftSidebar),
+    ] {
+        assert_eq!(command.binding(&bindings), Some(action.default_binding()));
+        bindings.set(action, custom);
+        assert_eq!(command.binding(&bindings), Some(custom));
+    }
 }
 
 #[test]

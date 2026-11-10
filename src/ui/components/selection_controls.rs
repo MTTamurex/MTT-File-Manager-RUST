@@ -21,6 +21,7 @@ pub(crate) fn render(
     svg_manager: &mut SvgIconManager,
     current_item_count: usize,
     has_selection: bool,
+    shortcuts: &crate::app::shortcuts::ShortcutBindings,
 ) -> Option<SelectionControlAction> {
     let controls_rect =
         egui::Rect::from_center_size(bar_rect.center(), egui::vec2(GROUP_WIDTH, BUTTON_SIZE.y));
@@ -49,7 +50,11 @@ pub(crate) fn render(
         &mut controls_ui,
         svg_manager,
         "invert_selection",
-        &t!("status_bar.invert_selection"),
+        &format!(
+            "{} ({})",
+            t!("status_bar.invert_selection"),
+            shortcuts.label(crate::app::shortcuts::ShortcutAction::InvertSelection)
+        ),
         current_item_count > 0,
     );
 

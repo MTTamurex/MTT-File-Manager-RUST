@@ -30,10 +30,14 @@ pub enum ShortcutAction {
     GoUp,
     ReopenClosedTab,
     CommandPalette,
+    OpenSettings,
+    InvertSelection,
+    TogglePreviewPanel,
+    ToggleLeftSidebar,
 }
 
 impl ShortcutAction {
-    pub const COUNT: usize = 26;
+    pub const COUNT: usize = 30;
     pub const ALL: [Self; Self::COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -61,8 +65,12 @@ impl ShortcutAction {
         Self::GoUp,
         Self::ReopenClosedTab,
         Self::CommandPalette,
+        Self::OpenSettings,
+        Self::InvertSelection,
+        Self::TogglePreviewPanel,
+        Self::ToggleLeftSidebar,
     ];
-    pub const CONFIGURABLE_COUNT: usize = 17;
+    pub const CONFIGURABLE_COUNT: usize = 21;
     pub const CONFIGURABLE: [Self; Self::CONFIGURABLE_COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -81,6 +89,10 @@ impl ShortcutAction {
         Self::GoForward,
         Self::GoUp,
         Self::CommandPalette,
+        Self::OpenSettings,
+        Self::InvertSelection,
+        Self::TogglePreviewPanel,
+        Self::ToggleLeftSidebar,
     ];
 
     pub const fn index(self) -> usize {
@@ -91,6 +103,10 @@ impl ShortcutAction {
         match self {
             Self::NewTab => "shortcut_new_tab",
             Self::CommandPalette => "shortcut_command_palette",
+            Self::OpenSettings => "shortcut_open_settings",
+            Self::InvertSelection => "shortcut_invert_selection",
+            Self::TogglePreviewPanel => "shortcut_toggle_preview_panel",
+            Self::ToggleLeftSidebar => "shortcut_toggle_left_sidebar",
             Self::CloseTab => "shortcut_close_tab",
             Self::ReopenClosedTab => "shortcut_reopen_closed_tab",
             Self::NextTab => "shortcut_next_tab",
@@ -122,6 +138,10 @@ impl ShortcutAction {
         match self {
             Self::NewTab => "settings.shortcut_new_tab",
             Self::CommandPalette => "command_palette.title",
+            Self::OpenSettings => "command_palette.settings",
+            Self::InvertSelection => "command_palette.invert_selection",
+            Self::TogglePreviewPanel => "command_palette.preview",
+            Self::ToggleLeftSidebar => "command_palette.sidebar",
             Self::CloseTab => "settings.shortcut_close_tab",
             Self::ReopenClosedTab => "settings.shortcut_reopen_closed_tab",
             Self::NextTab => "settings.shortcut_next_tab",
@@ -181,4 +201,8 @@ pub(super) const DEFAULT_BINDINGS: [ShortcutBinding; ShortcutAction::COUNT] = [
     ShortcutBinding::alt(Key::ArrowUp),
     ShortcutBinding::ctrl_shift(Key::T),
     ShortcutBinding::ctrl_shift(Key::P),
+    ShortcutBinding::ctrl(Key::Comma),
+    ShortcutBinding::ctrl(Key::I),
+    ShortcutBinding::alt(Key::P),
+    ShortcutBinding::ctrl(Key::B),
 ];

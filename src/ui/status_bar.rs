@@ -270,6 +270,7 @@ pub fn render_status_bar(
     video_preview_active: bool,
     active_tag_filter_name: Option<&str>,
     compact_layout: bool,
+    shortcuts: &crate::app::shortcuts::ShortcutBindings,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -322,7 +323,11 @@ pub fn render_status_bar(
                 svg_manager,
                 "settings",
                 false,
-                &t!("status_bar.settings"),
+                &format!(
+                    "{} ({})",
+                    t!("status_bar.settings"),
+                    shortcuts.label(crate::app::shortcuts::ShortcutAction::OpenSettings)
+                ),
                 theme::ICON_SIZE_SM,
                 1.0,
                 0.75,
@@ -431,6 +436,7 @@ pub fn render_status_bar(
             svg_manager,
             current_item_count,
             has_selection,
+            shortcuts,
         ) {
             action = match selection_action {
                 SelectionControlAction::SelectAll => StatusBarAction::SelectAll,

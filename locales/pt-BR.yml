@@ -42,6 +42,7 @@ command_palette:
   columns: "Alternar para visualização em Lista de Colunas"
   miller: "Alternar para visualização em Colunas de Miller"
   preview: "Alternar painel de detalhes e pré-visualização"
+  sidebar: "Alternar barra lateral esquerda de unidades"
   dual_panel: "Alternar painel duplo"
   global_search: "Abrir busca global"
   select_all: "Selecionar todos os itens"
