@@ -1,10 +1,13 @@
 //! The modal is rendered before file views; its command is dispatched after them.
 mod keyboard;
 mod row;
+mod selection;
 mod tooltip;
 pub(crate) use keyboard::consume_toggle;
 #[cfg(test)]
 mod layout_tests;
+#[cfg(test)]
+mod selection_tests;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +43,7 @@ fn render_dialog(
     let mut execute = None;
     let mut close = consume_toggle(shortcuts, ctx);
     let keys = keyboard::read(ctx);
+    let pointer_moved = selection::pointer_moved(state, ctx);
     let response = egui::Modal::new(egui::Id::new("command_palette_modal"))
         .area(
             egui::Modal::default_area(egui::Id::new("command_palette_modal"))
@@ -76,16 +80,10 @@ fn render_dialog(
                 state.move_selection(entries.len(), false);
             }
             close |= keys.close;
-            if keys.run {
-                if let Some(entry) = entries.get(state.selected) {
-                    if disabled_reason(entry.command, context).is_none() {
-                        execute = Some(entry.command);
-                    }
-                }
-            }
             ui.small(t!("command_palette.matches", count = entries.len()));
             ui.separator();
-            let described = entries.get(state.selected).map(|entry| entry.command);
+            let mouse_selects =
+                pointer_moved && !keys.up && !keys.down && !keys.run && !input.changed();
             let help_height = ui.text_style_height(&egui::TextStyle::Body) * 4.0
                 + ui.spacing().item_spacing.y * 2.0;
             let header_height = ui.min_rect().height();
@@ -112,34 +110,49 @@ fn render_dialog(
                         let reason = disabled_reason(entry.command, context);
                         let selected = index == state.selected;
                         let row = row::render(ui, entry, selected, reason.is_none());
+                        if mouse_selects && row.contains_pointer() && !row.clicked() {
+                            selection::select_hovered(state, index, ctx);
+                        }
                         if selected && state.reveal_selected {
                             row.scroll_to_me(Some(egui::Align::Center));
                         }
-                        let tooltip_text = reason
-                            .map(|reason| t!(reason).to_string())
-                            .or_else(|| input_hints::help(entry.command, shortcuts))
-                            .unwrap_or_else(|| entry.inputs.clone());
-                        let _ = tooltip::show(&row, &tooltip_text);
+                        if index == state.selected {
+                            let help = input_hints::help(entry.command, shortcuts);
+                            let tooltip_text = if let Some(reason) = reason {
+                                format!("{}\n\n{help}", t!(reason))
+                            } else {
+                                help
+                            };
+                            let _ = tooltip::show(&row, &tooltip_text);
+                        }
                         if row.clicked() {
+                            state.selected = index;
                             execute = Some(entry.command);
                         }
                     }
                 });
             state.reveal_selected = false;
+            let described = entries.get(state.selected).map(|entry| entry.command);
+            if keys.run {
+                if let Some(command) = described {
+                    if disabled_reason(command, context).is_none() {
+                        execute = Some(command);
+                    }
+                }
+            }
             ui.separator();
             // Reserve a stable help area: changing selection must not recenter the dialog.
             egui::ScrollArea::vertical()
-                .id_salt("command_palette_help")
+                // Do not inherit another command's position in a long description.
+                .id_salt(("command_palette_help", described))
                 .max_height(help_height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if let Some(command) = described {
-                        if let Some(help) = input_hints::help(command, shortcuts) {
-                            ui.add(egui::Label::new(help).wrap());
-                        }
                         if let Some(reason) = disabled_reason(command, context) {
                             ui.add(egui::Label::new(t!(reason)).wrap());
                         }
+                        ui.add(egui::Label::new(input_hints::help(command, shortcuts)).wrap());
                     }
                 });
             ui.separator();

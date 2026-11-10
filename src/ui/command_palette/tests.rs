@@ -1,6 +1,6 @@
 use super::*;
 
-fn key(key: egui::Key) -> egui::Event {
+pub(super) fn key(key: egui::Key) -> egui::Event {
     egui::Event::Key {
         key,
         physical_key: None,

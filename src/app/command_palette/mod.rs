@@ -15,6 +15,7 @@ pub(crate) struct CommandPaletteState {
     pub selected: usize,
     pub request_focus: bool,
     pub reveal_selected: bool,
+    pub pointer_position: Option<egui::Pos2>,
     previous_focus: Option<egui::Id>,
 }
 

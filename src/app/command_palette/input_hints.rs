@@ -65,7 +65,19 @@ pub(crate) fn summary(command: Command, shortcuts: &ShortcutBindings) -> String 
     parts.join("  ·  ")
 }
 
-pub(crate) fn help(command: Command, shortcuts: &ShortcutBindings) -> Option<String> {
+pub(crate) fn help(command: Command, shortcuts: &ShortcutBindings) -> String {
+    let mut paragraphs = vec![t!(command.help_key()).to_string()];
+    if let Some(usage) = usage_help(command, shortcuts) {
+        paragraphs.push(usage);
+    }
+    let inputs = summary(command, shortcuts);
+    if !inputs.is_empty() {
+        paragraphs.push(t!("command_help.inputs", inputs = inputs).to_string());
+    }
+    paragraphs.join("\n\n")
+}
+
+fn usage_help(command: Command, shortcuts: &ShortcutBindings) -> Option<String> {
     Some(match command {
         Command::Back => t!("command_palette.mouse_back_help").to_string(),
         Command::Forward => t!("command_palette.mouse_forward_help").to_string(),
@@ -91,6 +103,9 @@ pub(crate) fn help(command: Command, shortcuts: &ShortcutBindings) -> Option<Str
 }
 
 #[cfg(test)]
+mod help_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -110,15 +125,13 @@ mod tests {
             Command::NewTab,
             Command::CloseTab,
         ] {
-            assert!(help(command, &shortcuts).is_some());
+            assert!(!help(command, &shortcuts).is_empty());
         }
         shortcuts.set(
             ShortcutAction::NewTab,
             ShortcutBinding::ctrl(eframe::egui::Key::N),
         );
-        assert!(help(Command::NewTab, &shortcuts)
-            .unwrap()
-            .contains("Ctrl+N"));
+        assert!(help(Command::NewTab, &shortcuts).contains("Ctrl+N"));
     }
 
     #[test]

@@ -10,8 +10,6 @@ pub(crate) enum Command {
     Up,
     Refresh,
     Address,
-    Computer,
-    RecycleBin,
     Grid,
     Details,
     Columns,
@@ -29,7 +27,6 @@ pub(crate) enum Command {
     Rename,
     Properties,
     Settings,
-    Organizer,
 }
 
 pub(crate) const COMMANDS: &[Command] = &[
@@ -41,8 +38,6 @@ pub(crate) const COMMANDS: &[Command] = &[
     Command::Up,
     Command::Refresh,
     Command::Address,
-    Command::Computer,
-    Command::RecycleBin,
     Command::Grid,
     Command::Details,
     Command::Columns,
@@ -60,7 +55,6 @@ pub(crate) const COMMANDS: &[Command] = &[
     Command::Rename,
     Command::Properties,
     Command::Settings,
-    Command::Organizer,
 ];
 
 impl Command {
@@ -82,8 +76,6 @@ impl Command {
             Self::Up => "command_palette.up",
             Self::Refresh => "command_palette.refresh",
             Self::Address => "command_palette.address",
-            Self::Computer => "command_palette.computer",
-            Self::RecycleBin => "command_palette.recycle_bin",
             Self::Grid => "command_palette.grid",
             Self::Details => "command_palette.details",
             Self::Columns => "command_palette.columns",
@@ -101,7 +93,36 @@ impl Command {
             Self::Rename => "command_palette.rename",
             Self::Properties => "command_palette.properties",
             Self::Settings => "command_palette.settings",
-            Self::Organizer => "command_palette.organizer",
+        }
+    }
+
+    pub fn help_key(self) -> &'static str {
+        match self {
+            Self::NewTab => "command_help.new_tab",
+            Self::CloseTab => "command_help.close_tab",
+            Self::ReopenTab => "command_help.reopen_tab",
+            Self::Back => "command_help.back",
+            Self::Forward => "command_help.forward",
+            Self::Up => "command_help.up",
+            Self::Refresh => "command_help.refresh",
+            Self::Address => "command_help.address",
+            Self::Grid => "command_help.grid",
+            Self::Details => "command_help.details",
+            Self::Columns => "command_help.columns",
+            Self::Miller => "command_help.miller",
+            Self::NextView => "command_help.next_view",
+            Self::PreviousView => "command_help.previous_view",
+            Self::Preview => "command_help.preview",
+            Self::Sidebar => "command_help.sidebar",
+            Self::DualPanel => "command_help.dual_panel",
+            Self::GlobalSearch => "command_help.global_search",
+            Self::SelectAll => "command_help.select_all",
+            Self::ClearSelection => "command_help.clear_selection",
+            Self::InvertSelection => "command_help.invert_selection",
+            Self::CreateFolder => "command_help.create_folder",
+            Self::Rename => "command_help.rename",
+            Self::Properties => "command_help.properties",
+            Self::Settings => "command_help.settings",
         }
     }
 
@@ -111,7 +132,6 @@ impl Command {
             Self::Back | Self::Forward | Self::Up | Self::Refresh | Self::Address => {
                 "command_palette.navigation"
             }
-            Self::Computer | Self::RecycleBin => "command_palette.locations",
             Self::Grid
             | Self::Details
             | Self::Columns
@@ -126,7 +146,7 @@ impl Command {
                 "command_palette.selection"
             }
             Self::CreateFolder | Self::Rename | Self::Properties => "command_palette.files",
-            Self::Settings | Self::Organizer => "command_palette.tools",
+            Self::Settings => "command_palette.tools",
         }
     }
 

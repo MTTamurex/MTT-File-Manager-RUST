@@ -14,8 +14,20 @@ pub(super) fn render(
     let button = egui::Button::selectable(selected, &entry.label)
         .shortcut_text(egui::RichText::new(&entry.inputs).font(shortcut_font))
         .wrap();
-    ui.add_enabled_ui(enabled, |ui| {
-        ui.add_sized([ui.available_width(), 32.0], button)
+    ui.scope(|ui| {
+        // A stationary pointer must not add a second highlight after keyboard navigation.
+        if !selected {
+            let mut unselected = ui.visuals().widgets.inactive;
+            unselected.bg_fill = egui::Color32::TRANSPARENT;
+            unselected.weak_bg_fill = egui::Color32::TRANSPARENT;
+            unselected.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.hovered = unselected;
+            ui.visuals_mut().widgets.active = unselected;
+        }
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.add_sized([ui.available_width(), 32.0], button)
+        })
+        .inner
     })
     .inner
 }
@@ -40,12 +52,12 @@ mod tests {
                 ui.set_width(640.0);
                 expected_shortcut_size = egui::TextStyle::Body.resolve(ui.style()).size * 0.9;
                 for (label, inputs, enabled) in [
-                    ("Open This PC", "", true),
+                    ("Clear selection", "", true),
                     ("Go back", "Alt+ArrowLeft  ·  Mouse 4", true),
                     ("Switch to Grid view", "Cycle: Ctrl+Wheel ↕", false),
                 ] {
                     let entry = SearchEntry {
-                        command: Command::Computer,
+                        command: Command::ClearSelection,
                         label: label.into(),
                         inputs: inputs.into(),
                     };
@@ -56,7 +68,7 @@ mod tests {
             let mut shortcut_sizes = Vec::new();
             for shape in &output.shapes {
                 if let egui::Shape::Text(text) = &shape.shape {
-                    if ["Open This PC", "Go back", "Switch to Grid view"]
+                    if ["Clear selection", "Go back", "Switch to Grid view"]
                         .contains(&text.galley.text())
                     {
                         positions.push(text.pos.x);

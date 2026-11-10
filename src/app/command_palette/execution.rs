@@ -39,8 +39,6 @@ impl ImageViewerApp {
                 self.show_address_history_menu = false;
                 self.address_bar_focus_request = true;
             }
-            Command::Computer => self.navigate_to_computer(),
-            Command::RecycleBin => self.navigate_to_recycle_bin(),
             Command::Grid => {
                 self.change_view_mode(ViewMode::Grid);
             }
@@ -90,13 +88,7 @@ impl ImageViewerApp {
                 };
                 self.show_properties_for_paths(paths);
             }
-            Command::Settings | Command::Organizer => {
-                self.open_settings(if command == Command::Organizer {
-                    SettingsSection::Organizer
-                } else {
-                    SettingsSection::General
-                });
-            }
+            Command::Settings => self.open_settings(SettingsSection::General),
         }
         ctx.request_repaint();
     }
