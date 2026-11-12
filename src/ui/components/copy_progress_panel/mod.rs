@@ -1,5 +1,6 @@
-//! Non-modal copy dashboard. Colors and fonts are inherited from the app theme.
+//! Non-modal copy/deletion dashboard, inheriting the application's theme.
 mod active_files;
+mod deletion;
 mod graph;
 pub(crate) mod indicator;
 mod summary;
@@ -52,6 +53,9 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
+    if operation.deletion.is_some() {
+        return;
+    }
     let progress = &operation.progress;
     metrics.sample(
         progress.bytes_copied.load(Ordering::Relaxed),
@@ -64,7 +68,17 @@ fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
 }
 
 fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) -> bool {
-    card_with_paths(ui, operation, metrics, &operation.progress.active_files())
+    let paths = if let Some(deletion) = &operation.deletion {
+        deletion.current()
+    } else {
+        operation.progress.active_files()
+    };
+    let paths = metrics.names.snapshot(paths, std::time::Instant::now());
+    if operation.deletion.is_some() {
+        deletion::card(ui, operation, &paths)
+    } else {
+        card_with_paths(ui, operation, metrics, &paths)
+    }
 }
 
 fn card_with_paths(

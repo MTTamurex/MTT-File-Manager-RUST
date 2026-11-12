@@ -7,6 +7,7 @@ use rust_i18n::t;
 use std::sync::atomic::Ordering;
 
 pub(crate) struct CopyIndicator {
+    deletion: bool,
     pub count: usize,
     pub active: usize,
     pub finished: usize,
@@ -21,6 +22,7 @@ impl CopyIndicator {
             return None;
         }
         let mut result = Self {
+            deletion: jobs.iter().any(|(_, job)| job.deletion.is_some()),
             count: jobs.len(),
             active: 0,
             finished: 0,
@@ -37,6 +39,10 @@ impl CopyIndicator {
             }
             result.active += 1;
             let progress = &job.progress;
+            if job.deletion.is_some() {
+                preparing = true;
+                continue;
+            }
             preparing |= !progress.copying.load(Ordering::Relaxed);
             bytes = bytes.saturating_add(progress.bytes_copied.load(Ordering::Relaxed));
             total = total.saturating_add(progress.total_bytes.load(Ordering::Relaxed));
@@ -56,6 +62,15 @@ impl CopyIndicator {
     }
 
     fn label(&self) -> String {
+        if self.deletion {
+            return t!(
+                "delete_engine.indicator",
+                count = self.count,
+                active = self.active,
+                failed = self.failed
+            )
+            .to_string();
+        }
         if self.active > 0 {
             let progress = self
                 .fraction
@@ -103,7 +118,11 @@ pub(crate) fn render(
             egui::Button::new(RichText::new(summary.label()).color(color)).truncate(),
         )
         .on_hover_text(t!(
-            "copy_engine.restore_tooltip",
+            if summary.deletion {
+                "delete_engine.restore_tooltip"
+            } else {
+                "copy_engine.restore_tooltip"
+            },
             active = summary.active,
             finished = summary.finished,
             failed = summary.failed

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
+mod display_names;
 
 #[derive(Default)]
 pub struct CopyPanelState {
@@ -18,6 +19,7 @@ impl CopyPanelState {
 
 #[derive(Default)]
 pub struct TransferMetrics {
+    pub names: display_names::DisplayNames,
     last: Option<(u64, Duration)>,
     sampling: bool,
     pub speed: f64,

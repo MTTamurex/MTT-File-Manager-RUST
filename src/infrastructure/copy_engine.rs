@@ -1,4 +1,4 @@
-//! In-memory copy operations, retained until the user dismisses their results.
+//! Optional copy/deletion operations, retained until the user dismisses results.
 pub(crate) mod diagnostics;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ pub struct Outcome {
 }
 
 pub struct CopyOperation {
+    pub deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
     pub sources: Vec<PathBuf>,
     pub destination: PathBuf,
     pub progress: mtt_copy_engine::Progress,
@@ -55,8 +56,28 @@ pub struct CopyRuntime {
 
 impl CopyRuntime {
     pub fn start(&self, sources: Vec<PathBuf>, destination: PathBuf) -> CopyJob {
+        self.start_operation(sources, destination, None)
+    }
+
+    pub fn start_delete(&self, sources: Vec<PathBuf>, permanently: bool) -> CopyJob {
+        self.start_operation(
+            sources,
+            PathBuf::new(),
+            Some(crate::infrastructure::delete_engine::DeleteProgress::new(
+                permanently,
+            )),
+        )
+    }
+
+    fn start_operation(
+        &self,
+        sources: Vec<PathBuf>,
+        destination: PathBuf,
+        deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
+    ) -> CopyJob {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let operation = Arc::new(CopyOperation {
+            deletion,
             sources,
             destination,
             progress: Default::default(),
@@ -114,7 +135,11 @@ impl Drop for CopyJob {
             *outcome = Some((
                 Outcome {
                     kind: OutcomeKind::Failed,
-                    message: Some(rust_i18n::t!("copy_engine.interrupted").to_string()),
+                    message: Some(if self.operation.deletion.is_some() {
+                        rust_i18n::t!("delete_engine.interrupted").to_string()
+                    } else {
+                        rust_i18n::t!("copy_engine.interrupted").to_string()
+                    }),
                 },
                 self.operation.progress.active_elapsed(),
             ));

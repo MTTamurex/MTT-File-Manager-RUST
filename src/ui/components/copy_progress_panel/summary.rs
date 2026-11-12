@@ -6,6 +6,8 @@ use rust_i18n::t;
 use std::sync::{atomic::Ordering, Arc};
 
 pub(super) struct Summary {
+    removed: Option<u64>,
+    has_copies: bool,
     fraction: Option<f64>,
     preparing: bool,
     files: usize,
@@ -31,11 +33,22 @@ impl Summary {
         let mut speed = 0.0;
         let mut preparing = false;
         let mut completed = true;
+        let mut removed = None::<u64>;
+        let mut has_copies = false;
         for (id, job, outcome) in snapshots {
             // Retained old results must not skew a newly started copy.
             if active && outcome.is_some() {
                 continue;
             }
+            if let Some(deletion) = &job.deletion {
+                removed = Some(
+                    removed
+                        .unwrap_or(0)
+                        .saturating_add(deletion.removed.load(Ordering::Relaxed)),
+                );
+                continue;
+            }
+            has_copies = true;
             let progress = &job.progress;
             let copying = progress.copying.load(Ordering::Relaxed);
             preparing |= outcome.is_none() && !copying;
@@ -81,6 +94,8 @@ impl Summary {
             None
         };
         Some(Self {
+            removed,
+            has_copies,
             fraction,
             preparing,
             files,
@@ -90,6 +105,9 @@ impl Summary {
     }
 
     pub(super) fn label(&self) -> String {
+        if !self.has_copies {
+            return t!("delete_engine.header", count = self.removed.unwrap_or(0)).to_string();
+        }
         let progress = self
             .fraction
             .map(|fraction| format!("{:.0}%", fraction * 100.0))
@@ -100,7 +118,7 @@ impl Summary {
                     "—".into()
                 }
             });
-        format!(
+        let copy = format!(
             "{progress} · {} · {:.1} MiB/s",
             t!(
                 "copy_engine.header_files",
@@ -108,7 +126,12 @@ impl Summary {
                 total = self.total_files
             ),
             self.speed / 1_048_576.0
-        )
+        );
+        if let Some(removed) = self.removed {
+            format!("{copy} · {}", t!("delete_engine.header", count = removed))
+        } else {
+            copy
+        }
     }
 }
 

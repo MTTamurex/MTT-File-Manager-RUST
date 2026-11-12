@@ -12,6 +12,7 @@ mod batch_outcome;
 mod handlers;
 mod message_pump;
 mod native_copy;
+mod native_delete;
 mod search_delete;
 mod shell_transfers;
 mod shortcuts;
@@ -766,6 +767,9 @@ fn run_file_operation_loop(
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if native_copy::try_handle(&request, &result_sender, &copy_runtime) {
+                return CompletionBehavior::SendFinishedNoRefresh;
+            }
+            if native_delete::try_handle(&request, &result_sender, &copy_runtime) {
                 return CompletionBehavior::SendFinishedNoRefresh;
             }
             if shell_transfers::try_delegate(&request, &result_sender) {

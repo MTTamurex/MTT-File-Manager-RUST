@@ -5,8 +5,42 @@ in [BetterCopy](https://github.com/articulite/BetterCopy), reviewed at commit
 `a3e239bb6bbe60b79df93e6e04ad5e113c40934c`.
 
 The application keeps its existing copy mechanism as the default. Enable the
-optional MTT engine in **Settings > General > Copy engine**. Moves, deletion,
-organizer jobs, archive extraction and virtual Shell items are not redirected.
+optional MTT engine in **Settings > General > Copy and deletion engine**.
+The same persisted option enables the application's deletion backend (outside
+this copy-only crate). Moves, organizer jobs, archive extraction and virtual
+Shell items are not redirected.
+
+## Optional deletion integration
+
+- Delete uses `IFileOperation` recycling, with Shell safety dialogs retained.
+  `FOF_WANTNUKEWARNING` requests explicit confirmation when recycling is not
+  available; no permanent fallback is silently authorized.
+- Shift+Delete requires explicit confirmation before direct filesystem deletion.
+  Cancellation stops remaining work and never restores items already removed.
+- Direct deletion walks the tree once, depth-first, without a separate total-size
+  scan. Directory handles prevent ancestor replacement while traversing children.
+  Selected reparse paths are refused before canonicalization; nested reparse
+  entries are removed without traversing their targets. Read-only, inaccessible
+  or locked entries remain and produce a retained error result; permissions and
+  attributes are not silently changed.
+- Actual removals are reported in batches of up to 128 entries, including
+  children removed before a parent fails or cancellation stops the traversal.
+  A surviving selected folder is never reported as deleted.
+- Recycling uses Shell callbacks for cancellation and processed-item counts.
+  Cancellation is cooperative: pending filesystem calls or native dialogs must
+  return before it takes effect. Counts reflect entries reported by Shell, which
+  may recycle a whole directory as one item, not every descendant.
+- Deletions share the themed copy dashboard, minimization and retained results.
+  Progress remains indeterminate while running: neither traversal discoveries
+  nor Shell work units are advertised as a stable item total or byte throughput.
+  Pause is not offered for deletion. Elapsed time freezes on completion.
+- Deleting existing Recycle Bin entries and emptying the bin keep the original
+  Shell mechanisms, preserving their metadata and confirmation behavior.
+- Active filenames are sampled only for display, at most every 300 ms, for both
+  copies and deletions. Counters and operations are not throttled.
+- Automated deletion tests use owned synthetic temporary trees. Native recycle
+  dialogs and unavailable/full/disabled Recycle Bin behavior still require an
+  interactive Windows check. No deletion speed advantage is claimed.
 
 ## Initial supported scope
 
