@@ -255,6 +255,7 @@ fn query_ata(
             &data,
             threshold_data.as_ref().ok().map(|v| &v[..]),
             &identity.rotation,
+            identity.model.as_deref(),
         )
         .ok()
     });

@@ -79,14 +79,20 @@ pub(super) fn parse_smart(
     data: &[u8],
     thresholds: Option<&[u8]>,
     rotation: &DriveRotation,
+    model: Option<&str>,
 ) -> Result<AtaHealth, String> {
     let attributes = parse_attributes(data)?;
     let thresholds = thresholds.and_then(parse_thresholds);
+    let sandisk_pssd = is_sandisk_pssd_model(model);
     let mut evaluated_threshold = false;
     let mut critical = false;
     let mut threshold_warning = false;
     if let Some(thresholds) = &thresholds {
         for attribute in &attributes {
+            // Match CrystalDiskInfo's SanDisk pSSD compatibility workaround for SMART E8.
+            if sandisk_pssd && attribute.id == 0xE8 {
+                continue;
+            }
             let Some(threshold) = thresholds
                 .get(&attribute.id)
                 .copied()
@@ -128,6 +134,14 @@ pub(super) fn parse_smart(
             DriveHealthState::Unknown
         },
     })
+}
+
+fn is_sandisk_pssd_model(model: Option<&str>) -> bool {
+    let Some(model) = model else {
+        return false;
+    };
+    let model = model.to_ascii_uppercase();
+    model.contains("SANDISK") && model.contains("PSSD")
 }
 
 fn parse_attributes(data: &[u8]) -> Result<Vec<SmartAttribute>, String> {
@@ -375,7 +389,8 @@ mod tests {
         thresholds[3] = 10;
         fix_checksum(&mut thresholds);
 
-        let parsed = parse_smart(&smart, Some(&thresholds), &DriveRotation::Rpm(7200)).unwrap();
+        let parsed =
+            parse_smart(&smart, Some(&thresholds), &DriveRotation::Rpm(7200), None).unwrap();
         assert_eq!(parsed.health_state, DriveHealthState::Critical);
     }
 
@@ -391,7 +406,7 @@ mod tests {
         thresholds[3] = 10;
         fix_checksum(&mut thresholds);
         assert_eq!(
-            parse_smart(&smart, Some(&thresholds), &DriveRotation::Unknown)
+            parse_smart(&smart, Some(&thresholds), &DriveRotation::Unknown, None)
                 .unwrap()
                 .health_state,
             DriveHealthState::Critical
@@ -400,7 +415,7 @@ mod tests {
         smart[3] = 0;
         fix_checksum(&mut smart);
         assert_eq!(
-            parse_smart(&smart, Some(&thresholds), &DriveRotation::Unknown)
+            parse_smart(&smart, Some(&thresholds), &DriveRotation::Unknown, None)
                 .unwrap()
                 .health_state,
             DriveHealthState::Warning
@@ -415,7 +430,7 @@ mod tests {
         smart[7] = 42;
         fix_checksum(&mut smart);
 
-        let parsed = parse_smart(&smart, None, &DriveRotation::Unknown).unwrap();
+        let parsed = parse_smart(&smart, None, &DriveRotation::Unknown, None).unwrap();
         assert_eq!(parsed.power_on_hours, None);
         assert_eq!(parsed.health_state, DriveHealthState::Unknown);
     }
@@ -449,7 +464,7 @@ mod tests {
         smart[31] = 42;
         fix_checksum(&mut smart);
 
-        let parsed = parse_smart(&smart, None, &DriveRotation::Rpm(7200)).unwrap();
+        let parsed = parse_smart(&smart, None, &DriveRotation::Rpm(7200), None).unwrap();
         assert_eq!(parsed.temperature_celsius, Some(35));
         assert_eq!(parsed.power_on_hours, None);
         assert_eq!(parsed.health_state, DriveHealthState::Warning);
@@ -459,11 +474,80 @@ mod tests {
     fn rejects_smart_data_with_bad_checksum() {
         let mut smart = [0u8; 512];
         smart[2] = 0x09;
-        assert!(parse_smart(&smart, None, &DriveRotation::Unknown).is_err());
+        assert!(parse_smart(&smart, None, &DriveRotation::Unknown, None).is_err());
     }
 
     #[test]
     fn rejects_all_ones_smart_data() {
-        assert!(parse_smart(&[0xFF; 512], None, &DriveRotation::Unknown).is_err());
+        assert!(parse_smart(&[0xFF; 512], None, &DriveRotation::Unknown, None).is_err());
+    }
+
+    #[test]
+    fn sandisk_pssd_e8_threshold_is_ignored_but_other_models_are_checked() {
+        let mut smart = [0u8; 512];
+        smart[2] = 0xE8;
+        smart[3] = 0x03;
+        smart[5] = 0;
+        fix_checksum(&mut smart);
+
+        let mut thresholds = [0u8; 512];
+        thresholds[2] = 0xE8;
+        thresholds[3] = 5;
+        fix_checksum(&mut thresholds);
+
+        let pssd = parse_smart(
+            &smart,
+            Some(&thresholds),
+            &DriveRotation::Unknown,
+            Some("SanDisk pSSD"),
+        )
+        .unwrap();
+        assert_eq!(pssd.health_state, DriveHealthState::Unknown);
+
+        let other_model = parse_smart(
+            &smart,
+            Some(&thresholds),
+            &DriveRotation::Unknown,
+            Some("SanDisk SSD"),
+        )
+        .unwrap();
+        assert_eq!(other_model.health_state, DriveHealthState::Critical);
+    }
+
+    #[test]
+    fn sandisk_pssd_e8_exception_does_not_hide_other_threshold_failures() {
+        let mut smart = [0u8; 512];
+        smart[2] = 0xE8;
+        smart[3] = 0x03;
+        smart[5] = 0;
+        smart[14] = 0x05;
+        smart[15] = 0x03;
+        smart[17] = 1;
+        fix_checksum(&mut smart);
+
+        let mut thresholds = [0u8; 512];
+        thresholds[2] = 0xE8;
+        thresholds[3] = 5;
+        thresholds[14] = 0x05;
+        thresholds[15] = 10;
+        fix_checksum(&mut thresholds);
+
+        let parsed = parse_smart(
+            &smart,
+            Some(&thresholds),
+            &DriveRotation::Unknown,
+            Some("SanDisk pSSD"),
+        )
+        .unwrap();
+        assert_eq!(parsed.health_state, DriveHealthState::Critical);
+    }
+
+    #[test]
+    fn sandisk_pssd_model_match_is_case_insensitive_and_requires_both_terms() {
+        assert!(is_sandisk_pssd_model(Some("SanDisk pSSD")));
+        assert!(is_sandisk_pssd_model(Some("SANDISK PSSD")));
+        assert!(!is_sandisk_pssd_model(Some("SanDisk SSD")));
+        assert!(!is_sandisk_pssd_model(Some("Generic pSSD")));
+        assert!(!is_sandisk_pssd_model(None));
     }
 }
