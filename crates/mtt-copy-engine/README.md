@@ -53,13 +53,13 @@ also include copy activity and the `copy_dashboard` stage. API progress is not a
 measurement of physical flush completion, and a no-progress interval alone does
 not identify the controller/driver/cache/antivirus responsible for it.
 
-On Windows, files **>= 256 MiB** use `COPY_FILE_NO_BUFFERING`; smaller files keep
-buffered copying, following BetterCopy's size threshold. The `started` diagnostic
-event labels this policy `unbuffered_from_256_mib`. Worker budgets and thread/I/O
-priority are unchanged. Staging, verification and no-replace publication remain
-in place; errors do not trigger an automatic buffered retry. This bypasses the
-Windows copy cache, not the drive's internal cache, and does not guarantee better
-performance or resolve stalls on every controller/workload.
+On Windows, **all file sizes use buffered `CopyFileExW` copying**. There is no
+256 MiB cache-policy threshold and no application-owned fixed-size copy buffer;
+Windows manages the transfer buffers and system cache. The `started` diagnostic
+event labels this policy `buffered`. Worker budgets and thread/I/O priority are
+unchanged. Staging, verification and no-replace publication remain in place;
+errors do not trigger an automatic retry. System caching does not eliminate the
+drive's internal SLC-cache limits or guarantee better performance on every workload.
 There is an explicitly ignored 32 MiB integrity/smoke comparison:
 
 ```text
@@ -68,12 +68,12 @@ cargo test -p mtt-copy-engine --test cache_comparison -- --ignored --nocapture
 
 This creates disposable files on the temporary volume and compares buffered
 CopyFileEx, unbuffered CopyFileEx and the engine. It is **not run automatically**,
-and its 32 MiB engine copy remains below the unbuffered threshold. An additional
-manual integrity test exercises the production unbuffered path with a 256 MiB
+and its engine copy uses the production buffered policy. An additional
+manual integrity test exercises the production buffered path with a 256 MiB
 file and a non-sector-aligned tail:
 
 ```text
-cargo test -p mtt-copy-engine --test unbuffered_integrity -- --ignored --nocapture
+cargo test -p mtt-copy-engine --test buffered_integrity -- --ignored --nocapture
 ```
 
 These tests do not clear OS/device caches and are not comparisons against the app's Shell
@@ -83,6 +83,41 @@ current app mechanism and optional engine on the intended source/target disks.
 Start with a small workload; do not repeat a load that freezes the machine.
 Keep the Windows diagnostic log alongside elapsed times and disk response-time
 observations. No performance gain is claimed without those measurements.
+
+### Comparing the full engine on a selected file (Windows)
+
+The following explicitly ignored test compares buffered and unbuffered copying
+using the **same engine pipeline**, including preflight, worker admission,
+callbacks, staging, size checks and no-replace publication. Only the Win32 copy
+cache flag changes. The unbuffered mode exists only in the crate's unit-test
+build; normal application copying remains buffered for every file size.
+
+Choose an existing, non-personal test file on the mounted source volume and an
+existing destination folder. This performs **two full copies**, temporarily
+requiring roughly twice the file size in free destination space. Each sample
+uses a fresh owned temporary folder; those folders and their copies are removed
+afterward. The source is opened for reading, never deleted or overwritten.
+Run no other copies concurrently. Example with generic fixture paths:
+
+```powershell
+$env:MTT_COPY_CACHE_SOURCE = 'X:\Test\source.bin'
+$env:MTT_COPY_CACHE_DESTINATION = 'D:\Test'
+$env:MTT_COPY_CACHE_ORDER = 'buffered-first'
+cargo test -p mtt-copy-engine --lib compare_engine_cache_modes_on_selected_file -- --ignored --nocapture --test-threads=1
+```
+
+Repeat under comparable idle conditions with `MTT_COPY_CACHE_ORDER` set to
+`unbuffered-first` to check order effects. Cache state is **not** reset. The test
+prints only mode, elapsed milliseconds, byte count and numeric/static outcomes,
+not paths or filenames. Byte-for-byte verification of the main data stream
+happens after both measured copies so its reads do not prime the source between
+samples. Alternate streams and ACLs are not compared by this benchmark; API
+progress counters may include alternate-stream bytes beyond the main file size.
+Owned temporary folders are closed explicitly so cleanup errors fail the test
+instead of silently leaving copies behind. Timings include
+the whole engine call but do not measure physical flush completion. The test
+does not invoke Explorer/Shell and cannot establish by itself why they differ.
+Do not change the application's cache policy based on a single warm-cache run.
 
 The application presents a movable, non-modal copy dashboard using its current
 theme. Each operation has its own pause/resume/cancel controls, speed graph,

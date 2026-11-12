@@ -71,7 +71,7 @@ impl Monitor {
                     "started",
                     &[
                         field_u64("copy_id", id),
-                        field_label("cache", "unbuffered_from_256_mib"),
+                        field_label("cache", "buffered"),
                         field_label("priority", "unchanged"),
                     ],
                 );

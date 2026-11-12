@@ -1,6 +1,7 @@
 //! Copy-only engine inspired by BetterCopy's Win32 copying and storage profiling.
 //! No Shell, clipboard, move or delete operations are exposed.
 mod active_files;
+mod cache;
 mod control;
 mod path_resolution;
 mod plan;
@@ -45,6 +46,15 @@ pub struct Summary {
 /// before writing anything. A failure after preflight never triggers a retry via
 /// another engine. Completed files remain on cancellation; partial files do not.
 pub fn copy(sources: &[PathBuf], destination: &Path, progress: &Progress) -> io::Result<Summary> {
+    copy_with_cache(sources, destination, progress, cache::CacheMode::Buffered)
+}
+
+fn copy_with_cache(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+    cache: cache::CacheMode,
+) -> io::Result<Summary> {
     let _run = progress.telemetry.run();
     let coordinator = progress.participant();
     let plan = plan::build(sources, destination, progress)?;
@@ -129,7 +139,7 @@ pub fn copy(sources: &[PathBuf], destination: &Path, progress: &Progress) -> io:
                         ) else {
                             return;
                         };
-                        match platform::copy_file_scheduled(item, progress, &permit) {
+                        match platform::copy_file_scheduled(item, progress, &permit, cache) {
                             Ok(()) => {
                                 progress.files_copied.fetch_add(1, Ordering::Relaxed);
                                 published
@@ -165,5 +175,7 @@ fn check_cancel(progress: &Progress) -> io::Result<()> {
     progress.checkpoint()
 }
 
+#[cfg(all(test, windows))]
+mod cache_comparison;
 #[cfg(test)]
 mod tests;

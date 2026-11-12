@@ -1,4 +1,4 @@
-use crate::{plan, scheduler::Permit, staging::StagingFile, Progress};
+use crate::{cache::CacheMode, plan, scheduler::Permit, staging::StagingFile, Progress};
 use std::cell::Cell;
 use std::io;
 use std::sync::atomic::Ordering;
@@ -54,21 +54,23 @@ fn check_source(item: &plan::File) -> io::Result<()> {
 
 #[cfg(test)]
 pub(crate) fn copy_file(item: &plan::File, progress: &Progress) -> io::Result<()> {
-    copy_file_impl(item, progress, None)
+    copy_file_impl(item, progress, None, CacheMode::Buffered)
 }
 
 pub(crate) fn copy_file_scheduled<'a>(
     item: &plan::File,
     progress: &'a Progress,
     permit: &'a Permit<'a>,
+    cache: CacheMode,
 ) -> io::Result<()> {
-    copy_file_impl(item, progress, Some(permit))
+    copy_file_impl(item, progress, Some(permit), cache)
 }
 
 fn copy_file_impl<'a>(
     item: &plan::File,
     progress: &'a Progress,
     permit: Option<&'a Permit<'a>>,
+    cache: CacheMode,
 ) -> io::Result<()> {
     match permit {
         Some(permit) => permit.checkpoint()?,
@@ -89,7 +91,7 @@ fn copy_file_impl<'a>(
         bytes: Cell::new(0),
         committed: false,
     };
-    copy_contents(&item.source, temporary.path(), item.size, &transfer)?;
+    copy_contents(&item.source, temporary.path(), &transfer, cache)?;
     transfer.checkpoint()?;
     check_source(item)?;
     if std::fs::metadata(temporary.path())?.len() != item.size {
@@ -126,22 +128,11 @@ unsafe extern "system" fn callback(
 }
 
 #[cfg(windows)]
-fn copy_flags(size: u64) -> windows::Win32::Storage::FileSystem::COPYFILE_FLAGS {
-    use windows::Win32::Storage::FileSystem::{COPYFILE_FLAGS, COPY_FILE_NO_BUFFERING};
-    // Match BetterCopy's large-file cache policy, independently of worker budgets.
-    if size >= 256 * 1024 * 1024 {
-        COPY_FILE_NO_BUFFERING
-    } else {
-        COPYFILE_FLAGS(0)
-    }
-}
-
-#[cfg(windows)]
 fn copy_contents(
     source: &std::path::Path,
     target: &std::path::Path,
-    size: u64,
     transfer: &Transfer<'_>,
+    cache: CacheMode,
 ) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
@@ -155,7 +146,7 @@ fn copy_contents(
             Some(callback),
             Some((transfer as *const Transfer<'_>).cast()),
             None,
-            copy_flags(size),
+            cache.flags(),
         )
     }
     .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))
@@ -165,8 +156,8 @@ fn copy_contents(
 fn copy_contents(
     source: &std::path::Path,
     target: &std::path::Path,
-    _size: u64,
     transfer: &Transfer<'_>,
+    _cache: CacheMode,
 ) -> io::Result<()> {
     use std::io::{Read, Write};
     let mut source = std::fs::File::open(source)?;
@@ -192,19 +183,6 @@ fn copy_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(windows)]
-    #[test]
-    fn win32_cache_policy_changes_at_256_mib_only() {
-        use windows::Win32::Storage::FileSystem::{COPYFILE_FLAGS, COPY_FILE_NO_BUFFERING};
-        let threshold = 256 * 1024 * 1024;
-        for size in [0, 1, threshold - 1] {
-            assert_eq!(copy_flags(size), COPYFILE_FLAGS(0));
-        }
-        for size in [threshold, threshold + 1, u64::MAX] {
-            assert_eq!(copy_flags(size), COPY_FILE_NO_BUFFERING);
-        }
-    }
 
     #[test]
     fn failed_transfer_rolls_back_only_its_own_progress() {
@@ -276,7 +254,7 @@ mod tests {
                 bytes: Cell::new(0),
                 committed: false,
             };
-            assert!(copy_contents(&source, staged.path(), 2 * 1024 * 1024, &transfer).is_err());
+            assert!(copy_contents(&source, staged.path(), &transfer, CacheMode::Buffered).is_err());
         }
         assert_eq!(std::fs::read_dir(target).unwrap().count(), 0);
         assert_eq!(std::fs::metadata(source).unwrap().len(), 2 * 1024 * 1024);

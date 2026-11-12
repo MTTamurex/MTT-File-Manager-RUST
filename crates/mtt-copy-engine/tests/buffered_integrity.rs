@@ -2,7 +2,7 @@
 #[cfg(windows)]
 #[test]
 #[ignore = "Writes a 256 MiB + 37 byte fixture and its copy; run on a disposable test volume"]
-fn unbuffered_copy_preserves_contents_and_unaligned_tail() {
+fn buffered_copy_preserves_large_contents_and_unaligned_tail() {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
 
