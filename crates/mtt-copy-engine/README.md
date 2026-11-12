@@ -120,14 +120,21 @@ does not invoke Explorer/Shell and cannot establish by itself why they differ.
 Do not change the application's cache policy based on a single warm-cache run.
 
 The application presents a movable, non-modal copy dashboard using its current
-theme. Each operation has its own pause/resume/cancel controls, speed graph,
-byte/file counters and estimated remaining time (excluding requested pause
-intervals). Elapsed time is shown during the operation and retained as total time
+theme. Its title shows byte-weighted progress, copied/total files and summed
+speed for active operations, excluding retained terminal results. Once all
+operations finish, the title summarizes the retained results with zero speed.
+Preparing operations show unknown percentage rather than a misleading estimate.
+Each operation keeps its own pause/resume/cancel controls, speed graph, byte
+counters and estimated remaining time (excluding requested pause intervals).
+Elapsed time is shown during the operation and retained as total time
 after completion, cancellation or failure, excluding user-requested pauses and
 including preparation and I/O waits. Completed, cancelled and failed operations remain until dismissed.
 The dashboard lists only in-flight source files, including paused transfers:
-three names are visible initially and additional names can be expanded. Full
-paths appear on hover. Tracking is in memory and limited to active workers,
+up to three single-line name slots retain their dimensions even between files,
+bounded by the operation's worker budget. The expansion row is reserved only
+when additional workers are possible. Additional names can be expanded in a fixed-height scroll
+area. Full paths appear on hover. The window remains manually resizable and
+keeps a stable identity as its title changes. Tracking is in memory and limited to active workers,
 not the size of the directory tree or queued file list.
 
 Minimize hides the dashboard without pausing or cancelling copies. A status-bar

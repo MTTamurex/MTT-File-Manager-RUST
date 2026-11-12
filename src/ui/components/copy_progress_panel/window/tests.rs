@@ -2,6 +2,8 @@ use super::*;
 use crate::infrastructure::copy_engine::CopyRuntime;
 use std::path::PathBuf;
 
+mod geometry;
+
 struct Text {
     value: String,
     rect: egui::Rect,

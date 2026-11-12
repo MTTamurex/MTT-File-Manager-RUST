@@ -2,6 +2,7 @@
 mod active_files;
 mod graph;
 pub(crate) mod indicator;
+mod summary;
 mod window;
 
 use crate::app::copy_panel_state::TransferMetrics;
@@ -63,6 +64,15 @@ fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
 }
 
 fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) -> bool {
+    card_with_paths(ui, operation, metrics, &operation.progress.active_files())
+}
+
+fn card_with_paths(
+    ui: &mut egui::Ui,
+    operation: &CopyOperation,
+    metrics: &mut TransferMetrics,
+    active_paths: &[std::path::PathBuf],
+) -> bool {
     let progress = &operation.progress;
     let outcome = operation.outcome();
     let active = outcome.is_none();
@@ -116,7 +126,11 @@ fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetr
             || operation.destination.display().to_string(),
         );
         if active {
-            active_files::render(ui, progress);
+            let workers = progress
+                .telemetry
+                .policy()
+                .map_or(usize::MAX, |policy| policy.workers);
+            active_files::render_paths(ui, active_paths, workers);
         }
         ui.add_space(10.0);
         ui.columns(2, |columns| {
@@ -140,19 +154,6 @@ fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetr
                 eta.unwrap_or_else(|| "—".into()),
             );
         });
-        ui.add_space(6.0);
-        ui.columns(2, |columns| {
-            stat(
-                &mut columns[0],
-                &t!("copy_engine.speed"),
-                format!("{:.1} MiB/s", metrics.speed / 1_048_576.0),
-            );
-            stat(
-                &mut columns[1],
-                &t!("copy_engine.files"),
-                format!("{files} / {total_files}"),
-            );
-        });
         ui.add_space(8.0);
         graph::render(ui, metrics);
         let completed = outcome
@@ -165,11 +166,14 @@ fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetr
                 .fill(theme::accent_color(ui.ctx()))
                 .show_percentage(),
         );
-        ui.label(format!(
-            "{:.1} / {:.1} MiB",
-            bytes as f64 / 1_048_576.0,
-            total_bytes as f64 / 1_048_576.0
-        ));
+        ui.add(
+            egui::Label::new(format!(
+                "{:.1} / {:.1} MiB",
+                bytes as f64 / 1_048_576.0,
+                total_bytes as f64 / 1_048_576.0
+            ))
+            .truncate(),
+        );
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if active {
@@ -217,8 +221,9 @@ fn path_row(ui: &mut egui::Ui, label: &str, value: &str, tooltip: impl FnOnce() 
 }
 
 fn stat(ui: &mut egui::Ui, label: &str, value: String) {
-    ui.weak(label);
-    ui.label(RichText::new(value).strong());
+    ui.add(egui::Label::new(RichText::new(label).weak()).truncate());
+    ui.add(egui::Label::new(RichText::new(&value).strong()).truncate())
+        .on_hover_text(value);
 }
 
 fn fraction(bytes: u64, total: u64, files: usize, total_files: usize, completed: bool) -> f32 {
