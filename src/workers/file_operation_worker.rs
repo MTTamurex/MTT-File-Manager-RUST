@@ -11,6 +11,7 @@ use crate::domain::organizer_rule::OrganizerConflictPolicy;
 mod batch_outcome;
 mod handlers;
 mod message_pump;
+mod native_copy;
 mod search_delete;
 mod shell_transfers;
 mod shortcuts;
@@ -690,13 +691,20 @@ pub(crate) fn start_file_operation_worker(
     receiver: Arc<crossbeam_channel::Receiver<FileOperationRequest>>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
     archive_extract_sender: std::sync::mpsc::Sender<ArchiveExtractionRequest>,
+    copy_runtime: Arc<crate::infrastructure::copy_engine::CopyRuntime>,
 ) {
     for worker_id in 0..FILE_OPERATION_WORKERS {
         let receiver = Arc::clone(&receiver);
         let result_sender = result_sender.clone();
         let archive_extract_sender = archive_extract_sender.clone();
+        let copy_runtime = copy_runtime.clone();
         let spawn_result = crate::spawn_named(&format!("file-op-worker-{worker_id}"), move || {
-            run_file_operation_loop(receiver, result_sender, archive_extract_sender);
+            run_file_operation_loop(
+                receiver,
+                result_sender,
+                archive_extract_sender,
+                copy_runtime,
+            );
         });
 
         if let Err(error) = spawn_result {
@@ -713,6 +721,7 @@ fn run_file_operation_loop(
     receiver: Arc<crossbeam_channel::Receiver<FileOperationRequest>>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
     archive_extract_sender: std::sync::mpsc::Sender<ArchiveExtractionRequest>,
+    copy_runtime: Arc<crate::infrastructure::copy_engine::CopyRuntime>,
 ) {
     // Initialize COM as Single-Threaded Apartment (STA)
     // RAII guard ensures CoUninitialize even on panic.
@@ -756,6 +765,9 @@ fn run_file_operation_loop(
         let is_organizer_operation = organizer_operation.is_some();
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if native_copy::try_handle(&request, &result_sender, &copy_runtime) {
+                return CompletionBehavior::SendFinishedNoRefresh;
+            }
             if shell_transfers::try_delegate(&request, &result_sender) {
                 return CompletionBehavior::NoFinished;
             }

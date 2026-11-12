@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
-fn is_filesystem_transfer(paths: &[PathBuf], destination: &Path) -> bool {
+pub(super) fn is_filesystem_transfer(paths: &[PathBuf], destination: &Path) -> bool {
     !paths.is_empty()
         && std::iter::once(destination)
             .chain(paths.iter().map(PathBuf::as_path))

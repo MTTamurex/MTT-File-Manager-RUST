@@ -7,7 +7,28 @@ pub(super) fn record_context(app: &ImageViewerApp, ctx: &egui::Context) {
     if diagnostic_logger::capture_session().is_none() {
         return;
     }
+    let mut copy_jobs = 0u64;
+    let mut copy_active = 0u64;
+    let mut copy_waiting = 0u64;
+    for (_, job) in app.file_operation_state.copy_runtime.jobs() {
+        if job.outcome().is_none() {
+            copy_jobs += 1;
+            copy_active += job
+                .progress
+                .telemetry
+                .active
+                .load(std::sync::atomic::Ordering::Relaxed) as u64;
+            copy_waiting += job
+                .progress
+                .telemetry
+                .waiting
+                .load(std::sync::atomic::Ordering::Relaxed) as u64;
+        }
+    }
     frame_trace::context(vec![
+        field_u64("native_copy_jobs", copy_jobs),
+        field_u64("native_copy_active", copy_active),
+        field_u64("native_copy_waiting", copy_waiting),
         field_bool(
             "viewport_active",
             ctx.input(|i| i.viewport().focused.unwrap_or(false)),

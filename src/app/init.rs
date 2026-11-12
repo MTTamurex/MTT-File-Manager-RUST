@@ -158,6 +158,7 @@ impl ImageViewerApp {
             prefetch_tx,
             idle_warmup_tx,
             file_op_tx,
+            copy_runtime,
             file_op_res_rx,
             extraction_progress,
             extraction_cancel,
@@ -258,6 +259,11 @@ impl ImageViewerApp {
             date_format,
             tab_preferences,
         } = startup_preferences;
+
+        copy_runtime.enabled.store(
+            explorer_preferences.native_copy_engine,
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
         crate::domain::date_format::set_date_format(date_format);
 
@@ -930,6 +936,7 @@ impl ImageViewerApp {
 
             // FILE OPERATION WORKER/TRACKING
             file_operation_state: build_file_operation_state(
+                copy_runtime,
                 file_op_tx,
                 file_op_res_rx,
                 extraction_progress,

@@ -3829,6 +3829,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mtt-copy-engine"
+version = "0.2.12"
+dependencies = [
+ "tempfile",
+ "windows",
+]
+
+[[package]]
 name = "mtt-file-manager"
 version = "0.2.12"
 dependencies = [
@@ -3863,6 +3871,7 @@ dependencies = [
  "lopdf",
  "lru",
  "memmap2",
+ "mtt-copy-engine",
  "mtt-mpv-thumbnail",
  "mtt-search-protocol",
  "natord",

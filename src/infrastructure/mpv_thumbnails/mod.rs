@@ -1,4 +1,6 @@
 //! Video-only backend, isolated in a supervised same-executable process.
+//! Requests waiting for the decoder share it; the last request reaps the child
+//! immediately. No idle retention timer or resident libmpv session is kept.
 mod client;
 mod helper;
 mod process;
@@ -13,6 +15,7 @@ pub use protocol::{Failure, Frame};
 use parking_lot::Mutex;
 use std::{
     path::Path,
+    sync::atomic::{AtomicUsize, Ordering},
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -34,6 +37,7 @@ pub enum Error {
 struct Service {
     client: Mutex<Extractor>,
     control: std::sync::Arc<process::Control>,
+    pending: AtomicUsize,
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
@@ -50,10 +54,7 @@ pub fn extract(path: &Path, max_side: u32, cancelled: &dyn Fn() -> bool) -> Resu
     }
     let service = SERVICE.get_or_init(|| {
         let client = Extractor::new(std::env::current_exe().unwrap_or_default());
-        Service {
-            control: client.control.clone(),
-            client: Mutex::new(client),
-        }
+        Service::new(client)
     });
     service.extract_until(
         path,
@@ -64,6 +65,19 @@ pub fn extract(path: &Path, max_side: u32, cancelled: &dyn Fn() -> bool) -> Resu
 }
 
 impl Service {
+    fn new(client: Extractor) -> Self {
+        Self {
+            control: client.control.clone(),
+            client: Mutex::new(client),
+            pending: AtomicUsize::new(0),
+        }
+    }
+
+    fn register(&self) -> PendingRequest<'_> {
+        self.pending.fetch_add(1, Ordering::AcqRel);
+        PendingRequest(self)
+    }
+
     fn extract_until(
         &self,
         path: &Path,
@@ -71,6 +85,9 @@ impl Service {
         cancelled: &dyn Fn() -> bool,
         deadline: Instant,
     ) -> Result<Frame, Error> {
+        // Register before waiting for the decoder so the previous request can
+        // hand the process to queued callers instead of retaining it at idle.
+        let _pending = self.register();
         loop {
             if self.control.stopped() || cancelled() {
                 return Err(Error::Cancelled);
@@ -88,6 +105,23 @@ impl Service {
                     return Err(Error::QueueTimeout);
                 }
                 return client.extract_until(path, max_side, cancelled, deadline);
+            }
+        }
+    }
+}
+
+struct PendingRequest<'a>(&'a Service);
+
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        if self.0.pending.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        // A newly arrived request may already own the decoder. Never wait for
+        // it or terminate its process; that request will perform idle cleanup.
+        if let Some(mut client) = self.0.client.try_lock() {
+            if self.0.pending.load(Ordering::Acquire) == 0 {
+                client.release_process();
             }
         }
     }

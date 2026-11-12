@@ -1,4 +1,5 @@
 //! Fault injection uses a private mock peer, never production helper switches.
+mod lifecycle;
 use super::*;
 use crate::infrastructure::windows::OwnedHandle;
 use std::{
@@ -231,15 +232,15 @@ fn oversized_request_cannot_block_pipe_writer_past_deadline() {
 }
 
 #[test]
-fn queued_timeout_and_cancellation_do_not_discard_the_healthy_helper() {
+fn queued_timeout_and_cancellation_do_not_discard_an_inflight_helper() {
     let mut client = extractor();
     client.install_test_process(echo_peer());
     client.extract(fixture(), 256, &|| false).unwrap();
     let pid = client.process_id();
-    let service = Service {
-        control: client.control.clone(),
-        client: parking_lot::Mutex::new(client),
-    };
+    let handle = process_handle(&client);
+    let service = Service::new(client);
+    // Represent the in-flight owner as well as holding its decoder lock.
+    let active = service.register();
     let owner = service.client.lock();
     assert_eq!(
         service
@@ -268,4 +269,7 @@ fn queued_timeout_and_cancellation_do_not_discard_the_healthy_helper() {
     assert!(service
         .extract_until(fixture(), 256, &|| false, Instant::now() + REQUEST_TIMEOUT)
         .is_ok());
+    drop(active);
+    assert!(service.client.lock().process_id().is_none());
+    assert_exited(&handle);
 }

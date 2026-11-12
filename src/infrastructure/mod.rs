@@ -5,6 +5,7 @@ pub mod app_state_db;
 pub mod archive_create;
 pub mod archive_extract;
 pub mod auto_tag;
+pub mod copy_engine;
 pub mod db_utils;
 pub mod diagnostic_logger;
 pub mod directory_cache;

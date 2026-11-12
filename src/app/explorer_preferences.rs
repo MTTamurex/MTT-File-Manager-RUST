@@ -36,6 +36,7 @@ pub struct ExplorerPreferences {
     pub column_size_mode: ListColumnSizeMode,
     pub hover_preview: bool,
     pub sidebar_unified_scroll: bool,
+    pub native_copy_engine: bool,
 }
 
 impl Default for ExplorerPreferences {
@@ -44,6 +45,7 @@ impl Default for ExplorerPreferences {
             column_size_mode: ListColumnSizeMode::AutoFit,
             hover_preview: true,
             sidebar_unified_scroll: false,
+            native_copy_engine: false,
         }
     }
 }
@@ -76,16 +78,21 @@ impl ExplorerPreferences {
                 .get("sidebar_unified_scroll")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(false),
+            native_copy_engine: prefs
+                .get("native_copy_engine")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(false),
         }
     }
 
-    pub(crate) fn preferences(self) -> [(&'static str, String); 3] {
+    pub(crate) fn preferences(self) -> [(&'static str, String); 4] {
         [
             (
                 "list_column_size_mode",
                 self.column_size_mode.persisted_value().to_string(),
             ),
             ("hover_preview", self.hover_preview.to_string()),
+            ("native_copy_engine", self.native_copy_engine.to_string()),
             (
                 "sidebar_unified_scroll",
                 self.sidebar_unified_scroll.to_string(),
@@ -100,6 +107,7 @@ mod tests {
 
     #[test]
     fn missing_or_invalid_preferences_preserve_current_behavior() {
+        assert!(!ExplorerPreferences::default().native_copy_engine);
         assert!(!ExplorerPreferences::default().sidebar_unified_scroll);
         assert_eq!(
             ExplorerPreferences::load(&HashMap::new()),
@@ -111,6 +119,7 @@ mod tests {
             ("remember_column_widths".into(), "invalid".into()),
             ("hover_preview".into(), "invalid".into()),
             ("sidebar_unified_scroll".into(), "invalid".into()),
+            ("native_copy_engine".into(), "invalid".into()),
         ]);
         assert_eq!(
             ExplorerPreferences::load(&prefs),
@@ -160,6 +169,7 @@ mod tests {
                         column_size_mode,
                         hover_preview,
                         sidebar_unified_scroll,
+                        native_copy_engine: false,
                     };
                     let prefs = options
                         .preferences()
@@ -186,11 +196,28 @@ mod tests {
             column_size_mode: ListColumnSizeMode::RememberPerFolder,
             hover_preview: false,
             sidebar_unified_scroll: true,
+            native_copy_engine: true,
         };
         for (key, value) in options.preferences() {
             db.set_preference(key, &value).unwrap();
         }
         assert_eq!(StartupPreferences::load(&db).explorer_preferences, options);
+    }
+
+    #[test]
+    fn copy_engine_selection_round_trips_without_changing_other_options() {
+        for enabled in [false, true] {
+            let options = ExplorerPreferences {
+                native_copy_engine: enabled,
+                ..Default::default()
+            };
+            let preferences = options
+                .preferences()
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect();
+            assert_eq!(ExplorerPreferences::load(&preferences), options);
+        }
     }
 
     #[test]

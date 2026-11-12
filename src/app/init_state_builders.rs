@@ -187,6 +187,7 @@ pub(in crate::app) fn build_folder_size_state(
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn build_file_operation_state(
+    copy_runtime: Arc<crate::infrastructure::copy_engine::CopyRuntime>,
     file_op_sender: crossbeam_channel::Sender<
         crate::workers::file_operation_worker::FileOperationRequest,
     >,
@@ -211,6 +212,8 @@ pub(in crate::app) fn build_file_operation_state(
     pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
 ) -> FileOperationState {
     FileOperationState {
+        copy_runtime,
+        copy_panel: Default::default(),
         file_op_sender,
         file_op_res_receiver,
         extraction_progress,

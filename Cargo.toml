@@ -4,6 +4,7 @@ members = [
     "crates/mtt-search-protocol",
     "crates/mtt-search-service",
     "crates/mtt-mpv-thumbnail",
+    "crates/mtt-copy-engine",
 ]
 resolver = "2"
 
@@ -75,6 +76,7 @@ xlsx_model = { package = "betteroffice-xlsx-model", version = "=0.3.0" }
 yrs = "=0.27.3"
 mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 mtt-mpv-thumbnail = { path = "crates/mtt-mpv-thumbnail" }
+mtt-copy-engine = { path = "crates/mtt-copy-engine" }
 bincode = { workspace = true }
 serde = { workspace = true }
 rust-i18n = "3"

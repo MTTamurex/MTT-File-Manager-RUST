@@ -66,15 +66,40 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
         ctx.request_repaint(); // Keep UI refreshing while processing
     }
 
-    let compact_status_layout = root_ui.available_width()
-        < crate::ui::components::status_bar_size_controls::compact_width(root_ui);
+    let copy_indicator = app
+        .file_operation_state
+        .copy_panel
+        .minimized
+        .then(|| {
+            crate::ui::components::copy_progress_panel::indicator::CopyIndicator::from_runtime(
+                &app.file_operation_state.copy_runtime,
+            )
+        })
+        .flatten();
+    let indicator_width = copy_indicator
+        .as_ref()
+        .map(|indicator| indicator.width(root_ui))
+        .unwrap_or(0.0);
+    let compact_width = crate::ui::components::status_bar_size_controls::compact_width(root_ui);
+    // On narrow windows, put the badge on its own footer row rather than
+    // squeezing or covering the existing selection/size controls.
+    let indicator_below =
+        copy_indicator.is_some() && root_ui.available_width() - indicator_width < compact_width;
+    let reserved_width = if indicator_below {
+        0.0
+    } else {
+        indicator_width
+    };
+    let compact_status_layout = root_ui.available_width() - reserved_width < compact_width;
     let status_height = crate::ui::fonts::layout::row_height(root_ui, 24.0, 14.0, 4.0);
     egui::Panel::bottom("status_bar")
-        .exact_size(if compact_status_layout {
-            status_height * 2.0
-        } else {
-            status_height
-        })
+        .exact_size(
+            (if compact_status_layout {
+                status_height * 2.0
+            } else {
+                status_height
+            }) + if indicator_below { status_height } else { 0.0 },
+        )
         .frame(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 0))
@@ -82,6 +107,29 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
         )
         .show(root_ui, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
+            let full_rect = ui.max_rect();
+            let (status_rect, indicator_rect) =
+                crate::ui::components::copy_progress_panel::indicator::rects(
+                    full_rect,
+                    indicator_width,
+                    status_height,
+                    indicator_below,
+                );
+            let mut status_ui = ui.new_child(egui::UiBuilder::new().max_rect(status_rect));
+            if copy_indicator.is_some() {
+                status_ui.set_clip_rect(status_rect.intersect(ui.clip_rect()));
+            }
+            if let Some(summary) = &copy_indicator {
+                let mut indicator_ui =
+                    ui.new_child(egui::UiBuilder::new().max_rect(indicator_rect).layout(
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    ));
+                crate::ui::components::copy_progress_panel::indicator::render(
+                    &mut indicator_ui,
+                    summary,
+                    &mut app.file_operation_state.copy_panel,
+                );
+            }
             let video_preview_active = app
                 .media_preview
                 .as_ref()
@@ -98,7 +146,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
                 .and_then(|id| app.tag_definitions.get(&id).map(|tag| tag.name.clone()));
             let previous_scale = app.interface_scale;
             let action = render_status_bar(
-                ui,
+                &mut status_ui,
                 &mut app.svg_icon_manager,
                 &mut app.is_loading_folder,
                 app.total_items,

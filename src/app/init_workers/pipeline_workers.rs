@@ -41,6 +41,7 @@ type FileOperationWorkerHandles = (
     mpsc::Sender<crate::workers::image_conversion_worker::ImageConversionRequest>,
     crate::infrastructure::archive_create::SharedCompressionProgress,
     crate::infrastructure::archive_create::CompressionCancelFlag,
+    Arc<crate::infrastructure::copy_engine::CopyRuntime>,
 );
 
 pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandles {
@@ -50,6 +51,7 @@ pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandle
     let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
     let extraction_progress = crate::infrastructure::archive_extract::new_shared_progress();
     let extraction_cancel = crate::infrastructure::archive_extract::new_cancel_flag();
+    let copy_runtime = Arc::new(crate::infrastructure::copy_engine::CopyRuntime::default());
 
     // Create archive extraction channel and start the dedicated worker.
     let (archive_extract_tx, archive_extract_rx) = mpsc::channel();
@@ -81,6 +83,7 @@ pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandle
         Arc::new(file_op_rx),
         file_op_res_tx,
         archive_extract_tx,
+        copy_runtime.clone(),
     );
     (
         file_op_tx,
@@ -91,6 +94,7 @@ pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandle
         image_conversion_tx,
         compression_progress,
         compression_cancel,
+        copy_runtime,
     )
 }
 

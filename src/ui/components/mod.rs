@@ -4,6 +4,8 @@ pub mod auto_tag_settings;
 pub mod backend_settings;
 pub mod batch_rename_modal;
 pub mod breadcrumb;
+mod copy_engine_settings;
+pub(crate) mod copy_progress_panel;
 pub mod default_file_manager_settings;
 pub mod drag_move_confirmation_modal;
 mod explorer_settings;

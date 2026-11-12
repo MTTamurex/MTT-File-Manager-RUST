@@ -746,6 +746,7 @@ impl eframe::App for ImageViewerApp {
         }
 
         // 14. Notifications
+        crate::ui::components::copy_progress_panel::render(self, ctx);
         app::notifications::render_notifications(self, ctx);
 
         // 15. Global Search Overlay (on top of everything)

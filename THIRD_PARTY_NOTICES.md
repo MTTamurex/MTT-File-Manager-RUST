@@ -39,6 +39,18 @@ Source-location notes for public installers are kept in
 
 ## Bundled or copied files
 
+### BetterCopy
+
+- Source: https://github.com/articulite/BetterCopy
+- Reviewed revision: `a3e239bb6bbe60b79df93e6e04ad5e113c40934c`.
+- License: MIT; Copyright (c) 2026 BetterCopy Contributors.
+- `crates/mtt-copy-engine/` adapts the Win32 copy callback and storage profiling
+  approach. The application integration, planning and no-clobber staging are
+  local implementations. Upstream GUI, hotkeys, clipboard, move and deletion
+  routines are not bundled.
+- Preserve the full license at `third_party_licenses/BetterCopy-MIT.txt` with
+  distributions. The crate also carries its own copy of the license.
+
 ### ModernH
 
 Files:

@@ -106,6 +106,7 @@ $requiredFiles = @(
     "$RepoRoot\THIRD_PARTY_NOTICES.md",
     "$RepoRoot\third_party_licenses\README.md",
     "$RepoRoot\third_party_licenses\PROVENANCE.md",
+    "$RepoRoot\third_party_licenses\BetterCopy-MIT.txt",
     "$RepoRoot\third_party_licenses\GPL-2.0.txt",
     "$RepoRoot\third_party_licenses\LGPL-2.1.txt",
     "$RepoRoot\third_party_licenses\MPV-COPYRIGHT-NOTICE.txt",

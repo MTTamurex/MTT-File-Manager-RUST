@@ -62,6 +62,8 @@ pub(crate) fn release_pending_clipboard_move(
 }
 
 pub struct FileOperationState {
+    pub copy_runtime: Arc<crate::infrastructure::copy_engine::CopyRuntime>,
+    pub copy_panel: crate::app::copy_panel_state::CopyPanelState,
     pub(crate) file_op_sender:
         crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,

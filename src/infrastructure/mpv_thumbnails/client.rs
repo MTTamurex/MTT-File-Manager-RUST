@@ -20,6 +20,8 @@ pub struct Extractor {
     pub(super) control: Arc<Control>,
     process: Option<Process>,
     next_id: u64,
+    #[cfg(test)]
+    test_command: Option<fn() -> Command>,
 }
 
 impl Extractor {
@@ -29,12 +31,18 @@ impl Extractor {
             control: Arc::default(),
             process: None,
             next_id: 0,
+            #[cfg(test)]
+            test_command: None,
         }
     }
 
     fn command(&self) -> Result<Command, Error> {
         if !self.executable.is_absolute() {
             return Err(Error::Unavailable);
+        }
+        #[cfg(test)]
+        if let Some(command) = self.test_command {
+            return Ok(command());
         }
         let mut command = Command::new(&self.executable);
         command
@@ -63,7 +71,7 @@ impl Extractor {
         if result.is_err() {
             // Never retry the same request automatically; the next request gets
             // a fresh process. Existing worker failure/backoff policy still applies.
-            drop(self.process.take());
+            self.release_process();
         }
         result
     }
@@ -140,6 +148,17 @@ impl Extractor {
             return Err(Error::Timeout);
         }
         Ok(())
+    }
+
+    pub(super) fn release_process(&mut self) {
+        // Dropping this owned child reaps it and its IPC worker. This is not
+        // permanent service shutdown: a subsequent request can spawn normally.
+        drop(self.process.take());
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_test_command(&mut self, command: fn() -> Command) {
+        self.test_command = Some(command);
     }
 
     #[cfg(test)]
