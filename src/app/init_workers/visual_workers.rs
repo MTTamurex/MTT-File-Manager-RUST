@@ -397,14 +397,7 @@ pub(in crate::app) fn spawn_live_file_size_worker(
         );
 
         while let Ok(request) = size_req_rx.recv() {
-            let observed = if crate::app::live_file_size::should_probe_live_file_size(
-                &request.path,
-                request.source_mtime_secs,
-            ) {
-                crate::app::live_file_size::read_live_file_size(&request.path)
-            } else {
-                None
-            };
+            let observed = crate::app::live_file_size::observe_live_file_size(&request);
 
             let _ = size_res_tx.send(crate::app::live_file_size::LiveFileSizeResponse {
                 path: request.path,

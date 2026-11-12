@@ -16,7 +16,11 @@ static NEXT_LIVE_SIZE_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct LiveFileSizeRequest {
     pub path: PathBuf,
+    /// Listing version used to reject stale responses; never replace with the
+    /// newer timestamp observed by a previous background read.
     pub source_mtime_secs: u64,
+    /// Latest known mtime, used only to decide whether another read is useful.
+    pub probe_mtime_secs: u64,
     pub request_id: u64,
 }
 
@@ -78,7 +82,8 @@ pub fn cached_live_file_size(
     })
 }
 
-pub fn should_probe_live_file_size(path: &Path, modified_epoch: u64) -> bool {
+/// CPU-only freshness check, safe even while egui holds its context lock.
+fn is_recent_for_live_file_size(modified_epoch: u64) -> bool {
     if modified_epoch > 0 {
         let now_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -87,6 +92,15 @@ pub fn should_probe_live_file_size(path: &Path, modified_epoch: u64) -> bool {
         if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
             return false;
         }
+    }
+
+    true
+}
+
+/// Worker-only eligibility: volume detection can block in GetVolumeInformationW.
+fn should_probe_live_file_size(path: &Path, modified_epoch: u64) -> bool {
+    if !is_recent_for_live_file_size(modified_epoch) {
+        return false;
     }
 
     if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
@@ -152,7 +166,10 @@ fn resolve_cached_or_enqueue_live_file_size_at(
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs())
         .unwrap_or(modified_epoch);
-    if !should_probe_live_file_size(path, probe_mtime_secs) {
+    // Do not classify volumes or resolve cloud roots here. This function is
+    // called from renderers (some inside egui data_mut); the worker performs
+    // all potentially blocking eligibility checks before reading metadata.
+    if !is_recent_for_live_file_size(probe_mtime_secs) {
         return resolved_size;
     }
 
@@ -171,6 +188,7 @@ fn resolve_cached_or_enqueue_live_file_size_at(
     let request = LiveFileSizeRequest {
         path: path.clone(),
         source_mtime_secs: modified_epoch,
+        probe_mtime_secs,
         request_id,
     };
     if request_sender.send(request).is_ok() {
@@ -248,7 +266,25 @@ pub fn invalidate_live_file_size(
     active_requests.by_path.remove(path);
 }
 
-pub fn read_live_file_size(path: &Path) -> Option<ObservedLiveFileSize> {
+pub(crate) fn observe_live_file_size(
+    request: &LiveFileSizeRequest,
+) -> Option<ObservedLiveFileSize> {
+    observe_live_file_size_with(request, should_probe_live_file_size, read_live_file_size)
+}
+
+fn observe_live_file_size_with(
+    request: &LiveFileSizeRequest,
+    eligible: impl FnOnce(&Path, u64) -> bool,
+    read: impl FnOnce(&Path) -> Option<ObservedLiveFileSize>,
+) -> Option<ObservedLiveFileSize> {
+    if eligible(&request.path, request.probe_mtime_secs) {
+        read(&request.path)
+    } else {
+        None
+    }
+}
+
+fn read_live_file_size(path: &Path) -> Option<ObservedLiveFileSize> {
     std::fs::metadata(path)
         .ok()
         .filter(|metadata| metadata.is_file())
@@ -261,3 +297,7 @@ pub fn read_live_file_size(path: &Path) -> Option<ObservedLiveFileSize> {
 #[cfg(test)]
 #[path = "live_file_size_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "live_file_size/responsiveness_tests.rs"]
+mod responsiveness_tests;

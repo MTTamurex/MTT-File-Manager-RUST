@@ -32,12 +32,11 @@ pub fn is_virtual_drive_path(path: &Path) -> bool {
     detection::is_virtual_drive_path(path)
 }
 
-/// Fast check: true when the path is on a network share, virtual drive, or UNC path.
+/// Worker-only check: true when the path is on a network share, virtual drive, or UNC path.
 ///
-/// Uses `GetDriveTypeW` (cached, < 1ms) — safe for the UI thread.
-/// Synchronous filesystem calls (`std::fs::metadata`, `is_dir`, `exists`)
-/// MUST be avoided on these paths because they can block indefinitely when the
-/// remote server is unreachable or the virtual FS driver is stalled.
+/// Virtual-drive detection queries `GetVolumeInformationW` and the provider;
+/// this function itself can block and must not be called from renderers.
+/// Defer classification to a worker before deciding whether to access metadata.
 pub fn is_network_or_virtual(path: &Path) -> bool {
     // UNC paths (\\server\share) are always network
     if path.to_str().map(|s| s.starts_with(r"\\")).unwrap_or(false) {
