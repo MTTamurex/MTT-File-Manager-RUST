@@ -2,6 +2,7 @@
 //! No Shell, clipboard, move or delete operations are exposed.
 mod active_files;
 mod control;
+mod path_resolution;
 mod plan;
 mod platform;
 mod profile;

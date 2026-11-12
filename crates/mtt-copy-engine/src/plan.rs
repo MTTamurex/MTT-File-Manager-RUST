@@ -62,12 +62,33 @@ pub(crate) fn build(
     destination: &Path,
     progress: &Progress,
 ) -> io::Result<Plan> {
+    build_with(
+        sources,
+        destination,
+        progress,
+        crate::path_resolution::resolve,
+    )
+}
+
+pub(crate) fn build_with(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+    resolve: impl Fn(&Path) -> io::Result<crate::path_resolution::Resolved>,
+) -> io::Result<Plan> {
     check_cancel(progress)?;
     if sources.is_empty() {
         return Err(io::Error::other("No copy sources"));
     }
     check_path(destination)?;
-    let destination = fs::canonicalize(destination)?;
+    let destination = resolve(destination).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("Destination path resolution failed: {error}"),
+        )
+    })?;
+    let destination_virtual = destination.virtual_volume;
+    let destination = destination.path;
     if !destination.is_dir() {
         return Err(io::Error::other("Destination must be a directory"));
     }
@@ -82,7 +103,13 @@ pub(crate) fn build(
     for source in sources {
         check_cancel(progress)?;
         check_path(source)?;
-        let source = fs::canonicalize(source)?;
+        let resolved = resolve(source).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("Source path resolution failed: {error}"),
+            )
+        })?;
+        let source = resolved.path;
         let name = source
             .file_name()
             .ok_or_else(|| io::Error::other("Cannot copy a volume root"))?;
@@ -94,7 +121,10 @@ pub(crate) fn build(
                 "Duplicate copy targets",
             ));
         }
-        if destination.starts_with(&source) {
+        if destination.starts_with(&source)
+            || ((resolved.virtual_volume || destination_virtual)
+                && crate::path_resolution::contains_directory(&source, &destination)?)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Cannot copy a directory into itself",

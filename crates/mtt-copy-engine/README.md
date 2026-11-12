@@ -14,6 +14,11 @@ organizer jobs, archive extraction and virtual Shell items are not redirected.
 - Conflicts are reported, never overwritten or merged. There is no automatic
   fallback after an attempted copy.
 - Rejects symlinks/reparse points and recursive destinations during preflight.
+- WinFsp local mounts that return Windows error 1005 while resolving DOS volume
+  names use normalized volume-relative names instead. This compatibility path
+  still checks ancestors for reparse points and checks directory identities to
+  prevent recursive copying through volume aliases. Other resolution errors are
+  not bypassed. This does not imply support for every virtual filesystem feature.
 - Per-job progress, cooperative pause/resume and cancellation. Pause applies to
   preflight, queued files and in-flight Win32 progress callbacks. Workers sleep
   on a condition variable, and cancellation wakes paused workers. Pause/resume
