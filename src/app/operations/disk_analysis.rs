@@ -34,11 +34,12 @@ impl ImageViewerApp {
             }
         };
 
-        match std::process::Command::new(exe)
-            .arg("--disk-analyzer")
-            .arg(drive_letter.to_string())
-            .spawn()
-        {
+        match crate::viewer_runtime::backend::viewer_command(exe).and_then(|mut command| {
+            command
+                .arg("--disk-analyzer")
+                .arg(drive_letter.to_string())
+                .spawn()
+        }) {
             Ok(child) => {
                 let child_pid = child.id();
                 crate::viewer_processes::register(child);

@@ -1,17 +1,14 @@
 use eframe::egui;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
-use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
 mod app;
 mod cache;
 mod crop;
 mod export;
 mod indexer;
+mod instance;
 mod ipc;
 pub(crate) mod loader;
 pub(crate) mod metrics;
@@ -22,37 +19,8 @@ mod wallpaper;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
-const IMAGE_VIEWER_MUTEX_NAME: &str = "Local\\MTTFileManager_ImageViewer_SingleInstance\0";
 const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
 const OPEN_REQUEST_DEBOUNCE: Duration = Duration::from_millis(700);
-
-struct SingleInstanceGuard {
-    handle: HANDLE,
-}
-
-impl SingleInstanceGuard {
-    fn try_acquire() -> Option<Self> {
-        let wide: Vec<u16> = IMAGE_VIEWER_MUTEX_NAME.encode_utf16().collect();
-        unsafe {
-            let handle = CreateMutexW(None, true, PCWSTR(wide.as_ptr())).ok()?;
-            if GetLastError() == ERROR_ALREADY_EXISTS {
-                let _ = CloseHandle(handle);
-                None
-            } else {
-                Some(Self { handle })
-            }
-        }
-    }
-}
-
-impl Drop for SingleInstanceGuard {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = ReleaseMutex(self.handle);
-            let _ = CloseHandle(self.handle);
-        }
-    }
-}
 
 fn recent_open_request_state() -> &'static Mutex<Option<(PathBuf, Instant)>> {
     static RECENT_OPEN_REQUEST: OnceLock<Mutex<Option<(PathBuf, Instant)>>> = OnceLock::new();
@@ -158,7 +126,14 @@ fn open_image_viewer_blocking(path: &Path) {
         return;
     }
 
-    match ipc::send_open_request(path) {
+    let backend = match crate::viewer_runtime::backend::requested_backend() {
+        Ok(backend) => backend,
+        Err(error) => {
+            log::error!("[IMAGE-VIEWER] {error}");
+            return;
+        }
+    };
+    match ipc::send_open_request(path, backend) {
         Ok(true) => {
             log::info!(
                 "[IMAGE-VIEWER] existing instance accepted open request pid={} path='{}'",
@@ -187,7 +162,9 @@ fn open_image_viewer_blocking(path: &Path) {
         }
     };
 
-    match Command::new(exe).arg("--image-viewer").arg(path).spawn() {
+    match crate::viewer_runtime::backend::viewer_command(exe)
+        .and_then(|mut command| command.arg("--image-viewer").arg(path).spawn())
+    {
         Ok(child) => {
             let child_pid = child.id();
             crate::viewer_processes::register(child);
@@ -243,28 +220,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         let _ = std::fs::remove_file(&p);
     }
 
-    let _guard = match SingleInstanceGuard::try_acquire() {
-        Some(g) => g,
-        None => {
-            match ipc::send_open_request(&path) {
-                Ok(true) => {
-                    log::info!("[IMAGE-VIEWER] forwarded image to existing viewer instance");
-                }
-                Ok(false) => {
-                    log::warn!("[IMAGE-VIEWER] existing instance unavailable for IPC forward");
-                }
-                Err(err) => {
-                    log::warn!(
-                        "[IMAGE-VIEWER] failed to forward image to existing viewer: {}",
-                        err
-                    );
-                }
-            }
-            return Ok(());
-        }
-    };
-
-    let external_open_rx = ipc::start_open_request_server();
+    // Acquire the backend-specific instance only after graphics initialization:
+    // direct launches can fall back, so the requested backend is not sufficient.
+    let instance_guard = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let guard_for_creator = std::rc::Rc::clone(&instance_guard);
 
     let title_name = path
         .file_name()
@@ -332,7 +291,14 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let result = crate::viewer_runtime::run_viewer_native(
         &rust_i18n::t!("imageviewer.title"),
         native_options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            let backend = crate::viewer_runtime::backend::GraphicsBackend::from_context(cc)
+                .map_err(std::io::Error::other)?;
+            let Some((guard, external_open_rx)) = instance::start_or_forward(backend, &path)?
+            else {
+                return Ok(Box::new(instance::ForwardedApp));
+            };
+            *guard_for_creator.borrow_mut() = Some(guard);
             Ok(Box::new(app::DedicatedImageViewerApp::new(
                 initial_sequence,
                 external_open_rx,

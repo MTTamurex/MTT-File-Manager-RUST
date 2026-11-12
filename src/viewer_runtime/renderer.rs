@@ -1,103 +1,115 @@
-//! Glow-first startup with a single WGPU fallback before app creation.
+//! Shared standalone-viewer renderer configuration.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// Preserve the one-shot app creator across renderer initialization attempts.
-/// No retry is made after app creation starts: file errors and runtime failures
-/// must not reopen the viewer or duplicate its workers and IPC receivers.
+use super::backend::{self, BackendSelection, GraphicsBackend};
+
+/// Child windows inherit one exact backend. Only independent launches may fall
+/// back, and only before application creation has started.
 pub fn run_viewer_native(
     app_name: &str,
     options: eframe::NativeOptions,
     app_creator: eframe::AppCreator<'_>,
 ) -> eframe::Result<()> {
-    run_with(app_name, options, app_creator, |name, options, creator| {
-        eframe::run_native(name, options, creator)
-    })
+    let selection = backend::selection()
+        .map_err(|error| eframe::Error::AppCreation(std::io::Error::other(error).into()))?;
+    run_with(
+        app_name,
+        options,
+        app_creator,
+        selection,
+        |name, options, creator| eframe::run_native(name, options, creator),
+    )
 }
 
 fn run_with<'app>(
     app_name: &str,
     mut options: eframe::NativeOptions,
     app_creator: eframe::AppCreator<'app>,
+    selection: BackendSelection,
     mut run: impl FnMut(&str, eframe::NativeOptions, eframe::AppCreator<'app>) -> eframe::Result<()>,
 ) -> eframe::Result<()> {
-    options.renderer = eframe::Renderer::Glow;
-    // eframe must return initialization failures instead of exiting the process.
     options.run_and_return = true;
-    let fallback_options = options.clone();
     let creator = Rc::new(RefCell::new(Some(app_creator)));
-
-    log::info!("[VIEWER-RENDERER] attempt=glow");
-    let result = run(
-        app_name,
-        options,
-        pending_creator(Rc::clone(&creator), "glow"),
-    );
-    match result {
-        Err(error) if should_fallback(&error, creator.borrow().is_some()) => {
-            log::warn!("[VIEWER-RENDERER] Glow initialization failed; trying WGPU: {error}");
-            log::info!(
-                "[VIEWER-RENDERER] attempt=wgpu backends={:?}",
-                fallback_backends()
-            );
-            let result = run(
-                app_name,
-                wgpu_options(fallback_options),
-                pending_creator(creator, "wgpu"),
-            );
-            if let Err(error) = &result {
-                log::error!("[VIEWER-RENDERER] WGPU fallback failed: {error}");
+    for (index, requested) in selection.candidates.iter().copied().enumerate() {
+        log::info!(
+            "[VIEWER-RENDERER] requested={} inherited={}",
+            requested.key(),
+            selection.inherited
+        );
+        let pending = Rc::clone(&creator);
+        let result = run(
+            app_name,
+            options_for_backend(options.clone(), requested),
+            Box::new(move |cc| {
+                let create = pending
+                    .borrow_mut()
+                    .take()
+                    .expect("app creator is called once");
+                let actual = GraphicsBackend::from_context(cc).map_err(std::io::Error::other)?;
+                if actual != requested {
+                    return Err(std::io::Error::other(
+                        "viewer initialized an unexpected graphics backend",
+                    )
+                    .into());
+                }
+                backend::register_context(cc);
+                log::info!("[VIEWER-RENDERER] initialized={}", actual.key());
+                create(cc)
+            }),
+        );
+        match result {
+            Err(error)
+                if !selection.inherited
+                    && index + 1 < selection.candidates.len()
+                    && should_retry(&error, creator.borrow().is_some()) =>
+            {
+                log::warn!("[VIEWER-RENDERER] backend={} initialization failed; trying next backend: {error}", requested.key());
             }
-            result
+            result => {
+                if let Err(error) = &result {
+                    log::error!(
+                        "[VIEWER-RENDERER] backend={} failed: {error}",
+                        requested.key()
+                    );
+                }
+                return result;
+            }
         }
-        result => result,
     }
+    unreachable!("backend selection always contains at least one candidate")
 }
 
-fn pending_creator<'app>(
-    creator: Rc<RefCell<Option<eframe::AppCreator<'app>>>>,
-    renderer: &'static str,
-) -> eframe::AppCreator<'app> {
-    Box::new(move |cc| {
-        let create = creator
-            .borrow_mut()
-            .take()
-            .expect("app creator is called only once");
-        let app = create(cc)?;
-        log::info!("[VIEWER-RENDERER] initialized={renderer}");
-        Ok(app)
-    })
-}
-
-fn should_fallback(error: &eframe::Error, creator_available: bool) -> bool {
+fn should_retry(error: &eframe::Error, creator_available: bool) -> bool {
     creator_available
         && matches!(
             error,
-            eframe::Error::OpenGL(_)
+            eframe::Error::Wgpu(_)
+                | eframe::Error::OpenGL(_)
                 | eframe::Error::Glutin(_)
                 | eframe::Error::NoGlutinConfigs(_, _)
                 | eframe::Error::Winit(_)
         )
 }
 
-fn fallback_backends() -> eframe::wgpu::Backends {
-    #[cfg(target_os = "windows")]
-    {
-        eframe::wgpu::Backends::DX12
+fn options_for_backend(
+    mut options: eframe::NativeOptions,
+    backend: GraphicsBackend,
+) -> eframe::NativeOptions {
+    if backend == GraphicsBackend::Glow {
+        options.renderer = eframe::Renderer::Glow;
+        return options;
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        eframe::wgpu::Backends::PRIMARY
-    }
-}
-
-fn wgpu_options(mut options: eframe::NativeOptions) -> eframe::NativeOptions {
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
-    setup.instance_descriptor.backends = fallback_backends();
+    setup.instance_descriptor.backends = match backend {
+        GraphicsBackend::Dx12 => eframe::wgpu::Backends::DX12,
+        GraphicsBackend::Vulkan => eframe::wgpu::Backends::VULKAN,
+        GraphicsBackend::Glow => unreachable!(),
+    };
     #[cfg(target_os = "windows")]
-    {
+    if backend == GraphicsBackend::Dx12 {
         // Same presentation path as the main window, including VM drivers.
         setup
             .instance_descriptor

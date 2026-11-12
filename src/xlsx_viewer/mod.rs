@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
@@ -82,10 +81,8 @@ pub fn open_xlsx_viewer(path: PathBuf) {
         }
     };
 
-    match Command::new(executable)
-        .arg("--xlsx-viewer")
-        .arg(path)
-        .spawn()
+    match crate::viewer_runtime::backend::viewer_command(executable)
+        .and_then(|mut command| command.arg("--xlsx-viewer").arg(path).spawn())
     {
         Ok(child) => crate::viewer_processes::register(child),
         Err(error) => log::error!("[XLSX-VIEWER] failed to start viewer: {error}"),

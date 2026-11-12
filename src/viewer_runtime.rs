@@ -10,13 +10,9 @@
 //! * Read user prefs (locale, theme) with a tiny read-only SQLite query
 //!   instead of the full [`crate::infrastructure::app_state_db::AppStateDb`]
 //!   pipeline (which runs migrations and pragmas on every open).
-//! * Build [`eframe::NativeOptions`] that
-//!   - use the lighter `Glow` renderer instead of `Wgpu`; for the standalone
-//!     viewers this avoids the large DX12 / wgpu baseline that dominates RSS
-//!     even for tiny text files;
-//!     automatically retry with WGPU/DX12 if OpenGL initialization fails;
-//!   - disable optional GL-only buffers (`depth_buffer`, `stencil_buffer`,
-//!     `multisampling`) which the viewers never use.
+//! * Match the manager's initialized graphics backend in child windows. Direct
+//!   launches use the saved preference and the manager's startup fallback order.
+//! * Disable optional buffers these windows never use.
 
 use crate::app::navigation_state::ThemeMode;
 use eframe::egui;
@@ -24,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+pub(crate) mod backend;
 mod renderer;
 pub use renderer::run_viewer_native;
 
@@ -135,7 +132,7 @@ fn poll_saved_interface_scale(ctx: &egui::Context) {
 pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport,
-        renderer: eframe::Renderer::Glow,
+        renderer: eframe::Renderer::Wgpu,
         persist_window: false,
         multisampling: 0,
         depth_buffer: 0,

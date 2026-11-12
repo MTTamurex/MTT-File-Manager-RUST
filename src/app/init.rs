@@ -99,6 +99,7 @@ impl ImageViewerApp {
         cc: &eframe::CreationContext<'_>,
         startup_folder: Option<PathBuf>,
     ) -> Self {
+        crate::viewer_runtime::backend::register_context(cc);
         let ctx = cc.egui_ctx.clone();
         ctx.set_fonts(font_definitions_with_embedded_icons());
 

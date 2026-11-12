@@ -11,7 +11,6 @@
 //! - Binary detection: rejects files with too many null bytes.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
@@ -196,7 +195,9 @@ pub fn open_text_viewer(path: PathBuf) {
         }
     };
 
-    match Command::new(exe).arg("--text-viewer").arg(&path).spawn() {
+    match crate::viewer_runtime::backend::viewer_command(exe)
+        .and_then(|mut command| command.arg("--text-viewer").arg(&path).spawn())
+    {
         Ok(child) => crate::viewer_processes::register(child),
         Err(err) => {
             log::error!(

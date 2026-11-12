@@ -12,7 +12,6 @@
 //!   oldest/furthest pages are evicted when exceeded.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
@@ -134,7 +133,9 @@ pub fn open_pdf_viewer(path: PathBuf) {
         }
     };
 
-    match Command::new(exe).arg("--pdf-viewer").arg(&path).spawn() {
+    match crate::viewer_runtime::backend::viewer_command(exe)
+        .and_then(|mut command| command.arg("--pdf-viewer").arg(&path).spawn())
+    {
         Ok(child) => crate::viewer_processes::register(child),
         Err(err) => {
             log::error!(

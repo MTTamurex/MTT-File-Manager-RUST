@@ -4,7 +4,6 @@
 //! parse/layout/raster work is isolated on a background thread inside that process.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
@@ -88,10 +87,8 @@ pub fn open_docx_viewer(path: PathBuf) {
         }
     };
 
-    match Command::new(executable)
-        .arg("--docx-viewer")
-        .arg(path)
-        .spawn()
+    match crate::viewer_runtime::backend::viewer_command(executable)
+        .and_then(|mut command| command.arg("--docx-viewer").arg(path).spawn())
     {
         Ok(child) => crate::viewer_processes::register(child),
         Err(error) => log::error!("[DOCX-VIEWER] failed to start viewer: {error}"),

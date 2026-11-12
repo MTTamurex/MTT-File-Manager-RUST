@@ -1,3 +1,4 @@
+use crate::viewer_runtime::backend::GraphicsBackend;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
@@ -17,7 +18,9 @@ use windows::Win32::System::Pipes::{
     PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 
-pub const IMAGE_VIEWER_PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerImageViewer";
+pub(super) fn pipe_name(backend: GraphicsBackend) -> String {
+    format!(r"\\.\pipe\MTTFileManagerImageViewer_{}", backend.key())
+}
 
 const PIPE_BUFFER_SIZE: u32 = 32 * 1024;
 const MAX_PIPE_INSTANCES: u32 = 4;
@@ -27,7 +30,7 @@ const CLIENT_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(20);
 const CLIENT_MAX_RETRY_DELAY: Duration = Duration::from_millis(500);
 const ERROR_PIPE_CONNECTED_CODE: u32 = 535;
 
-pub fn send_open_request(path: &Path) -> Result<bool, String> {
+pub fn send_open_request(path: &Path, backend: GraphicsBackend) -> Result<bool, String> {
     let payload = path.to_string_lossy().into_owned().into_bytes();
     if payload.len() > MAX_MESSAGE_BYTES {
         return Err(format!(
@@ -36,7 +39,7 @@ pub fn send_open_request(path: &Path) -> Result<bool, String> {
         ));
     }
 
-    let pipe_name_wide: Vec<u16> = IMAGE_VIEWER_PIPE_NAME
+    let pipe_name_wide: Vec<u16> = pipe_name(backend)
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
@@ -90,7 +93,7 @@ pub fn send_open_request(path: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
-pub fn start_open_request_server() -> Receiver<PathBuf> {
+pub fn start_open_request_server(backend: GraphicsBackend) -> Receiver<PathBuf> {
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
@@ -99,9 +102,9 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
             log::info!(
                 "[IMAGE-VIEWER] IPC server thread starting pid={} pipe='{}'",
                 std::process::id(),
-                IMAGE_VIEWER_PIPE_NAME
+                pipe_name(backend)
             );
-            let pipe = match create_pipe() {
+            let pipe = match create_pipe(backend) {
                 Ok(p) => p,
                 Err(err) => {
                     log::error!("[IMAGE-VIEWER] failed to create initial IPC pipe: {}", err);
@@ -146,8 +149,8 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
     rx
 }
 
-fn create_pipe() -> Result<HANDLE, String> {
-    let pipe_name_wide: Vec<u16> = IMAGE_VIEWER_PIPE_NAME
+fn create_pipe(backend: GraphicsBackend) -> Result<HANDLE, String> {
+    let pipe_name_wide: Vec<u16> = pipe_name(backend)
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
