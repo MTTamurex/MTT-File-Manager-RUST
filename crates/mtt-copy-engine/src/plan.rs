@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct File {
+    pub replacement: Option<crate::replacement::Snapshot>,
     pub source: PathBuf,
     pub destination: PathBuf,
     pub size: u64,
@@ -12,13 +13,14 @@ pub(crate) struct File {
 }
 
 pub(crate) struct Plan {
+    pub merges: HashSet<PathBuf>,
     pub files: Vec<File>,
     pub directories: Vec<PathBuf>,
     pub roots: Vec<PathBuf>,
     pub bytes: u64,
 }
 
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -76,6 +78,30 @@ pub(crate) fn build_with(
     progress: &Progress,
     resolve: impl Fn(&Path) -> io::Result<crate::path_resolution::Resolved>,
 ) -> io::Result<Plan> {
+    build_impl(sources, destination, progress, resolve, false)
+}
+
+pub(crate) fn build_interactive(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+) -> io::Result<Plan> {
+    build_impl(
+        sources,
+        destination,
+        progress,
+        crate::path_resolution::resolve,
+        true,
+    )
+}
+
+fn build_impl(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+    resolve: impl Fn(&Path) -> io::Result<crate::path_resolution::Resolved>,
+    interactive: bool,
+) -> io::Result<Plan> {
     check_cancel(progress)?;
     if sources.is_empty() {
         return Err(io::Error::other("No copy sources"));
@@ -93,6 +119,7 @@ pub(crate) fn build_with(
         return Err(io::Error::other("Destination must be a directory"));
     }
     let mut plan = Plan {
+        merges: HashSet::new(),
         files: Vec::new(),
         directories: Vec::new(),
         roots: Vec::new(),
@@ -115,7 +142,7 @@ pub(crate) fn build_with(
             .ok_or_else(|| io::Error::other("Cannot copy a volume root"))?;
         // Windows targets are normally case insensitive. Reject ambiguous
         // top-level names even on case-sensitive directories.
-        if !names.insert(name.to_string_lossy().to_lowercase()) {
+        if !interactive && !names.insert(name.to_string_lossy().to_lowercase()) {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "Duplicate copy targets",
@@ -131,11 +158,14 @@ pub(crate) fn build_with(
             ));
         }
         let target = destination.join(name);
-        require_absent(&target)?;
-        plan.roots.push(target.clone());
-        stack.push((source, target));
+        if !interactive {
+            require_absent(&target)?;
+        }
+        stack.push((source, target, true));
     }
-    while let Some((source, destination)) = stack.pop() {
+    stack.reverse();
+    let mut reserved = HashSet::new();
+    while let Some((source, destination, root)) = stack.pop() {
         check_cancel(progress)?;
         let metadata = fs::symlink_metadata(&source)?;
         if is_link(&metadata) {
@@ -144,12 +174,35 @@ pub(crate) fn build_with(
                 "Links and reparse points are not supported",
             ));
         }
+        let (destination, replacement) = if interactive {
+            match crate::target::choose(
+                &source,
+                &destination,
+                metadata.is_dir(),
+                &reserved,
+                progress,
+            )? {
+                crate::target::Target::Skip => continue,
+                crate::target::Target::Absent(path) => (path, None),
+                crate::target::Target::Merge(path) => {
+                    plan.merges.insert(path.clone());
+                    (path, None)
+                }
+                crate::target::Target::Replace(path, snapshot) => (path, Some(snapshot)),
+            }
+        } else {
+            (destination, None)
+        };
+        reserved.insert(crate::target::key(&destination));
+        if root {
+            plan.roots.push(destination.clone());
+        }
         if metadata.is_dir() {
             plan.directories.push(destination.clone());
             for entry in fs::read_dir(source)? {
                 check_cancel(progress)?;
                 let entry = entry?;
-                stack.push((entry.path(), destination.join(entry.file_name())));
+                stack.push((entry.path(), destination.join(entry.file_name()), false));
             }
         } else if metadata.is_file() {
             plan.bytes = plan
@@ -157,6 +210,7 @@ pub(crate) fn build_with(
                 .checked_add(metadata.len())
                 .ok_or_else(|| io::Error::other("Copy size overflow"))?;
             plan.files.push(File {
+                replacement,
                 source,
                 destination,
                 size: metadata.len(),

@@ -34,7 +34,7 @@ pub(super) fn try_handle(
         crate::infrastructure::copy_engine::diagnostics::Monitor::start(job.operation.clone());
     let result = match validated {
         Ok((paths, destination)) => {
-            mtt_copy_engine::copy(&paths, &destination, &job.operation.progress)
+            mtt_copy_engine::copy_with_conflicts(&paths, &destination, &job.operation.progress)
         }
         Err(_) => Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn enabled_copy_completes_and_conflict_is_not_retried() {
+    fn enabled_copy_completes_and_skipped_conflict_is_not_retried_through_shell() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("file.txt");
         let destination = root.path().join("target");
@@ -157,7 +157,35 @@ mod tests {
             b"source"
         );
         std::fs::write(destination.join("file.txt"), b"target").unwrap();
-        assert!(try_handle(&request, &sender, &runtime));
+        let worker_runtime = runtime.clone();
+        let worker_sender = sender.clone();
+        let worker =
+            std::thread::spawn(move || try_handle(&request, &worker_sender, &worker_runtime));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some((operation, conflict)) =
+                runtime.jobs().into_iter().find_map(|(_, operation)| {
+                    operation
+                        .progress
+                        .conflicts
+                        .pending()
+                        .map(|conflict| (operation, conflict))
+                })
+            {
+                assert!(operation.progress.conflicts.respond(
+                    conflict.id,
+                    mtt_copy_engine::conflicts::ConflictAction::Skip,
+                    false
+                ));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Copy conflict was not published"
+            );
+            std::thread::yield_now();
+        }
+        assert!(worker.join().unwrap());
         assert!(matches!(
             receiver.try_recv().unwrap(),
             FileOperationResult::CopyCompleted { .. }
@@ -165,7 +193,15 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         assert_eq!(
             runtime.jobs()[1].1.outcome().unwrap().kind,
-            OutcomeKind::Failed
+            OutcomeKind::Completed
+        );
+        assert_eq!(
+            runtime.jobs()[1]
+                .1
+                .progress
+                .items_skipped
+                .load(Ordering::Relaxed),
+            1
         );
         assert_eq!(
             std::fs::read(destination.join("file.txt")).unwrap(),

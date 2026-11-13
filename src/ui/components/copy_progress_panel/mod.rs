@@ -1,5 +1,6 @@
 //! Non-modal copy/deletion dashboard, inheriting the application's theme.
 mod active_files;
+mod conflicts;
 mod deletion;
 mod graph;
 pub(crate) mod indicator;
@@ -39,13 +40,21 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .or_default();
         sample(operation, metrics);
         if operation.outcome().is_none() && !operation.progress.is_cancelled() {
-            if let Some(request) = operation
+            let request_id = operation
                 .deletion
                 .as_ref()
                 .and_then(|deletion| deletion.confirmation.pending())
-            {
-                if metrics.confirmation_seen != Some(request.id) {
-                    metrics.confirmation_seen = Some(request.id);
+                .map(|request| request.id)
+                .or_else(|| {
+                    operation
+                        .progress
+                        .conflicts
+                        .pending()
+                        .map(|request| request.id)
+                });
+            if let Some(id) = request_id {
+                if metrics.confirmation_seen != Some(id) {
+                    metrics.confirmation_seen = Some(id);
                     reveal_confirmation = true;
                 }
             }
@@ -78,6 +87,7 @@ fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
         operation.outcome().is_none()
             && progress.copying.load(Ordering::Relaxed)
             && !progress.is_cancelled()
+            && progress.conflicts.pending().is_none()
             && progress.pause_state() == PauseState::Running,
     );
 }
@@ -115,6 +125,12 @@ fn card_with_paths(
     let mut dismiss = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
+        if active && !cancelled {
+            if let Some(request) = progress.conflicts.pending() {
+                conflicts::render(ui, operation, &request);
+                return;
+            }
+        }
         let status = match outcome.as_ref().map(|result| result.kind) {
             Some(OutcomeKind::Completed) => t!("copy_engine.completed"),
             Some(OutcomeKind::Cancelled) => t!("copy_engine.cancelled_title"),
@@ -133,7 +149,19 @@ fn card_with_paths(
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.label(RichText::new(status).strong().color(status_color));
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !active {
+                    dismiss = window::controls::close(ui, false).clicked();
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(status).strong().color(status_color))
+                            .truncate(),
+                    );
+                });
+            });
+        });
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -204,8 +232,12 @@ fn card_with_paths(
             .truncate(),
         );
         ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            if active {
+        let skipped = progress.items_skipped.load(Ordering::Relaxed);
+        if skipped > 0 {
+            ui.label(t!("copy_engine.skipped", count = skipped));
+        }
+        if active {
+            ui.horizontal_wrapped(|ui| {
                 let label = if pause == PauseState::Running {
                     t!("copy_engine.pause")
                 } else {
@@ -227,10 +259,8 @@ fn card_with_paths(
                 {
                     progress.cancel();
                 }
-            } else if ui.button(t!("copy_engine.dismiss")).clicked() {
-                dismiss = true;
-            }
-        });
+            });
+        }
         if let Some(message) = outcome.as_ref().and_then(|result| result.message.as_ref()) {
             ui.add_space(6.0);
             ui.label(message);

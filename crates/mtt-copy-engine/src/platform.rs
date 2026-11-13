@@ -82,7 +82,14 @@ fn copy_file_impl<'a>(
         .parent()
         .ok_or_else(|| io::Error::other("Invalid target"))?;
     plan::check_path(parent)?;
-    plan::require_absent(&item.destination)?;
+    let _pins = crate::replacement::pin_parents(parent)?;
+    let existing_guard = match &item.replacement {
+        Some(snapshot) => Some(snapshot.hold(&item.destination)?),
+        None => {
+            plan::require_absent(&item.destination)?;
+            None
+        }
+    };
     let _active_file = progress.track_file(&item.source);
     let temporary = StagingFile::new(parent)?;
     let mut transfer = Transfer {
@@ -98,7 +105,18 @@ fn copy_file_impl<'a>(
         return Err(io::Error::other("Copy size verification failed"));
     }
     plan::check_path(parent)?;
-    temporary.publish(&item.destination)?;
+    if let Some(snapshot) = &item.replacement {
+        snapshot.validate(&item.destination)?;
+    }
+    // Windows replacement can require all target handles to be closed. Keep
+    // the write guard through verification, then release it for the atomic
+    // same-directory rename (never delete/truncate the old file first).
+    drop(existing_guard);
+    if item.replacement.is_some() {
+        temporary.publish_with_replacement(&item.destination, true)?;
+    } else {
+        temporary.publish(&item.destination)?;
+    }
     // Include empty files and APIs that did not issue a final progress callback.
     transfer.update(item.size);
     transfer.committed = true;

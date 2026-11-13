@@ -7,6 +7,7 @@ use rust_i18n::t;
 use std::sync::Arc;
 
 const WINDOW_ID: &str = "mtt_copy_progress_panel";
+pub(super) mod controls;
 
 pub(super) fn show(
     ctx: &egui::Context,
@@ -35,6 +36,11 @@ fn show_with(
     let saved_area = egui::AreaState::load(ctx, egui::Id::new(WINDOW_ID));
     let saved_pivot = saved_area.map_or(egui::Align2::CENTER_CENTER, |state| state.pivot);
     let mut dismissed = Vec::new();
+    let copy_conflict = jobs.iter().any(|(_, job)| {
+        job.outcome().is_none()
+            && !job.progress.is_cancelled()
+            && job.progress.conflicts.pending().is_some()
+    });
     let confirming = jobs.iter().any(|(_, job)| {
         job.outcome().is_none()
             && !job.progress.is_cancelled()
@@ -46,13 +52,15 @@ fn show_with(
     let title = super::summary::Summary::from_jobs(jobs, panel)
         .map(|summary| summary.label())
         .unwrap_or_else(|| t!("copy_engine.preparing").to_string());
-    let title = if confirming {
+    let title = if copy_conflict {
+        t!("copy_engine.conflict_title").to_string()
+    } else if confirming {
         t!("delete_engine.awaiting_confirmation").to_string()
     } else {
         title
     };
     let mut window =
-        egui::Window::new(egui::RichText::new(title).text_style(egui::TextStyle::Button))
+        egui::Window::new(egui::RichText::new(&title).text_style(egui::TextStyle::Button))
             .id(egui::Id::new(WINDOW_ID))
             .pivot(saved_pivot)
             .default_pos(screen.center())
@@ -63,7 +71,7 @@ fn show_with(
             .max_width((screen.width() - 24.0).max(180.0))
             .min_width(width.min(320.0))
             .resizable(true)
-            .collapsible(true);
+            .title_bar(false);
     if center_operation {
         panel.last_centered_operation = newest_operation;
         // A fresh area needs one placement after its initial sizing pass too.
@@ -81,16 +89,16 @@ fn show_with(
         ctx.request_repaint();
     }
     window.show(ctx, |ui| {
-        // Bound the alignment container to one row. Using with_layout
-        // directly here consumes the resizable window's remaining height.
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(t!("copy_engine.minimize")).clicked() {
-                    panel.minimize();
-                    ctx.request_repaint();
-                }
-            });
-        });
+        let active = jobs
+            .iter()
+            .any(|(_, operation)| operation.outcome().is_none());
+        let (minimize, close) = controls::header(ui, &title, active);
+        if minimize || (close && active) {
+            panel.minimize();
+            ctx.request_repaint();
+        } else if close {
+            dismissed.extend(jobs.iter().map(|(id, _)| *id));
+        }
         egui::ScrollArea::vertical()
             .max_height((screen.height() - 150.0).max(100.0))
             .show(ui, |ui| {

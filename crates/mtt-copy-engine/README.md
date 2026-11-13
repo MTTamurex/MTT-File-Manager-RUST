@@ -68,9 +68,33 @@ Shell items are not redirected.
 
 ## Initial supported scope
 
-- Regular files and directory trees; no existing top-level destination targets.
-- Conflicts are reported, never overwritten or merged. There is no automatic
-  fallback after an attempted copy.
+- Regular files and directory trees. The application calls `copy_with_conflicts`;
+  the non-interactive `copy` API retains its strict refusal of existing targets
+  for callers and diagnostics that do not provide a confirmation UI.
+- App conflicts offer Replace/Skip/Keep both for files and Merge/Skip/Keep both
+  for folders. Merge preserves unrelated contents and resolves conflicting files
+  individually. Keep both generates an unused numbered sibling name. Selected
+  folders skipped at preflight are not enumerated just to count descendants;
+  the dashboard reports skipped conflict items separately from copied files.
+- "Apply to all" is unchecked by default, operation-local and scoped to the
+  same conflict kind: a folder merge never silently authorizes file replacement.
+  `copy_with_conflicts` requires a fresh `Progress` for every call and rejects
+  reuse, so previously approved answers cannot leak into a new operation.
+  Cancel is initially focused, and the UI waits without blocking rendering or
+  occupying disk-transfer permits. Decisions currently happen during preflight.
+- Type mismatches (file versus folder), the source item itself and destinations
+  already reserved by another queued source permit only Keep both/Skip/Cancel.
+  No directory is deleted to make room for a file, and duplicate source names
+  cannot race to overwrite one another.
+- Replacement copies into an owned temporary sibling and checks the source and
+  staged main-stream size before publication. The original destination remains
+  in place until same-volume rename with replacement succeeds. A recorded file
+  identity/size/timestamps is rechecked; Windows denies writes to that target
+  while copying, then releases the handle immediately before rename. This is not
+  a transactional snapshot or crash-recovery/backup service. Read-only or locked
+  targets can fail without being silently unlocked or deleted first.
+- Newly created or detectably changed targets after preflight fail safely rather
+  than inheriting an old decision. There is no automatic retry through Shell.
 - Rejects symlinks/reparse points and recursive destinations during preflight.
 - WinFsp local mounts that return Windows error 1005 while resolving DOS volume
   names use normalized volume-relative names instead. This compatibility path

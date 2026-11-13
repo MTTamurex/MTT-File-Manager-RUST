@@ -15,11 +15,21 @@ impl StagingFile {
     }
 
     pub fn publish(mut self, destination: &Path) -> io::Result<()> {
+        self.publish_impl(destination, false)
+    }
+
+    pub fn publish_with_replacement(mut self, destination: &Path, replace: bool) -> io::Result<()> {
+        self.publish_impl(destination, replace)
+    }
+
+    fn publish_impl(&mut self, destination: &Path, replace: bool) -> io::Result<()> {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
             use windows::core::PCWSTR;
-            use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVE_FILE_FLAGS};
+            use windows::Win32::Storage::FileSystem::{
+                MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVE_FILE_FLAGS,
+            };
             let source: Vec<u16> = self
                 .path()
                 .as_os_str()
@@ -31,19 +41,30 @@ impl StagingFile {
                 .encode_wide()
                 .chain(Some(0))
                 .collect();
-            // tempfile::persist_noclobber clears Windows attributes. Rename our
-            // sibling directly, without REPLACE_EXISTING or cross-volume copy.
+            // Same-volume publication only. Replacement is possible solely for
+            // a confirmed, revalidated file, after staging verification.
             unsafe {
                 MoveFileExW(
                     PCWSTR(source.as_ptr()),
                     PCWSTR(destination.as_ptr()),
-                    MOVE_FILE_FLAGS(0),
+                    if replace {
+                        MOVEFILE_REPLACE_EXISTING
+                    } else {
+                        MOVE_FILE_FLAGS(0)
+                    },
                 )
             }
             .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
             let mut file = self.0.take().expect("Unpublished staging file");
             file.disable_cleanup(true);
             Ok(())
+        }
+        #[cfg(not(windows))]
+        if replace {
+            std::fs::rename(self.path(), destination)?;
+            let mut file = self.0.take().expect("Unpublished staging file");
+            file.disable_cleanup(true);
+            return Ok(());
         }
         #[cfg(not(windows))]
         match self

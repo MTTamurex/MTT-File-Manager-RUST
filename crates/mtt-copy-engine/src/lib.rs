@@ -2,13 +2,16 @@
 //! No Shell, clipboard, move or delete operations are exposed.
 mod active_files;
 mod cache;
+pub mod conflicts;
 mod control;
 mod path_resolution;
 mod plan;
 mod platform;
 mod profile;
+mod replacement;
 mod scheduler;
 mod staging;
+mod target;
 mod telemetry;
 pub use control::PauseState;
 pub use profile::PolicyInfo;
@@ -21,6 +24,9 @@ use std::sync::Mutex;
 
 #[derive(Default)]
 pub struct Progress {
+    interactive_started: AtomicBool,
+    pub conflicts: conflicts::Conflicts,
+    pub items_skipped: AtomicUsize,
     cancel: AtomicBool,
     control: control::Control,
     active: active_files::ActiveFiles,
@@ -34,6 +40,7 @@ pub struct Progress {
 
 #[derive(Default, Debug)]
 pub struct Summary {
+    pub items_skipped: usize,
     /// Includes partially populated roots so callers can refresh their views.
     pub destinations: Vec<PathBuf>,
     pub files_copied: usize,
@@ -49,31 +56,82 @@ pub fn copy(sources: &[PathBuf], destination: &Path, progress: &Progress) -> io:
     copy_with_cache(sources, destination, progress, cache::CacheMode::Buffered)
 }
 
+/// Interactive, operation-local conflicts. The caller must display and answer
+/// Progress::conflicts requests and use a fresh Progress for each operation;
+/// cancellation never implies permission.
+pub fn copy_with_conflicts(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+) -> io::Result<Summary> {
+    if progress.interactive_started.swap(true, Ordering::AcqRel) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Interactive copy requires a fresh Progress",
+        ));
+    }
+    run(
+        sources,
+        destination,
+        progress,
+        cache::CacheMode::Buffered,
+        true,
+    )
+}
+
 fn copy_with_cache(
     sources: &[PathBuf],
     destination: &Path,
     progress: &Progress,
     cache: cache::CacheMode,
 ) -> io::Result<Summary> {
+    run(sources, destination, progress, cache, false)
+}
+
+fn run(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+    cache: cache::CacheMode,
+    interactive: bool,
+) -> io::Result<Summary> {
     let _run = progress.telemetry.run();
     let coordinator = progress.participant();
-    let plan = plan::build(sources, destination, progress)?;
+    let plan = if interactive {
+        plan::build_interactive(sources, destination, progress)?
+    } else {
+        plan::build(sources, destination, progress)?
+    };
     progress
         .total_files
         .store(plan.files.len(), Ordering::Relaxed);
     progress.total_bytes.store(plan.bytes, Ordering::Relaxed);
-    let mut summary = Summary::default();
+    let mut summary = Summary {
+        items_skipped: progress.items_skipped.load(Ordering::Relaxed),
+        ..Summary::default()
+    };
     for directory in &plan.directories {
         if progress.checkpoint().is_err() {
             summary.cancelled = true;
             return Ok(summary);
         }
-        // Never merge an existing directory, including one created after preflight.
+        // A preflight merge never authorizes a late-created directory or link.
         let result = directory
             .parent()
             .ok_or_else(|| io::Error::other("Invalid parent"))
             .and_then(plan::check_path)
-            .and_then(|()| std::fs::create_dir(directory));
+            .and_then(|()| {
+                let _pins = replacement::pin_parents(directory.parent().unwrap())?;
+                if plan.merges.contains(directory) {
+                    plan::check_path(directory)?;
+                    if !directory.is_dir() {
+                        return Err(io::Error::other("Merge target changed"));
+                    }
+                    Ok(())
+                } else {
+                    std::fs::create_dir(directory)
+                }
+            });
         if let Err(error) = result {
             summary.failures += 1;
             summary.first_error = Some(error);

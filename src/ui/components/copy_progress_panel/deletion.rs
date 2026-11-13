@@ -48,7 +48,19 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.label(RichText::new(status.clone()).strong().color(color));
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !active {
+                    dismiss = super::window::controls::close(ui, false).clicked();
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(status.clone()).strong().color(color))
+                            .truncate(),
+                    );
+                });
+            });
+        });
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -114,18 +126,16 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             ui.label(t!("delete_engine.failed", count = failures));
         }
         ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            if active {
+        if active {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
                     .clicked()
                 {
                     operation.progress.cancel();
                 }
-            } else if ui.button(t!("copy_engine.dismiss")).clicked() {
-                dismiss = true;
-            }
-        });
+            });
+        }
         if let Some(message) = outcome.as_ref().and_then(|result| result.message.as_ref()) {
             ui.add_space(6.0);
             ui.label(message);

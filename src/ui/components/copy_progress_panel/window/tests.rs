@@ -2,6 +2,7 @@ use super::*;
 use crate::infrastructure::copy_engine::CopyRuntime;
 use std::path::PathBuf;
 
+mod actions;
 mod geometry;
 mod placement;
 
@@ -73,7 +74,7 @@ fn full_window_keeps_the_minimize_row_and_copy_controls_visible() {
             .unwrap();
         let minimize = texts
             .iter()
-            .find(|text| text.value == t!("copy_engine.minimize"))
+            .find(|text| text.value == controls::MINIMIZE)
             .unwrap();
         assert!(
             minimize.rect.top() - window.top() < 90.0,
@@ -125,11 +126,7 @@ fn completed_window_shows_total_time_and_keeps_remaining_information() {
         draw(&ctx, &runtime, &mut panel, size);
     }
     let texts = draw(&ctx, &runtime, &mut panel, size);
-    for key in [
-        "copy_engine.total_time",
-        "copy_engine.remaining",
-        "copy_engine.dismiss",
-    ] {
+    for key in ["copy_engine.total_time", "copy_engine.remaining"] {
         let label = t!(key);
         let text = texts.iter().find(|text| text.value == label).unwrap();
         assert!(text.clip.contains_rect(text.rect), "Clipped label: {label}");
@@ -182,11 +179,7 @@ fn oversized_cached_geometry_does_not_hide_the_copy_controls() {
         .memory(|memory| memory.area_rect(egui::Id::new(WINDOW_ID)))
         .unwrap();
     assert!(window.height() <= size.y);
-    for key in [
-        "copy_engine.minimize",
-        "copy_engine.pause",
-        "copy_engine.cancel",
-    ] {
+    for key in ["copy_engine.pause", "copy_engine.cancel"] {
         let label = t!(key);
         let text = texts.iter().find(|text| text.value == label).unwrap();
         assert!(
@@ -216,7 +209,7 @@ fn full_window_minimize_button_still_works_after_bounding_the_header() {
     let texts = draw(&ctx, &runtime, &mut panel, size);
     let pos = texts
         .iter()
-        .find(|text| text.value == t!("copy_engine.minimize"))
+        .find(|text| text.value == controls::MINIMIZE)
         .unwrap()
         .rect
         .center();
