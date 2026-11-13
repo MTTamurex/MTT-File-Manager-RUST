@@ -94,6 +94,11 @@ impl MpvPreview {
             return;
         }
 
+        // Hide the entire native subtree while its D3D11 output is still valid.
+        // Stopping video first can expose an empty child surface until destruction.
+        // The egui background remains underneath until the launcher is repainted.
+        self.set_visibility(false);
+
         log::info!("[VIDEO] Teardown MPV preview: {}", self.path.display());
         self.file_load_gate.shutdown();
         self.tracks_need_query.store(0, Ordering::Release);

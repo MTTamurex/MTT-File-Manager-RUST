@@ -1,15 +1,18 @@
 //! Optional deletion backend. No enumeration-only pass precedes deletion.
-pub(crate) mod confirmation;
+pub mod confirmation;
 pub(crate) mod permanent;
 pub(crate) mod recycle;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 pub(crate) type RemovalObserver = std::sync::Arc<dyn Fn(&Path) + Send + Sync>;
 
 pub struct DeleteProgress {
+    pub permanent_phase: AtomicBool,
+    pub used_permanent_fallback: AtomicBool,
+    pub confirmation: confirmation::Confirmation,
     pub permanently: bool,
     pub removed: AtomicU64,
     pub failures: AtomicU64,
@@ -19,6 +22,9 @@ pub struct DeleteProgress {
 impl DeleteProgress {
     pub fn new(permanently: bool) -> Self {
         Self {
+            permanent_phase: AtomicBool::new(false),
+            used_permanent_fallback: AtomicBool::new(false),
+            confirmation: Default::default(),
             permanently,
             removed: AtomicU64::new(0),
             failures: AtomicU64::new(0),

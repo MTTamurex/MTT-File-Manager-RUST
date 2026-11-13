@@ -124,6 +124,83 @@ mod native {
     }
 
     #[test]
+    fn shutdown_hides_surface_before_stopping_playback_resources() {
+        use crate::ui::components::mpv_preview::MpvPreview;
+        use std::cell::Cell;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+        use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+        use windows::Win32::UI::WindowsAndMessaging::{IsWindow, WM_SHOWWINDOW};
+
+        struct HideProbe {
+            running: Arc<AtomicBool>,
+            running_when_hidden: Cell<Option<bool>>,
+        }
+
+        unsafe extern "system" fn observe_hide(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+            _id: usize,
+            data: usize,
+        ) -> LRESULT {
+            if message == WM_SHOWWINDOW && wparam.0 == 0 {
+                let probe = &*(data as *const HideProbe);
+                probe
+                    .running_when_hidden
+                    .set(Some(probe.running.load(Ordering::Acquire)));
+            }
+            DefSubclassProc(hwnd, message, wparam, lparam)
+        }
+
+        let fixture = SurfaceFixture::new();
+        let mut preview = MpvPreview::new("video.mp4".into());
+        let parent = fixture.surface.main_hwnd().unwrap();
+        let child = super::super::create_surface_window(parent).unwrap();
+        preview.surface.main_hwnd = Some(parent);
+        preview.surface.mpv_hwnd = Some(child);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            preview.surface.sync_rect(
+                ui,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 180.0)),
+            );
+        });
+        preview.first_frame_ready.store(true, Ordering::Release);
+        preview.event_thread_running.store(true, Ordering::Release);
+        preview.set_visibility(true);
+        assert_ne!(
+            unsafe { GetWindowLongPtrW(child, GWL_STYLE) as u32 } & WS_VISIBLE.0,
+            0
+        );
+
+        let probe = HideProbe {
+            running: preview.event_thread_running.clone(),
+            running_when_hidden: Cell::new(None),
+        };
+        assert!(unsafe {
+            SetWindowSubclass(
+                child,
+                Some(observe_hide),
+                1,
+                &probe as *const HideProbe as usize,
+            )
+        }
+        .as_bool());
+
+        preview.shutdown();
+
+        assert_eq!(probe.running_when_hidden.get(), Some(true));
+        assert!(!preview.event_thread_running.load(Ordering::Acquire));
+        assert!(!preview.is_visible);
+        assert!(!preview.first_frame_ready.load(Ordering::Acquire));
+        assert!(!unsafe { IsWindow(Some(child)) }.as_bool());
+        preview.shutdown();
+    }
+
+    #[test]
     fn preview_applies_visibility_requested_before_surface_creation() {
         use crate::ui::components::mpv_preview::MpvPreview;
 

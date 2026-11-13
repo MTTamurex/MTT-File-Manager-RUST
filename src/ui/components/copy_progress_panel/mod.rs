@@ -29,18 +29,33 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
         return;
     }
     // Keep counters and graph sampling current even while the panel is hidden.
+    let mut reveal_confirmation = false;
     for (id, operation) in &jobs {
-        sample(
-            operation,
-            app.file_operation_state
-                .copy_panel
-                .metrics
-                .entry(*id)
-                .or_default(),
-        );
+        let metrics = app
+            .file_operation_state
+            .copy_panel
+            .metrics
+            .entry(*id)
+            .or_default();
+        sample(operation, metrics);
+        if operation.outcome().is_none() && !operation.progress.is_cancelled() {
+            if let Some(request) = operation
+                .deletion
+                .as_ref()
+                .and_then(|deletion| deletion.confirmation.pending())
+            {
+                if metrics.confirmation_seen != Some(request.id) {
+                    metrics.confirmation_seen = Some(request.id);
+                    reveal_confirmation = true;
+                }
+            }
+        }
     }
     if jobs.iter().any(|(_, job)| job.outcome().is_none()) {
         ctx.request_repaint_after(Duration::from_millis(100));
+    }
+    if reveal_confirmation {
+        app.file_operation_state.copy_panel.restore();
     }
     if app.file_operation_state.copy_panel.minimized {
         return;

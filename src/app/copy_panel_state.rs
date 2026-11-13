@@ -19,6 +19,7 @@ impl CopyPanelState {
 
 #[derive(Default)]
 pub struct TransferMetrics {
+    pub confirmation_seen: Option<u64>,
     pub names: display_names::DisplayNames,
     last: Option<(u64, Duration)>,
     sampling: bool,

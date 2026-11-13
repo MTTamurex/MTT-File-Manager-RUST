@@ -1,10 +1,11 @@
 //! Optional engine dispatch; the default Shell and virtual namespace paths remain intact.
 use super::{sanitize_operation_paths, FileOperationRequest, FileOperationResult};
 use crate::infrastructure::copy_engine::{CopyRuntime, Outcome, OutcomeKind};
-use crate::infrastructure::delete_engine::{confirmation, permanent, recycle};
+use crate::infrastructure::delete_engine::{confirmation, permanent};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{atomic::Ordering, mpsc::Sender, Arc};
+mod recycling;
 mod refresh;
 
 pub(super) fn try_handle(
@@ -12,29 +13,33 @@ pub(super) fn try_handle(
     sender: &Sender<FileOperationResult>,
     runtime: &Arc<CopyRuntime>,
 ) -> bool {
-    handle_with_confirmation(request, sender, runtime, confirmation::confirm)
+    handle_with_confirmation(request, sender, runtime, confirmation::ask)
 }
 
 fn handle_with_confirmation(
     request: &FileOperationRequest,
     sender: &Sender<FileOperationResult>,
     runtime: &Arc<CopyRuntime>,
-    confirm: impl Fn(windows::Win32::Foundation::HWND, &str, usize) -> windows::core::Result<bool>,
+    confirm: impl Fn(
+        &crate::infrastructure::copy_engine::CopyOperation,
+        confirmation::Kind,
+        &[PathBuf],
+    ) -> bool,
 ) -> bool {
     if !runtime.enabled.load(Ordering::Relaxed) {
         return false;
     }
-    let (paths, permanently, hwnd, search) = match request {
-        FileOperationRequest::Delete { paths, hwnd } => (paths, false, hwnd.0, false),
+    let (paths, permanently, hwnd) = match request {
+        FileOperationRequest::Delete { paths, hwnd } => (paths, false, hwnd.0),
         FileOperationRequest::DeletePermanently {
             physical_paths,
             hwnd,
-        } => (physical_paths, true, hwnd.0, false),
+        } => (physical_paths, true, hwnd.0),
         FileOperationRequest::SearchDelete {
             paths,
             permanently,
             hwnd,
-        } => (paths, *permanently, hwnd.0, true),
+        } => (paths, *permanently, hwnd.0),
         _ => return false,
     };
     // Recycle-bin namespace and other virtual objects keep their original path.
@@ -77,31 +82,16 @@ fn handle_with_confirmation(
             return true;
         }
     };
-    let confirmation = if permanently {
-        confirm(
-            hwnd,
-            "operations.search_delete_permanent_confirm",
-            paths.len(),
-        )
-    } else if search {
-        // Recycling fallback is confirmed separately by Shell, not pre-authorized.
-        confirm(hwnd, "delete_engine.recycle_confirm", paths.len())
-    } else {
-        Ok(true)
-    };
-    match confirmation {
-        Ok(true) if !operation.progress.is_cancelled() => {}
-        Ok(_) => {
+    {
+        let kind = if permanently {
+            confirmation::Kind::Permanent
+        } else {
+            confirmation::Kind::Recycle
+        };
+        if !confirm(operation, kind, &paths) || operation.progress.is_cancelled() {
             job.finish(Outcome {
                 kind: OutcomeKind::Cancelled,
                 message: Some(rust_i18n::t!("delete_engine.cancelled").to_string()),
-            });
-            return true;
-        }
-        Err(_) => {
-            job.finish(Outcome {
-                kind: OutcomeKind::Failed,
-                message: Some(rust_i18n::t!("operations.error_delete_confirmation").to_string()),
             });
             return true;
         }
@@ -136,15 +126,7 @@ fn handle_with_confirmation(
         }
         !operation.progress.is_cancelled()
     } else {
-        match recycle::delete(&paths, hwnd, operation.clone(), observer) {
-            Ok(completed) => completed,
-            Err(_) => {
-                if !operation.progress.is_cancelled() {
-                    progress.failed();
-                }
-                false
-            }
-        }
+        recycling::run(&paths, hwnd, operation, observer, &confirm)
     };
     removed.lock().unwrap_or_else(|e| e.into_inner()).flush();
     progress.set_current(None);

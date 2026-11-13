@@ -6,12 +6,18 @@ use eframe::egui::{self, RichText};
 use rust_i18n::t;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+mod confirmation;
 
 pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBuf]) -> bool {
     let progress = operation.deletion.as_ref().unwrap();
     let outcome = operation.outcome();
     let active = outcome.is_none();
     let cancelled = operation.progress.is_cancelled();
+    let pending = if active && !cancelled {
+        progress.confirmation.pending()
+    } else {
+        None
+    };
     let removed = progress.removed.load(Ordering::Relaxed);
     let failures = progress.failures.load(Ordering::Relaxed);
     let mut dismiss = false;
@@ -22,7 +28,10 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             Some(OutcomeKind::Cancelled) => t!("delete_engine.cancelled_title"),
             Some(OutcomeKind::Failed) => t!("delete_engine.failed_title"),
             None if cancelled => t!("copy_engine.cancelling"),
-            None if progress.permanently => t!("delete_engine.deleting"),
+            None if pending.is_some() => t!("delete_engine.awaiting_confirmation"),
+            None if progress.permanently || progress.permanent_phase.load(Ordering::Relaxed) => {
+                t!("delete_engine.deleting")
+            }
             None => t!("delete_engine.recycling"),
         };
         let color = if failures > 0
@@ -51,11 +60,16 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         });
         let mode = if progress.permanently {
             t!("delete_engine.permanent")
+        } else if progress.used_permanent_fallback.load(Ordering::Relaxed) {
+            t!("delete_engine.recycle_with_fallback")
         } else {
             t!("delete_engine.recycle_bin")
         };
         path_row(ui, &t!("delete_engine.mode"), &mode, || mode.to_string());
-        if active {
+        if let Some(request) = &pending {
+            confirmation::render(ui, operation, request);
+        }
+        if active && pending.is_none() {
             active_files::render_paths(ui, paths, 1);
         }
         ui.add_space(10.0);
@@ -76,12 +90,12 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             );
         });
         ui.add_space(8.0);
-        if active {
+        if active && pending.is_none() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.weak(t!("delete_engine.unknown_total"));
             });
-        } else {
+        } else if !active {
             let complete = outcome
                 .as_ref()
                 .is_some_and(|result| result.kind == OutcomeKind::Completed);
@@ -96,14 +110,14 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if active {
+            if active && pending.is_none() {
                 if ui
                     .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
                     .clicked()
                 {
                     operation.progress.cancel();
                 }
-            } else if ui.button(t!("copy_engine.dismiss")).clicked() {
+            } else if !active && ui.button(t!("copy_engine.dismiss")).clicked() {
                 dismiss = true;
             }
         });

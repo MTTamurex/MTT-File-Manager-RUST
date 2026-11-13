@@ -68,10 +68,10 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
         &request,
         &sender,
         &runtime,
-        |_, key, count| {
-            assert_eq!(key, "operations.search_delete_permanent_confirm");
-            assert_eq!(count, 1);
-            Ok(false)
+        |_, kind, paths| {
+            assert_eq!(kind, confirmation::Kind::Permanent);
+            assert_eq!(paths.len(), 1);
+            false
         }
     ));
     assert!(source.join("nested/file.txt").exists());
@@ -84,7 +84,7 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
         &request,
         &sender,
         &runtime,
-        |_, _, _| Ok(true)
+        |_, _, _| true
     ));
     assert!(!source.exists());
     let FileOperationResult::DeleteCompleted {
@@ -119,7 +119,7 @@ fn recycle_bin_storage_keeps_shell_metadata_semantics() {
 }
 
 #[test]
-fn confirmation_api_failure_never_deletes() {
+fn declining_confirmation_never_deletes() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("file.txt");
     std::fs::write(&path, b"synthetic").unwrap();
@@ -131,12 +131,12 @@ fn confirmation_api_failure_never_deletes() {
         &request,
         &sender,
         &runtime,
-        |_, _, _| Err(windows::Win32::Foundation::E_FAIL.into())
+        |_, _, _| false
     ));
     assert!(path.exists());
     assert_eq!(
         runtime.jobs()[0].1.outcome().unwrap().kind,
-        OutcomeKind::Failed
+        OutcomeKind::Cancelled
     );
     assert!(receiver.try_recv().is_err());
     temp.close().unwrap();
@@ -165,7 +165,7 @@ fn partial_failure_refreshes_parent_without_reporting_remaining_root_deleted() {
         &request,
         &sender,
         &runtime,
-        |_, _, _| Ok(true)
+        |_, _, _| true
     ));
     assert!(!removed.exists());
     assert!(locked.exists());
@@ -185,5 +185,54 @@ fn partial_failure_refreshes_parent_without_reporting_remaining_root_deleted() {
         OutcomeKind::Failed
     );
     drop(lock);
+    temp.close().unwrap();
+}
+
+#[test]
+fn normal_and_permanent_delete_wait_for_mtt_before_any_filesystem_change() {
+    use crate::infrastructure::delete_engine::confirmation::{tests::wait_for_request, Kind};
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("file.txt");
+    std::fs::write(&path, b"synthetic").unwrap();
+    for permanently in [false, true] {
+        let runtime = Arc::new(CopyRuntime::default());
+        runtime.enabled.store(true, Ordering::Relaxed);
+        let (sender, _) = std::sync::mpsc::channel();
+        let request = if permanently {
+            FileOperationRequest::delete_permanently(vec![path.clone()], HWND::default())
+        } else {
+            FileOperationRequest::delete(vec![path.clone()], HWND::default())
+        };
+        let worker_runtime = runtime.clone();
+        let worker = std::thread::spawn(move || try_handle(&request, &sender, &worker_runtime));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let operation = loop {
+            if let Some((_, operation)) = runtime.jobs().into_iter().next() {
+                break operation;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        };
+        let request = wait_for_request(&operation);
+        assert_eq!(
+            request.kind,
+            if permanently {
+                Kind::Permanent
+            } else {
+                Kind::Recycle
+            }
+        );
+        assert!(path.exists());
+        assert!(!worker.is_finished());
+        operation
+            .deletion
+            .as_ref()
+            .unwrap()
+            .confirmation
+            .respond(request.id, false);
+        assert!(worker.join().unwrap());
+        assert!(path.exists());
+        assert_eq!(operation.outcome().unwrap().kind, OutcomeKind::Cancelled);
+    }
     temp.close().unwrap();
 }

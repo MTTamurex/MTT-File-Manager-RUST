@@ -12,9 +12,19 @@ Shell items are not redirected.
 
 ## Optional deletion integration
 
-- Delete uses `IFileOperation` recycling, with Shell safety dialogs retained.
-  `FOF_WANTNUKEWARNING` requests explicit confirmation when recycling is not
-  available; no permanent fallback is silently authorized.
+- Delete and Shift+Delete use inline MTT confirmation controls, with Cancel
+  initially focused. A worker waits for an answer without blocking the UI.
+  Closing/cancelling the operation never implies consent, and stale answers
+  cannot confirm a later request. Minimized progress is revealed once per new
+  confirmation; the user can still minimize or collapse it afterward.
+- Delete uses `IFileOperation` recycling with a mandatory per-item
+  `PreDeleteItem` guard. An item without `TSF_DELETE_RECYCLE_IF_POSSIBLE` is
+  refused before deletion. Shell confirmation/error dialogs are suppressed;
+  errors stop the operation, while system UAC prompts remain permitted.
+- If recycling is unavailable, Shell is stopped before MTT asks separately
+  whether to permanently delete the remaining contents of that selected root.
+  Consent to recycle never authorizes this fallback. Already recycled items and
+  other selected roots are not included in that permanent-deletion request.
 - Shift+Delete requires explicit confirmation before direct filesystem deletion.
   Cancellation stops remaining work and never restores items already removed.
 - Direct deletion walks the tree once, depth-first, without a separate total-size
@@ -27,7 +37,7 @@ Shell items are not redirected.
   children removed before a parent fails or cancellation stops the traversal.
   A surviving selected folder is never reported as deleted.
 - Recycling uses Shell callbacks for cancellation and processed-item counts.
-  Cancellation is cooperative: pending filesystem calls or native dialogs must
+  Cancellation is cooperative: pending filesystem calls or system UAC dialogs must
   return before it takes effect. Counts reflect entries reported by Shell, which
   may recycle a whole directory as one item, not every descendant.
 - Deletions share the themed copy dashboard, minimization and retained results.
@@ -38,9 +48,10 @@ Shell items are not redirected.
   Shell mechanisms, preserving their metadata and confirmation behavior.
 - Active filenames are sampled only for display, at most every 300 ms, for both
   copies and deletions. Counters and operations are not throttled.
-- Automated deletion tests use owned synthetic temporary trees. Native recycle
-  dialogs and unavailable/full/disabled Recycle Bin behavior still require an
-  interactive Windows check. No deletion speed advantage is claimed.
+- Automated deletion tests use owned synthetic temporary trees, simulated Shell
+  results and actual progress-sink callbacks. Native unavailable/full/disabled
+  Recycle Bin and UAC behavior still require an interactive Windows check.
+  No deletion speed advantage is claimed.
 
 ## Initial supported scope
 

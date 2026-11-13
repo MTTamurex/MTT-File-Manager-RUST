@@ -29,9 +29,22 @@ fn show_with(
     let screen = ctx.viewport_rect();
     let width = 520.0f32.min((screen.width() - 24.0).max(180.0));
     let mut dismissed = Vec::new();
+    let confirming = jobs.iter().any(|(_, job)| {
+        job.outcome().is_none()
+            && !job.progress.is_cancelled()
+            && job
+                .deletion
+                .as_ref()
+                .is_some_and(|deletion| deletion.confirmation.pending().is_some())
+    });
     let title = super::summary::Summary::from_jobs(jobs, panel)
         .map(|summary| summary.label())
         .unwrap_or_else(|| t!("copy_engine.preparing").to_string());
+    let title = if confirming {
+        t!("delete_engine.awaiting_confirmation").to_string()
+    } else {
+        title
+    };
     egui::Window::new(egui::RichText::new(title).text_style(egui::TextStyle::Button))
         .id(egui::Id::new(WINDOW_ID))
         .default_pos(egui::pos2(
