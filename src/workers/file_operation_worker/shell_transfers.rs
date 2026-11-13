@@ -75,7 +75,7 @@ pub(super) fn try_delegate(
         _ => return false,
     };
     if !is_filesystem_transfer(paths, destination)
-        || !shell_transfer::teracopy_copy_handler_enabled()
+        || !shell_transfer::teracopy_copy_handler_registered()
     {
         return false;
     }

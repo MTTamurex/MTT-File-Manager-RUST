@@ -5,6 +5,10 @@ janela de escolha do TeraCopy 4.0.5. O exemplo permanece isolado dos workers do
 aplicativo. A integração de copiar/mover no MTT está descrita em
 `docs/shell_transfer_integration.md`, a partir da raiz do repositório.
 
+No MTT, a detecção usa o registro do copy handler e de sua classe COM; não exige
+**Use TeraCopy as default copy handler**. Confirmação e método preferido ficam
+a cargo do TeraCopy. Não é necessário desregistrar a extensão para validar isso.
+
 ## Segurança e limites
 
 - Usa somente cópia. Não solicita mover, excluir ou alterar o clipboard.

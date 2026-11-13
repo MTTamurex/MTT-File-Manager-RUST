@@ -74,8 +74,8 @@ pub enum DispatchOutcome {
     Failed,
 }
 
-pub(crate) fn teracopy_copy_handler_enabled() -> bool {
-    registration::enabled()
+pub(crate) fn teracopy_copy_handler_registered() -> bool {
+    registration::is_registered()
 }
 
 struct Pidl(*mut ITEMIDLIST);

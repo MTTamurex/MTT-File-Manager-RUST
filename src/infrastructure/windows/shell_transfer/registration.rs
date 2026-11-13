@@ -1,86 +1,81 @@
-//! Read-only detection of TeraCopy's opt-in. Missing/unreadable preferences
-//! preserve the existing MTT engine. Do not cache: settings can change at runtime.
+//! Read-only detection of "Register Copy Handler", NOT the preferred copy engine.
+//! HandleCopy/ConfirmDrag belong to TeraCopy and must not gate Shell delegation.
+//! Do not cache: registration can change while the file manager is running.
 
-use windows::core::{w, PCWSTR};
-use windows::Win32::System::Registry::{
-    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER,
-    KEY_QUERY_VALUE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
-};
+use windows::core::{GUID, PCWSTR};
+use windows::Win32::System::Registry::{RegGetValueW, HKEY_CLASSES_ROOT, RRF_RT_REG_SZ};
 
-fn read_handle_copy() -> bool {
-    let key = w!("Software\\Code Sector\\TeraCopy");
-    let value = w!("HandleCopy");
+#[cfg(test)]
+#[path = "registration_tests.rs"]
+mod tests;
+
+const HANDLER_KEYS: [&str; 2] = [
+    r"Directory\shellex\DragDropHandlers\TeraCopy",
+    r"Folder\shellex\DragDropHandlers\TeraCopy",
+];
+
+fn read_default_value(subkey: &str) -> Option<String> {
+    let key: Vec<u16> = subkey.encode_utf16().chain(Some(0)).collect();
+    let mut bytes = 0u32;
     unsafe {
-        // 4.0.5 uses REG_SZ. Also accept the conventional DWORD representation.
-        let mut number = 0u32;
-        let mut size = size_of::<u32>() as u32;
-        if RegGetValueW(
-            HKEY_CURRENT_USER,
-            key,
-            value,
-            RRF_RT_REG_DWORD,
+        RegGetValueW(
+            HKEY_CLASSES_ROOT,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
             None,
-            Some((&mut number as *mut u32).cast()),
-            Some(&mut size),
+            None,
+            Some(&mut bytes),
         )
-        .is_ok()
-        {
-            return number == 1;
+        .ok()
+        .ok()?;
+        // Bound allocation for malformed registrations; cover full-length
+        // Windows paths without a fixed short DLL-path buffer.
+        if bytes == 0 || bytes > 65_536 || !bytes.is_multiple_of(2) {
+            return None;
         }
-        let mut text = [0u16; 8];
-        size = size_of_val(&text) as u32;
-        let result = RegGetValueW(
-            HKEY_CURRENT_USER,
-            key,
-            value,
+        let mut text = vec![0u16; bytes as usize / 2];
+        RegGetValueW(
+            HKEY_CLASSES_ROOT,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
             RRF_RT_REG_SZ,
             None,
             Some(text.as_mut_ptr().cast()),
-            Some(&mut size),
-        );
-        result.is_ok() && enabled_text(&text, size as usize)
-    }
-}
-
-fn enabled_text(text: &[u16], bytes: usize) -> bool {
-    bytes == 2 * size_of::<u16>() && text.get(..2) == Some(&[b'1' as u16, 0])
-}
-
-fn handler_registered(subkey: PCWSTR) -> bool {
-    unsafe {
-        let mut key = HKEY::default();
-        if RegOpenKeyExW(
-            HKEY_CLASSES_ROOT,
-            subkey,
-            Some(0),
-            KEY_QUERY_VALUE,
-            &mut key,
+            Some(&mut bytes),
         )
-        .is_err()
-        {
-            return false;
+        .ok()
+        .ok()?;
+        if !bytes.is_multiple_of(2) {
+            return None;
         }
-        let _ = RegCloseKey(key);
-        true
+        let text = text.get(..bytes as usize / 2)?;
+        let end = text.iter().position(|&unit| unit == 0)?;
+        String::from_utf16(&text[..end]).ok()
     }
 }
 
-pub(super) fn enabled() -> bool {
-    read_handle_copy()
-        && (handler_registered(w!("Directory\\shellex\\DragDropHandlers\\TeraCopy"))
-            || handler_registered(w!("Folder\\shellex\\DragDropHandlers\\TeraCopy")))
+fn class_server_key(value: &str) -> Option<String> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(value);
+    let clsid = GUID::try_from(value).ok()?;
+    Some(format!(r"CLSID\{{{clsid:?}}}\InprocServer32"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn registered_with(mut read: impl FnMut(&str) -> Option<String>) -> bool {
+    HANDLER_KEYS.iter().any(|key| {
+        let Some(server_key) = read(key).and_then(|value| class_server_key(&value)) else {
+            return false;
+        };
+        // A leftover handler key without a registered COM server is not a
+        // usable integration. Do not instantiate or load the DLL to detect it.
+        read(&server_key).is_some_and(|server| !server.trim().is_empty())
+    })
+}
 
-    #[test]
-    fn only_explicit_enabled_preference_activates_teracopy() {
-        assert!(enabled_text(&[b'1' as u16, 0], 4));
-        assert!(!enabled_text(&[b'0' as u16, 0], 4));
-        assert!(!enabled_text(&[], 0));
-        assert!(!enabled_text(&[b'1' as u16], 2));
-        assert!(!enabled_text(&[b'1' as u16, 0, b'2' as u16, 0], 8));
-    }
+pub(super) fn is_registered() -> bool {
+    registered_with(read_default_value)
 }
