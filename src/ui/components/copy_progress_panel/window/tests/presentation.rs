@@ -1,5 +1,49 @@
 use super::*;
 
+#[test]
+fn move_window_uses_move_status_and_retains_cancellation_details() {
+    use crate::infrastructure::copy_engine::{Outcome, OutcomeKind};
+    for scale in [1.0, 2.0] {
+        let ctx = egui::Context::default();
+        crate::ui::interface_scale::apply(&ctx, scale);
+        let runtime = CopyRuntime::default();
+        let job = runtime.start_move(
+            vec![PathBuf::from("source/file.txt")],
+            PathBuf::from("target"),
+        );
+        let mut panel = CopyPanelState::default();
+        let size = egui::vec2(1200.0, 1000.0);
+        for _ in 0..8 {
+            draw(&ctx, &runtime, &mut panel, size);
+        }
+        let texts = draw(&ctx, &runtime, &mut panel, size);
+        assert!(texts
+            .iter()
+            .any(|text| text.value == t!("move_engine.preparing")));
+        job.operation
+            .progress
+            .copying
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let texts = draw(&ctx, &runtime, &mut panel, size);
+        assert!(texts
+            .iter()
+            .any(|text| text.value == t!("move_engine.moving")));
+        assert!(!texts
+            .iter()
+            .any(|text| text.value == t!("copy_engine.copying")));
+        let message = t!("move_engine.cancelled").to_string();
+        job.finish(Outcome {
+            kind: OutcomeKind::Cancelled,
+            message: Some(message.clone()),
+        });
+        let texts = draw(&ctx, &runtime, &mut panel, size);
+        assert!(texts
+            .iter()
+            .any(|text| text.value == t!("move_engine.cancelled_title")));
+        assert!(texts.iter().any(|text| text.value == message));
+    }
+}
+
 fn click(
     ctx: &egui::Context,
     runtime: &CopyRuntime,

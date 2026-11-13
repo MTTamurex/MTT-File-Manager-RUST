@@ -54,7 +54,7 @@ fn check_source(item: &plan::File) -> io::Result<()> {
 
 #[cfg(test)]
 pub(crate) fn copy_file(item: &plan::File, progress: &Progress) -> io::Result<()> {
-    copy_file_impl(item, progress, None, CacheMode::Buffered)
+    copy_file_impl(item, progress, None, CacheMode::Buffered).map(|_| ())
 }
 
 pub(crate) fn copy_file_scheduled<'a>(
@@ -63,15 +63,15 @@ pub(crate) fn copy_file_scheduled<'a>(
     permit: &'a Permit<'a>,
     cache: CacheMode,
 ) -> io::Result<()> {
-    copy_file_impl(item, progress, Some(permit), cache)
+    copy_file_impl(item, progress, Some(permit), cache).map(|_| ())
 }
 
-fn copy_file_impl<'a>(
+pub(crate) fn copy_file_impl<'a>(
     item: &plan::File,
     progress: &'a Progress,
     permit: Option<&'a Permit<'a>>,
     cache: CacheMode,
-) -> io::Result<()> {
+) -> io::Result<Option<crate::replacement::Snapshot>> {
     match permit {
         Some(permit) => permit.checkpoint()?,
         None => progress.checkpoint()?,
@@ -104,6 +104,11 @@ fn copy_file_impl<'a>(
     if std::fs::metadata(temporary.path())?.len() != item.size {
         return Err(io::Error::other("Copy size verification failed"));
     }
+    let published_snapshot = if item.move_source.is_some() {
+        Some(crate::replacement::Snapshot::capture(temporary.path())?)
+    } else {
+        None
+    };
     plan::check_path(parent)?;
     if let Some(snapshot) = &item.replacement {
         snapshot.validate(&item.destination)?;
@@ -120,7 +125,7 @@ fn copy_file_impl<'a>(
     // Include empty files and APIs that did not issue a final progress callback.
     transfer.update(item.size);
     transfer.committed = true;
-    Ok(())
+    Ok(published_snapshot)
 }
 
 #[cfg(windows)]

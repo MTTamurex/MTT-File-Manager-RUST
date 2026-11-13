@@ -132,13 +132,18 @@ fn card_with_paths(
             }
         }
         let status = match outcome.as_ref().map(|result| result.kind) {
+            Some(OutcomeKind::Completed) if operation.moving => t!("move_engine.completed"),
+            Some(OutcomeKind::Cancelled) if operation.moving => t!("move_engine.cancelled_title"),
+            Some(OutcomeKind::Failed) if operation.moving => t!("move_engine.failed_title"),
             Some(OutcomeKind::Completed) => t!("copy_engine.completed"),
             Some(OutcomeKind::Cancelled) => t!("copy_engine.cancelled_title"),
             Some(OutcomeKind::Failed) => t!("copy_engine.failed_title"),
             None if cancelled => t!("copy_engine.cancelling"),
             None if pause == PauseState::Paused => t!("copy_engine.paused"),
             None if pause == PauseState::Pausing => t!("copy_engine.pausing"),
+            None if copying && operation.moving => t!("move_engine.moving"),
             None if copying => t!("copy_engine.copying"),
+            None if operation.moving => t!("move_engine.preparing"),
             None => t!("copy_engine.preparing"),
         };
         let status_color = if outcome

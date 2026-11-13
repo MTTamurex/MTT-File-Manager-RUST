@@ -1,9 +1,10 @@
-//! Copy-only engine inspired by BetterCopy's Win32 copying and storage profiling.
-//! No Shell, clipboard, move or delete operations are exposed.
+//! Filesystem copy/move engine with operation-local conflicts and staged copies.
+//! No Shell, clipboard, recycling or standalone deletion operations are exposed.
 mod active_files;
 mod cache;
 pub mod conflicts;
 mod control;
+mod moving;
 mod path_resolution;
 mod plan;
 mod platform;
@@ -24,6 +25,8 @@ use std::sync::Mutex;
 
 #[derive(Default)]
 pub struct Progress {
+    pub files_moved: AtomicUsize,
+    pub sources_retained: AtomicUsize,
     interactive_started: AtomicBool,
     pub conflicts: conflicts::Conflicts,
     pub items_skipped: AtomicUsize,
@@ -40,6 +43,10 @@ pub struct Progress {
 
 #[derive(Default, Debug)]
 pub struct Summary {
+    pub files_moved: usize,
+    pub sources_retained: usize,
+    /// Only sources actually removed by this operation, with their final targets.
+    pub moved_pairs: Vec<(PathBuf, PathBuf)>,
     pub items_skipped: usize,
     /// Includes partially populated roots so callers can refresh their views.
     pub destinations: Vec<PathBuf>,
@@ -76,6 +83,33 @@ pub fn copy_with_conflicts(
         progress,
         cache::CacheMode::Buffered,
         true,
+        false,
+    )
+}
+
+/// Interactive movement. Completed moves are not undone on cancellation.
+/// A fresh Progress is required; failed/skipped sources are never removed.
+pub fn move_with_conflicts(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+) -> io::Result<Summary> {
+    if progress.interactive_started.swap(true, Ordering::AcqRel) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Interactive transfer requires a fresh Progress",
+        ));
+    }
+    #[cfg(not(windows))]
+    return Err(io::ErrorKind::Unsupported.into());
+    #[cfg(windows)]
+    run(
+        sources,
+        destination,
+        progress,
+        cache::CacheMode::Buffered,
+        true,
+        true,
     )
 }
 
@@ -85,7 +119,7 @@ fn copy_with_cache(
     progress: &Progress,
     cache: cache::CacheMode,
 ) -> io::Result<Summary> {
-    run(sources, destination, progress, cache, false)
+    run(sources, destination, progress, cache, false, false)
 }
 
 fn run(
@@ -94,10 +128,16 @@ fn run(
     progress: &Progress,
     cache: cache::CacheMode,
     interactive: bool,
+    moving: bool,
 ) -> io::Result<Summary> {
     let _run = progress.telemetry.run();
     let coordinator = progress.participant();
-    let plan = if interactive {
+    if moving {
+        moving::validate_selection(sources, destination, progress)?;
+    }
+    let plan = if moving {
+        plan::build_move(sources, destination, progress)?
+    } else if interactive {
         plan::build_interactive(sources, destination, progress)?
     } else {
         plan::build(sources, destination, progress)?
@@ -157,6 +197,7 @@ fn run(
     let failures = AtomicUsize::new(0);
     let first_error = Mutex::new(None);
     let published = Mutex::new(Vec::new());
+    let moved_pairs = Mutex::new(Vec::new());
     let (small, large): (Vec<_>, Vec<_>) = plan
         .files
         .iter()
@@ -171,6 +212,7 @@ fn run(
             let failures = &failures;
             let first_error = &first_error;
             let published = &published;
+            let moved_pairs = &moved_pairs;
             let policy = &policy;
             scope.spawn(move || {
                 let _participant = progress.participant();
@@ -197,9 +239,31 @@ fn run(
                         ) else {
                             return;
                         };
-                        match platform::copy_file_scheduled(item, progress, &permit, cache) {
-                            Ok(()) => {
+                        let result = if moving {
+                            moving::transfer(item, progress, Some(&permit), cache)
+                        } else {
+                            platform::copy_file_scheduled(item, progress, &permit, cache)
+                                .map(|()| None)
+                        };
+                        match result {
+                            Ok(retained_error) => {
                                 progress.files_copied.fetch_add(1, Ordering::Relaxed);
+                                if moving {
+                                    if let Some(error) = retained_error {
+                                        progress.sources_retained.fetch_add(1, Ordering::Relaxed);
+                                        failures.fetch_add(1, Ordering::Relaxed);
+                                        first_error
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .get_or_insert(error);
+                                    } else {
+                                        progress.files_moved.fetch_add(1, Ordering::Relaxed);
+                                        moved_pairs
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .push((item.source.clone(), item.destination.clone()));
+                                    }
+                                }
                                 published
                                     .lock()
                                     .unwrap_or_else(|e| e.into_inner())
@@ -226,6 +290,16 @@ fn run(
     summary.failures = failures.load(Ordering::Relaxed);
     summary.first_error = first_error.into_inner().unwrap_or_else(|e| e.into_inner());
     summary.cancelled = progress.cancel.load(Ordering::Relaxed);
+    summary.moved_pairs = moved_pairs.into_inner().unwrap_or_else(|e| e.into_inner());
+    if moving && !summary.cancelled {
+        moving::cleanup(&plan.move_directories, progress, &mut summary);
+    }
+    summary.cancelled |= progress.is_cancelled();
+    summary.files_moved = progress.files_moved.load(Ordering::Relaxed);
+    summary.sources_retained = progress.sources_retained.load(Ordering::Relaxed);
+    if moving {
+        moving::report_paths(&plan, &mut summary);
+    }
     Ok(summary)
 }
 

@@ -1,10 +1,11 @@
 use crate::{check_cancel, Progress};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct File {
+    pub move_source: Option<crate::replacement::Snapshot>,
     pub replacement: Option<crate::replacement::Snapshot>,
     pub source: PathBuf,
     pub destination: PathBuf,
@@ -13,6 +14,9 @@ pub(crate) struct File {
 }
 
 pub(crate) struct Plan {
+    pub move_roots: HashMap<PathBuf, PathBuf>,
+    pub move_destination: Option<(PathBuf, PathBuf)>,
+    pub move_directories: Vec<crate::moving::source::Directory>,
     pub merges: HashSet<PathBuf>,
     pub files: Vec<File>,
     pub directories: Vec<PathBuf>,
@@ -78,7 +82,7 @@ pub(crate) fn build_with(
     progress: &Progress,
     resolve: impl Fn(&Path) -> io::Result<crate::path_resolution::Resolved>,
 ) -> io::Result<Plan> {
-    build_impl(sources, destination, progress, resolve, false)
+    build_impl(sources, destination, progress, resolve, false, false)
 }
 
 pub(crate) fn build_interactive(
@@ -92,6 +96,22 @@ pub(crate) fn build_interactive(
         progress,
         crate::path_resolution::resolve,
         true,
+        false,
+    )
+}
+
+pub(crate) fn build_move(
+    sources: &[PathBuf],
+    destination: &Path,
+    progress: &Progress,
+) -> io::Result<Plan> {
+    build_impl(
+        sources,
+        destination,
+        progress,
+        crate::path_resolution::resolve,
+        true,
+        true,
     )
 }
 
@@ -101,12 +121,14 @@ fn build_impl(
     progress: &Progress,
     resolve: impl Fn(&Path) -> io::Result<crate::path_resolution::Resolved>,
     interactive: bool,
+    moving: bool,
 ) -> io::Result<Plan> {
     check_cancel(progress)?;
     if sources.is_empty() {
         return Err(io::Error::other("No copy sources"));
     }
     check_path(destination)?;
+    let reported_destination = destination.to_owned();
     let destination = resolve(destination).map_err(|error| {
         io::Error::new(
             error.kind(),
@@ -119,6 +141,9 @@ fn build_impl(
         return Err(io::Error::other("Destination must be a directory"));
     }
     let mut plan = Plan {
+        move_roots: HashMap::new(),
+        move_destination: moving.then(|| (destination.clone(), reported_destination)),
+        move_directories: Vec::new(),
         merges: HashSet::new(),
         files: Vec::new(),
         directories: Vec::new(),
@@ -136,7 +161,11 @@ fn build_impl(
                 format!("Source path resolution failed: {error}"),
             )
         })?;
+        let reported_source = source.clone();
         let source = resolved.path;
+        if moving {
+            plan.move_roots.insert(source.clone(), reported_source);
+        }
         let name = source
             .file_name()
             .ok_or_else(|| io::Error::other("Cannot copy a volume root"))?;
@@ -174,6 +203,19 @@ fn build_impl(
                 "Links and reparse points are not supported",
             ));
         }
+        let move_source = if moving && metadata.is_file() {
+            Some(crate::replacement::Snapshot::capture(&source)?)
+        } else {
+            None
+        };
+        let move_directory = if moving && metadata.is_dir() {
+            Some(crate::moving::source::Directory::capture(
+                &source,
+                &destination,
+            )?)
+        } else {
+            None
+        };
         let (destination, replacement) = if interactive {
             match crate::target::choose(
                 &source,
@@ -198,6 +240,10 @@ fn build_impl(
             plan.roots.push(destination.clone());
         }
         if metadata.is_dir() {
+            if let Some(mut directory) = move_directory {
+                directory.destination = destination.clone();
+                plan.move_directories.push(directory);
+            }
             plan.directories.push(destination.clone());
             for entry in fs::read_dir(source)? {
                 check_cancel(progress)?;
@@ -210,6 +256,7 @@ fn build_impl(
                 .checked_add(metadata.len())
                 .ok_or_else(|| io::Error::other("Copy size overflow"))?;
             plan.files.push(File {
+                move_source,
                 replacement,
                 source,
                 destination,

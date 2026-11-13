@@ -1,14 +1,50 @@
 # MTT Copy Engine
 
-Copy-only engine adapted from the Win32 callback and storage profiling approach
+Copy/move engine adapted from the Win32 callback and storage profiling approach
 in [BetterCopy](https://github.com/articulite/BetterCopy), reviewed at commit
 `a3e239bb6bbe60b79df93e6e04ad5e113c40934c`.
 
 The application keeps its existing copy mechanism as the default. Enable the
-optional MTT engine in **Settings > General > Copy and deletion engine**.
+optional MTT engine in **Settings > General > Copy, move and deletion engine**.
 The same persisted option enables the application's deletion backend (outside
-this copy-only crate). Moves, organizer jobs, archive extraction and virtual
-Shell items are not redirected.
+this crate). Manual filesystem moves (drag/drop and cut/paste) use the same
+option. Organizer jobs, archive extraction and virtual Shell items are not redirected.
+
+## Optional move integration (Windows)
+
+- `move_with_conflicts` uses a fresh `Progress`, the existing conflict UI and
+  scheduling/admission budgets. Same-volume files are renamed by handle, without
+  copying their data. Directory trees are planned and moved file by file, not
+  atomically renamed as whole trees; empty source directories are removed last.
+- Only Windows error 17 (`ERROR_NOT_SAME_DEVICE`) selects staged buffered copying
+  followed by source removal. Other rename failures are reported without an
+  automatic copy or Shell retry. Providers must support the required handle APIs.
+- A source identity/size/timestamps snapshot is recorded before asking about its
+  conflict. An identity-bound source handle denies writes/deletes throughout
+  transfer. Source and destination ancestors are pinned against substitution.
+  After copying, the staged destination identity is rechecked under a write/delete
+  guard before source disposition. No source is deleted by a pathname lookup.
+- Publication failure retains the source and existing target. If publication
+  succeeds but source removal fails, both copies are kept and a retained-source
+  result is shown. Cancellation stops remaining work, not already completed moves;
+  a cancellation after publication can leave both copies. This is not a
+  transactional snapshot, cryptographic verification, undo log, durable flush
+  guarantee, or crash-recovery mechanism.
+- Skipped files stay in the source tree. Cleanup uses nonrecursive directory
+  disposition: nonempty, changed or inaccessible directories are retained. New
+  arrivals are never recursively deleted. Same-folder and overlapping source
+  selections are refused before destination writes. Reparse paths remain refused.
+- Actual removed-source/destination pairs update views, tags and caches, including
+  partial results. Cut/paste completion clears the clipboard only when the whole
+  operation succeeds without skipped or retained items. Otherwise the pending
+  paste is released while the cut clipboard is retained.
+- Progress bytes include logical bytes completed by fast rename; its displayed
+  rate is not physical disk throughput. The diagnostic transferred-byte counter
+  counts only copies. Folder ACL/timestamp cloning and automatic elevation are
+  not added by move support.
+- Automated move safety tests use only owned synthetic temporary trees. The
+  copy-then-remove branch is forced in tests on one temporary volume; real
+  cross-volume/provider behavior still needs manual validation on disposable data.
 
 ## Optional deletion integration
 

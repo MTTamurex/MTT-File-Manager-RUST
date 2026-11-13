@@ -18,7 +18,7 @@ impl Snapshot {
         Self::from_file(&file)
     }
 
-    fn from_file(file: &File) -> io::Result<Self> {
+    pub(crate) fn from_file(file: &File) -> io::Result<Self> {
         let metadata = file.metadata()?;
         if !metadata.is_file() || crate::plan::is_link(&metadata) {
             return Err(io::Error::other("Replacement target is not a regular file"));
@@ -75,7 +75,7 @@ fn open_target(path: &Path, lock_writes: bool) -> io::Result<File> {
     }
 }
 
-fn identity(file: &File, metadata: &Metadata) -> io::Result<(u64, u64)> {
+pub(crate) fn identity(file: &File, metadata: &Metadata) -> io::Result<(u64, u64)> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;

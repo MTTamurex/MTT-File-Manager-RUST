@@ -1,4 +1,4 @@
-//! Optional copy/deletion operations, retained until the user dismisses results.
+//! Optional filesystem transfers/deletion, retained until results are dismissed.
 pub(crate) mod diagnostics;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ pub struct Outcome {
 }
 
 pub struct CopyOperation {
+    pub moving: bool,
     pub deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
     pub sources: Vec<PathBuf>,
     pub destination: PathBuf,
@@ -56,7 +57,11 @@ pub struct CopyRuntime {
 
 impl CopyRuntime {
     pub fn start(&self, sources: Vec<PathBuf>, destination: PathBuf) -> CopyJob {
-        self.start_operation(sources, destination, None)
+        self.start_operation(sources, destination, None, false)
+    }
+
+    pub fn start_move(&self, sources: Vec<PathBuf>, destination: PathBuf) -> CopyJob {
+        self.start_operation(sources, destination, None, true)
     }
 
     pub fn start_delete(&self, sources: Vec<PathBuf>, permanently: bool) -> CopyJob {
@@ -66,6 +71,7 @@ impl CopyRuntime {
             Some(crate::infrastructure::delete_engine::DeleteProgress::new(
                 permanently,
             )),
+            false,
         )
     }
 
@@ -74,9 +80,11 @@ impl CopyRuntime {
         sources: Vec<PathBuf>,
         destination: PathBuf,
         deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
+        moving: bool,
     ) -> CopyJob {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let operation = Arc::new(CopyOperation {
+            moving,
             deletion,
             sources,
             destination,
@@ -137,6 +145,8 @@ impl Drop for CopyJob {
                     kind: OutcomeKind::Failed,
                     message: Some(if self.operation.deletion.is_some() {
                         rust_i18n::t!("delete_engine.interrupted").to_string()
+                    } else if self.operation.moving {
+                        rust_i18n::t!("move_engine.interrupted").to_string()
                     } else {
                         rust_i18n::t!("copy_engine.interrupted").to_string()
                     }),
