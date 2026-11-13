@@ -4,9 +4,7 @@
 //! Low-level thread/resource monitoring stays in the background, but those
 //! process metrics are intentionally not exposed in the UI.
 
-use crate::domain::file_entry::ViewMode;
 use crate::ui::components::selection_controls::{self, SelectionControlAction};
-use crate::ui::components::status_bar_size_controls;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -264,9 +262,6 @@ pub fn render_status_bar(
     is_recycle_bin_view: bool,
     bulk_scan_active: bool,
     show_hidden_files: &mut bool,
-    view_mode: ViewMode,
-    thumbnail_size: &mut f32,
-    interface_scale: &mut f32,
     video_preview_active: bool,
     active_tag_filter_name: Option<&str>,
     compact_layout: bool,
@@ -418,8 +413,6 @@ pub fn render_status_bar(
                     }
                 }
             }); // end Frame
-
-            status_bar_size_controls::render(ui, view_mode, thumbnail_size, interface_scale);
         });
 
         let selection_row_rect = if compact_layout {
