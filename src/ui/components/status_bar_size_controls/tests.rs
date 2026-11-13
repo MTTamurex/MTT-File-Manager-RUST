@@ -334,3 +334,52 @@ fn scale_tooltip_tracks_the_draft_even_when_dragging_outside_the_slider() {
     assert_eq!(scale, 2.0);
     assert_eq!(thumbnail, 128.0);
 }
+
+#[test]
+fn changing_values_never_wrap_even_when_the_tooltip_width_is_constrained() {
+    for zoom in [1.0, 2.0] {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(zoom);
+        ctx.global_style_mut(|style| style.spacing.tooltip_width = 20.0);
+        let mut thumbnail = 128.0;
+        let mut scale = 1.0;
+        popup_frame(&ctx, &mut thumbnail, &mut scale, vec![]);
+        let (responses, _) = popup_frame(&ctx, &mut thumbnail, &mut scale, vec![]);
+        for index in [0, 1] {
+            popup_frame(
+                &ctx,
+                &mut thumbnail,
+                &mut scale,
+                vec![egui::Event::PointerMoved(responses[index].rect.center())],
+            );
+            for (next_scale, next_thumbnail) in
+                [(1.0, 96.0), (1.05, 128.0), (2.0, 256.0), (1.0, 96.0)]
+            {
+                scale = next_scale;
+                thumbnail = next_thumbnail;
+                let expected = if index == 0 {
+                    format!("{:.0}%", scale * 100.0)
+                } else {
+                    format!("{thumbnail:.0} px")
+                };
+                popup_frame(&ctx, &mut thumbnail, &mut scale, vec![]);
+                let (_, output) = popup_frame(&ctx, &mut thumbnail, &mut scale, vec![]);
+                let galley = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.job.text == expected => {
+                            Some(&text.galley)
+                        }
+                        _ => None,
+                    })
+                    .expect("The interacted slider must display its current value");
+                assert_eq!(
+                    galley.rows.len(),
+                    1,
+                    "Value {expected} wrapped at zoom {zoom}"
+                );
+            }
+        }
+    }
+}

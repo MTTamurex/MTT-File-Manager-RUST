@@ -151,7 +151,7 @@ fn show_value_tooltip(response: &egui::Response, value: String) {
         let mut tooltip = egui::Tooltip::for_widget(response);
         tooltip.popup = tooltip.popup.align(egui::RectAlign::TOP);
         tooltip.show(|ui| {
-            ui.label(value);
+            ui.add(egui::Label::new(value).extend());
         });
     }
 }
