@@ -4,6 +4,8 @@ mod display_names;
 
 #[derive(Default)]
 pub struct CopyPanelState {
+    pub(crate) last_centered_operation: Option<u64>,
+    pub(crate) pending_initial_center: bool,
     pub metrics: HashMap<u64, TransferMetrics>,
     pub minimized: bool,
 }

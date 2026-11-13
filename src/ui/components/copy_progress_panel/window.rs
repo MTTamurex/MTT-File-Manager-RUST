@@ -28,6 +28,12 @@ fn show_with(
 ) -> Vec<u64> {
     let screen = ctx.viewport_rect();
     let width = 520.0f32.min((screen.width() - 24.0).max(180.0));
+    let newest_operation = jobs.iter().map(|(id, _)| *id).max();
+    let center_operation = panel.pending_initial_center
+        || newest_operation
+            .is_some_and(|id| panel.last_centered_operation.is_none_or(|seen| id > seen));
+    let saved_area = egui::AreaState::load(ctx, egui::Id::new(WINDOW_ID));
+    let saved_pivot = saved_area.map_or(egui::Align2::CENTER_CENTER, |state| state.pivot);
     let mut dismissed = Vec::new();
     let confirming = jobs.iter().any(|(_, job)| {
         job.outcome().is_none()
@@ -45,44 +51,59 @@ fn show_with(
     } else {
         title
     };
-    egui::Window::new(egui::RichText::new(title).text_style(egui::TextStyle::Button))
-        .id(egui::Id::new(WINDOW_ID))
-        .default_pos(egui::pos2(
-            (screen.right() - width - 24.0).max(screen.left()),
-            screen.top() + 70.0,
-        ))
-        .default_width(width)
-        // Let auto-shrinking content fit at large font scales instead of
-        // clipping controls inside egui's default 420-point resize height.
-        .default_height((screen.height() - 150.0).max(100.0))
-        .max_width((screen.width() - 24.0).max(180.0))
-        .min_width(width.min(320.0))
-        .resizable(true)
-        .collapsible(true)
-        .show(ctx, |ui| {
-            // Bound the alignment container to one row. Using with_layout
-            // directly here consumes the resizable window's remaining height.
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(t!("copy_engine.minimize")).clicked() {
-                        panel.minimize();
-                        ctx.request_repaint();
-                    }
-                });
+    let mut window =
+        egui::Window::new(egui::RichText::new(title).text_style(egui::TextStyle::Button))
+            .id(egui::Id::new(WINDOW_ID))
+            .pivot(saved_pivot)
+            .default_pos(screen.center())
+            .default_width(width)
+            // Let auto-shrinking content fit at large font scales instead of
+            // clipping controls inside egui's default 420-point resize height.
+            .default_height((screen.height() - 150.0).max(100.0))
+            .max_width((screen.width() - 24.0).max(180.0))
+            .min_width(width.min(320.0))
+            .resizable(true)
+            .collapsible(true);
+    if center_operation {
+        panel.last_centered_operation = newest_operation;
+        // A fresh area needs one placement after its initial sizing pass too.
+        panel.pending_initial_center = saved_area.is_none_or(|state| state.size.is_none());
+        // Center the actual, dynamically sized window, not an estimated height.
+        // Disable dragging only for this placement frame so egui does not
+        // restore the old title-drag position over current_pos().
+        window = window
+            .pivot(egui::Align2::CENTER_CENTER)
+            .current_pos(screen.center())
+            // The first layout can still carry an estimated/cached size.
+            // Constrain the measured window next frame, not that estimate.
+            .constrain(false)
+            .movable(false);
+        ctx.request_repaint();
+    }
+    window.show(ctx, |ui| {
+        // Bound the alignment container to one row. Using with_layout
+        // directly here consumes the resizable window's remaining height.
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button(t!("copy_engine.minimize")).clicked() {
+                    panel.minimize();
+                    ctx.request_repaint();
+                }
             });
-            egui::ScrollArea::vertical()
-                .max_height((screen.height() - 150.0).max(100.0))
-                .show(ui, |ui| {
-                    for (id, operation) in jobs {
-                        ui.push_id(id, |ui| {
-                            if render_card(ui, operation, panel.metrics.entry(*id).or_default()) {
-                                dismissed.push(*id);
-                            }
-                        });
-                        ui.add_space(8.0);
-                    }
-                });
         });
+        egui::ScrollArea::vertical()
+            .max_height((screen.height() - 150.0).max(100.0))
+            .show(ui, |ui| {
+                for (id, operation) in jobs {
+                    ui.push_id(id, |ui| {
+                        if render_card(ui, operation, panel.metrics.entry(*id).or_default()) {
+                            dismissed.push(*id);
+                        }
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+    });
     dismissed
 }
 

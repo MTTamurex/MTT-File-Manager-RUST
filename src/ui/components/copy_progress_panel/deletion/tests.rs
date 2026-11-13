@@ -1,6 +1,9 @@
 use super::*;
 use crate::app::copy_panel_state::CopyPanelState;
 use crate::infrastructure::copy_engine::{CopyRuntime, Outcome};
+mod cancelled;
+mod layout;
+mod scope;
 
 fn texts(shape: &egui::epaint::Shape, result: &mut Vec<String>) {
     match shape {

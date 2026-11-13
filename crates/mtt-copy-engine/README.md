@@ -17,14 +17,24 @@ Shell items are not redirected.
   Closing/cancelling the operation never implies consent, and stale answers
   cannot confirm a later request. Minimized progress is revealed once per new
   confirmation; the user can still minimize or collapse it afterward.
+- Confirmation shows the question, selected names and action buttons.
+  The list is virtualized, scrollable and limited to about five visible rows
+  at the current font scale; full paths appear on hover. Selected directories
+  are not expanded into descendants. Source/mode summaries and progress
+  statistics appear only after confirmation, not beside the initial question.
 - Delete uses `IFileOperation` recycling with a mandatory per-item
   `PreDeleteItem` guard. An item without `TSF_DELETE_RECYCLE_IF_POSSIBLE` is
   refused before deletion. Shell confirmation/error dialogs are suppressed;
   errors stop the operation, while system UAC prompts remain permitted.
 - If recycling is unavailable, Shell is stopped before MTT asks separately
   whether to permanently delete the remaining contents of that selected root.
-  Consent to recycle never authorizes this fallback. Already recycled items and
-  other selected roots are not included in that permanent-deletion request.
+  Consent to recycle never authorizes this fallback. The fallback warning offers
+  an unchecked "apply to all" checkbox: only an affirmative answer with that box
+  checked permits subsequent unrecyclable items in this operation without more
+  prompts. Without it, only the displayed root is authorized. Every item still
+  attempts recycling first; recyclable items and already recycled items are not
+  permanently deleted by this authorization. It is not saved as a preference or
+  shared with other operations, and cancellation still stops remaining work.
 - Shift+Delete requires explicit confirmation before direct filesystem deletion.
   Cancellation stops remaining work and never restores items already removed.
 - Direct deletion walks the tree once, depth-first, without a separate total-size
@@ -41,6 +51,9 @@ Shell items are not redirected.
   return before it takes effect. Counts reflect entries reported by Shell, which
   may recycle a whole directory as one item, not every descendant.
 - Deletions share the themed copy dashboard, minimization and retained results.
+  Each new copy or deletion centers the window once, including when an old window
+  position is cached. Dragging and resizing remain available afterward.
+  Cancelled results keep their status/message without a progress bar.
   Progress remains indeterminate while running: neither traversal discoveries
   nor Shell work units are advertised as a stable item total or byte throughput.
   Pause is not offered for deletion. Elapsed time freezes on completion.

@@ -23,12 +23,17 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
     let mut dismiss = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
+        // Confirmation is its own phase: progress statistics and source/mode
+        // summaries only become useful after the user has answered.
+        if let Some(request) = &pending {
+            confirmation::render(ui, operation, request);
+            return;
+        }
         let status = match outcome.as_ref().map(|outcome| outcome.kind) {
             Some(OutcomeKind::Completed) => t!("delete_engine.completed"),
             Some(OutcomeKind::Cancelled) => t!("delete_engine.cancelled_title"),
             Some(OutcomeKind::Failed) => t!("delete_engine.failed_title"),
             None if cancelled => t!("copy_engine.cancelling"),
-            None if pending.is_some() => t!("delete_engine.awaiting_confirmation"),
             None if progress.permanently || progress.permanent_phase.load(Ordering::Relaxed) => {
                 t!("delete_engine.deleting")
             }
@@ -66,10 +71,7 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             t!("delete_engine.recycle_bin")
         };
         path_row(ui, &t!("delete_engine.mode"), &mode, || mode.to_string());
-        if let Some(request) = &pending {
-            confirmation::render(ui, operation, request);
-        }
-        if active && pending.is_none() {
+        if active {
             active_files::render_paths(ui, paths, 1);
         }
         ui.add_space(10.0);
@@ -90,12 +92,15 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             );
         });
         ui.add_space(8.0);
-        if active && pending.is_none() {
+        if active {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.weak(t!("delete_engine.unknown_total"));
             });
-        } else if !active {
+        } else if !outcome
+            .as_ref()
+            .is_some_and(|result| result.kind == OutcomeKind::Cancelled)
+        {
             let complete = outcome
                 .as_ref()
                 .is_some_and(|result| result.kind == OutcomeKind::Completed);
@@ -110,14 +115,14 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if active && pending.is_none() {
+            if active {
                 if ui
                     .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
                     .clicked()
                 {
                     operation.progress.cancel();
                 }
-            } else if !active && ui.button(t!("copy_engine.dismiss")).clicked() {
+            } else if ui.button(t!("copy_engine.dismiss")).clicked() {
                 dismiss = true;
             }
         });

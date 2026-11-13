@@ -24,7 +24,13 @@ struct State {
     waiting: bool,
     next: u64,
     pending: Option<Request>,
-    answer: Option<bool>,
+    answer: Option<Answer>,
+    allow_remaining_fallbacks: bool,
+}
+
+struct Answer {
+    allow: bool,
+    apply_to_remaining: bool,
 }
 
 #[derive(Default)]
@@ -43,6 +49,12 @@ impl Confirmation {
     }
 
     pub fn respond(&self, id: u64, allow: bool) -> bool {
+        self.respond_with_scope(id, allow, false)
+    }
+
+    /// Scope is limited to unrecyclable items in this operation. Recycling or
+    /// permanent-delete confirmations cannot grant a fallback authorization.
+    pub fn respond_with_scope(&self, id: u64, allow: bool, apply_to_remaining: bool) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state
             .pending
@@ -51,8 +63,15 @@ impl Confirmation {
         {
             return false;
         }
+        let fallback = state
+            .pending
+            .as_ref()
+            .is_some_and(|request| request.kind == Kind::RecycleUnavailable);
         state.pending = None;
-        state.answer = Some(allow);
+        state.answer = Some(Answer {
+            allow,
+            apply_to_remaining: allow && fallback && apply_to_remaining,
+        });
         self.wake.notify_all();
         true
     }
@@ -61,6 +80,9 @@ impl Confirmation {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if control.is_cancelled() || state.waiting {
             return false;
+        }
+        if kind == Kind::RecycleUnavailable && state.allow_remaining_fallbacks {
+            return true;
         }
         state.waiting = true;
         let id = state.next;
@@ -80,7 +102,10 @@ impl Confirmation {
             }
             if let Some(answer) = state.answer.take() {
                 state.waiting = false;
-                return answer;
+                if answer.apply_to_remaining {
+                    state.allow_remaining_fallbacks = true;
+                }
+                return answer.allow;
             }
             // Worker-only wait. The timeout observes cancellation even when the
             // progress control is cancelled outside the confirmation widget.

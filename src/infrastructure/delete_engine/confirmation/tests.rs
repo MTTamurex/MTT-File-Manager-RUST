@@ -63,3 +63,100 @@ fn recycle_consent_does_not_authorize_a_later_permanent_fallback() {
     assert!(confirmation.respond(second.id, false));
     assert!(!worker.join().unwrap());
 }
+
+#[test]
+fn a_single_item_answer_does_not_skip_the_next_fallback() {
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], false);
+    for allow in [true, false] {
+        let operation = job.operation.clone();
+        let worker = std::thread::spawn(move || {
+            ask(&operation, Kind::RecycleUnavailable, &operation.sources)
+        });
+        let request = wait_for_request(&job.operation);
+        let confirmation = &job.operation.deletion.as_ref().unwrap().confirmation;
+        assert!(confirmation.respond(request.id, allow));
+        assert_eq!(worker.join().unwrap(), allow);
+    }
+}
+
+#[test]
+fn apply_all_is_limited_to_fallbacks_in_this_operation_and_cannot_override_cancel() {
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], false);
+    let operation = job.operation.clone();
+    let worker =
+        std::thread::spawn(move || ask(&operation, Kind::RecycleUnavailable, &operation.sources));
+    let request = wait_for_request(&job.operation);
+    let confirmation = &job.operation.deletion.as_ref().unwrap().confirmation;
+    assert!(!confirmation.respond_with_scope(request.id.wrapping_add(1), true, true));
+    assert!(confirmation.respond_with_scope(request.id, true, true));
+    assert!(worker.join().unwrap());
+
+    let operation = job.operation.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let allowed = ask(&operation, Kind::RecycleUnavailable, &operation.sources);
+        let _ = sender.send(allowed);
+    });
+    let answer = receiver.recv_timeout(Duration::from_secs(3));
+    if answer.is_err() {
+        job.operation.progress.cancel();
+    }
+    worker.join().unwrap();
+    assert_eq!(answer, Ok(true));
+    assert!(confirmation.pending().is_none());
+
+    // Other confirmation kinds still need their own answer.
+    let operation = job.operation.clone();
+    let worker = std::thread::spawn(move || ask(&operation, Kind::Permanent, &operation.sources));
+    let request = wait_for_request(&job.operation);
+    assert!(confirmation.respond(request.id, false));
+    assert!(!worker.join().unwrap());
+    // A new job cannot inherit consent, even while the original is active.
+    let fresh = runtime.start_delete(vec![PathBuf::from("source/other.txt")], false);
+    let operation = fresh.operation.clone();
+    let worker =
+        std::thread::spawn(move || ask(&operation, Kind::RecycleUnavailable, &operation.sources));
+    let request = wait_for_request(&fresh.operation);
+    assert!(fresh
+        .operation
+        .deletion
+        .as_ref()
+        .unwrap()
+        .confirmation
+        .respond(request.id, false));
+    assert!(!worker.join().unwrap());
+    job.operation.progress.cancel();
+    assert!(!ask(
+        &job.operation,
+        Kind::RecycleUnavailable,
+        &job.operation.sources
+    ));
+}
+
+#[test]
+fn declining_or_approving_non_fallback_prompts_cannot_grant_apply_all() {
+    let runtime = CopyRuntime::default();
+    for (kind, allow) in [
+        (Kind::Recycle, true),
+        (Kind::Permanent, true),
+        (Kind::RecycleUnavailable, false),
+    ] {
+        let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], false);
+        let operation = job.operation.clone();
+        let worker = std::thread::spawn(move || ask(&operation, kind, &operation.sources));
+        let request = wait_for_request(&job.operation);
+        let confirmation = &job.operation.deletion.as_ref().unwrap().confirmation;
+        assert!(confirmation.respond_with_scope(request.id, allow, true));
+        assert_eq!(worker.join().unwrap(), allow);
+        assert!(!confirmation.respond_with_scope(request.id, true, true));
+        let operation = job.operation.clone();
+        let worker = std::thread::spawn(move || {
+            ask(&operation, Kind::RecycleUnavailable, &operation.sources)
+        });
+        let request = wait_for_request(&job.operation);
+        assert!(confirmation.respond(request.id, false));
+        assert!(!worker.join().unwrap());
+    }
+}

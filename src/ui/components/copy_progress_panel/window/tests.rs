@@ -3,6 +3,7 @@ use crate::infrastructure::copy_engine::CopyRuntime;
 use std::path::PathBuf;
 
 mod geometry;
+mod placement;
 
 struct Text {
     value: String,
