@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod actions;
 mod geometry;
 mod placement;
+mod presentation;
 
 struct Text {
     value: String,
@@ -72,9 +73,8 @@ fn full_window_keeps_the_minimize_row_and_copy_controls_visible() {
         let window = ctx
             .memory(|memory| memory.area_rect(egui::Id::new(WINDOW_ID)))
             .unwrap();
-        let minimize = texts
-            .iter()
-            .find(|text| text.value == controls::MINIMIZE)
+        let minimize = ctx
+            .read_response(egui::Id::new(controls::MINIMIZE_ID))
             .unwrap();
         assert!(
             minimize.rect.top() - window.top() < 90.0,
@@ -206,10 +206,9 @@ fn full_window_minimize_button_still_works_after_bounding_the_header() {
     for _ in 0..4 {
         draw(&ctx, &runtime, &mut panel, size);
     }
-    let texts = draw(&ctx, &runtime, &mut panel, size);
-    let pos = texts
-        .iter()
-        .find(|text| text.value == controls::MINIMIZE)
+    draw(&ctx, &runtime, &mut panel, size);
+    let pos = ctx
+        .read_response(egui::Id::new(controls::MINIMIZE_ID))
         .unwrap()
         .rect
         .center();

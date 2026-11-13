@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 mod confirmation;
 
-pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBuf]) -> bool {
+pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBuf]) {
     let progress = operation.deletion.as_ref().unwrap();
     let outcome = operation.outcome();
     let active = outcome.is_none();
@@ -20,7 +20,6 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
     };
     let removed = progress.removed.load(Ordering::Relaxed);
     let failures = progress.failures.load(Ordering::Relaxed);
-    let mut dismiss = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
         // Confirmation is its own phase: progress statistics and source/mode
@@ -48,19 +47,7 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !active {
-                    dismiss = super::window::controls::close(ui, false).clicked();
-                }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(
-                        egui::Label::new(RichText::new(status.clone()).strong().color(color))
-                            .truncate(),
-                    );
-                });
-            });
-        });
+        ui.add(egui::Label::new(RichText::new(status.clone()).strong().color(color)).truncate());
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -127,13 +114,15 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         }
         ui.add_space(6.0);
         if active {
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
-                    .clicked()
-                {
-                    operation.progress.cancel();
-                }
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
+                        .clicked()
+                    {
+                        operation.progress.cancel();
+                    }
+                });
             });
         }
         if let Some(message) = outcome.as_ref().and_then(|result| result.message.as_ref()) {
@@ -141,7 +130,6 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             ui.label(message);
         }
     });
-    dismiss
 }
 
 #[cfg(test)]

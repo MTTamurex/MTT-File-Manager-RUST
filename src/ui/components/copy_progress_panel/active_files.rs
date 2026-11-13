@@ -83,7 +83,7 @@ fn file_row(ui: &mut egui::Ui, path: &Path) {
         egui::Label::new(name).truncate().halign(egui::Align::Min),
     )
     .on_hover_ui(|ui| {
-        ui.label(path.display().to_string());
+        ui.label(super::display_paths::text(&path.display().to_string()));
     });
 }
 

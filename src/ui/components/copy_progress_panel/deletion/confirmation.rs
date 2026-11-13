@@ -41,7 +41,9 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Req
                         .unwrap_or(path.as_os_str())
                         .to_string_lossy();
                     ui.add(egui::Label::new(name).truncate().halign(egui::Align::Min))
-                        .on_hover_text(path.display().to_string());
+                        .on_hover_text(super::super::display_paths::text(
+                            &path.display().to_string(),
+                        ));
                 }
             });
     });

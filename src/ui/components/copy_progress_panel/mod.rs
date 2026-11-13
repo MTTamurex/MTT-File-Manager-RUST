@@ -2,6 +2,7 @@
 mod active_files;
 mod conflicts;
 mod deletion;
+mod display_paths;
 mod graph;
 pub(crate) mod indicator;
 mod summary;
@@ -92,7 +93,7 @@ fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
     );
 }
 
-fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) -> bool {
+fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) {
     let paths = if let Some(deletion) = &operation.deletion {
         deletion.current()
     } else {
@@ -111,7 +112,7 @@ fn card_with_paths(
     operation: &CopyOperation,
     metrics: &mut TransferMetrics,
     active_paths: &[std::path::PathBuf],
-) -> bool {
+) {
     let progress = &operation.progress;
     let outcome = operation.outcome();
     let active = outcome.is_none();
@@ -122,7 +123,6 @@ fn card_with_paths(
     let total_bytes = progress.total_bytes.load(Ordering::Relaxed);
     let files = progress.files_copied.load(Ordering::Relaxed);
     let total_files = progress.total_files.load(Ordering::Relaxed);
-    let mut dismiss = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
         if active && !cancelled {
@@ -149,19 +149,7 @@ fn card_with_paths(
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !active {
-                    dismiss = window::controls::close(ui, false).clicked();
-                }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(
-                        egui::Label::new(RichText::new(status).strong().color(status_color))
-                            .truncate(),
-                    );
-                });
-            });
-        });
+        ui.add(egui::Label::new(RichText::new(status).strong().color(status_color)).truncate());
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -237,28 +225,30 @@ fn card_with_paths(
             ui.label(t!("copy_engine.skipped", count = skipped));
         }
         if active {
-            ui.horizontal_wrapped(|ui| {
-                let label = if pause == PauseState::Running {
-                    t!("copy_engine.pause")
-                } else {
-                    t!("copy_engine.resume")
-                };
-                if ui
-                    .add_enabled(!cancelled, egui::Button::new(label))
-                    .clicked()
-                {
-                    if pause == PauseState::Running {
-                        progress.pause();
-                    } else {
-                        progress.resume();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
+                        .clicked()
+                    {
+                        progress.cancel();
                     }
-                }
-                if ui
-                    .add_enabled(!cancelled, egui::Button::new(t!("copy_engine.cancel")))
-                    .clicked()
-                {
-                    progress.cancel();
-                }
+                    let label = if pause == PauseState::Running {
+                        t!("copy_engine.pause")
+                    } else {
+                        t!("copy_engine.resume")
+                    };
+                    if ui
+                        .add_enabled(!cancelled, egui::Button::new(label))
+                        .clicked()
+                    {
+                        if pause == PauseState::Running {
+                            progress.pause();
+                        } else {
+                            progress.resume();
+                        }
+                    }
+                });
             });
         }
         if let Some(message) = outcome.as_ref().and_then(|result| result.message.as_ref()) {
@@ -266,15 +256,14 @@ fn card_with_paths(
             ui.label(message);
         }
     });
-    dismiss
 }
 
 fn path_row(ui: &mut egui::Ui, label: &str, value: &str, tooltip: impl FnOnce() -> String) {
     ui.horizontal(|ui| {
         ui.weak(label);
-        let response = ui.add(egui::Label::new(value).truncate());
+        let response = ui.add(egui::Label::new(display_paths::text(value)).truncate());
         response.on_hover_ui(|ui| {
-            ui.label(tooltip());
+            ui.label(display_paths::text(&tooltip()));
         });
     });
 }
@@ -353,7 +342,7 @@ mod tests {
         ] {
             theme::apply_theme_visuals(&ctx, mode);
             let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                assert!(!card(ui, &job.operation, &mut metrics));
+                card(ui, &job.operation, &mut metrics);
             });
             assert!(!output.shapes.is_empty());
             assert!(!job.operation.progress.is_cancelled());
@@ -363,7 +352,7 @@ mod tests {
             message: Some("Copy error".into()),
         });
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            assert!(!card(ui, &job.operation, &mut metrics));
+            card(ui, &job.operation, &mut metrics);
         });
         assert_eq!(job.operation.outcome().unwrap().kind, OutcomeKind::Failed);
     }

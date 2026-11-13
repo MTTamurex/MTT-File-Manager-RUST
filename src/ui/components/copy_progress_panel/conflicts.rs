@@ -21,7 +21,9 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Con
         .unwrap_or(request.destination.as_os_str())
         .to_string_lossy();
     ui.add(egui::Label::new(RichText::new(name).strong()).truncate())
-        .on_hover_text(request.destination.display().to_string());
+        .on_hover_text(super::display_paths::text(
+            &request.destination.display().to_string(),
+        ));
     ui.add_space(12.0);
     egui::Frame::group(ui.style()).show(ui, |ui| {
         path_row(

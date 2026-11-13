@@ -25,7 +25,7 @@ fn show_with(
         &mut egui::Ui,
         &CopyOperation,
         &mut crate::app::copy_panel_state::TransferMetrics,
-    ) -> bool,
+    ),
 ) -> Vec<u64> {
     let screen = ctx.viewport_rect();
     let width = 520.0f32.min((screen.width() - 24.0).max(180.0));
@@ -104,9 +104,7 @@ fn show_with(
             .show(ui, |ui| {
                 for (id, operation) in jobs {
                     ui.push_id(id, |ui| {
-                        if render_card(ui, operation, panel.metrics.entry(*id).or_default()) {
-                            dismissed.push(*id);
-                        }
+                        render_card(ui, operation, panel.metrics.entry(*id).or_default());
                     });
                     ui.add_space(8.0);
                 }
