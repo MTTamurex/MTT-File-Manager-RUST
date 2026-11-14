@@ -1619,7 +1619,7 @@ copy_engine:
   active_files: "正在传输的文件："
   more_active_files: "另有 %{count} 个文件正在传输"
   minimize: "最小化"
-  hide_window: "隐藏窗口但不取消操作"
+  cancel_and_close: "取消正在进行的操作并关闭窗口"
   indicator_active: "复制 (%{count}) · %{progress}"
   indicator_results: "复制 (%{count}) · 结果"
   indicator_errors: "复制 (%{count}) · 错误"

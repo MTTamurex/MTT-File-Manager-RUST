@@ -1628,7 +1628,7 @@ copy_engine:
   active_files: "Arquivos em transferência:"
   more_active_files: "+ %{count} em transferência"
   minimize: "Minimizar"
-  hide_window: "Ocultar janela sem cancelar as operações"
+  cancel_and_close: "Cancelar operações ativas e fechar a janela"
   indicator_active: "Cópias (%{count}) · %{progress}"
   indicator_results: "Cópias (%{count}) · resultados"
   indicator_errors: "Cópias (%{count}) · erros"

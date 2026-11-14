@@ -5,6 +5,53 @@ fn start(runtime: &Arc<CopyRuntime>) -> CopyJob {
 }
 
 #[test]
+fn closed_jobs_are_not_minimized_entries_and_are_collected_after_the_worker_finishes() {
+    for kind in [
+        OutcomeKind::Cancelled,
+        OutcomeKind::Failed,
+        OutcomeKind::Completed,
+    ] {
+        let runtime = Arc::new(CopyRuntime::default());
+        let job = start(&runtime);
+        let id = runtime.jobs()[0].0;
+        job.operation.close();
+        assert!(job.operation.progress.is_cancelled());
+        assert!(runtime.jobs().is_empty());
+        assert!(
+            runtime.jobs.lock().unwrap().contains_key(&id),
+            "Worker state must survive until completion"
+        );
+        let next = start(&runtime);
+        assert_eq!(runtime.jobs().len(), 1);
+        assert!(!next.operation.progress.is_cancelled());
+        job.finish(Outcome {
+            kind,
+            message: None,
+        });
+        assert_eq!(job.operation.outcome().unwrap().kind, kind);
+        assert_eq!(runtime.jobs().len(), 1);
+        assert!(!runtime.jobs.lock().unwrap().contains_key(&id));
+    }
+}
+
+#[test]
+fn closing_a_finished_job_does_not_cancel_it_or_restore_its_result() {
+    let runtime = Arc::new(CopyRuntime::default());
+    let job = start(&runtime);
+    job.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+    job.operation.close();
+    assert!(!job.operation.progress.is_cancelled());
+    assert!(runtime.jobs().is_empty());
+    assert_eq!(
+        job.operation.outcome().unwrap().kind,
+        OutcomeKind::Completed
+    );
+}
+
+#[test]
 fn jobs_have_independent_controls_and_retain_results_until_dismissed() {
     let runtime = Arc::new(CopyRuntime::default());
     let first = start(&runtime);

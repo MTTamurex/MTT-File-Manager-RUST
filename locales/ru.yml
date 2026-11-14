@@ -1619,7 +1619,7 @@ copy_engine:
   active_files: "Передаваемые файлы:"
   more_active_files: "Ещё передаётся: %{count}"
   minimize: "Свернуть"
-  hide_window: "Скрыть окно без отмены операций"
+  cancel_and_close: "Отменить активные операции и закрыть окно"
   indicator_active: "Копирование (%{count}) · %{progress}"
   indicator_results: "Копирование (%{count}) · результаты"
   indicator_errors: "Копирование (%{count}) · ошибки"

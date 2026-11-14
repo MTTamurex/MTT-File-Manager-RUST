@@ -3,9 +3,11 @@ use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
 mod detached;
+mod layout;
 mod pickers;
 mod seek_bar;
 
+use layout::{docked_controls_need_time_row, docked_volume_slider_width};
 use seek_bar::draw_seek_bar;
 
 /// Result from video control interactions.
@@ -71,6 +73,11 @@ fn draw_basic_controls(
 ) -> Option<ControlAction> {
     let icon_color_val = icon_color(ui.visuals().dark_mode);
     let btn_size = 18.0;
+    let slider_width = if is_detached {
+        70.0
+    } else {
+        docked_volume_slider_width(ui.available_width(), ui.spacing().item_spacing.x)
+    };
 
     // Play/Pause
     let play_icon = if is_playing { "pause" } else { "play" };
@@ -143,7 +150,7 @@ fn draw_basic_controls(
     // Volume Slider
     let mut vol = volume;
     ui.add_space(4.0);
-    ui.spacing_mut().slider_width = 70.0;
+    ui.spacing_mut().slider_width = slider_width;
     ui.visuals_mut().selection.bg_fill = crate::ui::theme::accent_color(ui.ctx());
     if ui
         .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
@@ -159,12 +166,16 @@ fn draw_basic_controls(
 }
 
 /// Draw time display
-fn draw_time_display(ui: &mut egui::Ui, current_time: f64, duration: f64) {
-    let time_text = format!(
+fn format_time_display(current_time: f64, duration: f64) -> String {
+    format!(
         "{} / {}",
         crate::ui::components::media_preview::format_time(current_time),
         crate::ui::components::media_preview::format_time(duration)
-    );
+    )
+}
+
+fn draw_time_display(ui: &mut egui::Ui, current_time: f64, duration: f64) {
+    let time_text = format_time_display(current_time, duration);
     let time_color = if ui.visuals().dark_mode {
         egui::Color32::LIGHT_GRAY
     } else {
@@ -188,6 +199,7 @@ pub fn draw_docked_controls(
     volume: f32,
     is_muted: bool,
 ) -> Option<ControlAction> {
+    let full_width = full_width.max(0.0).min(ui.available_width());
     ui.set_width(full_width);
 
     // Seek Bar
@@ -196,6 +208,19 @@ pub fn draw_docked_controls(
     ui.add_space(6.0);
 
     // Buttons row - only basic controls for docked mode
+    let time_text = format_time_display(current_time, duration);
+    let time_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                time_text.clone(),
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    let separate_time =
+        docked_controls_need_time_row(full_width, ui.spacing().item_spacing.x, time_width);
     let mut result = None;
     ui.horizontal(|ui| {
         // Basic controls (play, detach, volume)
@@ -209,11 +234,14 @@ pub fn draw_docked_controls(
             false,
         );
 
-        ui.add_space(10.0);
-
-        // Time display
-        draw_time_display(ui, current_time, duration);
+        if !separate_time {
+            ui.add_space(10.0);
+            draw_time_display(ui, current_time, duration);
+        }
     });
+    if separate_time {
+        draw_time_display(ui, current_time, duration);
+    }
     result
 }
 

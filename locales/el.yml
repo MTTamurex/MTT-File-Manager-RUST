@@ -1618,7 +1618,7 @@ copy_engine:
   active_files: "Αρχεία σε μεταφορά:"
   more_active_files: "+ %{count} σε μεταφορά"
   minimize: "Ελαχιστοποίηση"
-  hide_window: "Απόκρυψη παραθύρου χωρίς ακύρωση εργασιών"
+  cancel_and_close: "Ακύρωση ενεργών εργασιών και κλείσιμο παραθύρου"
   indicator_active: "Αντιγραφές (%{count}) · %{progress}"
   indicator_results: "Αντιγραφές (%{count}) · αποτελέσματα"
   indicator_errors: "Αντιγραφές (%{count}) · σφάλματα"

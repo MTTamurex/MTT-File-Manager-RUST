@@ -27,6 +27,9 @@ fn show_with(
         &mut crate::app::copy_panel_state::TransferMetrics,
     ),
 ) -> Vec<u64> {
+    if jobs.is_empty() {
+        return Vec::new();
+    }
     let screen = ctx.viewport_rect();
     let width = 520.0f32.min((screen.width() - 24.0).max(180.0));
     let newest_operation = jobs.iter().map(|(id, _)| *id).max();
@@ -93,11 +96,21 @@ fn show_with(
             .iter()
             .any(|(_, operation)| operation.outcome().is_none());
         let (minimize, close) = controls::header(ui, &title, active);
-        if minimize || (close && active) {
+        if close {
+            if active {
+                for (_, operation) in jobs {
+                    operation.close();
+                }
+                // Closed jobs are no longer dashboard/indicator entries. Their
+                // workers remain alive to finish cancellation in the background.
+                panel.restore();
+            } else {
+                dismissed.extend(jobs.iter().map(|(id, _)| *id));
+            }
+            ctx.request_repaint();
+        } else if minimize {
             panel.minimize();
             ctx.request_repaint();
-        } else if close {
-            dismissed.extend(jobs.iter().map(|(id, _)| *id));
         }
         egui::ScrollArea::vertical()
             .max_height((screen.height() - 150.0).max(100.0))

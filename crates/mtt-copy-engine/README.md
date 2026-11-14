@@ -10,6 +10,12 @@ The same persisted option enables the application's deletion backend (outside
 this crate). Manual filesystem moves (drag/drop and cut/paste) use the same
 option. Organizer jobs, archive extraction and virtual Shell items are not redirected.
 
+The shared operation window's minimize button keeps jobs running. Its close
+button cancels all active jobs and closes the window immediately, without creating
+a minimized/restore entry. Workers finish cancellation in the background without
+undoing completed work; their state is released after completion. If no jobs are
+active, closing dismisses the retained results.
+
 ## Optional move integration (Windows)
 
 - `move_with_conflicts` uses a fresh `Progress`, the existing conflict UI and

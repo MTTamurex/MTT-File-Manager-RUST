@@ -1,4 +1,4 @@
-//! Familiar window controls; hiding never changes an operation's state.
+//! Minimize keeps operations running; Close cancels active jobs before hiding.
 use eframe::egui;
 use rust_i18n::t;
 
@@ -10,7 +10,7 @@ fn close(ui: &mut egui::Ui, active: bool) -> egui::Response {
         ui,
         CLOSE_ID,
         &if active {
-            t!("copy_engine.hide_window")
+            t!("copy_engine.cancel_and_close")
         } else {
             t!("copy_engine.dismiss")
         },

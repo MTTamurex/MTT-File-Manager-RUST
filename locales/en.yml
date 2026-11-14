@@ -1628,7 +1628,7 @@ copy_engine:
   active_files: "Files in transfer:"
   more_active_files: "+ %{count} in transfer"
   minimize: "Minimize"
-  hide_window: "Hide window without cancelling operations"
+  cancel_and_close: "Cancel active operations and close window"
   indicator_active: "Copies (%{count}) · %{progress}"
   indicator_results: "Copies (%{count}) · results"
   indicator_errors: "Copies (%{count}) · errors"

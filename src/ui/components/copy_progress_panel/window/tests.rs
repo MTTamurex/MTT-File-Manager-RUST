@@ -3,6 +3,7 @@ use crate::infrastructure::copy_engine::CopyRuntime;
 use std::path::PathBuf;
 
 mod actions;
+mod closing;
 mod geometry;
 mod placement;
 mod presentation;
@@ -202,6 +203,11 @@ fn full_window_minimize_button_still_works_after_bounding_the_header() {
         vec![PathBuf::from("source/file.txt")],
         PathBuf::from("target"),
     );
+    let _moving = runtime.start_move(
+        vec![PathBuf::from("source/other.txt")],
+        PathBuf::from("target"),
+    );
+    let _deleting = runtime.start_delete(vec![PathBuf::from("source/removed.txt")], false);
     let mut panel = CopyPanelState::default();
     for _ in 0..4 {
         draw(&ctx, &runtime, &mut panel, size);
@@ -235,4 +241,8 @@ fn full_window_minimize_button_still_works_after_bounding_the_header() {
     assert!(panel.minimized);
     assert!(!job.operation.progress.is_cancelled());
     assert!(job.operation.outcome().is_none());
+    assert!(runtime
+        .jobs()
+        .iter()
+        .all(|(_, job)| !job.progress.is_cancelled() && job.outcome().is_none()));
 }

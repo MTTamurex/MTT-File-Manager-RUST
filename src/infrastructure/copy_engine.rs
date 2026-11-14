@@ -25,10 +25,20 @@ pub struct CopyOperation {
     pub sources: Vec<PathBuf>,
     pub destination: PathBuf,
     pub progress: mtt_copy_engine::Progress,
+    closed: AtomicBool,
     outcome: Mutex<Option<(Outcome, Duration)>>,
 }
 
 impl CopyOperation {
+    /// Closing is not minimization: exclude the job from the dashboard and its
+    /// restore indicator, while its worker safely completes cancellation.
+    pub fn close(&self) {
+        if self.outcome().is_none() {
+            self.progress.cancel();
+        }
+        self.closed.store(true, Ordering::Release);
+    }
+
     pub fn outcome(&self) -> Option<Outcome> {
         self.outcome
             .lock()
@@ -89,6 +99,7 @@ impl CopyRuntime {
             sources,
             destination,
             progress: Default::default(),
+            closed: AtomicBool::new(false),
             outcome: Mutex::new(None),
         });
         self.jobs
@@ -99,16 +110,20 @@ impl CopyRuntime {
     }
 
     pub fn jobs(&self) -> Vec<(u64, Arc<CopyOperation>)> {
-        self.jobs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        // Closed jobs stay owned until cancellation completes, but cannot
+        // reappear as minimized entries or retained results afterward.
+        jobs.retain(|_, operation| {
+            !operation.closed.load(Ordering::Acquire) || operation.outcome().is_none()
+        });
+        jobs.iter()
+            .filter(|(_, operation)| !operation.closed.load(Ordering::Acquire))
             .map(|(&id, operation)| (id, operation.clone()))
             .collect()
     }
 
-    /// Only terminal results can be dismissed. Hiding a running job must never
-    /// make its pause/cancel controls unreachable.
+    /// Only terminal results can be dismissed. Use close() for cancel-and-close;
+    /// minimizing keeps active jobs visible through the restore indicator.
     pub fn dismiss(&self, id: u64) {
         let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
         if jobs.get(&id).is_some_and(|job| job.outcome().is_some()) {

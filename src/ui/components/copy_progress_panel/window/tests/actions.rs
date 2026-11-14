@@ -2,19 +2,19 @@ use super::*;
 use crate::infrastructure::copy_engine::{Outcome, OutcomeKind};
 
 #[test]
-fn title_close_hides_active_jobs_and_dismisses_only_when_all_are_finished() {
+fn title_close_cancels_active_jobs_and_dismisses_only_when_all_are_finished() {
     for scale in [1.0, 2.0] {
-        for deletion in [false, true] {
+        for kind in 0..3 {
             for completed in [false, true] {
                 let ctx = egui::Context::default();
                 crate::ui::interface_scale::apply(&ctx, scale);
                 let size = egui::vec2(1200.0, 1000.0);
                 let runtime = CopyRuntime::default();
                 let paths = vec![PathBuf::from("source/file.txt")];
-                let job = if deletion {
-                    runtime.start_delete(paths, false)
-                } else {
-                    runtime.start(paths, PathBuf::from("target"))
+                let job = match kind {
+                    0 => runtime.start(paths, PathBuf::from("target")),
+                    1 => runtime.start_move(paths, PathBuf::from("target")),
+                    _ => runtime.start_delete(paths, false),
                 };
                 let operation = job.operation.clone();
                 if completed {
@@ -63,7 +63,7 @@ fn title_close_hides_active_jobs_and_dismisses_only_when_all_are_finished() {
                         |ui| dismissed.extend(show(ui.ctx(), &runtime.jobs(), &mut panel)),
                     );
                 }
-                assert!(!operation.progress.is_cancelled());
+                assert_eq!(operation.progress.is_cancelled(), !completed);
                 if completed {
                     assert_eq!(dismissed, vec![runtime.jobs()[0].0]);
                     for id in dismissed {
@@ -72,11 +72,15 @@ fn title_close_hides_active_jobs_and_dismisses_only_when_all_are_finished() {
                     assert!(runtime.jobs().is_empty());
                 } else {
                     assert!(dismissed.is_empty());
-                    assert!(panel.minimized);
+                    assert!(!panel.minimized);
                     assert!(operation.outcome().is_none());
                     panel.restore();
                     assert!(!panel.minimized);
-                    assert_eq!(runtime.jobs().len(), 1);
+                    assert!(runtime.jobs().is_empty());
+                    assert!(
+                        super::super::super::indicator::CopyIndicator::from_runtime(&runtime)
+                            .is_none()
+                    );
                 }
             }
         }
@@ -84,7 +88,7 @@ fn title_close_hides_active_jobs_and_dismisses_only_when_all_are_finished() {
 }
 
 #[test]
-fn close_with_mixed_jobs_keeps_finished_results_and_never_cancels_active_jobs() {
+fn close_with_mixed_jobs_cancels_active_jobs_without_creating_minimized_entries() {
     let ctx = egui::Context::default();
     let runtime = CopyRuntime::default();
     let finished = runtime.start(
@@ -96,6 +100,15 @@ fn close_with_mixed_jobs_keeps_finished_results_and_never_cancels_active_jobs() 
         message: None,
     });
     let active = runtime.start_delete(vec![PathBuf::from("source/second.txt")], false);
+    let moving = runtime.start_move(
+        vec![PathBuf::from("source/third.txt")],
+        PathBuf::from("target"),
+    );
+    let copying = runtime.start(
+        vec![PathBuf::from("source/fourth.txt")],
+        PathBuf::from("target"),
+    );
+    copying.operation.progress.pause();
     let mut panel = CopyPanelState::default();
     let size = egui::vec2(1200.0, 1000.0);
     for _ in 0..8 {
@@ -125,17 +138,21 @@ fn close_with_mixed_jobs_keeps_finished_results_and_never_cancels_active_jobs() 
             |ui| assert!(show(ui.ctx(), &runtime.jobs(), &mut panel).is_empty()),
         );
     }
-    assert!(panel.minimized);
-    assert_eq!(runtime.jobs().len(), 2);
-    assert!(!active.operation.progress.is_cancelled());
+    assert!(!panel.minimized);
+    assert!(runtime.jobs().is_empty());
+    assert!(active.operation.progress.is_cancelled());
+    assert!(moving.operation.progress.is_cancelled());
+    assert!(copying.operation.progress.is_cancelled());
+    assert!(!finished.operation.progress.is_cancelled());
     assert!(active.operation.outcome().is_none());
 
-    // Restoring must not introduce another close control on a finished card.
+    // Restoring cannot resurrect closed jobs as retained/minimized entries.
     panel.restore();
     let texts = draw(&ctx, &runtime, &mut panel, size);
     assert!(!texts
         .iter()
         .any(|text| text.value == "×" || text.value == t!("copy_engine.dismiss")));
     assert!(!panel.minimized);
-    assert!(!active.operation.progress.is_cancelled());
+    assert!(active.operation.progress.is_cancelled());
+    assert!(super::super::super::indicator::CopyIndicator::from_runtime(&runtime).is_none());
 }
