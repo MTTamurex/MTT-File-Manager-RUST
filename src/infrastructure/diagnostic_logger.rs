@@ -273,12 +273,13 @@ pub fn log_file_path() -> PathBuf {
     log_directory_path().join(LOG_FILE_NAME)
 }
 
-pub fn open_log_folder() -> Result<PathBuf, String> {
-    let log_dir = log_directory_path();
+pub fn ensure_log_directory() -> Result<PathBuf, String> {
+    ensure_log_directory_at(log_directory_path())
+}
+
+fn ensure_log_directory_at(log_dir: PathBuf) -> Result<PathBuf, String> {
     fs::create_dir_all(&log_dir)
         .map_err(|err| format!("Failed to create diagnostic log directory: {}", err))?;
-    crate::infrastructure::windows::open_with_shell(&log_dir, None)
-        .map_err(|err| format!("Failed to open diagnostic log directory: {}", err))?;
     Ok(log_dir)
 }
 

@@ -583,13 +583,25 @@ impl ImageViewerApp {
     }
 
     pub fn open_diagnostic_log_folder(&mut self) {
-        if let Err(error) = diagnostic_logger::open_log_folder() {
-            diagnostic_logger::diag_warn("diagnostic_mode", "open_log_folder_failed", &[]);
-            log::warn!(
-                "[DIAGNOSTIC] Failed to open diagnostic log folder: {}",
-                error
-            );
-            self.notifications.warning(error);
+        match diagnostic_logger::ensure_log_directory() {
+            Ok(path) => {
+                // This explicit settings action must bypass the settings navigation guard.
+                if self.open_locations_in_new_tabs(
+                    self.dual_panel_active,
+                    &[path.to_string_lossy().into_owned()],
+                    false,
+                ) {
+                    self.navigation_state.show_settings_window = false;
+                }
+            }
+            Err(error) => {
+                diagnostic_logger::diag_warn("diagnostic_mode", "open_log_folder_failed", &[]);
+                log::warn!(
+                    "[DIAGNOSTIC] Failed to open diagnostic log folder: {}",
+                    error
+                );
+                self.notifications.warning(error);
+            }
         }
     }
 }

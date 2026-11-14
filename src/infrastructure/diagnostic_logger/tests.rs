@@ -22,6 +22,30 @@ fn flush(logger: &DiagnosticLogger) {
 }
 
 #[test]
+fn log_directory_is_created_and_existing_contents_are_preserved() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("diagnostics").join("logs");
+    assert_eq!(ensure_log_directory_at(path.clone()).unwrap(), path);
+    assert!(path.is_dir());
+
+    let file = path.join("file.txt");
+    fs::write(&file, b"existing log").unwrap();
+    assert_eq!(ensure_log_directory_at(path.clone()).unwrap(), path);
+    assert_eq!(fs::read(file).unwrap(), b"existing log");
+}
+
+#[test]
+fn log_directory_creation_failure_is_reported() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("file.txt");
+    fs::write(&file, b"existing file").unwrap();
+
+    let error = ensure_log_directory_at(file.join("logs")).unwrap_err();
+    assert!(error.starts_with("Failed to create diagnostic log directory:"));
+    assert_eq!(fs::read(file).unwrap(), b"existing file");
+}
+
+#[test]
 fn capture_and_enabled_status_do_not_consult_writer() {
     let logger = logger();
     assert_eq!(logger.capture_session(), None);
