@@ -40,26 +40,44 @@ fn run_with<'app>(
             selection.inherited
         );
         let pending = Rc::clone(&creator);
-        let result = run(
-            app_name,
-            options_for_backend(options.clone(), requested),
-            Box::new(move |cc| {
-                let create = pending
-                    .borrow_mut()
-                    .take()
-                    .expect("app creator is called once");
-                let actual = GraphicsBackend::from_context(cc).map_err(std::io::Error::other)?;
-                if actual != requested {
-                    return Err(std::io::Error::other(
-                        "viewer initialized an unexpected graphics backend",
-                    )
-                    .into());
-                }
-                backend::register_context(cc);
-                log::info!("[VIEWER-RENDERER] initialized={}", actual.key());
-                create(cc)
-            }),
-        );
+        let attempt = || {
+            run(
+                app_name,
+                options_for_backend(options.clone(), requested),
+                Box::new(move |cc| {
+                    let create = pending
+                        .borrow_mut()
+                        .take()
+                        .expect("app creator is called once");
+                    let actual =
+                        GraphicsBackend::from_context(cc).map_err(std::io::Error::other)?;
+                    if actual != requested {
+                        return Err(std::io::Error::other(
+                            "viewer initialized an unexpected graphics backend",
+                        )
+                        .into());
+                    }
+                    backend::register_context(cc);
+                    log::info!("[VIEWER-RENDERER] initialized={}", actual.key());
+                    let app = create(cc)?;
+                    #[cfg(target_os = "windows")]
+                    let app = if actual == GraphicsBackend::Dx12 {
+                        super::dx12_window::wrap(app, cc)
+                    } else {
+                        app
+                    };
+                    Ok(app)
+                }),
+            )
+        };
+        #[cfg(target_os = "windows")]
+        let result = if requested == GraphicsBackend::Dx12 {
+            winit::platform::windows::with_direct_composition_window(attempt)
+        } else {
+            attempt()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let result = attempt();
         match result {
             Err(error)
                 if !selection.inherited
@@ -110,7 +128,8 @@ fn options_for_backend(
     };
     #[cfg(target_os = "windows")]
     if backend == GraphicsBackend::Dx12 {
-        // Same presentation path as the main window, including VM drivers.
+        // The opt-in winit live-resize patch prepares and presents this visual
+        // at the prospective client size before the OS exposes the new area.
         setup
             .instance_descriptor
             .backend_options

@@ -95,6 +95,10 @@ coverage/
 !/vendor/yrs/**
 !/vendor/betteroffice-opc/
 !/vendor/betteroffice-opc/**
+!/vendor/winit/
+!/vendor/winit/**
+/vendor/winit/Cargo.lock
+/vendor/winit/target/
 
 # ============================================
 # Other Project-Specific Files

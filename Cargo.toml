@@ -160,6 +160,8 @@ features = [
 
 [target.'cfg(windows)'.dependencies]
 wgpu = { version = "29.0", default-features = false, features = ["std", "dx12"] }
+# Uses the opt-in Windows resize API in the matching vendored source.
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 
 [features]
 default = ["notify-watcher", "online-updates"]
@@ -177,6 +179,7 @@ lopdf = { version = "0.44", default-features = false }
 [patch.crates-io]
 yrs = { path = "vendor/yrs" }
 betteroffice-opc = { path = "vendor/betteroffice-opc" }
+winit = { path = "vendor/winit" }
 
 [[bench]]
 name = "image_viewer_decode"

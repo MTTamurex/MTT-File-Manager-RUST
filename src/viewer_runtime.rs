@@ -21,6 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub(crate) mod backend;
+#[cfg(target_os = "windows")]
+mod dx12_window;
 mod renderer;
 pub use renderer::run_viewer_native;
 
