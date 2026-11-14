@@ -15,6 +15,8 @@ pub struct DeleteProgress {
     pub confirmation: confirmation::Confirmation,
     pub permanently: bool,
     pub removed: AtomicU64,
+    pub recycled: AtomicU64,
+    pub permanently_removed: AtomicU64,
     pub failures: AtomicU64,
     current: Mutex<Option<PathBuf>>,
 }
@@ -27,6 +29,8 @@ impl DeleteProgress {
             confirmation: Default::default(),
             permanently,
             removed: AtomicU64::new(0),
+            recycled: AtomicU64::new(0),
+            permanently_removed: AtomicU64::new(0),
             failures: AtomicU64::new(0),
             current: Mutex::new(None),
         }
@@ -46,6 +50,12 @@ impl DeleteProgress {
     }
 
     pub(crate) fn removed(&self) {
+        self.permanently_removed.fetch_add(1, Ordering::Relaxed);
+        self.removed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn recycled(&self) {
+        self.recycled.fetch_add(1, Ordering::Relaxed);
         self.removed.fetch_add(1, Ordering::Relaxed);
     }
 

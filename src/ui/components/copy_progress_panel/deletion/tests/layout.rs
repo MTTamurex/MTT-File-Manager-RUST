@@ -131,7 +131,8 @@ fn confirmation_has_one_question_and_no_progress_or_redundant_summaries() {
         );
         for label in [
             t!("copy_engine.elapsed"),
-            t!("delete_engine.removed"),
+            t!("delete_engine.recycled_count"),
+            t!("delete_engine.permanent_count"),
             t!("copy_engine.source"),
             t!("delete_engine.mode"),
         ] {
@@ -188,7 +189,7 @@ fn confirmation_has_one_question_and_no_progress_or_redundant_summaries() {
             .any(|text| text.value == t!("copy_engine.elapsed")));
         assert!(texts
             .iter()
-            .any(|text| text.value == t!("delete_engine.removed")));
+            .any(|text| text.value == t!("delete_engine.recycled_count")));
         assert!(!texts
             .iter()
             .any(|text| text.value == t!("delete_engine.confirm_recycle")));

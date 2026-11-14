@@ -107,7 +107,7 @@ fn apply_all_still_tries_recycling_and_cancel_preserves_remaining_synthetic_file
                 |path, operation, observer| {
                     if path == &worker_paths[1] {
                         std::fs::rename(path, worker_recycled.join("file-1.txt")).unwrap();
-                        operation.deletion.as_ref().unwrap().removed();
+                        operation.deletion.as_ref().unwrap().recycled();
                         observer(path);
                         Ok(recycle::Status::Completed)
                     } else {

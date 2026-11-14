@@ -89,6 +89,11 @@ active, closing dismisses the retained results.
   children removed before a parent fails or cancellation stops the traversal.
   A surviving selected folder is never reported as deleted.
 - Recycling uses Shell callbacks for cancellation and processed-item counts.
+  Completed nonzero success results are accepted as well as `S_OK`; skipped,
+  pending and failed results are not counted as completed. Original paths are
+  captured before deletion and confirmed absent before counters/refreshes advance.
+  Recycled and permanently deleted items have separate card/title counters,
+  including mixed operations; duplicate callbacks cannot count an item twice.
   Cancellation is cooperative: pending filesystem calls or system UAC dialogs must
   return before it takes effect. Counts reflect entries reported by Shell, which
   may recycle a whole directory as one item, not every descendant.

@@ -6,7 +6,7 @@ use rust_i18n::t;
 use std::sync::{atomic::Ordering, Arc};
 
 pub(super) struct Summary {
-    removed: Option<u64>,
+    removed: Option<super::deletion_counts::Counts>,
     has_copies: bool,
     fraction: Option<f64>,
     preparing: bool,
@@ -33,7 +33,7 @@ impl Summary {
         let mut speed = 0.0;
         let mut preparing = false;
         let mut completed = true;
-        let mut removed = None::<u64>;
+        let mut removed = None::<super::deletion_counts::Counts>;
         let mut has_copies = false;
         for (id, job, outcome) in snapshots {
             // Retained old results must not skew a newly started copy.
@@ -41,11 +41,9 @@ impl Summary {
                 continue;
             }
             if let Some(deletion) = &job.deletion {
-                removed = Some(
-                    removed
-                        .unwrap_or(0)
-                        .saturating_add(deletion.removed.load(Ordering::Relaxed)),
-                );
+                removed
+                    .get_or_insert_with(Default::default)
+                    .include(deletion);
                 continue;
             }
             has_copies = true;
@@ -106,7 +104,10 @@ impl Summary {
 
     pub(super) fn label(&self) -> String {
         if !self.has_copies {
-            return t!("delete_engine.header", count = self.removed.unwrap_or(0)).to_string();
+            return self.removed.as_ref().map_or_else(
+                || super::deletion_counts::Counts::default().label(),
+                |counts| counts.label(),
+            );
         }
         let progress = self
             .fraction
@@ -127,8 +128,8 @@ impl Summary {
             ),
             self.speed / 1_048_576.0
         );
-        if let Some(removed) = self.removed {
-            format!("{copy} · {}", t!("delete_engine.header", count = removed))
+        if let Some(removed) = &self.removed {
+            format!("{copy} · {}", removed.label())
         } else {
             copy
         }

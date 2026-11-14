@@ -6,10 +6,11 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use windows::core::{implement, Ref, Result, HRESULT, PCWSTR};
+use windows::core::{implement, Interface, Ref, Result, HRESULT, PCWSTR};
 use windows::Win32::Foundation::{ERROR_CANCELLED, E_ABORT, HWND};
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
 use windows::Win32::UI::Shell::*;
+mod completion;
 
 pub(crate) fn flags() -> FILEOPERATION_FLAGS {
     // Suppression is safe only together with the mandatory PreDeleteItem guard.
@@ -49,10 +50,12 @@ pub(crate) fn delete(
         shell.SetOwnerWindow(hwnd)?;
         shell.SetOperationFlags(flags())?;
         let unavailable = Arc::new(AtomicBool::new(false));
+        let completed = Arc::new(completion::Completion::default());
         let sink: IFileOperationProgressSink = Sink {
             operation: operation.clone(),
-            removed,
+            removed: removed.clone(),
             unavailable: unavailable.clone(),
+            completed: completed.clone(),
         }
         .into();
         // Queue everything before executing. Queue/setup failure cannot delete.
@@ -64,6 +67,7 @@ pub(crate) fn delete(
             shell.DeleteItem(&item, &sink)?;
         }
         let result = shell.PerformOperations();
+        completed.flush(operation.deletion.as_ref().unwrap(), &removed);
         let aborted = shell.GetAnyOperationsAborted();
         if unavailable.load(Ordering::Relaxed)
             || result
@@ -91,6 +95,7 @@ struct Sink {
     operation: Arc<CopyOperation>,
     removed: super::RemovalObserver,
     unavailable: Arc<AtomicBool>,
+    completed: Arc<completion::Completion>,
 }
 
 fn item_path(item: Ref<IShellItem>) -> Option<PathBuf> {
@@ -145,11 +150,14 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
             self.unavailable.store(true, Ordering::Relaxed);
             return Err(E_ABORT.into());
         }
+        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
+        let path = item_path(psiitem);
+        self.completed.begin(key, path.clone());
         self.operation
             .deletion
             .as_ref()
             .unwrap()
-            .set_current(item_path(psiitem).as_deref());
+            .set_current(path.as_deref());
         Ok(())
     }
     fn PostDeleteItem(
@@ -167,20 +175,21 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
             if !self.unavailable.load(Ordering::Relaxed) {
                 self.operation.progress.cancel();
             }
-        } else if hrdelete.0 == 0 {
-            progress.removed();
-            if let Some(path) = item_path(psiitem) {
-                if matches!(std::fs::symlink_metadata(&path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-                {
-                    (self.removed)(&path);
-                }
-            }
         } else if hrdelete.is_err()
             && !self.operation.progress.is_cancelled()
             && !self.unavailable.load(Ordering::Relaxed)
         {
             progress.failed();
         }
+        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
+        self.completed.record(
+            key,
+            item_path(psiitem),
+            hrdelete,
+            psinewlycreated.as_ref().is_some(),
+            progress,
+            &self.removed,
+        );
         self.check()
     }
     // Shell work units are not a stable file count; keep progress indeterminate.
@@ -301,6 +310,7 @@ mod tests {
             operation: job.operation.clone(),
             removed: Arc::new(|_| {}),
             unavailable: Arc::new(AtomicBool::new(false)),
+            completed: Default::default(),
         }
         .into();
         unsafe {
@@ -338,6 +348,7 @@ mod tests {
             operation: job.operation.clone(),
             removed: Arc::new(|_| {}),
             unavailable: unavailable.clone(),
+            completed: Default::default(),
         }
         .into();
         assert!(

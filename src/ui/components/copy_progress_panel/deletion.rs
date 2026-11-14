@@ -18,7 +18,8 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
     } else {
         None
     };
-    let removed = progress.removed.load(Ordering::Relaxed);
+    let mut counts = super::deletion_counts::Counts::default();
+    counts.include(progress);
     let failures = progress.failures.load(Ordering::Relaxed);
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
@@ -84,11 +85,23 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
                 },
                 format_duration(operation.elapsed()),
             );
-            stat(
-                &mut columns[1],
-                &t!("delete_engine.removed"),
-                removed.to_string(),
-            );
+            if counts.has_recycle {
+                stat(
+                    &mut columns[1],
+                    &t!("delete_engine.recycled_count"),
+                    counts.recycled.to_string(),
+                );
+            }
+            if counts.has_permanent {
+                if counts.has_recycle {
+                    columns[1].add_space(6.0);
+                }
+                stat(
+                    &mut columns[1],
+                    &t!("delete_engine.permanent_count"),
+                    counts.permanent.to_string(),
+                );
+            }
         });
         ui.add_space(8.0);
         if active {

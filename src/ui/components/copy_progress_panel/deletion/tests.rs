@@ -2,6 +2,7 @@ use super::*;
 use crate::app::copy_panel_state::CopyPanelState;
 use crate::infrastructure::copy_engine::{CopyRuntime, Outcome};
 mod cancelled;
+mod counts;
 mod layout;
 mod scope;
 
@@ -28,7 +29,7 @@ fn deletion_uses_shared_window_without_copy_units_or_pause_controls() {
             .deletion
             .as_ref()
             .unwrap()
-            .removed
+            .permanently_removed
             .store(12, Ordering::Relaxed);
         let mut panel = CopyPanelState::default();
         let mut labels = Vec::new();
@@ -86,7 +87,7 @@ fn mixed_title_keeps_removed_items_separate_from_copied_bytes() {
         .deletion
         .as_ref()
         .unwrap()
-        .removed
+        .recycled
         .store(7, Ordering::Relaxed);
     let copy = runtime.start(
         vec![PathBuf::from("source/file.txt")],
@@ -109,7 +110,7 @@ fn mixed_title_keeps_removed_items_separate_from_copied_bytes() {
             .unwrap()
             .label();
     assert!(label.starts_with("25%"));
-    assert!(label.contains(&t!("delete_engine.header", count = 7).to_string()));
+    assert!(label.contains(&t!("delete_engine.header_recycled", count = 7).to_string()));
     assert!(
         super::super::indicator::CopyIndicator::from_runtime(&runtime)
             .unwrap()

@@ -91,7 +91,7 @@ fn new_deletion_is_centered_even_after_cached_copy_geometry_and_remains_draggabl
         );
         let title = texts
             .iter()
-            .find(|text| text.value == t!("delete_engine.header", count = 0))
+            .find(|text| text.value == t!("delete_engine.header_recycled", count = 0))
             .unwrap();
         drag(&ctx, &runtime, &mut panel, size, title.rect.center());
         settle(&ctx, &runtime, &mut panel, size);

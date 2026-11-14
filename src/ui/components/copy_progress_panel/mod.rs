@@ -2,6 +2,7 @@
 mod active_files;
 mod conflicts;
 mod deletion;
+mod deletion_counts;
 mod display_paths;
 mod graph;
 pub(crate) mod indicator;
