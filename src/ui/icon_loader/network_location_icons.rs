@@ -2,7 +2,7 @@
 
 use super::*;
 
-const NETWORK_LOCATION_ICON_KEY: &str = "network-location-folder";
+pub(super) const NETWORK_LOCATION_ICON_KEY: &str = "network-location-folder";
 
 impl IconLoader {
     pub fn get_or_load_network_location_icon(

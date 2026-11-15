@@ -1,7 +1,9 @@
 //! Dedicated, software-only libmpv thumbnail sessions. Run in an isolated process:
 //! native calls may block or crash; this crate is not a crash/security sandbox.
+mod attachment;
 mod capture;
 mod cover;
+mod cover_recovery;
 #[cfg(test)]
 mod cover_tests;
 mod extract;

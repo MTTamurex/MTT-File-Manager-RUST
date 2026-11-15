@@ -273,6 +273,11 @@ have been tested; actual format support depends on the bundled runtime and the f
 
 - **Embedded MKV covers:** JPEG attachments named exactly `cover.jpg` or
   `cover.jpeg` are preferred. Missing/unreadable covers use adaptive video frames.
+  If libmpv cannot decode the cover because its MIME/extension is incorrect, a
+  bounded recovery path recognizes JPEG, PNG, or WebP from the attachment bytes;
+  the accepted attachment names remain unchanged. The source file is never rewritten.
+  An already cached video frame remains until thumbnail refresh; the preview
+  panel's reload-thumbnail button refreshes the selected file without clearing other entries.
 - **Adaptive frames:** selects positions in the middle half of the video, retries
   nearly uniform black/white frames, and scales thumbnails to at most 512 pixels
   on the largest side while preserving aspect ratio.

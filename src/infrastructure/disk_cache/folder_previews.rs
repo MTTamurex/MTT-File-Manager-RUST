@@ -326,7 +326,12 @@ mod tests {
         assert_eq!(height, 16);
         // Previews are stored as lossy WebP (q90): RGB shifts slightly, while
         // alpha is compressed losslessly and must round-trip exactly.
-        for (decoded_px, original_px) in decoded.chunks_exact(4).zip(original.chunks_exact(4)) {
+        for (decoded_px, original_px) in decoded
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(original.as_chunks::<4>().0)
+        {
             assert_eq!(
                 decoded_px[3], original_px[3],
                 "alpha channel must round-trip exactly"

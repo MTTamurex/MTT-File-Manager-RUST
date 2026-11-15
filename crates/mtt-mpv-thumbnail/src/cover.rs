@@ -7,6 +7,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) struct Cover {
+    pub screenshot: Screenshot,
+    pub recovered: bool,
+}
+
 fn cover_track(tracks: &Value) -> Option<i64> {
     tracks.as_array()?.iter().find_map(|track| {
         if track["type"] != "video" || track["albumart"] != true || track["external"] == true {
@@ -32,11 +37,38 @@ impl Session<'_> {
         path: &Path,
         max_side: u32,
         deadline: Instant,
-    ) -> Result<Option<Screenshot>> {
+    ) -> Result<Option<Cover>> {
         // Do not consume the whole frame-extraction budget on a broken attachment.
         let now = Instant::now();
         let budget = deadline.saturating_duration_since(now) / 2;
         let probe_deadline = now + budget.min(Duration::from_secs(2));
+        let result = self.cover_track_capture(path, max_side, probe_deadline);
+        match result {
+            Ok(value) => Ok(value.map(|screenshot| Cover {
+                screenshot,
+                recovered: false,
+            })),
+            Err(error) => {
+                if Instant::now() >= probe_deadline {
+                    return Err(error);
+                }
+                self.stop(probe_deadline)?;
+                crate::cover_recovery::capture(path, max_side, probe_deadline).map(|value| {
+                    value.map(|screenshot| Cover {
+                        screenshot,
+                        recovered: true,
+                    })
+                })
+            }
+        }
+    }
+
+    fn cover_track_capture(
+        &mut self,
+        path: &Path,
+        max_side: u32,
+        probe_deadline: Instant,
+    ) -> Result<Option<Screenshot>> {
         self.load_tracks(path, probe_deadline)?;
         let Some(id) = cover_track(&self.property("track-list")?) else {
             return Ok(None);

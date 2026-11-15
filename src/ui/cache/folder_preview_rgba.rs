@@ -1,6 +1,6 @@
 use super::CacheManager;
 use crate::workers::folder_preview_worker::CachedFolderPreview;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 impl CacheManager {
     pub fn folder_preview_requires_validation(&self, path: &PathBuf) -> bool {
@@ -11,8 +11,9 @@ impl CacheManager {
         self.folder_preview_refresh_required.pop(path);
     }
 
-    pub fn require_folder_preview_validation(&mut self, path: &PathBuf) {
-        self.folder_preview_refresh_required.put(path.clone(), ());
+    pub fn require_folder_preview_validation(&mut self, path: &Path) {
+        self.folder_preview_refresh_required
+            .put(path.to_path_buf(), ());
         self.folder_preview_requests.invalidate(path);
     }
 

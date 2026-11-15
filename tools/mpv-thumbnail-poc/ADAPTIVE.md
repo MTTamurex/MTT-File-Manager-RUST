@@ -2,7 +2,7 @@
 
 The application uses this backend by default in an isolated helper, with Windows
 Shell/Media Foundation as fallback on extraction failure. The standalone diagnostic
-tool uses libmpv only. There are no added decoder DLLs or installed tools. FFmpeg
+tool uses the same backend without Windows fallback. There are no added decoder DLLs or installed tools. FFmpeg
 below is a fixture generator only. See [INTEGRATION.md](INTEGRATION.md) for routing.
 
 ## Selection and quality
@@ -10,7 +10,7 @@ below is a fixture generator only. See [INTEGRATION.md](INTEGRATION.md) for rout
 Automatic MKV requests first probe embedded attachments through libmpv's internal
 FFmpeg (`lavf`) demuxer. Only an internal attached-picture track whose `filename`
 metadata is exactly `cover.jpg` or `cover.jpeg` is accepted. Other names, paths,
-PNG attachments, and external images are not considered covers. The expected
+attachments named `cover.png`, and external images are not considered covers. The expected
 layout is one cover per MKV. Explicit `--at` and `--legacy` bypass cover selection.
 
 Discovery disables track auto-selection and reads metadata without initializing
@@ -20,6 +20,24 @@ decoding, scaled with the same native filter, and captured without a seek or
 black/white rejection. Even a deliberately black/white cover is preserved. This
 avoids returning a stale video frame if a cover decoder fails during a paused
 track switch. No attachment bytes are written to disk by the extractor.
+
+If this libmpv path fails before the cover-probe deadline, a recovery-only reader
+looks for exact `cover.jpg`/`cover.jpeg` names in Matroska Attachments. It checks
+metadata before the first Cluster and follows bounded SeekHead references for
+attachments stored later; it does not scan Cluster payloads or extract files to
+disk. The reader checks parent/file bounds, caps metadata at 4,096 elements and
+index traversal at 64 unique targets, and limits a compressed cover to 16 MiB.
+
+Recovery detects JPEG/PNG/WebP by content, ignoring incorrect MIME declarations.
+It uses the existing Rust `image` decoders within the same supervised helper,
+with 16,384-pixel dimension limits and a 64 MiB decoder allocation budget (not a
+total-process memory guarantee). It shares the existing two-second/remaining-half
+soft probe deadline and the parent hard deadline. Recovered covers are resized
+in Rust, not by mpv's native filter: reports set `cover_recovered=true` and
+`native_scale=false`, with original decoded dimensions in `raw_width/raw_height`.
+Missing, corrupt, unsupported, oversized, or out-of-budget recovery still falls
+back to adaptive frames. Normal JPEG covers and explicit/legacy captures retain
+their existing paths. No cache key/version or automatic invalidation is changed.
 
 The optional cover probe (discovery plus cover load/capture) has a two-second
 soft cap and at most half the remaining work budget. Absent, unsupported, or

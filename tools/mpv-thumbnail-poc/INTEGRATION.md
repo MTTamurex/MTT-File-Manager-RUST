@@ -49,6 +49,10 @@ application executable or a required runtime dependency.
   A bounded probe uses the existing DLL's internal FFmpeg demuxer; unusable or
   absent covers return to normal adaptive frame selection. The player and other
   containers are unaffected. No external cover files are loaded.
+  If libmpv cannot decode a mislabeled cover, a bounded in-memory recovery path
+  detects JPEG/PNG/WebP by content using the existing Rust image codecs. It neither
+  rewrites the MKV nor invokes an FFmpeg executable/Windows provider. See
+  [ADAPTIVE.md](ADAPTIVE.md) for reader, size, allocation, and deadline limits.
 - Only the current executable is launched, using the internal
   `--internal-mpv-thumbnail-helper` mode. It dispatches before preferences,
   diagnostics, migrations, and UI initialization. Do not launch this mode manually:
@@ -117,8 +121,9 @@ are not a substitute for testing actual player playback below.
 
 The synthetic real-helper cover test needs FFmpeg (fixture generation only) and
 an existing scratch directory in `MTT_MPV_TEST_DIR`. It verifies both accepted
-attachment names, red cover pixels over a blue video, repeated process/session
-reuse, portrait sizing, and exclusive source access:
+attachment names, real JPEG plus mislabeled WebP/PNG, red cover pixels over a blue
+video, repeated process/session reuse (including return to JPEG), portrait sizing,
+and exclusive source access:
 
 ```powershell
 cargo test --test mpv_thumbnail_cover -- --ignored --test-threads=1
@@ -204,3 +209,32 @@ release pipe verification, and HDR color accuracy remain manual acceptance work.
   This is an incomplete release validation, not a reported compiler/test failure.
   Release helper/pipe and final GUI/Sandbox acceptance should be completed before
   publishing an installer. No installer or release was published by this promotion.
+
+## Content-based cover recovery validation
+
+- All 37 backend tests passed, including index traversal/cycles, metadata and
+  compressed-size limits, truncation, deadlines, exact names, and synthetic
+  WebP/PNG declared as JPEG. Explicit timestamps, legacy capture, source release,
+  and return to normal JPEG capture were checked using the same session.
+- The real-helper cover test passed 24 captures across both accepted names and
+  JPEG/WebP/PNG/JPEG fixture batches. The focused application thumbnail selection
+  passed 105 tests (one unrelated native test remained opt-in/ignored).
+- Standalone release smoke, default all-target checking, formatting, and strict
+  backend/tool Clippy passed. Follow-up cleanup corrected the folder-preview
+  warnings rather than suppressing them: workspace all-target Clippy and the
+  no-online-updates variant both pass with `-D warnings` and no lint allowances.
+- An initial full application run aborted with native status `0xc0000409` during
+  a sidebar interaction test. Subsequent runs passed both alone and as a full
+  suite, so the original native failure has not been reproduced or conclusively
+  diagnosed. Sidebar click tests now use cached in-memory icon fixtures and assert
+  that they start no native icon workers. Real COM/Shell lifecycle tests remain
+  unchanged; an additional opt-in sidebar stress test still uses real providers.
+  Passing reruns must not be interpreted as proof of a native crash root-cause fix.
+- Final ordinary validation passed three consecutive serial library runs, each
+  with 2,794 passed, zero failed, and 14 ignored tests (98.50s, 90.97s, 91.71s).
+  The real-provider sidebar creation/drop stress test also passed when explicitly
+  selected (one passed, zero failed; 5.10s). These runs used no native diagnostic
+  scripts or antivirus exclusions.
+- No source media or existing application thumbnail cache was modified. Cached
+  frames can be refreshed individually using the preview panel's thumbnail reload
+  control; the fix does not invalidate caches automatically.

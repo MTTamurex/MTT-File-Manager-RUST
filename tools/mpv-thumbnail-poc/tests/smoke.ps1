@@ -53,7 +53,7 @@ function Assert-Report([string]$Name, [int]$Successes, [int]$Failures) {
                 if ($row.capture.attempts -lt 1 -or $row.capture.attempts -gt 3) {
                     throw "Invalid adaptive attempt count in test $Name"
                 }
-                if ($row.capture.raw_width -gt 256 -or $row.capture.raw_height -gt 256) {
+                if ($row.capture.native_scale -eq $true -and ($row.capture.raw_width -gt 256 -or $row.capture.raw_height -gt 256)) {
                     throw "Native capture was not reduced before copying in test $Name"
                 }
             }

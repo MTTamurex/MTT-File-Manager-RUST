@@ -49,7 +49,7 @@ fn click_section_with_feedback(
     renaming: bool,
     dragging: bool,
 ) -> (Option<SidebarAction>, bool) {
-    render_section_with_feedback(section, button, renaming, dragging, false)
+    render_section_with_feedback(section, button, renaming, dragging, false, false)
 }
 
 fn render_section_with_feedback(
@@ -58,6 +58,7 @@ fn render_section_with_feedback(
     renaming: bool,
     dragging: bool,
     collapsed_headers: bool,
+    native_icons: bool,
 ) -> (Option<SidebarAction>, bool) {
     let ctx = egui::Context::default();
     let mut fonts = egui::FontDefinitions::default();
@@ -94,7 +95,15 @@ fn render_section_with_feedback(
     let tag_counts = FxHashMap::default();
     let subtree_tag_counts = FxHashMap::default();
     let collapsed_tags = rustc_hash::FxHashSet::default();
-    let mut icon_loader = crate::ui::icon_loader::IconLoader::new();
+    let icon_paths = [Section::Local.destination(), Section::Cloud.destination()];
+    let mut icon_loader = if native_icons {
+        crate::ui::icon_loader::IconLoader::new()
+    } else {
+        crate::ui::icon_loader::IconLoader::with_cached_test_icons(
+            &ctx,
+            &icon_paths.each_ref().map(String::as_str),
+        )
+    };
     let mut render = |ui: &mut egui::Ui| {
         ui.set_width(260.0);
         let mut sidebar = SidebarContext {
@@ -167,6 +176,9 @@ fn render_section_with_feedback(
         let local = header_y(&t!("sidebar.local_disks"));
         let network = header_y(&t!("sidebar.network_locations"));
         assert!((network - local - (local - cloud)).abs() < 0.1);
+        if !native_icons {
+            assert!(!icon_loader.has_pending_auxiliary_icon_work());
+        }
         return (None, false);
     }
     let pos = output
@@ -208,6 +220,10 @@ fn render_section_with_feedback(
                 egui::epaint::Shape::Rect(rect) if rect.fill == color && rect.rect.contains(pos))
             });
         }
+    }
+    if !native_icons {
+        assert_eq!(icon_loader.auxiliary_icon_thread_count(), 0);
+        assert!(!icon_loader.has_pending_auxiliary_icon_work());
     }
     (result, highlighted)
 }
@@ -259,6 +275,7 @@ fn collapsed_sidebar_headers_have_consistent_spacing() {
         false,
         false,
         true,
+        false,
     );
 }
 
@@ -320,6 +337,26 @@ fn primary_click_keeps_navigation_and_tag_toggle_behavior() {
         click_section(Section::Tag, egui::PointerButton::Primary, false, false),
         Some(SidebarAction::FilterByTag(None))
     ));
+}
+
+#[test]
+#[ignore = "Native Shell worker lifecycle stress; run explicitly when diagnosing suite aborts"]
+fn repeated_sidebar_creation_and_drop_does_not_abort_process() {
+    for _ in 0..150 {
+        for section in [Section::Cloud, Section::Local] {
+            let (action, _) = render_section_with_feedback(
+                section,
+                egui::PointerButton::Primary,
+                false,
+                false,
+                false,
+                true,
+            );
+            assert!(
+                matches!(action, Some(SidebarAction::NavigateTo(path)) if path == section.destination())
+            );
+        }
+    }
 }
 
 #[test]

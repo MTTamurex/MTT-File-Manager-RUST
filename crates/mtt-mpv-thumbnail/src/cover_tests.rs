@@ -15,6 +15,16 @@ fn directory() -> tempfile::TempDir {
 }
 
 fn fixture(directory: &Path, name: Option<&str>, color: &str, corrupt: bool) -> PathBuf {
+    fixture_with_codec(directory, name, color, "mjpeg", corrupt)
+}
+
+fn fixture_with_codec(
+    directory: &Path,
+    name: Option<&str>,
+    color: &str,
+    codec: &str,
+    corrupt: bool,
+) -> PathBuf {
     let attachment = directory.join("image.jpg");
     if name.is_some() {
         if corrupt {
@@ -34,6 +44,8 @@ fn fixture(directory: &Path, name: Option<&str>, color: &str, corrupt: bool) -> 
                 &format!("color=c={color}:size=200x300"),
                 "-frames:v",
                 "1",
+                "-c:v",
+                codec,
             ])
             .arg(&attachment)
             .status()
@@ -223,4 +235,50 @@ fn expired_cover_probe_can_be_stopped_before_reusing_the_session() {
             .open(&path)
             .unwrap();
     }
+}
+
+#[test]
+#[ignore = "Requires the existing DLL, FFmpeg fixture generator, and a test directory"]
+fn recovers_webp_and_png_declared_as_jpeg_and_preserves_session_reuse() {
+    let api = Api::load(&PathBuf::from(
+        std::env::var_os("MTT_MPV_TEST_DLL").expect("Set MTT_MPV_TEST_DLL"),
+    ))
+    .unwrap();
+    let mut session = Session::new(&api).unwrap();
+    for codec in ["libwebp", "png"] {
+        for name in ["cover.jpg", "cover.jpeg"] {
+            let directory = directory();
+            let path = fixture_with_codec(directory.path(), Some(name), "red", codec, false);
+            let result = session
+                .capture(&path, None, 256, Duration::from_secs(10))
+                .unwrap();
+            assert_eq!(result.details["source"], "embedded-cover", "{codec}");
+            assert_eq!(result.details["cover_recovered"], true);
+            assert_eq!(result.details["native_scale"], false);
+            assert_eq!(result.image.dimensions(), (171, 256));
+            let pixel = result.image.get_pixel(80, 128);
+            assert!(pixel[0] > 200 && pixel[2] < 30);
+            let explicit = session
+                .capture(&path, Some(0.5), 256, Duration::from_secs(10))
+                .unwrap();
+            assert!(explicit.image.get_pixel(100, 100)[2] > 200);
+            let legacy = session
+                .capture_legacy(&path, 256, Duration::from_secs(10))
+                .unwrap();
+            assert!(legacy.image.get_pixel(100, 100)[2] > 200);
+            let _exclusive = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+        }
+    }
+    let directory = directory();
+    let path = fixture(directory.path(), Some("cover.jpg"), "red", false);
+    let result = session
+        .capture(&path, None, 256, Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(result.details["source"], "embedded-cover");
+    assert_eq!(result.details["cover_recovered"], false);
+    assert_eq!(result.details["native_scale"], true);
 }

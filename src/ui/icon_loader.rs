@@ -23,6 +23,8 @@ mod file_icons;
 mod folder_navigation_icons;
 mod network_location_icons;
 mod special_icons;
+#[cfg(test)]
+mod test_support;
 
 #[derive(Default)]
 pub struct IconLoadTracker {

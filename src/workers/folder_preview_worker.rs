@@ -277,25 +277,26 @@ pub fn spawn_folder_preview_worker(
                 );
                 // An unchanged snapshot only needs a terminal completion, not
                 // another SQLite read, decode, or GPU upload.
-                if mode == FolderPreviewRequestMode::ValidateCached {
-                    if source.is_some() && source == validation_source {
-                        let _ = tx.send(FolderPreviewData {
-                            validation_pending: false,
-                            replace_existing: true,
-                            cache_source: source,
-                            retry_after_source_change: false,
-                            cover_path,
-                            validity,
-                            appearance,
-                            path,
-                            rgba_data: Arc::new(Vec::new()),
-                            width: 0,
-                            height: 0,
-                            premultiplied: true,
-                        });
-                        throttle_repaint(&ctx, &mut last_repaint);
-                        continue;
-                    }
+                if mode == FolderPreviewRequestMode::ValidateCached
+                    && source.is_some()
+                    && source == validation_source
+                {
+                    let _ = tx.send(FolderPreviewData {
+                        validation_pending: false,
+                        replace_existing: true,
+                        cache_source: source,
+                        retry_after_source_change: false,
+                        cover_path,
+                        validity,
+                        appearance,
+                        path,
+                        rgba_data: Arc::new(Vec::new()),
+                        width: 0,
+                        height: 0,
+                        premultiplied: true,
+                    });
+                    throttle_repaint(&ctx, &mut last_repaint);
+                    continue;
                 }
                 let cache_start = Instant::now();
                 if let Some((rgba_data, width, height, _created_at)) =

@@ -71,7 +71,12 @@ mod tests {
             assert_eq!(decoded.len(), expected.len());
             // Stored lossy (q90): solid colors round-trip within a small RGB
             // delta; alpha is lossless and stays exact.
-            for (decoded_px, expected_px) in decoded.chunks_exact(4).zip(expected.chunks_exact(4)) {
+            for (decoded_px, expected_px) in decoded
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(expected.as_chunks::<4>().0)
+            {
                 assert_eq!(decoded_px[3], expected_px[3], "alpha must stay exact");
                 for channel in 0..3 {
                     let delta = i32::from(decoded_px[channel]) - i32::from(expected_px[channel]);

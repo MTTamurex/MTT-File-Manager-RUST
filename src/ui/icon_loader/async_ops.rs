@@ -1,6 +1,6 @@
 use super::*;
 
-fn folder_path_icon_cache_key(folder_path: &str) -> String {
+pub(super) fn folder_path_icon_cache_key(folder_path: &str) -> String {
     folder_path
         .to_lowercase()
         .trim_end_matches(['\\', '/'])

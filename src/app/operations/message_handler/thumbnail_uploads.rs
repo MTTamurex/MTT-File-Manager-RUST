@@ -1217,8 +1217,6 @@ impl ImageViewerApp {
         &mut self,
         ctx: &egui::Context,
         data: crate::workers::folder_preview_worker::FolderPreviewData,
-        is_opengl: bool,
-        is_vulkan: bool,
         use_conservative_policy: bool,
         is_scrolling: bool,
         visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>>,
@@ -1331,8 +1329,8 @@ impl ImageViewerApp {
             texture_upload_start.elapsed(),
             data.width,
             data.height,
-            is_opengl,
-            is_vulkan,
+            self.is_opengl_backend(),
+            self.is_vulkan_backend(),
         );
 
         if let Some(visible_paths) = visible_paths {
@@ -1359,8 +1357,6 @@ impl ImageViewerApp {
         is_scrolling: bool,
         visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>>,
     ) {
-        let is_opengl = self.is_opengl_backend();
-        let is_vulkan = self.is_vulkan_backend();
         let use_conservative_policy = self.uses_conservative_folder_preview_policy();
 
         // When no file-thumbnail uploads are pending (cold folder navigation),
@@ -1426,8 +1422,6 @@ impl ImageViewerApp {
                     if self.upload_folder_preview_data(
                         ctx,
                         data,
-                        is_opengl,
-                        is_vulkan,
                         use_conservative_policy,
                         is_scrolling,
                         visible_paths,

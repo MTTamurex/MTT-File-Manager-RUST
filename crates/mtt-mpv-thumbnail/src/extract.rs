@@ -115,13 +115,15 @@ impl Session<'_> {
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("mkv"))
         {
             let cover = self.embedded_cover(path, max_side, work_deadline);
-            if let Ok(Some(screenshot)) = cover {
+            if let Ok(Some(cover)) = cover {
+                let screenshot = cover.screenshot;
                 let cover_probe_ms = start.elapsed().as_secs_f64() * 1000.0;
                 let stop_start = Instant::now();
                 self.stop(deadline)?;
                 return Ok(Capture {
                     details: json!({"strategy": strategy.name(), "source": "embedded-cover",
-                        "native_scale": native_scale, "width": screenshot.image.width(),
+                        "native_scale": native_scale && !cover.recovered,
+                        "cover_recovered": cover.recovered, "width": screenshot.image.width(),
                         "height": screenshot.image.height(), "raw_width": screenshot.width,
                         "raw_height": screenshot.height, "attempts": 1,
                         "cover_probe_ms": cover_probe_ms,
