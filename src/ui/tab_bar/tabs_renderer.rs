@@ -23,6 +23,7 @@ pub(super) fn render_tabs(
     is_muted: bool,
     is_item_dragging: bool,
     ideal_tab_width: f32,
+    reveal_active: bool,
     tab_height: f32,
     tab_padding: f32,
     close_btn_size: f32,
@@ -71,6 +72,9 @@ pub(super) fn render_tabs(
             egui::Sense::click_and_drag(),
         );
         tab_rects.push(rect);
+        if is_active && reveal_active {
+            ui.scroll_to_rect(rect, None);
+        }
         if drag_src == Some(idx) {
             source_owns_drag = response.dragged_by(egui::PointerButton::Primary)
                 || response.drag_stopped_by(egui::PointerButton::Primary);

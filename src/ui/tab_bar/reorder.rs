@@ -33,7 +33,7 @@ pub(super) fn finish_drag(
         return TabBarAction::None;
     };
     let row = rects[0].union(rects[rects.len() - 1]);
-    let in_row = row.contains(pointer);
+    let in_row = row.intersect(ui.clip_rect()).contains(pointer);
     let gap = rects
         .iter()
         .position(|rect| pointer.x < rect.center().x)
@@ -52,6 +52,32 @@ pub(super) fn finish_drag(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropping_over_fixed_controls_does_not_reorder_clipped_tabs() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_clip_rect(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(600.0, 36.0),
+            ));
+            let tabs = [egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(2000.0, 36.0),
+            )];
+            assert!(matches!(
+                finish_drag(
+                    ui,
+                    Some(0),
+                    &tabs,
+                    false,
+                    Some(egui::pos2(700.0, 18.0)),
+                    true
+                ),
+                TabBarAction::None
+            ));
+        });
+    }
 
     fn drop_at(position: egui::Pos2, escape: bool) -> TabBarAction {
         drop_with_cancel(position, escape, escape)

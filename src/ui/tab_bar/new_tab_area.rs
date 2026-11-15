@@ -14,7 +14,7 @@ pub(super) fn render_new_tab_and_drag_area(
     text_color: Color32,
     tab_reorder_active: bool,
 ) -> bool {
-    let new_tab_btn_width = 36.0;
+    let new_tab_btn_width = super::strip::NEW_TAB_WIDTH;
     let (new_tab_rect, new_tab_response) = ui.allocate_exact_size(
         Vec2::new(new_tab_btn_width, tab_height),
         egui::Sense::click(),
