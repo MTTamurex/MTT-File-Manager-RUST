@@ -1,6 +1,6 @@
 # MTT File Manager
 
-**MTT File Manager** is a native Windows file manager built in Rust. Browse folders in tabs or side by side, find files with indexed search, and preview images, documents, and media without opening another application. Built-in tools for tags, archives, disk usage analysis, and automatic file organization help keep things in order.
+**MTT File Manager** is a native Windows file manager built in Rust. Browse folders in tabs or side by side, find files with indexed search, and preview images, documents, and media without opening another application. Video thumbnails normally work **without installing additional codecs or codec packs**, using the bundled libmpv decoder. Built-in tools for tags, archives, disk usage analysis, and automatic file organization help keep things in order.
 
 <img width="3840" height="2064" alt="main_app" src="https://github.com/user-attachments/assets/a0d6a2e2-798c-4fde-97f9-08bb62381f93" />
 
@@ -23,11 +23,12 @@
 ## Key Features
 
 ### Interface & Navigation
+- **Multilingual interface** — Available in English (`en`), Brazilian Portuguese (`pt-BR`), Simplified Chinese (`zh-CN`), Russian (`ru`), and Greek (`el`). Choose the application language in **Settings > General > Language**; changes apply immediately without restarting the file manager
 - **Appearance themes** — Choose Light, Dark, Dark Deep, Midnight, or System in Settings > Appearance; saved between sessions and shared with image, PDF, DOCX, XLSX, and text viewers, including native title bar styling
 - **Interface fonts and text size** — Choose an installed Windows font in **Settings > Appearance**, preview it before confirming, and save a separate text-size preference for each font without resizing icons or document contents
-- **Text and interface scaling** — Adjust the status-bar interface-size slider from 100–200%; release it to apply and save the size. Text and controls grow together on top of Windows display scaling; 100% follows Windows scaling alone. Thumbnail size remains separately adjustable alongside it
-- **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
-- **Tabbed navigation** — Multiple tabs with independent history; dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation. Right-click tabs to close, duplicate, close tabs to the left or right, or pin/unpin them. Pinned tabs stay on the left, cannot be closed until unpinned, and open other locations in a new tab instead of replacing their pinned location. Reopen closed main tabs from the context menu or with Ctrl+Shift+T
+- **Text and interface scaling** — Hover over or click the compact size-controls button at the right of the status bar to open the interface-scale and thumbnail-size sliders. Adjust interface scale from 100–200%; release it to apply and save the size. Text and controls grow together on top of Windows display scaling; 100% follows Windows scaling alone. Thumbnail size is independently adjustable in supported views, with slider values shown on hover or while dragging
+- **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button or Ctrl+Shift+D, and use Tab to switch the active panel when not editing text or using a popup/dialog. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
+- **Tabbed navigation** — Multiple tabs with independent history; overflowing main tabs scroll within a dedicated strip, keeping the new-tab button and window controls visible and revealing the active tab when it changes. Dual-panel mode also provides separate tabs for each pane, with independent navigation state and drag-hover activation. Right-click tabs to close, duplicate, close tabs to the left or right, or pin/unpin them. Pinned tabs stay on the left, cannot be closed until unpinned, and open other locations in a new tab instead of replacing their pinned location. Reopen closed main tabs from the context menu or with Ctrl+Shift+T
 - **Tab detaching and drag previews** — Drag a main or dual-panel tab outside the window to move it into a new window when multiple instances are enabled; animated previews show tab movement while dragging
 - **Session restoration and startup location** — Continue the previous session with saved tabs, pane layouts, and view preferences, or start at This PC, Documents, the user profile, or a custom folder; restored Tag tabs display their names immediately. With previous-session startup and multiple instances enabled, exiting all instances together preserves their separate tab sessions for the next launch
 - **New-tab preferences** — Choose the current location, This PC, Documents, the user profile, or a custom folder for new tabs, and optionally open archives in a new tab. Choose whether new tabs become active, with Ctrl reversing that preference for supported opening actions; open multiple selected folders in separate tabs, or middle-click supported sidebar locations to open them in a new tab
@@ -35,7 +36,8 @@
 - **Single or multiple instances** — Choose whether to allow multiple application instances in **Settings > General**. When disabled, launching MTT again restores the existing window, including from the system tray
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
 - **File grouping** — Group items by name, date, type, or size, including in Miller's Columns; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions. Enabled additional property and tag columns are also available as sorting and grouping criteria
-- **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings, including Back, Forward, and Up navigation with support for assigning Backspace. Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
+- **Command palette** — Press Ctrl+Shift+P by default to search commands for navigation, tabs, views, selection, file operations, settings, and disk analysis. Navigate with the keyboard, inspect command explanations and current shortcuts, and execute actions available in the current context; its opening shortcut is customizable
+- **Configurable shortcuts and view controls** — Customize keyboard and mouse-wheel shortcuts in Settings, including Back, Forward, and Up navigation with support for assigning Backspace. Defaults also include Ctrl+, for Settings, Ctrl+I for Invert selection, Alt+P for the preview panel, and Ctrl+B for the left sidebar. Existing custom assignments take priority over newly introduced defaults. Ctrl+mouse wheel cycles view modes by default, while Ctrl+Shift+mouse wheel adjusts thumbnail size in Grid view
 - **Customizable columns** — Drag List view headers to reorder columns, right-click to show or hide columns, or use the searchable picker to add Windows file properties and tags; active columns appear first in the menu and picker without changing the saved layout. Column layouts are saved separately for regular folders, This PC, and the Recycle Bin
 - **File-list preferences** — In **Settings > General**, choose automatic content sizing, manual column widths remembered per folder, or **Fit columns to panel**; wider layouts support horizontal scrolling. Hover previews can be disabled independently. Enable optional alternating row colors in **Settings > Appearance**
 - **Date formats** — Choose DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD for displayed dates and Global Search date filters
@@ -61,7 +63,9 @@
 
 ### Media Preview
 - **Media metadata** — The preview panel extracts video and audio details such as codec, bitrate, channels, sample rate, and music tags
-- **Smart thumbnails** — Video thumbnails use the bundled libmpv in an isolated helper, with embedded MKV cover preference and adaptive frame selection; Windows Shell → Media Foundation is the fallback. Still images retain their image crate/WIC fast paths
+- **Video thumbnails without extra codec packs** — Generate video thumbnails using the bundled libmpv decoder rather than relying on codecs installed in Windows. H.264, HEVC/H.265, VP9, and AV1 have been tested; support depends on the bundled runtime and the file. Additional codecs are normally unnecessary; only the Windows fallback depends on installed thumbnail providers/codecs. See [Video Thumbnails](#video-thumbnails)
+- **Smart thumbnail selection** — Prefer embedded MKV covers when available; otherwise, select frames from the middle portion of the video and retry nearly uniform black or white frames. Video decoding runs in an isolated helper process. Still images retain their image crate/WIC fast paths
+- **Docked video playback** — Play videos inside the preview panel or detach playback; the docked video and its controls adapt to narrow panel widths, with playback time placed on a separate row when needed
 - **Selection sizes** — Include folder contents in selection totals, with background calculation and progress updates while folder sizes are resolved; size sorting uses calculated folder sizes as they become available
 - **Animated GIF playback** — Animated preview on details panel
 
@@ -97,7 +101,7 @@
 - **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
 - **Largest items report** — List the largest files and folders with file-count ranking and filter-adjusted values; visible controls independently select folders/files first, the sort column, and ascending or descending order, synchronized with clickable headers
 - **Duplicate detection** — Run an on-demand, cancelable scan: exact size, validated 64 KiB prefix, then full BLAKE3 confirmation; short files are not read twice. Per-stage progress and actual bytes read, conservative or opt-in bounded parallel readers, cloud-placeholder protection, Recycle Bin exclusion, and hardlink-aware recoverable-space totals
-- **Duplicate comparison and deletion** — Compare two selectable copies with full paths, sizes, dates and bounded image previews loaded in the background. Explicitly delete a selected file through the same native Windows Shell operation as the main file manager: the Recycle Bin is requested, but Windows may permanently delete depending on settings/location, with native warnings enabled. Both displayed files are fully compared again before deletion, and an unchanged, physically independent copy must remain verifiable; a hardlink alone is not sufficient. The report updates after removal; a visible warning requests a fresh disk analysis for chart and size totals
+- **Duplicate comparison and deletion** — Compare two selectable copies with full paths, sizes, dates and bounded image previews loaded in the background. Explicitly delete a selected file through the native Windows Shell, independently of the optional MTT operation engine: the Recycle Bin is requested, but Windows may permanently delete depending on settings/location, with native warnings enabled. Both displayed files are fully compared again before deletion, and an unchanged, physically independent copy must remain verifiable; a hardlink alone is not sufficient. The report updates after removal; a visible warning requests a fresh disk analysis for chart and size totals
 
 Deletion validation and the native, path-based Windows operation are not an atomic filesystem transaction. The surviving file is held against writes and deletion during the operation, but unrelated software can still rename or replace the selected path between validation and Windows processing it.
 
@@ -112,7 +116,8 @@ Deletion validation and the native, path-based Windows operation are not an atom
 - **Category filters** — Show all results or narrow them to files, folders, images, videos, audio, documents, or applications; Applications includes executables, installers, application shortcuts, and scripts
 - **Drive, size, and date filters** — Narrow results to a drive, set minimum and maximum file sizes, or specify a creation-date range
 - **Tag filters** — Narrow global search results to any tagged item or to specific tags and their sub-tags
-- **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
+- **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, use **Move to** to choose a destination for eligible items from multiple folders, or drag results to folders or other applications. Context menus combine MTT actions with native Windows entries where the selection supports them
+- **Selected-result deletion** — Delete selected visible results with Delete or Shift+Delete, or through their context menu. The default Windows-based mechanism shows a consolidated confirmation for selections spanning multiple folders; the optional MTT engine uses its in-app confirmation
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 - **Initial indexing feedback** — After an installer-driven index rebuild, a persistent notification reports preparation and live item counts until every indexed volume is ready
 
@@ -120,6 +125,11 @@ Deletion validation and the native, path-based Windows operation are not an atom
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
+- **Move to and Copy path** — Choose **Move to** from an eligible item context menu to move a selection to a chosen folder without changing the clipboard, including selections spanning multiple source folders. **Copy path** copies every selected path as text, quoted and separated by line breaks
+- **Optional MTT operation engine (experimental)** — Enable **Use MTT copy, move and deletion engine (experimental)** in **Settings > General > Copy, move and deletion engine**. It is off by default and handles filesystem copies, manual moves, and deletions; organizer jobs, archive extraction, and virtual Shell items retain their existing mechanisms. Copy/move conflicts offer replace, skip, keep both, or folder merge as appropriate
+- **Operation window** — The optional MTT engine provides a themed window with active filenames, retained results, cancellation, and separate recycled/permanently deleted counts. Copies and moves also show byte progress, transfer-rate graphs, and pause/resume controls. Minimize keeps work running and leaves a status-bar entry to restore the window; closing cancels active jobs. Cancellation stops remaining work, not completed copies, moves, or deletions
+- **MTT engine safeguards and limits** — Delete asks for recycling confirmation; if recycling is unavailable, permanent deletion requires separate consent, with an optional operation-local **Apply to all** choice. Shift+Delete also requires confirmation. Selected symlink/reparse paths are refused. Copy/move support does not provide automatic elevation, persistent resume, filesystem snapshots, or crash recovery; it is not a backup or undo system. See the [engine documentation](crates/mtt-copy-engine/README.md) for supported scope and limitations
+- **TeraCopy / FastCopy integration** — With the optional MTT engine disabled, eligible manual clipboard and drag-and-drop transfers are handed to Windows Shell when TeraCopy's copy handler is registered. FastCopy also works indirectly through this handoff. Configure only one application as the default copy/move handler: enabling both TeraCopy and FastCopy as defaults can launch both for the same operation. Organizer jobs and archive extraction are not redirected
 - **Clipboard feedback** — Distinct markers identify copied and cut files and folders, with faded icons for items marked for moving; choose separate copy/cut highlight colors or disable both highlights and cut-icon fading in **Settings > Appearance**
 - **Internal drag-and-drop** — Move items between folders, hold Ctrl to copy, or hold Alt to create shortcuts. Copies and shortcuts can also be dropped into the source folder, with copies receiving a separate name
 - **Permanent deletion** — Use Shift+Delete or hold Shift while clicking Delete in the context menu or toolbar to bypass the Recycle Bin
@@ -150,12 +160,14 @@ Deletion validation and the native, path-based Windows operation are not an atom
 
 ### Performance & Cache
 - **Multi-level cache** — Memory, disk (SQLite), and GPU textures
+- **Cached folder previews** — Display cached artwork before background source validation, reuse decoded previews within a bounded memory budget, and decode cached previews concurrently. Older composed folder previews are regenerated as needed for the current cache format; valid individual video thumbnails are preserved
 - **Tag view cache** — Persistent metadata cache and paged loading make large Tag views appear quickly without preloading thumbnails or increasing GPU texture cache limits
 - **Async workers** — Background processing keeps UI responsive
 - **UI virtualization** — Efficient rendering of large directories
 - **Bounded background work** — Folder loading, thumbnail generation, and search rescans use concurrency limits to avoid resource spikes and improve shutdown behavior
 - **Folder summaries** — Reuse completed background calculations for folder sizes and details-panel file/subfolder counts; retain previously calculated values while refreshing them in the background
 - **Idle memory trimming** — Trims the Windows process working set after idle periods when it exceeds a configured threshold
+- **Startup memory trimming** — Backends using the low-memory policy also request a one-time working-set trim after startup settles, deferring it while loading or other protected activity is in progress
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`; event bursts are coalesced into debounced reloads
 
 ## Optional Windows Integration
@@ -197,7 +209,9 @@ The app supports three rendering backend choices, selectable in **Settings > Gra
 - OpenGL texture uploads can be synchronous on the CPU thread, leading to some stutter.
 - If scrolling stutters with OpenGL, try disabling **Scroll interpolation** in **Settings > Graphics**.
 
-Dedicated image, PDF, DOCX, XLSX, and text viewer windows start with Glow independently of the main window's backend setting. If OpenGL initialization fails before the viewer is created, they retry with Wgpu (DirectX 12 on Windows).
+Dedicated image, PDF, DOCX, XLSX, and text viewer windows launched from MTT inherit the main window's **active** backend, including one selected by startup fallback. Changing the saved preference does not change the running backend until restart. These child viewers do not independently switch backends if initialization fails.
+
+Independently launched viewers use the saved preference: DirectX 12/default can fall back to Vulkan and then Glow; Vulkan can fall back to Glow; an explicit Glow preference uses Glow only. Fallback applies only to renderer initialization failures before viewer creation, not to file-loading or runtime errors. DirectX 12 viewers use DirectComposition, present updated content during resizing, and hide after close acceptance before graphics resources are released.
 
 ## Prerequisites
 
@@ -267,9 +281,16 @@ Startup checks are enabled by default and can be disabled in **Settings > About*
 
 ## Video Thumbnails
 
-Video thumbnails are generated by default through the **bundled libmpv**, without
-requiring a separate codec pack or FFmpeg executable. H.264, HEVC/H.265, VP9, and AV1
-have been tested; actual format support depends on the bundled runtime and the file.
+**Additional video codecs or codec packs are normally not required.** MTT generates
+video thumbnails through the **bundled libmpv**, replacing its previous reliance
+on Windows thumbnail providers as the primary extraction path. No separate FFmpeg
+executable is needed either. H.264, HEVC/H.265, VP9, and AV1 have been tested;
+actual format support depends on the bundled runtime and the file.
+
+If libmpv cannot extract a thumbnail, MTT can fall back to Windows thumbnail
+providers and Media Foundation. **Only this fallback depends on the providers
+and codecs installed in Windows**; installing a codec pack is not a prerequisite
+for the primary extractor.
 
 - **Embedded MKV covers:** JPEG attachments named exactly `cover.jpg` or
   `cover.jpeg` are preferred. Missing/unreadable covers use adaptive video frames.
@@ -306,6 +327,7 @@ This project includes and builds upon work from the following projects:
 - [ModernH](https://github.com/HarkeshBhatia/ModernH), by Harkesh Bhatia. Our OSC file originated from this project and is used here with small modifications.
 - [RTX HDR / RTX VSR toggle gist](https://gist.github.com/anthonybaldwin/1e49b28b49babf64f159cb793c506333), by anthonybaldwin. This gist served as an early development reference while experimenting with RTX HDR / RTX VSR behavior in mpv; the current repository implementation has since been reworked independently.
 - [BetterOffice](https://github.com/openooxml/betteroffice), by Elia Hilse and The OpenOOXML Project. MTT uses its Apache-2.0 DOCX and XLSX engines for the read-only document and workbook viewers; the upstream attribution notice is included in `third_party_licenses/` and public installers.
+- [BetterCopy](https://github.com/articulite/BetterCopy). The optional MTT copy engine adapts its Win32 copy-callback and storage-profiling approach under the MIT license; the upstream GUI, hotkeys, clipboard, move, and deletion routines are not bundled. Attribution and license text are included in `third_party_licenses/BetterCopy-MIT.txt`.
 
 ### Translations
 
@@ -326,6 +348,7 @@ This repository also contains or redistributes third-party components that remai
 - `target\release\pdfium.dll`, which carries upstream PDFium licensing and notice obligations independent of the Rust bindings.
 - `mpv_ui/portable_config/fonts/Material-Design-Iconic-Font.ttf`, which has its own upstream asset license.
 - `unrar`, whose Rust wrapper is permissive but whose embedded UnRAR sources retain the upstream UnRAR license.
+- `crates/mtt-copy-engine/`, which includes BetterCopy-derived code under MIT; its license is preserved in the crate and in `third_party_licenses/BetterCopy-MIT.txt`.
 - BetterOffice's DOCX and XLSX engines, under Apache-2.0, and the shared Yrs
   0.27.3 dependency, under MIT. The upstream attribution notice and applicable
   license texts are included with the installer; the vendored Yrs copy contains
