@@ -2,7 +2,8 @@ use eframe::egui;
 use std::path::Path;
 
 use crate::app::operations::rectangle_selection::{
-    grouped_visual_order, resolve_rectangle_preview_indices, resolve_rectangle_selection,
+    grouped_visual_order, release_rectangle_selection_focus, resolve_rectangle_preview_indices,
+    resolve_rectangle_selection,
 };
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
@@ -79,6 +80,7 @@ impl ImageViewerApp {
                     modifiers,
                     0,
                 ));
+                release_rectangle_selection_focus(ui.ctx());
             }
         }
 

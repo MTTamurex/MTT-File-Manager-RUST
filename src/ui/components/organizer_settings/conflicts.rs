@@ -5,6 +5,9 @@ use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
+mod confirmation;
+use confirmation::{render_destination_confirmation_dialog, DestinationConfirmationAction};
+
 pub(super) fn render_conflicts(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.add_space(18.0);
     settings_ui::card_frame(ui.ctx()).show(ui, |ui| {
@@ -234,40 +237,29 @@ fn render_destination_confirmation(app: &mut ImageViewerApp, ctx: &egui::Context
         .parent()
         .map(|parent| parent.join(&new_name))
         .unwrap_or_default();
-    let mut confirm = false;
-    let mut cancel = false;
-    egui::Window::new(t!("organizer.rename_destination_confirm_title"))
-        .collapsible(false)
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.label(t!("organizer.rename_destination_warning"));
-            ui.add_space(6.0);
-            ui.label(conflict.destination_path.display().to_string());
-            ui.label("->");
-            ui.label(new_path.display().to_string());
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .button(t!("organizer.rename_destination_confirm"))
-                    .clicked()
-                {
-                    confirm = true;
-                }
-                if ui.button(t!("organizer.cancel")).clicked() {
-                    cancel = true;
-                }
-            });
-        });
-    if confirm {
-        app.organizer_state.conflict_state.destination_confirmation = None;
-        if let Err(error) = app.organizer_state.resolve_conflict(
-            conflict_id,
-            OrganizerConflictResolution::RenameDestination { new_name },
-        ) {
-            app.notifications.warning(error.to_string());
+    let dialog = render_destination_confirmation_dialog(
+        ctx,
+        &conflict.destination_path.display().to_string(),
+        &new_path.display().to_string(),
+    );
+    let should_close = dialog.should_close();
+    match dialog
+        .inner
+        .or_else(|| should_close.then_some(DestinationConfirmationAction::Cancel))
+    {
+        Some(DestinationConfirmationAction::Confirm) => {
+            app.organizer_state.conflict_state.destination_confirmation = None;
+            if let Err(error) = app.organizer_state.resolve_conflict(
+                conflict_id,
+                OrganizerConflictResolution::RenameDestination { new_name },
+            ) {
+                app.notifications.warning(error.to_string());
+            }
         }
-    } else if cancel {
-        app.organizer_state.conflict_state.destination_confirmation = None;
+        Some(DestinationConfirmationAction::Cancel) => {
+            app.organizer_state.conflict_state.destination_confirmation = None;
+        }
+        None => {}
     }
 }
 

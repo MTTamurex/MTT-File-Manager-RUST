@@ -10,6 +10,9 @@ use crate::ui::views::rectangle_selection::{
     RectangleSelectionState,
 };
 
+mod focus;
+pub(super) use focus::release_rectangle_selection_focus;
+
 pub(crate) struct RectangleSelectionResolveResult {
     pub selected_paths: FxHashSet<PathBuf>,
     pub focus_index: Option<usize>,
@@ -286,6 +289,7 @@ impl ImageViewerApp {
                         modifiers,
                         self.generation,
                     ));
+                    release_rectangle_selection_focus(ui.ctx());
                 }
             }
         }
