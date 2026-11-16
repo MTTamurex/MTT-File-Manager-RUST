@@ -64,6 +64,7 @@ impl DocxViewerApp {
                         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         egui::Color32::WHITE,
                     );
+                    self.opening_trace.page_drawn();
                 } else if let Some(error) = self.failed_pages.get(&page_index) {
                     ui.painter().text(
                         rect.center(),

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::egui;
 
+use crate::infrastructure::diagnostic_logger::docx_trace::{Milestone, OpenTrace, Phase};
+
 use super::renderer::{DocxPagePixels, DocxRenderer};
 use super::search::{DocxSearchIndex, SearchBounds, SearchRequest, SearchResult};
 
@@ -41,7 +43,7 @@ pub(super) struct DocxRenderWorker {
 }
 
 impl DocxRenderWorker {
-    pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
+    pub fn spawn(path: PathBuf, repaint: egui::Context, trace: OpenTrace) -> Self {
         let (request_tx, request_rx) = bounded(24);
         let (search_request_tx, search_request_rx) = crossbeam_channel::unbounded();
         let (search_result_tx, search_result_rx) = bounded(4);
@@ -59,6 +61,7 @@ impl DocxRenderWorker {
                     search_request_rx,
                     search_result_tx,
                     repaint,
+                    trace,
                 )
             })
             .expect("spawn DOCX render worker");
@@ -128,17 +131,23 @@ fn worker_loop(
     search_request_rx: Receiver<SearchRequest>,
     search_result_tx: Sender<SearchResult>,
     repaint: egui::Context,
+    trace: OpenTrace,
 ) {
-    let mut renderer = match DocxRenderer::open(&path) {
+    let mut renderer = match DocxRenderer::open(&path, trace) {
         Ok(renderer) => renderer,
         Err(error) => {
+            trace.mark(Milestone::OpenFailed);
             let _ = event_tx.send(WorkerEvent::Failed(error));
             repaint.request_repaint();
             return;
         }
     };
 
-    let search_index = DocxSearchIndex::new(renderer.search_display_list());
+    trace.mark(Milestone::RendererReady);
+    let search_index = {
+        let _stages = trace.stages(Phase::SearchIndex);
+        DocxSearchIndex::new(renderer.search_display_list())
+    };
     let search_repaint = repaint.clone();
     std::thread::Builder::new()
         .name("docx-search".to_owned())
@@ -152,6 +161,7 @@ fn worker_loop(
         })
         .expect("spawn DOCX search worker");
 
+    trace.mark(Milestone::ReadyForPages);
     if event_tx
         .send(WorkerEvent::Opened {
             page_sizes: renderer.page_sizes().to_vec(),
@@ -162,14 +172,27 @@ fn worker_loop(
     }
     repaint.request_repaint();
 
+    let mut first_render = true;
     while let Ok(request) = request_rx.recv() {
         match request {
             RenderRequest::TrimCaches => renderer.trim_caches(),
             RenderRequest::Page(page_index) => {
-                let event = match renderer.render_page(page_index) {
-                    Ok(page) => WorkerEvent::Rendered(page),
-                    Err(error) => WorkerEvent::PageFailed { page_index, error },
+                let page_trace = if first_render {
+                    trace
+                } else {
+                    OpenTrace::default()
                 };
+                let event = match renderer.render_page(page_index, page_trace) {
+                    Ok(page) => {
+                        page_trace.mark(Milestone::FirstPageRasterized);
+                        WorkerEvent::Rendered(page)
+                    }
+                    Err(error) => {
+                        page_trace.mark(Milestone::FirstPageFailed);
+                        WorkerEvent::PageFailed { page_index, error }
+                    }
+                };
+                first_render = false;
                 if event_tx.send(event).is_err() {
                     break;
                 }

@@ -97,6 +97,8 @@ coverage/
 !/vendor/betteroffice-opc/**
 !/vendor/betteroffice-docx-raster/
 !/vendor/betteroffice-docx-raster/**
+!/vendor/betteroffice-docx-edit/
+!/vendor/betteroffice-docx-edit/**
 !/vendor/winit/
 !/vendor/winit/**
 /vendor/winit/Cargo.lock

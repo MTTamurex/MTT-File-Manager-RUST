@@ -180,6 +180,7 @@ lopdf = { version = "0.44", default-features = false }
 yrs = { path = "vendor/yrs" }
 betteroffice-opc = { path = "vendor/betteroffice-opc" }
 betteroffice-docx-raster = { path = "vendor/betteroffice-docx-raster" }
+betteroffice-docx-edit = { path = "vendor/betteroffice-docx-edit" }
 winit = { path = "vendor/winit" }
 
 [[bench]]

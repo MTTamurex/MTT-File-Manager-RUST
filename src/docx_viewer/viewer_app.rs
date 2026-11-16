@@ -5,12 +5,14 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use rust_i18n::t;
 
-use super::render_worker::{DocxRenderWorker, WorkerEvent};
+use super::render_worker::DocxRenderWorker;
 use super::search::SearchMatch;
+use crate::infrastructure::diagnostic_logger::docx_trace::FirstPageTrace;
 mod rendering;
 mod search;
 mod selection;
 mod toolbar;
+mod worker_events;
 
 use selection::{DragSelection, TextSelection};
 
@@ -41,6 +43,7 @@ pub(super) struct PageGeometry {
 pub(super) struct DocxViewerApp {
     file_path: PathBuf,
     worker: Option<DocxRenderWorker>,
+    opening_trace: FirstPageTrace,
     status: ViewerStatus,
     page_sizes: Vec<(f32, f32)>,
     textures: HashMap<usize, PageTexture>,
@@ -82,6 +85,7 @@ impl DocxViewerApp {
         Self {
             file_path: path,
             worker: None,
+            opening_trace: FirstPageTrace::new(),
             status: ViewerStatus::Opening,
             page_sizes: Vec::new(),
             textures: HashMap::new(),
@@ -120,67 +124,11 @@ impl DocxViewerApp {
 
     fn ensure_worker(&mut self, ctx: &egui::Context) {
         if self.worker.is_none() && matches!(self.status, ViewerStatus::Opening) {
-            self.worker = Some(DocxRenderWorker::spawn(self.file_path.clone(), ctx.clone()));
-        }
-    }
-
-    fn poll_worker(&mut self, ctx: &egui::Context) {
-        let events = self
-            .worker
-            .as_ref()
-            .map(DocxRenderWorker::drain_events)
-            .unwrap_or_default();
-        for event in events {
-            match event {
-                WorkerEvent::Opened { page_sizes } => {
-                    self.page_sizes = page_sizes;
-                    self.status = ViewerStatus::Ready;
-                    self.current_page = 0;
-                    self.scroll_to_page = Some(0);
-                }
-                WorkerEvent::Rendered(page) => {
-                    self.pending.remove(&page.page_index);
-                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [page.width, page.height],
-                        &page.rgba,
-                    );
-                    let texture = ctx.load_texture(
-                        format!("docx_page_{}", page.page_index),
-                        color_image,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    let bytes = page.rgba.len();
-                    if let Some(previous) = self
-                        .textures
-                        .insert(page.page_index, PageTexture { texture, bytes })
-                    {
-                        self.cache_bytes = self.cache_bytes.saturating_sub(previous.bytes);
-                    }
-                    self.cache_bytes = self.cache_bytes.saturating_add(bytes);
-                    self.skipped_images = self.skipped_images.saturating_add(page.skipped_images);
-                }
-                WorkerEvent::TextSelected {
-                    page_index,
-                    generation,
-                    text,
-                } => self.receive_selected_text(page_index, generation, text),
-                WorkerEvent::PageFailed { page_index, error } => {
-                    self.pending.remove(&page_index);
-                    self.failed_pages.insert(page_index, error);
-                }
-                WorkerEvent::Failed(error) => {
-                    self.status = ViewerStatus::Failed(error);
-                }
-            }
-        }
-
-        let search_results = self
-            .worker
-            .as_ref()
-            .map(DocxRenderWorker::drain_search_results)
-            .unwrap_or_default();
-        for result in search_results {
-            self.accept_search_result(result);
+            self.worker = Some(DocxRenderWorker::spawn(
+                self.file_path.clone(),
+                ctx.clone(),
+                self.opening_trace.trace(),
+            ));
         }
     }
 

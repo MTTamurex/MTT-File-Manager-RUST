@@ -710,8 +710,6 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 [[package]]
 name = "betteroffice-docx-edit"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c49ca49d189f8adca9bfa2ce610679ef5268f15a32a51835da11a2c849646ef8"
 dependencies = [
  "betteroffice-docx-layout",
  "betteroffice-docx-parse",

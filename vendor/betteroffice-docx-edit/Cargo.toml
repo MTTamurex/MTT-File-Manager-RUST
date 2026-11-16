@@ -1,0 +1,30 @@
+[package]
+name = "betteroffice-docx-edit"
+version = "0.3.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Pilcrow-stream yrs editing foundation for collaborative DOCX documents."
+repository = "https://github.com/openooxml/betteroffice"
+
+[features]
+tiff = ["docx-parse/tiff"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
+
+[lib]
+name = "docx_edit"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+docx-layout = { package = "betteroffice-docx-layout", version = "0.3.0" }
+docx-parse = { package = "betteroffice-docx-parse", version = "0.3.0" }
+ooxml-diff = { package = "betteroffice-ooxml-diff", version = "0.3.0" }
+ooxml-opc = { package = "betteroffice-opc", version = "0.3.0" }
+js-sys = { version = "0.3", optional = true }
+ryu-js = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+unicode-segmentation = "1.12"
+wasm-bindgen = { version = "0.2", optional = true }
+yrs = "0.27.3"

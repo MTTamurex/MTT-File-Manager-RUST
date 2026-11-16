@@ -10,14 +10,14 @@ fn small_caps_docx_renders_and_preserves_search_and_selection() {
         <w:r><w:t xml:space="preserve"> normal</w:t></w:r>"#,
     );
     std::fs::write(source.path(), &bytes).unwrap();
-    let mut renderer = DocxRenderer::open(source.path()).unwrap();
+    let mut renderer = DocxRenderer::open(source.path(), OpenTrace::default()).unwrap();
     let before = renderer.search_display_list();
     // Authoritative layout supplies the original cluster origins. Rendering
     // must change the glyph appearance, not recalculate wrapping or positions.
     assert!(before.pages[0].primitives.iter().any(|primitive| {
         matches!(primitive, docx_layout::display_list::Primitive::Text(run) if run.small_caps)
     }));
-    let page = renderer.render_page(0).unwrap();
+    let page = renderer.render_page(0, OpenTrace::default()).unwrap();
     assert!(page
         .rgba
         .as_chunks::<4>()
@@ -62,8 +62,8 @@ fn small_caps_language_and_all_caps_docx_render() {
             <w:r><w:rPr><w:smallCaps/><w:caps/></w:rPr><w:t xml:space="preserve"> Mixed</w:t></w:r>"#,
         ),
     ).unwrap();
-    let mut renderer = DocxRenderer::open(source.path()).unwrap();
-    let page = renderer.render_page(0).unwrap();
+    let mut renderer = DocxRenderer::open(source.path(), OpenTrace::default()).unwrap();
+    let page = renderer.render_page(0, OpenTrace::default()).unwrap();
     assert!(page
         .rgba
         .as_chunks::<4>()

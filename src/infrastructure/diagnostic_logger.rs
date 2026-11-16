@@ -1,3 +1,4 @@
+pub(crate) mod docx_trace;
 pub(crate) mod frame_trace;
 pub(crate) mod navigation_trace;
 mod slow_scope;
