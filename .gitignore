@@ -95,6 +95,8 @@ coverage/
 !/vendor/yrs/**
 !/vendor/betteroffice-opc/
 !/vendor/betteroffice-opc/**
+!/vendor/betteroffice-docx-raster/
+!/vendor/betteroffice-docx-raster/**
 !/vendor/winit/
 !/vendor/winit/**
 /vendor/winit/Cargo.lock

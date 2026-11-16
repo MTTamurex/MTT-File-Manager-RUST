@@ -258,11 +258,17 @@ fn append_notes(target: &mut Vec<Value>, notes: Option<&[docx_parse::Note]>, kin
 
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
+    mod small_caps;
+
     use std::io::{Cursor, Write};
 
     use super::*;
 
     fn synthetic_docx() -> Vec<u8> {
+        synthetic_docx_with_text_run("<w:r><w:t>DOCX viewer fixture</w:t></w:r>")
+    }
+
+    fn synthetic_docx_with_text_run(text_run: &str) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut archive = zip::ZipWriter::new(&mut cursor);
@@ -305,7 +311,13 @@ mod tests {
                 ),
             ] {
                 archive.start_file(name, options).unwrap();
-                archive.write_all(contents.as_bytes()).unwrap();
+                if name == "word/document.xml" {
+                    let contents =
+                        contents.replace("<w:r><w:t>DOCX viewer fixture</w:t></w:r>", text_run);
+                    archive.write_all(contents.as_bytes()).unwrap();
+                } else {
+                    archive.write_all(contents.as_bytes()).unwrap();
+                }
             }
             let mut image = Cursor::new(Vec::new());
             image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(

@@ -1,0 +1,20 @@
+[package]
+name = "betteroffice-docx-raster"
+version = "0.3.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Server-side raster backend for DOCX display lists. Never part of the wasm build."
+repository = "https://github.com/openooxml/betteroffice"
+
+[lib]
+name = "docx_raster"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.22"
+docx-layout = { package = "betteroffice-docx-layout", version = "0.3.0" }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+ooxml-text = { package = "betteroffice-ooxml-text", version = "0.3.0" }
+png = "0.18"
+serde_json = "1"
+tiny-skia = "0.12"

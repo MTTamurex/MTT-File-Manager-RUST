@@ -762,8 +762,6 @@ dependencies = [
 [[package]]
 name = "betteroffice-docx-raster"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd9c4e6479e4bb8f76eda367d5eb28ed1dbc3ca45a1c43f2c4b781af6d83ad1"
 dependencies = [
  "base64 0.22.1",
  "betteroffice-docx-layout",
