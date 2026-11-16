@@ -15,6 +15,7 @@ fn confirmed_display_survives_invalidation_failure_navigation_and_partial_result
         folder_path: path.clone(),
         summary: Some(FolderContentSummary::size_only(20)),
         complete: false,
+        cancelled: false,
         request_epoch: 1,
         request_generation: 0,
     };
@@ -72,6 +73,7 @@ fn batch_dispatch_deduplicates_and_caps_all_producers() {
         folder_path: PathBuf::from("folder-0"),
         summary: Some(FolderContentSummary::size_only(1)),
         complete: true,
+        cancelled: false,
         request_epoch: 0,
         request_generation: 0,
     }));
@@ -120,6 +122,7 @@ fn stale_terminal_results_never_replace_last_confirmed_display() {
         folder_path: path.clone(),
         summary: Some(FolderContentSummary::size_only(500)),
         complete: true,
+        cancelled: false,
         request_epoch: 1,
         request_generation: 0,
     };

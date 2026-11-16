@@ -185,6 +185,7 @@ fn old_navigation_result_cannot_release_a_new_request_for_the_same_folder() {
         folder_path: path.clone(),
         summary: Some(FolderContentSummary::size_only(10)),
         complete: true,
+        cancelled: false,
         request_epoch: 0,
         request_generation: generation,
     };
@@ -205,6 +206,7 @@ fn invalidated_batch_result_is_rejected_and_releases_its_loading_slot() {
         folder_path: path.clone(),
         summary: Some(FolderContentSummary::size_only(10)),
         complete: true,
+        cancelled: false,
         request_epoch: 1,
         request_generation: state.batch_generation.load(Ordering::Acquire),
     };
@@ -227,6 +229,7 @@ fn old_epoch_result_does_not_release_a_newer_retry() {
         folder_path: path.clone(),
         summary: Some(FolderContentSummary::size_only(10)),
         complete: true,
+        cancelled: false,
         request_epoch: 0,
         request_generation: state.batch_generation.load(Ordering::Acquire),
     };

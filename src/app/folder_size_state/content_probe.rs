@@ -82,7 +82,9 @@ impl FolderSizeState {
                 let in_listing = path
                     .parent()
                     .is_some_and(|parent| normalize_tag_path_key(parent) == key);
-                (in_listing || normalize_tag_path_key(path) == key).then(|| path.clone())
+                ((in_listing || normalize_tag_path_key(path) == key)
+                    && !self.delete_activity.affects(path))
+                .then(|| path.clone())
             })
             .collect()
     }

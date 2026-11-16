@@ -36,6 +36,7 @@ pub fn render_preview_panel(
     folder_summary: Option<crate::app::folder_size_state::FolderContentSummary>,
     is_folder_size_loading: bool,
     is_folder_size_failed: bool,
+    is_folder_size_suspended: bool,
     live_file_size_cache: &mut crate::app::live_file_size::LiveFileSizeCache,
     live_file_size_loading: &mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
     live_file_size_req_sender: &std::sync::mpsc::Sender<
@@ -102,6 +103,12 @@ pub fn render_preview_panel(
                 total_size_text = format!(
                     "{total_size_text} ({})",
                     rust_i18n::t!("file_info.unavailable")
+                );
+            }
+            if multi_selection_size.suspended_folders > 0 {
+                total_size_text = format!(
+                    "{total_size_text} ({})",
+                    rust_i18n::t!("file_info.size_suspended_deletion")
                 );
             }
             ui.label(
@@ -206,6 +213,7 @@ pub fn render_preview_panel(
         folder_summary,
         is_folder_size_loading,
         is_folder_size_failed,
+        is_folder_size_suspended,
         is_metadata_loading,
         live_file_size_cache,
         live_file_size_loading,

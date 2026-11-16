@@ -461,12 +461,6 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_composer,
         folder_preview_trace.clone(),
     );
-    let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel, folder_size_latest_request_id) =
-        spawn_folder_size_worker(ctx);
-    let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
-        spawn_folder_size_batch_worker(ctx);
-    log_bootstrap_step!("visual_and_size_workers");
-
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
         idle_warmup_sender: idle_warmup_tx,
@@ -487,6 +481,11 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         compression_cancel,
         copy_runtime,
     ) = spawn_file_operation_worker();
+    let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel, folder_size_latest_request_id) =
+        spawn_folder_size_worker(ctx, copy_runtime.delete_activity.clone());
+    let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
+        spawn_folder_size_batch_worker(ctx, copy_runtime.delete_activity.clone());
+    log_bootstrap_step!("visual_and_size_workers");
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
     let disk_cache_invalidation_tx =
         spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());

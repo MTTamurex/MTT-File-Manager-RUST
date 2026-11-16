@@ -30,7 +30,8 @@ impl FolderSizeState {
 
     pub fn take_due_panel_revalidation(&mut self, now: Instant, path: &PathBuf) -> Option<PathBuf> {
         let deadline = self.panel_deferred_revalidation.get(path).copied()?;
-        if deadline > now
+        if self.delete_activity.affects(path)
+            || deadline > now
             || self.loading.contains(path)
             || self.pending_revalidation.contains_key(path)
             || self.is_failure_active(path, now)
@@ -44,7 +45,8 @@ impl FolderSizeState {
     /// All automatic details-panel requests share deduplication, debounce and
     /// failure backoff. Deferring a request must not cancel another active scan.
     pub fn request_panel_refresh(&mut self, path: PathBuf, now: Instant) -> bool {
-        if self.loading.contains(&path)
+        if self.delete_activity.affects(&path)
+            || self.loading.contains(&path)
             || self.pending_revalidation.contains_key(&path)
             || self
                 .panel_deferred_revalidation

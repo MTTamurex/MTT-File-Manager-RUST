@@ -2,6 +2,7 @@ use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+mod invalidation_worker;
 
 const DIRECTORY_INDEX_FORMAT_VERSION: i64 = 1;
 
@@ -24,6 +25,7 @@ pub struct DirectoryMeta {
 
 pub struct DirectoryIndex {
     conn: Mutex<Connection>,
+    invalidations: invalidation_worker::Invalidations,
 }
 
 impl DirectoryIndex {
@@ -97,6 +99,7 @@ impl DirectoryIndex {
 
         Ok(Self {
             conn: Mutex::new(conn),
+            invalidations: Default::default(),
         })
     }
 

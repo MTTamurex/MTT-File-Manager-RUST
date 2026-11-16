@@ -200,6 +200,7 @@ sidebar:
   collapse_section: "Свернуть раздел"
   expand_section: "Развернуть раздел"
 tags:
+  persistence_failed: "Не удалось сохранить изменения тегов. Сохранённое состояние будет восстановлено."
   browser_search: "Поиск тегов или папок…"
   browser_select: "Выберите элемент для просмотра или изменения его свойств."
   browser_details: "Свойства"
@@ -360,6 +361,7 @@ file_info:
   subfolders: "Подпапки:"
   files: "Файлы:"
   calculating: "Вычисление..."
+  size_suspended_deletion: "Вычисление приостановлено на время удаления"
   unavailable: "Недоступно"
   metadata: "Метаданные:"
   metadata_loading: "Загрузка..."

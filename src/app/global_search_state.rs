@@ -227,6 +227,9 @@ pub struct GlobalSearchState {
     pub tooltip_thumbnail_inflight: HashSet<String>,
 }
 
+#[cfg(test)]
+mod tag_cache_tests;
+
 impl GlobalSearchState {
     pub fn new(
         sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
@@ -626,7 +629,10 @@ impl GlobalSearchState {
 
     pub fn invalidate_tag_assignment_dependent_results(&mut self) {
         self.cancel_tagged_results_request();
-        self.truncate_tagged_results();
+        let truncated = self.truncate_tagged_results();
+        if !truncated && matches!(self.tag_filter, GlobalSearchTagFilter::All) {
+            return;
+        }
         self.cached_filtered_indices.clear();
         self.cached_sorted_indices.clear();
         self.results_generation = self.results_generation.wrapping_add(1);
@@ -775,6 +781,11 @@ impl GlobalSearchState {
         tag_assignments_epoch: u64,
         tag_filter: &GlobalSearchTagFilter,
     ) -> &[usize] {
+        let tag_assignments_epoch = if matches!(tag_filter, GlobalSearchTagFilter::All) {
+            0
+        } else {
+            tag_assignments_epoch
+        };
         let filters = GlobalSearchFilters {
             category: self.category,
             drive_filter: self.drive_filter,
@@ -828,6 +839,11 @@ impl GlobalSearchState {
         tag_assignments_epoch: u64,
         tag_filter: &GlobalSearchTagFilter,
     ) -> &[usize] {
+        let tag_assignments_epoch = if matches!(tag_filter, GlobalSearchTagFilter::All) {
+            0
+        } else {
+            tag_assignments_epoch
+        };
         self.ensure_filter_cache(tag_assignments, tag_assignments_epoch, tag_filter);
         let filters = GlobalSearchFilters {
             category: self.category,

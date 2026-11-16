@@ -8,6 +8,7 @@ pub(super) fn test_state() -> FolderSizeState {
     let (_batch_res_sender, batch_res_receiver) = std::sync::mpsc::channel();
 
     FolderSizeState {
+        delete_activity: Default::default(),
         size_sorting: Default::default(),
         selection_size: Default::default(),
         req_sender,

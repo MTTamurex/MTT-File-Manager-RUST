@@ -200,6 +200,7 @@ sidebar:
   collapse_section: "Σύμπτυξη ενότητας"
   expand_section: "Ανάπτυξη ενότητας"
 tags:
+  persistence_failed: "Δεν ήταν δυνατή η αποθήκευση των ετικετών. Θα επαναφερθεί η αποθηκευμένη κατάσταση."
   browser_search: "Αναζήτηση ετικετών ή φακέλων…"
   browser_select: "Επιλέξτε ένα στοιχείο για προβολή ή επεξεργασία λεπτομερειών."
   browser_details: "Λεπτομέρειες"
@@ -360,6 +361,7 @@ file_info:
   subfolders: "Υποφάκελοι:"
   files: "Αρχεία:"
   calculating: "Υπολογισμός..."
+  size_suspended_deletion: "Ο υπολογισμός αναστέλλεται κατά τη διαγραφή"
   unavailable: "Μη διαθέσιμο"
   metadata: "Μεταδεδομένα:"
   metadata_loading: "Φόρτωση..."

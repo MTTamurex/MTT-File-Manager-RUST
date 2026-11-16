@@ -815,6 +815,9 @@ pub struct ImageViewerApp {
     /// `normalize_tag_path_key(path)`. Rebuilt only when `tag_assignments`
     /// mutates; consumed O(1) per visible item per frame by grid/list views.
     pub tag_assignments_normalized: Arc<rustc_hash::FxHashMap<String, Vec<i64>>>,
+    pub(crate) tag_path_index: crate::app::operations::tag_ops::path_index::TagPathIndex,
+    pub(crate) tag_updates: crate::app::operations::tag_ops::TagUpdates,
+    pub(crate) tag_persistence: crate::app::operations::tag_ops::persistence::TagPersistence,
     pub tag_assignments_epoch: u64,
     pub tag_counts: rustc_hash::FxHashMap<i64, usize>,
     /// Distinct-path item count per tag including its whole subtree — the

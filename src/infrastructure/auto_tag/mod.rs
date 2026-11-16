@@ -10,6 +10,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 mod manager;
+mod reapply;
 #[cfg(feature = "notify-watcher")]
 mod worker;
 
@@ -26,6 +27,7 @@ pub(crate) enum AutoTagCommand {
     ApplyExisting {
         rule_id: i64,
     },
+    ReapplyPaths(Vec<PathBuf>),
     Shutdown,
 }
 

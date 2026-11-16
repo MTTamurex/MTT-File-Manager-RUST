@@ -307,6 +307,12 @@ impl ImageViewerApp {
             ),
         );
         let tag_counts = app_state_db.get_tag_counts();
+        let tag_path_index =
+            crate::app::operations::tag_ops::path_index::TagPathIndex::build(&tag_assignments);
+        let tag_persistence = crate::app::operations::tag_ops::persistence::TagPersistence::new(
+            app_state_db.clone(),
+            ctx.clone(),
+        );
         let subtree_tag_counts =
             crate::domain::tag_tree::compute_subtree_counts(&tag_definitions, &tag_assignments);
         let organizer_rules = app_state_db.get_organizer_rules();
@@ -789,6 +795,7 @@ impl ImageViewerApp {
 
             // FOLDER SIZE CALCULATOR
             folder_size_state: build_folder_size_state(
+                copy_runtime.delete_activity.clone(),
                 folder_size_req_tx,
                 folder_size_res_rx,
                 folder_size_cancel,
@@ -886,6 +893,9 @@ impl ImageViewerApp {
             sidebar_tag_ids,
             tag_assignments,
             tag_assignments_normalized,
+            tag_path_index,
+            tag_persistence,
+            tag_updates: Default::default(),
             tag_assignments_epoch: 0,
             tag_counts,
             subtree_tag_counts,

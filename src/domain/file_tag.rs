@@ -1,19 +1,27 @@
 use eframe::egui::Color32;
-use rustc_hash::FxHashMap;
-use std::path::Path;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::path::{Path, PathBuf};
 
 pub fn normalize_tag_path_key(path: &Path) -> String {
-    normalize_tag_path_text(&path.to_string_lossy()).to_lowercase()
+    let mut normalized = normalize_tag_path_text(&path.to_string_lossy());
+    if normalized.is_ascii() {
+        normalized.make_ascii_lowercase();
+        normalized
+    } else {
+        normalized.to_lowercase()
+    }
 }
 
 pub fn normalize_tag_path_text(path: &str) -> String {
     let mut normalized = path.replace('/', "\\");
-    let lower = normalized.to_ascii_lowercase();
-    if lower.starts_with("\\\\?\\unc\\") {
+    if normalized
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("\\\\?\\unc\\"))
+    {
         normalized = format!("\\\\{}", &normalized[8..]);
-    } else if lower.starts_with("\\\\?\\")
-        || lower.starts_with("\\\\.\\")
-        || lower.starts_with("\\??\\")
+    } else if normalized.starts_with("\\\\?\\")
+        || normalized.starts_with("\\\\.\\")
+        || normalized.starts_with("\\??\\")
     {
         normalized = normalized[4..].to_string();
     }
@@ -60,6 +68,29 @@ pub fn tag_ids_for_path<'a>(
 
 pub fn path_has_tag(assignments: &FxHashMap<String, Vec<i64>>, path: &Path, tag_id: i64) -> bool {
     tag_ids_for_path(assignments, path).is_some_and(|ids| ids.contains(&tag_id))
+}
+
+/// Compute checkbox states once per selection, not once per menu tag.
+pub fn common_tag_ids(
+    assignments: &FxHashMap<String, Vec<i64>>,
+    paths: &[PathBuf],
+) -> FxHashSet<i64> {
+    let Some((first, rest)) = paths.split_first() else {
+        return FxHashSet::default();
+    };
+    let mut common: FxHashSet<_> = tag_ids_for_path(assignments, first)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .collect();
+    for path in rest {
+        if common.is_empty() {
+            break;
+        }
+        let ids = tag_ids_for_path(assignments, path).unwrap_or_default();
+        common.retain(|id| ids.contains(id));
+    }
+    common
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -207,7 +238,46 @@ pub struct FileTag {
 
 #[cfg(test)]
 mod tests {
-    use super::TagColor;
+    use super::*;
+
+    #[test]
+    fn selection_checkboxes_use_the_intersection_and_handle_untagged_items() {
+        let assignments = [
+            (
+                normalize_tag_path_key(Path::new(r"C:\Data\first.txt")),
+                vec![1, 2],
+            ),
+            (
+                normalize_tag_path_key(Path::new(r"C:\Data\second.txt")),
+                vec![1, 3],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let mut paths = vec![
+            PathBuf::from(r"c:\data\FIRST.txt"),
+            PathBuf::from(r"C:\Data\second.txt"),
+        ];
+        assert_eq!(
+            common_tag_ids(&assignments, &paths),
+            [1].into_iter().collect()
+        );
+        paths.push(PathBuf::from(r"C:\Data\untagged.txt"));
+        assert!(common_tag_ids(&assignments, &paths).is_empty());
+        assert!(common_tag_ids(&assignments, &[]).is_empty());
+    }
+
+    #[test]
+    fn normalized_keys_preserve_unicode_and_windows_alias_equivalence() {
+        assert_eq!(
+            normalize_tag_path_key(Path::new(r"\\?\UNC\SERVER\Share\FÓLDER\FILE.TXT")),
+            normalize_tag_path_key(Path::new(r"\\server\share\fólDer\file.txt"))
+        );
+        assert_eq!(
+            normalize_tag_path_key(Path::new(r"\\?\C:\Data\FILE.TXT")),
+            normalize_tag_path_key(Path::new(r"C:/Data/file.txt"))
+        );
+    }
 
     #[test]
     fn tag_color_roundtrips_db_values() {

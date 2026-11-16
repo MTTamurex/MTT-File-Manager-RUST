@@ -3,6 +3,7 @@ use crate::domain::file_tag::{FileTag, TagColor};
 use rusqlite::{params, Connection, OptionalExtension};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
+mod auto_heal;
 
 #[cfg(test)]
 mod color_tests;
@@ -12,10 +13,6 @@ mod hierarchy_tests;
 
 fn normalize_path_text(path: &str) -> String {
     crate::domain::file_tag::normalize_tag_path_text(path)
-}
-
-fn path_match_key(path: &str) -> String {
-    normalize_path_text(path).to_lowercase()
 }
 
 fn storage_path_text(path: &Path) -> Option<String> {
@@ -276,38 +273,38 @@ impl AppStateDb {
 
     /// Load all path -> tag assignments. [READER]
     pub fn get_all_tag_assignments(&self) -> FxHashMap<PathBuf, Vec<i64>> {
-        let mut results: FxHashMap<PathBuf, Vec<i64>> = FxHashMap::default();
-        let db = match self.reader.lock() {
-            Ok(db) => db,
-            Err(e) => {
-                log::error!("[TAGS] Failed to acquire reader lock: {:?}", e);
-                return results;
-            }
-        };
-
-        let mut stmt = match db.prepare(
-            "SELECT file_path, tag_id FROM file_tag_assignments ORDER BY file_path ASC, tag_id ASC",
-        ) {
-            Ok(stmt) => stmt,
-            Err(e) => {
-                log::error!("[TAGS] Failed to prepare assignments SELECT: {:?}", e);
-                return results;
-            }
-        };
-
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }) {
-            for row in rows.flatten() {
-                let (path, tag_id) = row;
-                results
-                    .entry(PathBuf::from(normalize_path_text(&path)))
-                    .or_default()
-                    .push(tag_id);
+        match self.try_get_all_tag_assignments() {
+            Ok(results) => results,
+            Err(_) => {
+                log::warn!("[TAGS] Failed to load assignment snapshot");
+                FxHashMap::default()
             }
         }
+    }
 
-        results
+    /// Recovery must distinguish a failed read from a legitimately empty table.
+    pub(crate) fn try_get_all_tag_assignments(
+        &self,
+    ) -> rusqlite::Result<FxHashMap<PathBuf, Vec<i64>>> {
+        let mut results: FxHashMap<PathBuf, Vec<i64>> = FxHashMap::default();
+        let db = self
+            .reader
+            .lock()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let mut stmt = db.prepare(
+            "SELECT file_path, tag_id FROM file_tag_assignments ORDER BY file_path ASC, tag_id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (path, tag_id) = row?;
+            results
+                .entry(PathBuf::from(normalize_path_text(&path)))
+                .or_default()
+                .push(tag_id);
+        }
+        Ok(results)
     }
 
     /// Load paths assigned to a specific tag, using the `idx_file_tag_assignments_tag`
@@ -629,22 +626,18 @@ impl AppStateDb {
             let tx = db.transaction()?;
             {
                 let mut insert_stmt = tx.prepare(
-                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id)
+                     SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM file_tags WHERE id = ?2)",
                 )?;
                 let mut delete_stmt = tx.prepare(
                     "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
                 )?;
-                let mut update_stmt = tx.prepare(
-                    "UPDATE file_tag_assignments SET file_path = ?1 WHERE file_path = ?2 AND tag_id = ?3",
-                )?;
-
-                for (old_file_path, new_file_path, tag_id) in &remapped_rows {
-                    if path_match_key(old_file_path) == path_match_key(new_file_path) {
-                        update_stmt.execute(params![new_file_path, old_file_path, tag_id])?;
-                    } else {
-                        insert_stmt.execute(params![new_file_path, tag_id])?;
-                        delete_stmt.execute(params![old_file_path, tag_id])?;
-                    }
+                // All sources refer to the pre-move snapshot, including swaps.
+                for (old_file_path, _, tag_id) in &remapped_rows {
+                    delete_stmt.execute(params![old_file_path, tag_id])?;
+                }
+                for (_, new_file_path, tag_id) in &remapped_rows {
+                    insert_stmt.execute(params![new_file_path, tag_id])?;
                 }
             }
             tx.commit()

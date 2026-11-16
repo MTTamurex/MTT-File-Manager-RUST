@@ -33,7 +33,7 @@ impl RemovedItems {
             .iter()
             .filter_map(|path| path.parent().map(Path::to_path_buf))
             .collect();
-        let _ = self.sender.send(FileOperationResult::DeleteCompleted {
+        let _ = self.sender.send(FileOperationResult::DeleteProgress {
             parent_folders: parents.into_iter().collect(),
             deleted_paths,
         });
@@ -57,7 +57,7 @@ mod tests {
             removed.record(&PathBuf::from(format!("source/file-{index}.txt")));
             assert!(removed.paths.len() < 128);
         }
-        let FileOperationResult::DeleteCompleted {
+        let FileOperationResult::DeleteProgress {
             deleted_paths,
             parent_folders,
         } = receiver.try_recv().unwrap()
@@ -68,7 +68,7 @@ mod tests {
         assert_eq!(parent_folders, vec![PathBuf::from("source")]);
         assert!(receiver.try_recv().is_err());
         drop(removed);
-        let FileOperationResult::DeleteCompleted { deleted_paths, .. } =
+        let FileOperationResult::DeleteProgress { deleted_paths, .. } =
             receiver.try_recv().unwrap()
         else {
             panic!("Expected final partial batch");

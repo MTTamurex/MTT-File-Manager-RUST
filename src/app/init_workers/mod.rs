@@ -1,4 +1,5 @@
 mod background_jobs;
+mod batch_size_cancellation;
 pub(crate) mod consistency_probe_worker;
 mod cover_worker;
 mod filesystem_workers;

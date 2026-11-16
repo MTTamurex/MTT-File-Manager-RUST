@@ -371,6 +371,7 @@ fn prepare_folder_size_request(
 
 pub(in crate::app) fn spawn_folder_size_worker(
     ctx: &egui::Context,
+    delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
 ) -> (
     mpsc::Sender<FolderSizeRequest>,
     mpsc::Receiver<FolderSizeMessage>,
@@ -414,6 +415,16 @@ pub(in crate::app) fn spawn_folder_size_worker(
                 folder_size_ctx.request_repaint();
                 continue;
             }
+
+            let Some(_scan) = delete_activity.scan(&folder_path, &folder_size_cancel_worker) else {
+                let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                    folder_path,
+                    request_epoch,
+                    request_id,
+                });
+                folder_size_ctx.request_repaint();
+                continue;
+            };
 
             // NTFS fast path: use the service's indexed subtree total.
             if is_ntfs_volume(&folder_path) {
@@ -602,6 +613,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
 /// invalidates queued requests from previous folders.
 pub(in crate::app) fn spawn_folder_size_batch_worker(
     ctx: &egui::Context,
+    delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
 ) -> (
     mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
     mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
@@ -634,11 +646,35 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 if path.as_os_str().is_empty() {
                     continue;
                 }
+                let Some(_scan) = delete_activity.scan(&path, &cancel_worker) else {
+                    let _ = res_tx.send(BatchSizeResult {
+                        folder_path: path,
+                        summary: None,
+                        complete: true,
+                        cancelled: true,
+                        request_epoch: req_epoch,
+                        request_generation: req_gen,
+                    });
+                    ctx.request_repaint();
+                    continue;
+                };
+                let cancellation_path = path.clone();
+                let mut acknowledge_cancel = super::batch_size_cancellation::BatchSizeCancellation {
+                    acknowledged: false,
+                    sender: &res_tx,
+                    path: &cancellation_path,
+                    cancel: &cancel_worker,
+                    generation: &generation_worker,
+                    request_generation: req_gen,
+                    request_epoch: req_epoch,
+                    ctx: &ctx,
+                };
 
                 // NTFS fast path: use the service index instead of local recursion.
                 if is_ntfs_volume(&path) {
                     match query_ntfs_folder_size_with_retry(&path, &cancel_worker) {
                         Ok((total_size, file_count, folder_count)) => {
+                            acknowledge_cancel.acknowledged = true;
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
                                 summary: Some(FolderContentSummary::complete(
@@ -647,6 +683,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                     folder_count,
                                 )),
                                 complete: true,
+                                cancelled: false,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
                             });
@@ -661,6 +698,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                 match query_cloud_sync_folder_size_with_timeout(&path, &cancel_worker)
                                 {
                                     Ok(result) => {
+                                        acknowledge_cancel.acknowledged = true;
                                         let _ = res_tx.send(BatchSizeResult {
                                             folder_path: path,
                                             summary: Some(FolderContentSummary::complete(
@@ -669,6 +707,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                                 result.folder_count,
                                             )),
                                             complete: true,
+                                            cancelled: false,
                                             request_epoch: req_epoch,
                                             request_generation: req_gen,
                                         });
@@ -693,10 +732,12 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                 path.display(),
                                 error,
                             );
+                            acknowledge_cancel.acknowledged = true;
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
                                 summary: None,
                                 complete: true,
+                                cancelled: false,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
                             });
@@ -746,6 +787,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                 folder_path: path.clone(),
                                 summary: Some(FolderContentSummary::size_only(partial)),
                                 complete: false,
+                                cancelled: false,
                                 request_epoch: req_epoch,
                                 request_generation: req_gen,
                             });
@@ -766,6 +808,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 if !cancel_worker.load(Ordering::Acquire)
                     && req_gen == generation_worker.load(Ordering::Acquire)
                 {
+                    acknowledge_cancel.acknowledged = true;
                     let _ = res_tx.send(BatchSizeResult {
                         folder_path: path,
                         summary: result.map(|result| FolderContentSummary::complete(
@@ -774,6 +817,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             result.folder_count,
                         )),
                         complete: true,
+                        cancelled: false,
                         request_epoch: req_epoch,
                         request_generation: req_gen,
                     });

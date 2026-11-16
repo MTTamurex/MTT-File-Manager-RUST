@@ -799,7 +799,8 @@ impl ImageViewerApp {
         if !self.show_preview_panel
             || self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
-            || self.file_operation_state.file_ops_in_progress > 0
+            || self.file_operation_state.file_ops_in_progress
+                > self.folder_size_state.delete_activity.active_count()
             || self.is_loading_folder
             || self.thumbnail_scroll_is_settling()
         {
@@ -905,11 +906,15 @@ impl ImageViewerApp {
                 .get(message_path)
                 .copied()
                 .unwrap_or(0);
-            if request_epoch < current_epoch {
+            if request_epoch < current_epoch
+                || self.folder_size_state.delete_activity.affects(message_path)
+            {
                 if terminal {
                     self.folder_size_state
                         .finish_request(message_path, request_id);
                     self.folder_size_state.cache.pop(message_path);
+                    self.folder_size_state
+                        .invalidate_calculated_folder_size(message_path);
                     self.folder_size_state
                         .reschedule_panel_revalidation_if_stale(message_path, Instant::now());
                 }

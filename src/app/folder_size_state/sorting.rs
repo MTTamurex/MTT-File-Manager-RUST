@@ -105,6 +105,9 @@ impl FolderSizeState {
 
         let mut requests = Vec::new();
         for path in &self.size_sorting.tracked {
+            if self.delete_activity.affects(path) {
+                continue;
+            }
             if self.size_sorting.sizes.contains_key(path) {
                 continue;
             }

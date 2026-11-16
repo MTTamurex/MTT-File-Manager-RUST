@@ -44,7 +44,12 @@ pub enum FileOperationResult {
     RestoreCompleted {
         parent_folders: Vec<PathBuf>,
     },
-    /// Delete operation completed - parent folders need refresh
+    /// Confirmed partial removals; must not run terminal refresh/cleanup.
+    DeleteProgress {
+        parent_folders: Vec<PathBuf>,
+        deleted_paths: Vec<PathBuf>,
+    },
+    /// Delete operation completed - parent folders need refresh.
     DeleteCompleted {
         parent_folders: Vec<PathBuf>,
         deleted_paths: Vec<PathBuf>,

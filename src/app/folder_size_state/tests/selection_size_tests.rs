@@ -1,6 +1,7 @@
 use super::*;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 
+mod deletion;
 mod review;
 
 fn entry(name: &str, is_dir: bool, size: u64) -> FileEntry {

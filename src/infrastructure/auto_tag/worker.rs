@@ -130,6 +130,10 @@ pub(crate) fn run_auto_tag(
                 }
             }
             Some(AutoTagCommand::Shutdown) => break,
+            Some(AutoTagCommand::ReapplyPaths(paths)) => {
+                super::reapply::apply(&context, &rules, &defs_by_id, paths);
+                ui_ctx.request_repaint();
+            }
             None => {}
         }
 

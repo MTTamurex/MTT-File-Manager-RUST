@@ -84,7 +84,8 @@ impl FolderSizeState {
     ) -> Result<bool, std::sync::mpsc::SendError<BatchSizeRequest>> {
         // All producers share the same bound. Deferred revalidation keeps its
         // first deadline, so continuous notifications cannot postpone retries.
-        if self.batch_loading.contains(&path)
+        if self.delete_activity.affects(&path)
+            || self.batch_loading.contains(&path)
             || self.loading.contains(&path)
             || self.pending_revalidation.contains_key(&path)
             || self.batch_loading.len() >= MAX_IN_FLIGHT_REQUESTS
@@ -119,6 +120,9 @@ impl FolderSizeState {
             return false;
         }
         if !result.complete {
+            if self.delete_activity.affects(&result.folder_path) {
+                return false;
+            }
             if self.batch_loading.contains(&result.folder_path)
                 && !self.loading.contains(&result.folder_path)
                 && self.batch_request_epochs.get(&result.folder_path) == Some(&result.request_epoch)
@@ -142,6 +146,10 @@ impl FolderSizeState {
         self.batch_progress.remove(&result.folder_path);
         self.batch_loading.remove(&result.folder_path);
         self.batch_request_epochs.remove(&result.folder_path);
+        if result.cancelled || self.delete_activity.affects(&result.folder_path) {
+            self.invalidate_calculated_folder_size(&result.folder_path);
+            return false;
+        }
         if result.request_epoch
             < self
                 .batch_invalidation_epoch

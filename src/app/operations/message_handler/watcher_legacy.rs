@@ -91,6 +91,9 @@ impl ImageViewerApp {
         for _ in 0..MAX_EVENTS_PER_TICK {
             match self.fs_event_receiver.try_recv() {
                 Ok(mut event) => {
+                    if self.absorb_engine_remove_event(&mut event) {
+                        continue;
+                    }
                     if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS {
                         if self
                             .deferred_fs_events
@@ -157,6 +160,10 @@ impl ImageViewerApp {
             while processed_events < max_events_individual {
                 match self.fs_event_receiver.try_recv() {
                     Ok(mut event) => {
+                        processed_events += 1;
+                        if self.absorb_engine_remove_event(&mut event) {
+                            continue;
+                        }
                         if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS
                             && self
                                 .deferred_fs_events
@@ -166,7 +173,6 @@ impl ImageViewerApp {
                             event.overflow = true;
                         }
                         self.deferred_fs_events.push_back(event);
-                        processed_events += 1;
                     }
                     Err(_) => break,
                 }

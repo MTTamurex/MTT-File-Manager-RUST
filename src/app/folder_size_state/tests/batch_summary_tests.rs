@@ -9,6 +9,7 @@ fn pending_summary() -> (FolderSizeState, BatchSizeResult) {
         folder_path: path,
         summary: Some(FolderContentSummary::complete(100, 12, 3)),
         complete: true,
+        cancelled: false,
         request_epoch: 0,
         request_generation: 0,
     };

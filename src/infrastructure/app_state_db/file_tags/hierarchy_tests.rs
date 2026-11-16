@@ -153,3 +153,33 @@ fn multi_tag_path_query_deduplicates_paths_shared_by_the_subtree() {
     let limited = db.get_tag_assignment_paths_after_for_tags(&[root, child], None, 1);
     assert_eq!(limited, vec![shared]);
 }
+
+#[test]
+fn batch_moves_use_the_original_snapshot_for_swapped_paths() {
+    let db = AppStateDb::new_in_memory().unwrap();
+    let first = db.create_tag("Tag A", TagColor::Blue, None).unwrap();
+    let second = db.create_tag("Tag B", TagColor::Green, None).unwrap();
+    let a = PathBuf::from(r"C:\Data\first.txt");
+    let b = PathBuf::from(r"C:\Data\second.txt");
+    assert!(db.assign_tags_batch(std::slice::from_ref(&a), &[first]));
+    assert!(db.assign_tags_batch(std::slice::from_ref(&b), &[second]));
+    assert!(db.move_tag_assignments(&[
+        (a.clone(), b.clone(), first),
+        (b.clone(), a.clone(), second),
+    ]));
+    let snapshot = db.try_get_all_tag_assignments().unwrap();
+    assert_eq!(snapshot.get(&a), Some(&vec![second]));
+    assert_eq!(snapshot.get(&b), Some(&vec![first]));
+}
+
+#[test]
+fn failed_recovery_read_is_not_an_empty_assignment_snapshot() {
+    let db = AppStateDb::new_in_memory().unwrap();
+    assert!(db.try_get_all_tag_assignments().unwrap().is_empty());
+    db.writer
+        .lock()
+        .unwrap()
+        .execute("DROP TABLE file_tag_assignments", [])
+        .unwrap();
+    assert!(db.try_get_all_tag_assignments().is_err());
+}

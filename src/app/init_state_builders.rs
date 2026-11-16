@@ -137,6 +137,7 @@ pub(in crate::app) fn build_drive_state(
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn build_folder_size_state(
+    delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
     req_sender: mpsc::Sender<FolderSizeRequest>,
     res_receiver: mpsc::Receiver<FolderSizeMessage>,
     cancel: Arc<AtomicBool>,
@@ -147,6 +148,7 @@ pub(in crate::app) fn build_folder_size_state(
     batch_generation: Arc<AtomicU64>,
 ) -> FolderSizeState {
     FolderSizeState {
+        delete_activity,
         size_sorting: Default::default(),
         selection_size: Default::default(),
         req_sender,
@@ -227,6 +229,8 @@ pub(in crate::app) fn build_file_operation_state(
         idle_warmup_sender,
         file_ops_in_progress: 0,
         batch_rename_progress: None,
+        pinned_cleanup_receiver: None,
+        pinned_cleanup_pending: false,
         pending_clipboard_move: None,
         pending_clipboard_cleanup_sequence: None,
         next_clipboard_move_token: 0,

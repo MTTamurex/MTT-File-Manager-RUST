@@ -96,6 +96,7 @@ fn handle_with_confirmation(
             return true;
         }
     }
+    let _deletion_activity = runtime.delete_activity.begin(&paths);
     let existing: Vec<_> = paths
         .iter()
         .filter(|path| std::fs::symlink_metadata(path).is_ok())

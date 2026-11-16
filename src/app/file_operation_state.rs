@@ -81,6 +81,8 @@ pub struct FileOperationState {
     pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
     pub file_ops_in_progress: usize,
     pub batch_rename_progress: Option<BatchRenameProgress>,
+    pub(crate) pinned_cleanup_receiver: Option<Receiver<Vec<String>>>,
+    pub(crate) pinned_cleanup_pending: bool,
     pub(crate) pending_clipboard_move: Option<PendingClipboardMove>,
     pub(crate) pending_clipboard_cleanup_sequence: Option<u32>,
     pub(crate) next_clipboard_move_token: u64,

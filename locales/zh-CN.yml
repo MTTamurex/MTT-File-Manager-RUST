@@ -200,6 +200,7 @@ sidebar:
   collapse_section: "折叠分区"
   expand_section: "展开分区"
 tags:
+  persistence_failed: "无法保存标签更改。将恢复已保存的状态。"
   browser_search: "搜索标签或文件夹…"
   browser_select: "选择项目以查看或编辑详情。"
   browser_details: "详情"
@@ -360,6 +361,7 @@ file_info:
   subfolders: "子文件夹："
   files: "文件数："
   calculating: "计算中..."
+  size_suspended_deletion: "删除期间暂停计算"
   unavailable: "不可用"
   metadata: "元数据："
   metadata_loading: "加载中..."

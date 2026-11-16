@@ -20,6 +20,7 @@ macro_rules! debug_log {
     }};
 }
 
+mod delete_events;
 mod dual_panel_events;
 mod file_op_events;
 mod file_op_sizes;
@@ -103,6 +104,7 @@ impl ImageViewerApp {
         self.redirect_tabs_from_removed_drives(&removed);
 
         self.process_pending_folder_cover_removals();
+        self.flush_tag_updates();
         self.poll_folder_access();
         self.poll_network_location_wizard();
         self.poll_network_drive_dialog();

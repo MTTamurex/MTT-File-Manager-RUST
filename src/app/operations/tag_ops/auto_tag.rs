@@ -1,10 +1,9 @@
+use super::persistence::TagWrite;
 use super::*;
 use crate::app::state::ImageViewerApp;
-use crate::domain::auto_tag_rule::{matching_rules, remap_rule_folders};
+use crate::domain::auto_tag_rule::remap_rule_folders;
 use crate::domain::tag_tree::tags_to_assign;
-use rustc_hash::FxHashSet;
 use std::path::Path;
-use std::sync::Arc;
 
 impl ImageViewerApp {
     /// Reloads rules from the database and pushes them to the worker. Called
@@ -37,49 +36,45 @@ impl ImageViewerApp {
 
         // Group by resolved ancestor chain so each distinct chain becomes a
         // single batch write.
-        let mut chains: Vec<(Vec<i64>, Vec<PathBuf>)> = Vec::new();
-        let mut changed_tags = FxHashSet::default();
+        let mut chains: FxHashMap<Vec<i64>, Vec<PathBuf>> = FxHashMap::default();
+        let mut resolved = FxHashMap::default();
         for (path, rule_tag) in assignments {
             if !self.tag_definitions.contains_key(rule_tag) {
                 continue; // tag deleted while the event was in flight
             }
-            let chain = tags_to_assign(&self.tag_definitions, *rule_tag);
-            changed_tags.extend(chain.iter().copied());
-            if let Some(group) = chains.iter_mut().find(|(existing, _)| *existing == chain) {
-                group.1.push(path.clone());
-            } else {
-                chains.push((chain, vec![path.clone()]));
+            let chain = resolved
+                .entry(*rule_tag)
+                .or_insert_with(|| tags_to_assign(&self.tag_definitions, *rule_tag));
+            chains.entry(chain.clone()).or_default().push(path.clone());
+        }
+        if chains.is_empty() {
+            return;
+        }
+
+        for (chain, paths) in chains {
+            if !self.queue_tag_write(TagWrite::HealAuto {
+                paths: paths.clone(),
+                rule_tag: chain[0],
+                ids: chain.clone(),
+            }) {
+                continue;
             }
-        }
-        if chains.is_empty() {
-            return;
-        }
-
-        chains.retain(|(chain, paths)| self.app_state_db.assign_tags_batch(paths, chain));
-        if chains.is_empty() {
-            return;
-        }
-
-        let assignments_map = Arc::make_mut(&mut self.tag_assignments);
-        for (chain, paths) in &chains {
+            let mut changes: FxHashMap<String, (PathBuf, Vec<i64>)> = FxHashMap::default();
             for path in paths {
-                let assignment_key = tag_assignment_key_for_path(assignments_map, path)
-                    .cloned()
-                    .unwrap_or_else(|| path.clone());
-                let ids = assignments_map.entry(assignment_key).or_default();
-                for id in chain {
+                let key = normalize_path_text(&path);
+                let (_, ids) = changes.entry(key).or_insert_with(|| {
+                    let path = self.tag_path_index.canonical(&path).unwrap_or(path);
+                    let ids = self.tag_assignments.get(&path).cloned().unwrap_or_default();
+                    (path, ids)
+                });
+                for id in &chain {
                     if !ids.contains(id) {
                         ids.push(*id);
                     }
                 }
             }
+            self.replace_tag_paths(changes.into_values().collect());
         }
-
-        self.recompute_tag_counts_from_assignments();
-        self.sync_tag_assignments_normalized();
-        self.invalidate_cached_tag_views_for_tags(&changed_tags);
-        self.refresh_visible_items_after_tag_change();
-        self.ui_ctx.request_repaint();
     }
 
     /// Re-applies matching rules to the given paths. Called after a copy's
@@ -89,21 +84,8 @@ impl ImageViewerApp {
         if self.auto_tag_rules.is_empty() || paths.is_empty() {
             return;
         }
-        let mut assignments = Vec::new();
-        for path in paths {
-            let Ok(metadata) = path.metadata() else {
-                continue;
-            };
-            let is_dir = metadata.is_dir();
-            for matched in matching_rules(&self.auto_tag_rules, path) {
-                // Rules that exclude subfolders tag files only.
-                if !matched.include_subfolders && is_dir {
-                    continue;
-                }
-                assignments.push((path.clone(), matched.tag_id));
-            }
-        }
-        self.apply_auto_tag_assignments(&assignments);
+        self.tag_updates.reapply_paths.extend(paths.iter().cloned());
+        self.ui_ctx.request_repaint();
     }
 
     /// Follows folder renames/moves so watched folders keep working after the

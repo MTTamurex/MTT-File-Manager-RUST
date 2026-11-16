@@ -11,8 +11,8 @@
 //! To keep render O(1) without losing the casing tolerance needed for
 //! mutations, we maintain `tag_assignments_normalized` — a parallel map keyed
 //! by `normalize_tag_path_key(path)` (lowercased `\`-separated, no trailing
-//! separator). It is rebuilt only when `tag_assignments` mutates, never per
-//! frame.
+//! separator). Ordinary edits update touched keys incrementally; loading or
+//! replacing a complete snapshot rebuilds the mirror and ordered path index.
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_tag::normalize_tag_path_key;
@@ -55,23 +55,23 @@ impl ImageViewerApp {
     /// step. Prefer this over assigning `tag_assignments` directly so the two
     /// maps cannot drift.
     pub(crate) fn set_tag_assignments(&mut self, new: FxHashMap<PathBuf, Vec<i64>>) {
+        self.tag_path_index = super::path_index::TagPathIndex::build(&new);
         let normalized = build_tag_assignments_normalized(&new);
         self.tag_assignments = Arc::new(new);
         self.tag_assignments_normalized = Arc::new(normalized);
         self.mark_tag_assignments_changed();
     }
 
-    /// Rebuilds `tag_assignments_normalized` from the current `tag_assignments`.
-    /// Call this after any in-place mutation of `tag_assignments`
-    /// (`Arc::make_mut` + retain/insert/remove) before the next render frame
-    /// touches the normalized view.
+    /// Rebuild after whole-map changes (for example, deleting a tag definition).
+    /// Normal path edits use `replace_tag_paths` to avoid a global rebuild.
     pub(crate) fn sync_tag_assignments_normalized(&mut self) {
+        self.tag_path_index = super::path_index::TagPathIndex::build(&self.tag_assignments);
         let normalized = build_tag_assignments_normalized(self.tag_assignments.as_ref());
         self.tag_assignments_normalized = Arc::new(normalized);
         self.mark_tag_assignments_changed();
     }
 
-    fn mark_tag_assignments_changed(&mut self) {
+    pub(super) fn mark_tag_assignments_changed(&mut self) {
         self.tag_assignments_epoch = self.tag_assignments_epoch.wrapping_add(1);
         self.global_search
             .invalidate_tag_assignment_dependent_results();

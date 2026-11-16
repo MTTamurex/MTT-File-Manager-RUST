@@ -103,11 +103,13 @@ pub struct FolderSizeRequest {
 /// before a cache invalidation.
 pub struct BatchSizeResult {
     pub folder_path: PathBuf,
-    /// One indexed/scanned snapshot; `None` denotes failure, never an empty folder.
+    /// One indexed/scanned snapshot; `None` denotes failure/cancellation, never an empty folder.
     /// Progress carries size only and must not publish confirmed counts.
     pub summary: Option<FolderContentSummary>,
     /// Partial totals update the display only; they must not finish the request.
     pub complete: bool,
+    /// Cancellation is not a service failure and must allow an immediate retry.
+    pub cancelled: bool,
     /// Invalidation epoch copied from the request — compared against the
     /// current `batch_invalidation_epoch` to detect staleness.
     pub request_epoch: u64,
@@ -118,6 +120,7 @@ pub struct BatchSizeResult {
 pub type BatchSizeRequest = (PathBuf, u64, u64);
 
 pub struct FolderSizeState {
+    pub delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
     pub size_sorting: SizeSortingState,
     pub selection_size: SelectionSizeState,
     pub req_sender: Sender<FolderSizeRequest>,
@@ -174,6 +177,9 @@ impl FolderSizeState {
         request_epoch: u64,
         now: Instant,
     ) -> bool {
+        if self.delete_activity.affects(&folder_path) {
+            return false;
+        }
         if self.active_requests.remove(&folder_path).is_some() {
             self.cancel.store(true, Ordering::Release);
         }

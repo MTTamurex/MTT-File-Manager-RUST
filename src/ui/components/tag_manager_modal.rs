@@ -181,12 +181,7 @@ pub(crate) fn render_tag_details(app: &mut ImageViewerApp, ui: &mut egui::Ui, ta
                 let subtree = tag_tree::subtree_ids(&app.tag_definitions, tag.id);
                 let subtag_count = subtree.len().saturating_sub(1);
                 let confirm_text = if subtag_count > 0 {
-                    let removed: FxHashSet<i64> = subtree.iter().copied().collect();
-                    let affected_items = app
-                        .tag_assignments
-                        .values()
-                        .filter(|ids| ids.iter().any(|id| removed.contains(id)))
-                        .count();
+                    let affected_items = app.subtree_tag_counts.get(&tag.id).copied().unwrap_or(0);
                     RichText::new(
                         t!(
                             "tags.delete_subtree_confirm",

@@ -11,6 +11,7 @@ use std::time::Instant;
 pub struct SelectionSizeSummary {
     pub total_size: u64,
     pub pending_folders: usize,
+    pub suspended_folders: usize,
     pub unavailable_items: usize,
 }
 
@@ -98,6 +99,14 @@ impl FolderSizeState {
                 || item.drive_info.is_some()
             {
                 summary.total_size = summary.total_size.saturating_add(item.size);
+                continue;
+            }
+            if self.delete_activity.affects(&item.path) {
+                summary.suspended_folders += 1;
+                // Retain a last confirmed value for display only, not a new scan.
+                if let Some(size) = self.display_size_cache.peek(&item.path) {
+                    summary.total_size = summary.total_size.saturating_add(size.size);
+                }
                 continue;
             }
             let mut value = self

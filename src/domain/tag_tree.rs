@@ -96,15 +96,17 @@ pub fn compute_subtree_counts(
     assignments: &FxHashMap<PathBuf, Vec<i64>>,
 ) -> FxHashMap<i64, usize> {
     let mut counts: FxHashMap<i64, usize> = FxHashMap::default();
+    let mut chains: FxHashMap<i64, Vec<i64>> = FxHashMap::default();
     for ids in assignments.values() {
         let mut touched: FxHashSet<i64> = FxHashSet::default();
         for id in ids {
             if !defs.contains_key(id) {
                 continue;
             }
-            for ancestor in ancestor_chain(defs, *id) {
-                touched.insert(ancestor);
-            }
+            let chain = chains
+                .entry(*id)
+                .or_insert_with(|| ancestor_chain(defs, *id));
+            touched.extend(chain.iter().copied());
         }
         for id in touched {
             *counts.entry(id).or_insert(0) += 1;

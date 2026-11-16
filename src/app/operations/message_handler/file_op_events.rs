@@ -41,6 +41,10 @@ impl ImageViewerApp {
         current_path_norm: &str,
         ctx: &eframe::egui::Context,
     ) {
+        let _timing = crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new(
+            "file_operation_results",
+        );
+        self.poll_deleted_pinned_folders();
         const MAX_FILE_OP_RESULTS_PER_FRAME: usize = 96;
         let budget = if self.frame_time_peak_ms > 33.33 {
             Duration::from_millis(2)
@@ -125,6 +129,14 @@ impl ImageViewerApp {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm);
                             self.request_global_search_refresh();
                         }
+                        FileOperationResult::DeleteProgress {
+                            parent_folders,
+                            deleted_paths,
+                        } => self.handle_delete_progress(
+                            parent_folders,
+                            deleted_paths,
+                            current_path_norm,
+                        ),
                         FileOperationResult::DeleteCompleted {
                             parent_folders,
                             deleted_paths,
@@ -859,62 +871,6 @@ impl ImageViewerApp {
         }
     }
 
-    fn handle_delete_completed(
-        &mut self,
-        parent_folders: Vec<PathBuf>,
-        deleted_paths: Vec<PathBuf>,
-        current_path_norm: &str,
-    ) {
-        self.invalidate_content_ancestor_sizes(&parent_folders);
-        let current_folder_deleted =
-            self.remove_deleted_paths_from_navigation_history(&deleted_paths);
-
-        // The parent listing is invalidated below, but a previously visited
-        // deleted folder may also have its own cached listing. Drop that exact
-        // entry so a later navigation cannot resurrect its old contents. Do
-        // not take a SQLite writer lock for every deleted file in a batch.
-        self.invalidate_panel_tab_snapshots_for_paths(&deleted_paths);
-        for path in &deleted_paths {
-            if self.is_known_directory_path(path)
-                || Self::normalize_for_match(path) == current_path_norm
-            {
-                self.directory_cache.invalidate_children(path);
-                if let Some(directory_index) = &self.directory_index {
-                    let _ = directory_index.invalidate_recursive(path);
-                }
-                self.miller_columns.invalidate(path);
-            }
-        }
-
-        for path in &deleted_paths {
-            self.cache_manager.texture_cache.pop(path);
-            self.cache_manager.loading_set.remove(path);
-            self.cache_manager.pop_rgba_data(path);
-            self.cache_manager.failed_thumbnails.pop(path);
-            self.multi_selection.remove(path);
-        }
-
-        if let Some(selected) = &self.selected_file {
-            if deleted_paths.contains(&selected.path) {
-                self.selected_item = None;
-                self.selected_file = None;
-            }
-        }
-
-        self.navigate_inactive_panel_after_deleted_paths(&deleted_paths);
-        self.clear_tag_assignments_for_paths(&deleted_paths);
-        self.enqueue_disk_cache_invalidations_forced(deleted_paths);
-        let affected_parent_folders: Vec<&PathBuf> = parent_folders.iter().collect();
-        self.reload_inactive_panel_if_matches(&affected_parent_folders);
-
-        if current_folder_deleted {
-            self.navigate_to_nearest_valid_ancestor();
-            return;
-        }
-
-        self.handle_parent_folder_updates(parent_folders, current_path_norm);
-    }
-
     pub(in crate::app::operations) fn restore_app_focus(&self) {
         use crate::infrastructure::windows::window_subclass::{layout_phase, WindowLayoutPhase};
 
@@ -1181,8 +1137,8 @@ impl ImageViewerApp {
         for (source, dest) in &known_moved_pairs {
             self.remap_visual_caches_for_path(source, dest);
         }
+        self.move_tag_assignments_for_paths(&known_moved_pairs);
         for (source, dest) in &known_moved_pairs {
-            self.move_tag_assignments_for_path(source, dest);
             self.remap_auto_tag_rule_folders(source, dest);
         }
         self.enqueue_thumbnail_cache_renames(&known_moved_pairs);

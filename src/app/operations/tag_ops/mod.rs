@@ -7,7 +7,14 @@ mod auto_tag;
 mod cache;
 mod definitions;
 pub(crate) mod migration;
+mod moves;
 pub(crate) mod normalized;
+pub(crate) mod path_index;
+pub(crate) mod persistence;
+mod refresh_policy;
+mod removal;
+mod updates;
+pub(crate) use updates::TagUpdates;
 pub(crate) mod purge_worker;
 mod sidebar_order;
 mod view;
@@ -30,36 +37,6 @@ pub(crate) enum TagPathUpdate {
 
 fn normalize_path_text(path: &Path) -> String {
     crate::domain::file_tag::normalize_tag_path_key(path)
-}
-
-fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {
-    let candidate = normalize_path_text(candidate);
-    let root = normalize_path_text(root);
-    candidate == root
-        || candidate
-            .strip_prefix(&root)
-            .is_some_and(|suffix| suffix.starts_with('\\'))
-}
-
-fn remap_path(candidate: &Path, old_root: &Path, new_root: &Path) -> PathBuf {
-    if let Ok(suffix) = candidate.strip_prefix(old_root) {
-        return new_root.join(suffix);
-    }
-
-    let candidate = candidate.to_string_lossy();
-    let old_root = old_root.to_string_lossy();
-    let new_root = new_root.to_string_lossy();
-    let old_root = old_root.trim_end_matches(['\\', '/']);
-    if candidate.len() <= old_root.len() {
-        return PathBuf::from(new_root.as_ref());
-    }
-
-    let suffix = &candidate[old_root.len()..];
-    PathBuf::from(format!(
-        "{}{}",
-        new_root.trim_end_matches(['\\', '/']),
-        suffix
-    ))
 }
 
 fn tag_sort_key(tag: &FileTag) -> (i64, String) {
@@ -108,40 +85,6 @@ pub(crate) fn build_sorted_tag_ids(defs: &FxHashMap<i64, FileTag>) -> std::sync:
         out.extend(leftover.iter().map(|tag| tag.id));
     }
     out.into()
-}
-
-fn tag_assignment_path_matches(assigned_path: &Path, path: &Path) -> bool {
-    normalize_path_text(assigned_path) == normalize_path_text(path)
-}
-
-fn tag_assignment_key_for_path<'a>(
-    assignments: &'a FxHashMap<PathBuf, Vec<i64>>,
-    path: &Path,
-) -> Option<&'a PathBuf> {
-    if let Some((key, _)) = assignments.get_key_value(path) {
-        return Some(key);
-    }
-
-    assignments
-        .keys()
-        .find(|assigned_path| tag_assignment_path_matches(assigned_path, path))
-}
-
-fn tag_assignment_key_for_path_with_any<'a>(
-    assignments: &'a FxHashMap<PathBuf, Vec<i64>>,
-    path: &Path,
-    tag_ids: &FxHashSet<i64>,
-) -> Option<&'a PathBuf> {
-    let has_any = |ids: &Vec<i64>| ids.iter().any(|id| tag_ids.contains(id));
-    if let Some((key, ids)) = assignments.get_key_value(path) {
-        if has_any(ids) {
-            return Some(key);
-        }
-    }
-
-    assignments.iter().find_map(|(assigned_path, ids)| {
-        (has_any(ids) && tag_assignment_path_matches(assigned_path, path)).then_some(assigned_path)
-    })
 }
 
 #[cfg(test)]

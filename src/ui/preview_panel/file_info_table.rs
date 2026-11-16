@@ -71,6 +71,7 @@ pub fn render_file_info_table(
     folder_summary: Option<FolderContentSummary>,
     is_folder_size_loading: bool,
     is_folder_size_failed: bool,
+    is_folder_size_suspended: bool,
     is_metadata_loading: bool,
     live_file_size_cache: &mut crate::app::live_file_size::LiveFileSizeCache,
     live_file_size_loading: &mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
@@ -422,7 +423,9 @@ pub fn render_file_info_table(
                         .map(|summary| summary.has_counts())
                         .unwrap_or(false);
                     let size_str = if show_folder_aggregate_details {
-                        if is_folder_size_failed {
+                        if is_folder_size_suspended {
+                            t!("file_info.size_suspended_deletion").to_string()
+                        } else if is_folder_size_failed {
                             t!("file_info.unavailable").to_string()
                         } else if let Some(summary) = folder_summary {
                             let formatted =
@@ -435,6 +438,8 @@ pub fn render_file_info_table(
                         } else {
                             t!("file_info.calculating").to_string()
                         }
+                    } else if is_folder_size_suspended {
+                        t!("file_info.size_suspended_deletion").to_string()
                     } else {
                         let live_size = resolve_live_file_size(
                             ui,
@@ -450,7 +455,9 @@ pub fn render_file_info_table(
                     add_detail(ui, &t!("file_info.size"), size_str);
 
                     if show_folder_aggregate_details {
-                        let subfolders = if is_folder_size_failed {
+                        let subfolders = if is_folder_size_suspended {
+                            "-".to_string()
+                        } else if is_folder_size_failed {
                             t!("file_info.unavailable").to_string()
                         } else {
                             folder_summary
@@ -460,7 +467,9 @@ pub fn render_file_info_table(
                         };
                         add_detail(ui, &t!("file_info.subfolders"), subfolders);
 
-                        let files = if is_folder_size_failed {
+                        let files = if is_folder_size_suspended {
+                            "-".to_string()
+                        } else if is_folder_size_failed {
                             t!("file_info.unavailable").to_string()
                         } else {
                             folder_summary
@@ -475,6 +484,7 @@ pub fn render_file_info_table(
                         && (folder_summary.is_none() || !folder_counts_complete)
                         && !is_folder_size_loading
                         && !is_folder_size_failed
+                        && !is_folder_size_suspended
                     {
                         action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
                     }

@@ -200,6 +200,7 @@ sidebar:
   collapse_section: "Recolher seção"
   expand_section: "Expandir seção"
 tags:
+  persistence_failed: "Não foi possível salvar as alterações de tags. O estado salvo será restaurado."
   browser_search: "Buscar tags ou pastas…"
   browser_select: "Selecione um item para ver ou editar seus detalhes."
   browser_details: "Detalhes"
@@ -360,6 +361,7 @@ file_info:
   subfolders: "Subpastas:"
   files: "Arquivos:"
   calculating: "Calculando..."
+  size_suspended_deletion: "Cálculo suspenso durante a exclusão"
   unavailable: "Indisponível"
   metadata: "Metadados:"
   metadata_loading: "Carregando..."

@@ -61,6 +61,7 @@ impl CopyOperation {
 #[derive(Default)]
 pub struct CopyRuntime {
     pub enabled: AtomicBool,
+    pub delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
     next_id: AtomicU64,
     jobs: Mutex<BTreeMap<u64, Arc<CopyOperation>>>,
 }

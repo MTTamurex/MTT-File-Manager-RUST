@@ -23,10 +23,29 @@ impl ImageViewerApp {
     }
 
     pub(super) fn refresh_visible_items_after_tag_change(&mut self) {
+        self.refresh_tag_views(None);
+    }
+
+    pub(super) fn refresh_visible_items_for_changed_tags(&mut self, changed: &FxHashSet<i64>) {
+        self.refresh_tag_views(Some(changed));
+    }
+
+    fn refresh_tag_views(&mut self, changed: Option<&FxHashSet<i64>>) {
+        let refresh_active = changed.is_none_or(|changed| {
+            super::refresh_policy::needs_refresh(
+                &self.navigation_state.current_path,
+                self.active_tag_filter,
+                self.sort_mode,
+                self.group_mode,
+                changed,
+            )
+        });
         let mut active_reload_started = false;
         // Check if the active panel tag view needs a full reload because a
         // newly tagged file is not in all_items yet.
-        if let Some(tag_id) = tag_id_from_view_path(&self.navigation_state.current_path) {
+        if let Some(tag_id) =
+            tag_id_from_view_path(&self.navigation_state.current_path).filter(|_| refresh_active)
+        {
             self.prune_active_tag_view_items_without_tag(tag_id);
             if super::view_reload::tag_change_requires_reload(
                 self.is_loading_folder,
@@ -37,7 +56,8 @@ impl ImageViewerApp {
             }
         }
 
-        if !active_reload_started
+        if refresh_active
+            && !active_reload_started
             && !super::view_reload::defer_tag_refilter(
                 self.is_loading_folder,
                 self.hold_visible_items_until_load_complete,
@@ -47,7 +67,17 @@ impl ImageViewerApp {
         }
 
         // Re-filter the inactive panel if it's showing a tag view.
-        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref().filter(|panel| {
+            changed.is_none_or(|changed| {
+                super::refresh_policy::needs_refresh(
+                    &panel.path,
+                    panel.active_tag_filter,
+                    panel.sort_mode,
+                    panel.group_mode,
+                    changed,
+                )
+            })
+        }) {
             if let Some(tag_id) = tag_id_from_view_path(&snapshot.path) {
                 let subtree: FxHashSet<i64> =
                     crate::domain::tag_tree::subtree_ids(&self.tag_definitions, tag_id)
@@ -80,6 +110,8 @@ impl ImageViewerApp {
                         self.tag_assignments_normalized.as_ref(),
                     );
                 }
+            } else if changed.is_some() {
+                self.with_inactive_panel(|app| app.filter_items());
             }
         }
 
@@ -230,38 +262,6 @@ impl ImageViewerApp {
         let tag_ids: FxHashSet<i64> = self.tag_definitions.keys().copied().collect();
         self.invalidate_cached_tag_views_for_tags(&tag_ids);
         self.reload_visible_tag_views();
-    }
-
-    pub fn reconcile_garbage_collected_tag_assignments(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
-            return;
-        }
-
-        let changed_tags: FxHashSet<i64> = self
-            .tag_assignments
-            .iter()
-            .filter(|(assigned_path, _)| {
-                paths
-                    .iter()
-                    .any(|path| tag_assignment_path_matches(assigned_path, path))
-            })
-            .flat_map(|(_, ids)| ids.iter().copied())
-            .collect();
-        if changed_tags.is_empty() {
-            return;
-        }
-
-        let assignments = Arc::make_mut(&mut self.tag_assignments);
-        assignments.retain(|assigned_path, _| {
-            !paths
-                .iter()
-                .any(|path| tag_assignment_path_matches(assigned_path, path))
-        });
-        self.recompute_tag_counts_from_assignments();
-        self.invalidate_cached_tag_views_for_tags(&changed_tags);
-        self.sync_tag_assignments_normalized();
-        self.prune_paths_from_loaded_tag_views(paths);
-        self.refresh_visible_items_after_tag_change();
     }
 
     fn retain_tag_view_items(

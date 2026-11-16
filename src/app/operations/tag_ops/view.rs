@@ -299,10 +299,16 @@ impl ImageViewerApp {
         // tab switching, dual-panel removal, and shutdown without coupling the
         // inactive panel to the active panel's generation.
         let gen_tracker = self.folder_load_generation.clone();
+        let tag_writes = self.tag_persistence.barrier();
 
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-load".into())
             .spawn(move || {
+                if !tag_writes
+                    .wait(|| gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen)
+                {
+                    return;
+                }
                 // Keep the first page small so the UI can paint before the
                 // full tag assignment list has been materialized.
                 const FIRST_PAGE_SIZE: i64 = 64;

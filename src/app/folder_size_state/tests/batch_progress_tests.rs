@@ -10,6 +10,7 @@ fn pending_scan() -> (FolderSizeState, BatchSizeResult) {
         folder_path: path,
         summary: Some(FolderContentSummary::size_only(10)),
         complete: false,
+        cancelled: false,
         request_epoch: 0,
         request_generation: 0,
     };

@@ -621,9 +621,6 @@ impl ImageViewerApp {
             return false;
         }
 
-        let norms: std::collections::HashSet<String> =
-            paths.iter().map(|p| Self::normalize_for_match(p)).collect();
-
         for path in paths {
             if self.file_operation_state.pending_deletions.len() < 10_000 {
                 self.file_operation_state
@@ -633,7 +630,13 @@ impl ImageViewerApp {
             self.evict_stale_path_caches(path);
         }
         self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
+        self.remove_deleted_paths_from_listing(paths)
+    }
 
+    /// Memory-only removal for engine batches; persistent cleanup is queued separately.
+    pub(super) fn remove_deleted_paths_from_listing(&mut self, paths: &[PathBuf]) -> bool {
+        let norms: std::collections::HashSet<String> =
+            paths.iter().map(|p| Self::normalize_for_match(p)).collect();
         let had_any = self
             .all_items
             .iter()

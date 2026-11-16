@@ -220,6 +220,7 @@ pub(super) fn render_preview_panel_layout(
                                 folder_summary,
                                 is_folder_size_loading,
                                 is_folder_size_failed,
+                                app.folder_size_state.delete_activity.affects(&file.path),
                                 &mut app.live_file_size_cache,
                                 &mut app.live_file_size_loading,
                                 &app.live_file_size_req_sender,

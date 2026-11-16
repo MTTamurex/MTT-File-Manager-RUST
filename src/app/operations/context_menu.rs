@@ -41,11 +41,13 @@ fn build_tag_menu_entries(
     use crate::application::context_menu::ContextMenuItem;
 
     let children_map = crate::domain::tag_tree::build_children_map(&app.tag_definitions);
+    let common_tags =
+        crate::domain::file_tag::common_tag_ids(&app.tag_assignments_normalized, paths);
     fn build_level(
         app: &ImageViewerApp,
         parent: Option<i64>,
         children_map: &crate::domain::tag_tree::TagChildrenMap,
-        paths: &[PathBuf],
+        common_tags: &rustc_hash::FxHashSet<i64>,
         next_id: &mut i32,
     ) -> Vec<ContextMenuItem> {
         let mut items = Vec::new();
@@ -59,10 +61,10 @@ fn build_tag_menu_entries(
             let entry = ContextMenuItem::new(*next_id, tag.name.clone())
                 .with_command(format!("tag_toggle:{}", tag.id))
                 .with_leading_color(tag.color.to_color32())
-                .checked(app.paths_have_tag(paths, *tag_id));
+                .checked(common_tags.contains(tag_id));
             *next_id -= 1;
 
-            let children = build_level(app, Some(*tag_id), children_map, paths, next_id);
+            let children = build_level(app, Some(*tag_id), children_map, common_tags, next_id);
             if children.is_empty() {
                 items.push(entry);
             } else {
@@ -73,7 +75,7 @@ fn build_tag_menu_entries(
         }
         items
     }
-    build_level(app, None, &children_map, paths, next_id)
+    build_level(app, None, &children_map, &common_tags, next_id)
 }
 
 fn is_open_with_menu_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {

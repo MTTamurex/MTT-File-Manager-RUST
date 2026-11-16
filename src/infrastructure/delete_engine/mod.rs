@@ -1,4 +1,5 @@
 //! Optional deletion backend. No enumeration-only pass precedes deletion.
+pub mod activity;
 pub mod confirmation;
 pub(crate) mod permanent;
 pub(crate) mod recycle;

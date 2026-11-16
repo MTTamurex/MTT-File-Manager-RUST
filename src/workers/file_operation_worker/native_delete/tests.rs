@@ -1,5 +1,6 @@
 use super::*;
 use windows::Win32::Foundation::HWND;
+mod batching;
 
 #[test]
 fn default_engine_leaves_all_deletion_requests_unchanged() {
@@ -87,7 +88,7 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
         |_, _, _| true
     ));
     assert!(!source.exists());
-    let FileOperationResult::DeleteCompleted {
+    let FileOperationResult::DeleteProgress {
         deleted_paths,
         parent_folders,
     } = receiver.try_recv().unwrap()
@@ -98,6 +99,11 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
     assert!(deleted_paths.contains(&source));
     assert!(deleted_paths.contains(&source.join("nested/file.txt")));
     assert!(parent_folders.contains(&temp.path().to_path_buf()));
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        FileOperationResult::DeleteCompleted { .. }
+    ));
+    assert!(!runtime.delete_activity.affects(&source));
     assert_eq!(
         runtime.jobs()[1].1.outcome().unwrap().kind,
         OutcomeKind::Completed
@@ -169,7 +175,7 @@ fn partial_failure_refreshes_parent_without_reporting_remaining_root_deleted() {
     ));
     assert!(!removed.exists());
     assert!(locked.exists());
-    let FileOperationResult::DeleteCompleted {
+    let FileOperationResult::DeleteProgress {
         deleted_paths,
         parent_folders,
     } = receiver.try_recv().unwrap()
@@ -180,6 +186,11 @@ fn partial_failure_refreshes_parent_without_reporting_remaining_root_deleted() {
     assert!(!deleted_paths.contains(&source));
     assert_eq!(parent_folders.len(), 1);
     assert_eq!(parent_folders[0], source);
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        FileOperationResult::DeleteCompleted { .. }
+    ));
+    assert!(!runtime.delete_activity.affects(&source));
     assert_eq!(
         runtime.jobs()[0].1.outcome().unwrap().kind,
         OutcomeKind::Failed
