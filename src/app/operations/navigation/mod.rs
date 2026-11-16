@@ -4,6 +4,7 @@
 
 mod folder_timestamps;
 pub mod keyboard;
+mod listing;
 mod path_normalization;
 pub mod selection;
 
@@ -150,7 +151,7 @@ impl ImageViewerApp {
 
         // Apply folder lock if this folder has locked preferences
         diagnostic_stage.lap("navigation_folder_lock");
-        self.apply_folder_lock_if_present();
+        self.apply_folder_settings_for_navigation();
         self.request_list_column_autofit();
 
         // The app has one watcher owned by the active panel.
@@ -166,9 +167,7 @@ impl ImageViewerApp {
         // like ZIP/RAR which take longer to enumerate via Shell API).
         // Watcher-triggered reloads (same path) don't go through navigate_to()
         // so they still benefit from stale-while-revalidate in load_folder.
-        self.items = std::sync::Arc::new(Vec::new());
-        self.group_projection = std::sync::Arc::new(Default::default());
-        self.all_items_mut().clear();
+        self.clear_listing_for_navigation();
 
         // Cancel pending batch folder-size calculations for the old folder.
         self.folder_size_state.cancel_batch();
@@ -278,7 +277,6 @@ impl ImageViewerApp {
 
                 self.navigation_state.current_path = path.clone();
                 self.loaded_path.clear(); // Clear to allow reload
-                self.sync_to_tab();
                 self.navigation_state.path_input = self.navigation_state.current_path.clone();
                 self.navigation_state.is_computer_view = false;
                 self.navigation_state.is_recycle_bin_view = false;
@@ -287,14 +285,12 @@ impl ImageViewerApp {
                 self.sort_mode = self.sort_mode_normal;
 
                 self.reset_selection_and_search();
-                self.apply_folder_lock_if_present();
+                self.apply_folder_settings_for_navigation();
                 self.request_list_column_autofit();
                 self.watch_current_folder(); // Update the watcher
 
                 // Clear stale items (see navigate_to comment)
-                self.items = std::sync::Arc::new(Vec::new());
-                self.group_projection = std::sync::Arc::new(Default::default());
-                self.all_items_mut().clear();
+                self.clear_listing_for_navigation();
 
                 // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
                 self.sync_to_tab();
@@ -361,7 +357,6 @@ impl ImageViewerApp {
 
                 self.navigation_state.current_path = path.clone();
                 self.loaded_path.clear(); // Clear to allow reload
-                self.sync_to_tab();
                 self.navigation_state.path_input = self.navigation_state.current_path.clone();
                 self.navigation_state.is_computer_view = false;
                 self.navigation_state.is_recycle_bin_view = false;
@@ -370,14 +365,12 @@ impl ImageViewerApp {
                 self.sort_mode = self.sort_mode_normal;
 
                 self.reset_selection_and_search();
-                self.apply_folder_lock_if_present();
+                self.apply_folder_settings_for_navigation();
                 self.request_list_column_autofit();
                 self.watch_current_folder();
 
                 // Clear stale items (see navigate_to comment)
-                self.items = std::sync::Arc::new(Vec::new());
-                self.group_projection = std::sync::Arc::new(Default::default());
-                self.all_items_mut().clear();
+                self.clear_listing_for_navigation();
 
                 // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
                 self.sync_to_tab();

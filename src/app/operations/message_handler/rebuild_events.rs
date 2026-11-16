@@ -186,6 +186,14 @@ impl ImageViewerApp {
             self.items = Arc::new(result.items);
             self.total_items = result.total_items;
             self.group_projection = Arc::new(result.group_projection);
+            // Column values are published by their own worker, not the generic
+            // rebuild worker. Reattach that projection when replacing the rows.
+            if matches!(
+                self.group_mode,
+                crate::domain::file_entry::GroupMode::Column(_)
+            ) {
+                self.rebuild_group_projection();
+            }
             self.hold_visible_items_until_load_complete = false;
 
             // After rebuild: if a pending selection was requested (e.g., after rename),

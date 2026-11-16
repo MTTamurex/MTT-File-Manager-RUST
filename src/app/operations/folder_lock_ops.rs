@@ -112,13 +112,17 @@ impl ImageViewerApp {
     }
 
     fn apply_resolved_folder_lock(&mut self, resolved: &ResolvedFolderLock) {
+        self.apply_resolved_folder_settings(resolved);
+        self.sort_items();
+    }
+
+    fn apply_resolved_folder_settings(&mut self, resolved: &ResolvedFolderLock) {
         self.view_mode = resolved.lock.view_mode;
         self.sort_mode = resolved.lock.sort_mode;
         self.sort_descending = resolved.lock.sort_descending;
         self.folders_position = resolved.lock.folders_position;
         self.group_mode = resolved.lock.group_mode;
         self.group_descending = resolved.lock.group_descending;
-        self.sort_items();
         self.current_folder_locked = true;
     }
 
@@ -127,6 +131,16 @@ impl ImageViewerApp {
     /// If not, restores the "normal" (unlocked) settings so that locked-folder
     /// overrides don't bleed into unlocked folders.
     pub fn apply_folder_lock_if_present(&mut self) {
+        self.apply_folder_lock_settings(true);
+    }
+
+    /// Navigation discards the old listing. Apply destination preferences without
+    /// sorting or grouping that listing; the load/rebuild worker handles new rows.
+    pub(crate) fn apply_folder_settings_for_navigation(&mut self) {
+        self.apply_folder_lock_settings(false);
+    }
+
+    fn apply_folder_lock_settings(&mut self, rebuild_items: bool) {
         let lock_start = std::time::Instant::now();
         let path = self.navigation_state.current_path.clone();
         if !is_lockable_view_path(&path) {
@@ -144,7 +158,7 @@ impl ImageViewerApp {
                 resolved.lock.folders_position,
                 resolved.lock.scope,
             );
-            self.apply_resolved_folder_lock(&resolved);
+            self.apply_resolved_folder_settings(&resolved);
         } else {
             log::debug!(
                 "[FOLDER-LOCK] No lock for {:?} (known locks: {})",
@@ -167,8 +181,11 @@ impl ImageViewerApp {
             self.folders_position = self.folders_position_normal;
             self.group_mode = self.group_mode_normal;
             self.group_descending = self.group_descending_normal;
-            self.sort_items();
             self.current_folder_locked = false;
+        }
+
+        if rebuild_items {
+            self.sort_items();
         }
 
         let lock_ms = lock_start.elapsed().as_millis();

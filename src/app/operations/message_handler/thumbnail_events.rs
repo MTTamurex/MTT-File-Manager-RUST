@@ -101,7 +101,9 @@ impl ImageViewerApp {
                             self.pending_items_rebuild = true;
                             self.all_items_mut().extend(new_batch);
                             if rebuild_first_tag_batch_now {
-                                self.filter_items();
+                                // Submit immediately for first paint, but keep sorting
+                                // and grouping off the UI thread even for small tags.
+                                self.spawn_items_rebuild_job();
                                 self.clear_pending_items_rebuild_flags();
                                 self.last_items_rebuild = Instant::now();
                                 ctx.request_repaint();

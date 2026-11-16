@@ -163,45 +163,7 @@ impl ImageViewerApp {
         self.hydrate_current_folder_timestamp_hints_after_load();
     }
 
-    fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {
-        let active_tag_filter = if self.navigation_state.is_computer_view
-            || self.navigation_state.is_recycle_bin_view
-            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
-        {
-            None
-        } else {
-            self.active_tag_filter_ids()
-        };
-        let result_items = match sorting::filter_items_opt_with_tags(
-            &self.all_items,
-            &self.search_query,
-            active_tag_filter.as_deref(),
-            self.tag_assignments_normalized.as_ref(),
-        ) {
-            Some(mut filtered) => {
-                sorting::sort_items(
-                    &mut filtered,
-                    self.sort_mode,
-                    self.sort_descending,
-                    self.folders_position,
-                );
-                filtered
-            }
-            None => {
-                let mut all = self.all_items.as_ref().clone();
-                sorting::sort_items(
-                    &mut all,
-                    self.sort_mode,
-                    self.sort_descending,
-                    self.folders_position,
-                );
-                all
-            }
-        };
-        result_items
-    }
-
-    fn spawn_items_rebuild_job(&mut self) {
+    pub(super) fn spawn_items_rebuild_job(&mut self) {
         if self.items_rebuild_in_flight {
             return;
         }
@@ -468,27 +430,10 @@ impl ImageViewerApp {
         self.reconcile_stale_visual_caches();
         self.sync_selected_file_from_all_items();
 
-        if self.all_items.len() <= INLINE_REBUILD_THRESHOLD {
-            let result_items = self.build_sorted_items_snapshot();
-            self.items = Arc::new(result_items);
-            self.total_items = self.items.len();
-            self.rebuild_group_projection();
-            self.hold_visible_items_until_load_complete = false;
-
-            if let Some(target_path) = self.pending_select_path.take() {
-                let _ = self.select_item_by_path(&target_path);
-            } else {
-                self.reconcile_visible_selection_index();
-            }
-
-            log::debug!(
-                "[PERF] Inline items rebuild (end-of-load): {} items",
-                self.total_items
-            );
-        } else {
-            self.spawn_items_rebuild_job();
-            self.hold_visible_items_until_load_complete = false;
-        }
+        // Small listings can still have expensive grouping. Use the same worker
+        // and generation/signature checks as streaming rebuilds at every size.
+        self.spawn_items_rebuild_job();
+        self.hold_visible_items_until_load_complete = false;
 
         self.pending_post_load_visual_work = !enqueue_visual_work;
         if enqueue_visual_work {

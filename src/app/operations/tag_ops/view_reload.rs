@@ -1,5 +1,4 @@
 use crate::app::state::ImageViewerApp;
-use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -55,12 +54,10 @@ impl ImageViewerApp {
                 self.suppress_next_folder_preview_invalidation.clear();
             }
             self.reset_selection_and_search();
-            self.apply_folder_lock_if_present();
+            self.apply_folder_settings_for_navigation();
         }
         if !policy.preserve_listing {
-            self.items = Arc::new(Vec::new());
-            self.group_projection = Arc::new(Default::default());
-            self.all_items_mut().clear();
+            self.clear_listing_for_navigation();
             self.total_items = 0;
             self.stale_items_snapshot = None;
         }
