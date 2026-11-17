@@ -16,6 +16,24 @@ struct State {
 pub(super) struct Completion(Mutex<State>);
 
 impl Completion {
+    pub(super) fn confirmed_selected_paths(
+        &self,
+        selected: &[PathBuf],
+        key: impl Fn(&Path) -> String,
+    ) -> HashSet<String> {
+        let selected: HashSet<_> = selected.iter().map(|path| key(path)).collect();
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .confirmed
+            .iter()
+            .filter_map(|path| {
+                let path_key = key(path);
+                selected.contains(&path_key).then_some(path_key)
+            })
+            .collect()
+    }
+
     pub(super) fn begin(&self, key: Option<usize>, path: Option<PathBuf>) {
         if let (Some(key), Some(path)) = (key, path) {
             self.0

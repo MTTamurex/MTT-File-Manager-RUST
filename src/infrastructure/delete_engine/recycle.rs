@@ -4,12 +4,15 @@
 use crate::infrastructure::copy_engine::CopyOperation;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use windows::core::{implement, Interface, Ref, Result, HRESULT, PCWSTR};
 use windows::Win32::Foundation::{ERROR_CANCELLED, E_ABORT, HWND};
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
 use windows::Win32::UI::Shell::*;
+mod batch;
+pub(crate) use batch::BatchOutcome;
+use batch::BatchTracking;
 mod completion;
 
 pub(crate) fn flags() -> FILEOPERATION_FLAGS {
@@ -25,13 +28,6 @@ pub(crate) fn flags() -> FILEOPERATION_FLAGS {
         | FOFX_SHOWELEVATIONPROMPT
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Status {
-    Completed,
-    Unavailable,
-    Cancelled,
-}
-
 fn is_cancellation(result: HRESULT) -> bool {
     result == E_ABORT
         || result == COPYENGINE_E_USER_CANCELLED
@@ -44,17 +40,17 @@ pub(crate) fn delete(
     hwnd: HWND,
     operation: Arc<CopyOperation>,
     removed: super::RemovalObserver,
-) -> Result<Status> {
+) -> Result<BatchOutcome> {
     unsafe {
         let shell: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_INPROC_SERVER)?;
         shell.SetOwnerWindow(hwnd)?;
         shell.SetOperationFlags(flags())?;
-        let unavailable = Arc::new(AtomicBool::new(false));
+        let tracking = Arc::new(BatchTracking::new(paths));
         let completed = Arc::new(completion::Completion::default());
         let sink: IFileOperationProgressSink = Sink {
             operation: operation.clone(),
             removed: removed.clone(),
-            unavailable: unavailable.clone(),
+            tracking: tracking.clone(),
             completed: completed.clone(),
         }
         .into();
@@ -69,24 +65,23 @@ pub(crate) fn delete(
         let result = shell.PerformOperations();
         completed.flush(operation.deletion.as_ref().unwrap(), &removed);
         let aborted = shell.GetAnyOperationsAborted();
-        if unavailable.load(Ordering::Relaxed)
-            || result
-                .as_ref()
-                .is_err_and(|error| is_unavailable(error.code()))
-        {
-            return Ok(Status::Unavailable);
-        }
-        if let Err(error) = &result {
-            if is_cancellation(error.code()) {
-                operation.progress.cancel();
-            }
-        }
-        result?;
-        Ok(if aborted?.as_bool() || operation.progress.is_cancelled() {
-            Status::Cancelled
-        } else {
-            Status::Completed
-        })
+        let confirmed = completed.confirmed_selected_paths(paths, batch::path_key);
+        let unavailable_error = result
+            .as_ref()
+            .is_err_and(|error| is_unavailable(error.code()));
+        let unavailable_seen =
+            tracking.unavailable_seen.load(Ordering::Relaxed) || unavailable_error;
+        let operation_cancelled = operation.progress.is_cancelled()
+            || (!tracking.stopped.load(Ordering::Relaxed)
+                && result
+                    .as_ref()
+                    .is_err_and(|error| is_cancellation(error.code())));
+        let shell_aborted = aborted.as_ref().is_ok_and(|value| value.as_bool());
+        let cancelled = operation_cancelled
+            || (shell_aborted && !unavailable_seen && !tracking.stopped.load(Ordering::Relaxed));
+        let fatal =
+            aborted.is_err() || (result.is_err() && !unavailable_seen && !operation_cancelled);
+        Ok(tracking.classify(paths, &confirmed, cancelled, fatal, unavailable_error))
     }
 }
 
@@ -94,7 +89,7 @@ pub(crate) fn delete(
 struct Sink {
     operation: Arc<CopyOperation>,
     removed: super::RemovalObserver,
-    unavailable: Arc<AtomicBool>,
+    tracking: Arc<BatchTracking>,
     completed: Arc<completion::Completion>,
 }
 
@@ -120,7 +115,7 @@ fn is_unavailable(result: HRESULT) -> bool {
 
 impl Sink {
     fn check(&self) -> Result<()> {
-        if self.operation.progress.is_cancelled() || self.unavailable.load(Ordering::Relaxed) {
+        if self.operation.progress.is_cancelled() || self.tracking.stopped.load(Ordering::Relaxed) {
             Err(E_ABORT.into())
         } else {
             Ok(())
@@ -135,23 +130,26 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
     }
     fn FinishOperations(&self, hrresult: HRESULT) -> Result<()> {
         if is_unavailable(hrresult) {
-            self.unavailable.store(true, Ordering::Relaxed);
+            self.tracking.unavailable(None);
         }
-        if is_cancellation(hrresult) && !self.unavailable.load(Ordering::Relaxed) {
+        if is_cancellation(hrresult) && !self.tracking.stopped.load(Ordering::Relaxed) {
             self.operation.progress.cancel();
         }
         Ok(())
     }
     fn PreDeleteItem(&self, dwflags: u32, psiitem: Ref<IShellItem>) -> Result<()> {
         self.check()?;
+        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
+        let path = item_path(psiitem);
         // The recycle flag is supplied by Shell for this specific item, not
         // inferred from drive type, free space, or a stale preflight probe.
         if dwflags & TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32 == 0 {
-            self.unavailable.store(true, Ordering::Relaxed);
+            self.tracking.unavailable(path.as_deref());
             return Err(E_ABORT.into());
         }
-        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
-        let path = item_path(psiitem);
+        if !self.tracking.attempted(path.as_deref()) {
+            return Err(E_ABORT.into());
+        }
         self.completed.begin(key, path.clone());
         self.operation
             .deletion
@@ -168,23 +166,25 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
         psinewlycreated: Ref<IShellItem>,
     ) -> Result<()> {
         let progress = self.operation.deletion.as_ref().unwrap();
+        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
+        let path = item_path(psiitem);
         if is_unavailable(hrdelete) {
-            self.unavailable.store(true, Ordering::Relaxed);
+            self.tracking.unavailable(path.as_deref());
         }
         if is_cancellation(hrdelete) {
-            if !self.unavailable.load(Ordering::Relaxed) {
+            if !self.tracking.stopped.load(Ordering::Relaxed) {
                 self.operation.progress.cancel();
             }
         } else if hrdelete.is_err()
             && !self.operation.progress.is_cancelled()
-            && !self.unavailable.load(Ordering::Relaxed)
+            && !self.tracking.stopped.load(Ordering::Relaxed)
         {
             progress.failed();
+            self.tracking.failed(path.as_deref());
         }
-        let key = psiitem.as_ref().map(|item| item.as_raw() as usize);
         self.completed.record(
             key,
-            item_path(psiitem),
+            path,
             hrdelete,
             psinewlycreated.as_ref().is_some(),
             progress,
@@ -309,7 +309,7 @@ mod tests {
         let sink: IFileOperationProgressSink = Sink {
             operation: job.operation.clone(),
             removed: Arc::new(|_| {}),
-            unavailable: Arc::new(AtomicBool::new(false)),
+            tracking: Arc::new(BatchTracking::new(&[PathBuf::from("source/file.txt")])),
             completed: Default::default(),
         }
         .into();
@@ -343,19 +343,16 @@ mod tests {
         use crate::infrastructure::copy_engine::CopyRuntime;
         let runtime = CopyRuntime::default();
         let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], false);
-        let unavailable = Arc::new(AtomicBool::new(false));
+        let tracking = Arc::new(BatchTracking::new(&[PathBuf::from("source/file.txt")]));
         let sink: IFileOperationProgressSink = Sink {
             operation: job.operation.clone(),
             removed: Arc::new(|_| {}),
-            unavailable: unavailable.clone(),
+            tracking: tracking.clone(),
             completed: Default::default(),
         }
         .into();
-        assert!(
-            unsafe { sink.PreDeleteItem(TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32, None) }.is_ok()
-        );
         assert!(unsafe { sink.PreDeleteItem(0, None) }.is_err());
-        assert!(unavailable.load(Ordering::Relaxed));
+        assert!(tracking.stopped.load(Ordering::Relaxed));
         let _ = unsafe { sink.PostDeleteItem(0, None, E_ABORT, None) };
         unsafe { sink.FinishOperations(E_ABORT) }.unwrap();
         assert!(!job.operation.progress.is_cancelled());

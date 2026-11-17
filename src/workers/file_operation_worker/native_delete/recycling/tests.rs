@@ -19,7 +19,13 @@ fn unavailable_recycling_never_deletes_without_a_separate_permanent_answer() {
                 assert!(path.exists());
                 allow
             },
-            |_, _, _| Ok(recycle::Status::Unavailable),
+            |paths, _, _| {
+                assert_eq!(paths, std::slice::from_ref(&path));
+                Ok(recycle::BatchOutcome {
+                    unavailable: vec![path.clone()],
+                    ..Default::default()
+                })
+            },
         );
         assert_eq!(completed, allow);
         assert_eq!(path.exists(), !allow);
@@ -37,7 +43,7 @@ fn unavailable_recycling_never_deletes_without_a_separate_permanent_answer() {
 }
 
 #[test]
-fn fallback_only_applies_to_the_blocked_root_and_cancel_stops_later_roots() {
+fn fallback_is_limited_to_the_unavailable_root_and_declining_preserves_pending_items() {
     let temp = tempfile::tempdir().unwrap();
     let paths: Vec<_> = (0..3)
         .map(|index| temp.path().join(format!("file-{index}.txt")))
@@ -56,14 +62,14 @@ fn fallback_only_applies_to_the_blocked_root_and_cancel_stops_later_roots() {
             assert_eq!(pending, &paths[1..2]);
             false
         },
-        |path, _, _| {
-            if path == &paths[0] {
-                std::fs::remove_file(path).unwrap();
-                Ok(recycle::Status::Completed)
-            } else {
-                assert_eq!(path, &paths[1]);
-                Ok(recycle::Status::Unavailable)
-            }
+        |batch, _, _| {
+            assert_eq!(batch, paths.as_slice());
+            std::fs::remove_file(&paths[0]).unwrap();
+            Ok(recycle::BatchOutcome {
+                unavailable: vec![paths[1].clone()],
+                pending: vec![paths[2].clone()],
+                ..Default::default()
+            })
         },
     );
     assert!(!completed);
@@ -74,9 +80,10 @@ fn fallback_only_applies_to_the_blocked_root_and_cancel_stops_later_roots() {
 }
 
 #[test]
-fn apply_all_still_tries_recycling_and_cancel_preserves_remaining_synthetic_files() {
+fn accepted_fallback_processes_pending_batch_and_cancellation_stops_remaining_items() {
     use crate::infrastructure::delete_engine::confirmation::{ask, tests::wait_for_request};
-    for cancel_after_first in [false, true] {
+
+    for cancel_after_first_recycle in [false, true] {
         let temp = tempfile::tempdir().unwrap();
         let paths: Vec<_> = (0..3)
             .map(|index| temp.path().join(format!("file-{index}.txt")))
@@ -90,8 +97,9 @@ fn apply_all_still_tries_recycling_and_cancel_preserves_remaining_synthetic_file
         let job = runtime.start_delete(paths.clone(), false);
         let operation = job.operation.clone();
         let control = operation.clone();
-        let observer: RemovalObserver = Arc::new(move |_| {
-            if cancel_after_first {
+        let cancellation_trigger = paths[1].clone();
+        let observer: RemovalObserver = Arc::new(move |removed_path| {
+            if cancel_after_first_recycle && removed_path == cancellation_trigger {
                 control.progress.cancel();
             }
         });
@@ -99,24 +107,56 @@ fn apply_all_still_tries_recycling_and_cancel_preserves_remaining_synthetic_file
         let worker_paths = paths.clone();
         let worker_recycled = recycled.clone();
         let worker = std::thread::spawn(move || {
+            let mut first_call = true;
             let completed = run_with_recycler(
                 &worker_paths,
                 &operation,
-                observer,
+                observer.clone(),
                 &ask,
-                |path, operation, observer| {
-                    if path == &worker_paths[1] {
-                        std::fs::rename(path, worker_recycled.join("file-1.txt")).unwrap();
+                |batch, operation, observer| {
+                    if first_call {
+                        first_call = false;
+                        return Ok(recycle::BatchOutcome {
+                            unavailable: vec![worker_paths[0].clone()],
+                            pending: worker_paths[1..].to_vec(),
+                            ..Default::default()
+                        });
+                    }
+                    assert!(
+                        !operation
+                            .deletion
+                            .as_ref()
+                            .unwrap()
+                            .permanent_phase
+                            .load(Ordering::Relaxed),
+                        "recycling must not inherit the permanent-fallback UI phase"
+                    );
+
+                    let mut pending = Vec::new();
+                    for (index, path) in batch.iter().enumerate() {
+                        if operation.progress.is_cancelled() {
+                            pending.extend(batch[index..].iter().cloned());
+                            break;
+                        }
+                        std::fs::rename(path, worker_recycled.join(path.file_name().unwrap()))
+                            .unwrap();
                         operation.deletion.as_ref().unwrap().recycled();
                         observer(path);
-                        Ok(recycle::Status::Completed)
-                    } else {
-                        Ok(recycle::Status::Unavailable)
+                        if operation.progress.is_cancelled() {
+                            pending.extend(batch[index + 1..].iter().cloned());
+                            break;
+                        }
                     }
+                    Ok(recycle::BatchOutcome {
+                        pending,
+                        cancelled: operation.progress.is_cancelled(),
+                        ..Default::default()
+                    })
                 },
             );
             let _ = sender.send(completed);
         });
+
         let request = wait_for_request(&job.operation);
         assert_eq!(request.paths, paths[..1]);
         assert!(job
@@ -131,11 +171,52 @@ fn apply_all_still_tries_recycling_and_cancel_preserves_remaining_synthetic_file
             job.operation.progress.cancel();
         }
         worker.join().unwrap();
-        assert_eq!(completed, Ok(!cancel_after_first));
-        assert!(!paths[0].exists());
-        assert_eq!(paths[1].exists(), cancel_after_first);
-        assert_eq!(paths[2].exists(), cancel_after_first);
-        assert_eq!(recycled.join("file-1.txt").exists(), !cancel_after_first);
+
+        assert_eq!(completed, Ok(!cancel_after_first_recycle));
+        assert!(!paths[0].exists(), "the confirmed fallback root is removed");
+        assert!(
+            !paths[1].exists(),
+            "the first pending item was recycled (cancel={cancel_after_first_recycle})"
+        );
+        assert_eq!(
+            paths[2].exists(),
+            cancel_after_first_recycle,
+            "cancellation preserves items not yet processed"
+        );
+        assert!(
+            recycled.join(paths[1].file_name().unwrap()).exists(),
+            "the successfully recycled item is retained in the test bin"
+        );
+        assert_eq!(
+            recycled.join(paths[2].file_name().unwrap()).exists(),
+            !cancel_after_first_recycle
+        );
         temp.close().unwrap();
     }
+}
+
+#[test]
+fn large_selections_are_submitted_in_bounded_batches() {
+    let paths: Vec<_> = (0..(RECYCLE_BATCH_SIZE * 2 + 1))
+        .map(|index| PathBuf::from(format!("synthetic/file-{index}.txt")))
+        .collect();
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(paths.clone(), false);
+    let batch_sizes = std::sync::Mutex::new(Vec::new());
+    let completed = run_with_recycler(
+        &paths,
+        &job.operation,
+        Arc::new(|_| {}),
+        &|_, _, _| true,
+        |batch, _, _| {
+            batch_sizes.lock().unwrap().push(batch.len());
+            Ok(recycle::BatchOutcome::default())
+        },
+    );
+
+    assert!(completed);
+    assert_eq!(
+        *batch_sizes.lock().unwrap(),
+        [RECYCLE_BATCH_SIZE, RECYCLE_BATCH_SIZE, 1]
+    );
 }
