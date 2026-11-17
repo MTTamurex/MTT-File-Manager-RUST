@@ -1277,6 +1277,32 @@ mod tests {
     }
 
     #[test]
+    fn resizing_caches_after_promoting_visible_entries_preserves_visible_thumbnails() {
+        let context = egui::Context::default();
+        let mut cache = CacheManager::new();
+        cache.retune_texture_cache_capacity(64);
+
+        for index in 0..64 {
+            let path = PathBuf::from(format!("cache-{index}.png"));
+            let texture = context.load_texture(
+                format!("cache-{index}"),
+                egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            );
+            cache.put_thumbnail(path, texture);
+        }
+
+        let visible_paths = [PathBuf::from("cache-0.png"), PathBuf::from("cache-1.png")]
+            .into_iter()
+            .collect::<FxHashSet<_>>();
+        cache.promote_visible(&visible_paths);
+        cache.retune_texture_cache_capacity(48);
+
+        assert!(visible_paths.iter().all(|path| cache.has_thumbnail(path)));
+        assert_eq!(cache.texture_cache.len(), 48);
+    }
+
+    #[test]
     fn test_vram_estimation() {
         let cache = CacheManager::new();
         let usage = cache.estimate_vram_usage();

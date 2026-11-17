@@ -15,6 +15,7 @@ use crate::workers::thumbnail::processing::get_bucket_size;
 
 use super::ImageViewerApp;
 
+pub(super) mod file_operation_memory;
 pub(super) mod startup_memory_trim;
 
 const BASE_PENDING_THUMBNAILS: usize = 64;
@@ -676,11 +677,20 @@ impl ImageViewerApp {
 
         let visible_items = self.visible_grid_items_for_cache();
         let target = dynamic_texture_keep_count(visible_items);
-        if self.uses_aggressive_gpu_memory_policy() {
+        let target = if self.uses_aggressive_gpu_memory_policy() {
             let cap = LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
                 .max(visible_items)
                 .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
             target.min(cap).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS)
+        } else {
+            target
+        };
+        if self.file_operations_active_for_background() {
+            file_operation_memory::cache_target(
+                target,
+                visible_items,
+                MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+            )
         } else {
             target
         }
@@ -699,11 +709,20 @@ impl ImageViewerApp {
         } else {
             dynamic_folder_preview_keep_count(visible_items, self.current_directory_folder_count())
         };
-        if self.uses_aggressive_gpu_memory_policy() {
+        let target = if self.uses_aggressive_gpu_memory_policy() {
             let cap = LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS
                 .max(visible_items)
                 .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS);
             target.min(cap).max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+        } else {
+            target
+        };
+        if self.file_operations_active_for_background() {
+            file_operation_memory::cache_target(
+                target,
+                visible_items,
+                MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+            )
         } else {
             target
         }
@@ -729,8 +748,13 @@ impl ImageViewerApp {
         };
         let budget = self.current_dynamic_rgba_budget_bytes(floor_bytes);
 
-        if self.uses_aggressive_gpu_memory_policy() && self.thumbnail_caches_active() {
+        let budget = if self.uses_aggressive_gpu_memory_policy() && self.thumbnail_caches_active() {
             budget.clamp(MIN_RGBA_BUDGET_BYTES, LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES)
+        } else {
+            budget
+        };
+        if self.file_operations_active_for_background() {
+            file_operation_memory::rgba_budget(budget)
         } else {
             budget
         }
@@ -749,10 +773,15 @@ impl ImageViewerApp {
                 .max(MIN_RGBA_BUDGET_BYTES);
         }
 
-        if self.uses_aggressive_gpu_memory_policy() {
+        let budget = if self.uses_aggressive_gpu_memory_policy() {
             LOW_RAM_GPU_MAX_PENDING_THUMBNAIL_RGBA_BYTES
         } else {
             MAX_PENDING_THUMBNAIL_RGBA_BYTES
+        };
+        if self.file_operations_active_for_background() {
+            file_operation_memory::rgba_budget(budget)
+        } else {
+            budget
         }
     }
 
@@ -837,6 +866,7 @@ impl ImageViewerApp {
         let rgba_bytes = self.cache_manager.estimate_ram_cache_usage();
         let vram_estimate = self.cache_manager.estimate_vram_usage();
         let visible_grid_items = self.visible_grid_items_for_cache();
+        let file_operations = self.file_operation_state.file_ops_in_progress;
         let texture_target = self.current_dynamic_texture_keep_count();
         let folder_preview_target = self.current_dynamic_folder_preview_keep_count();
         let rgba_target = self.current_thumbnail_rgba_budget_bytes();
@@ -870,13 +900,14 @@ impl ImageViewerApp {
         let thumbnail_trace = self.cache_manager.thumbnail_trace.take_snapshot();
 
         log::info!(
-            "[MEM-TRACE:{label}] backend={} ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={}/{} pending_rgba={:.1}/{:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms request_epochs={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
+            "[MEM-TRACE:{label}] backend={} ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} file_ops={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={}/{} pending_rgba={:.1}/{:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms request_epochs={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
             self.active_gpu_backend.as_str(),
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
             self.items.len(),
             self.all_items.len(),
             self.tab_manager.count(),
+            file_operations,
             directory_cache_folders,
             directory_cache_items,
             visible_grid_items,
@@ -1970,39 +2001,98 @@ impl ImageViewerApp {
         // so memory is released promptly after navigation.
         let scroll_is_settling = self.thumbnail_scroll_is_settling();
         if !self.is_in_restore_burst() && thumbnails_active && !scroll_is_settling {
-            let texture_keep = self.current_dynamic_texture_keep_count();
-            let texture_count = self.cache_manager.texture_cache.len();
-            // Trim when cache holds more than ~1.5× what the current view
-            // needs.  After navigation, cap is reset to the minimum and grows
-            // via retune; during normal scrolling it overshoots by ~1.5× for
-            // scroll-ahead.  Trimming back to 1.25× releases excess without
-            // causing visible flashing.
-            let excess_threshold =
-                (texture_keep + (texture_keep / 2)).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
-            if texture_count > excess_threshold {
-                let target = texture_keep
-                    .saturating_add(texture_keep / 4)
-                    .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
-                let mut visible_for_proactive = self.visible_grid_paths_snapshot();
+            if self.file_operations_active_for_background() {
+                // Keep the transfer independent of UI cache reclamation: this
+                // only trims app-owned caches, promoting visible textures and
+                // previews first. The process working-set trim remains blocked.
+                let visible_items = self.visible_grid_items_for_cache();
+                let mut texture_target = self.current_dynamic_texture_keep_count();
+                let mut folder_target = self.current_dynamic_folder_preview_keep_count();
+                let rgba_budget = self.current_thumbnail_rgba_budget_bytes();
+                let mut visible_paths = self.visible_grid_paths_snapshot();
                 if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim()
                 {
-                    visible_for_proactive
+                    visible_paths
                         .get_or_insert_with(FxHashSet::default)
                         .extend(detail_panel_paths);
                 }
-                self.cache_manager.trim_thumbnail_caches(
-                    target,
-                    self.current_thumbnail_rgba_budget_bytes(),
-                    self.current_dynamic_folder_preview_keep_count(),
-                    visible_for_proactive.as_ref(),
+                let visible_path_count = visible_paths.as_ref().map_or(0, FxHashSet::len);
+                texture_target = texture_target
+                    .max(visible_path_count)
+                    .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
+                folder_target = folder_target
+                    .max(visible_path_count)
+                    .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS);
+                let pending_before_count = self.pending_thumbnails.len();
+                let pending_before_bytes = self.pending_thumbnail_rgba_bytes();
+                let pending_after_bytes = self.trim_pending_thumbnail_uploads_to_limit(
+                    pending_before_bytes,
+                    visible_paths.as_ref(),
                 );
-                log::debug!(
-                    "[MEMORY] proactive trim: textures={}/{} target={} visible_keep={}",
-                    texture_count,
-                    self.cache_manager.texture_cache.cap().get(),
-                    target,
-                    texture_keep,
-                );
+                let pending_removed_count =
+                    pending_before_count.saturating_sub(self.pending_thumbnails.len());
+                if pending_removed_count > 0 {
+                    log::debug!(
+                        "[MEMORY] file-operation pending trim removed={} bytes_released={}",
+                        pending_removed_count,
+                        pending_before_bytes.saturating_sub(pending_after_bytes),
+                    );
+                }
+                if let Some(trim) = file_operation_memory::trim_active_caches(
+                    &mut self.cache_manager,
+                    &mut self.item_icon_loader,
+                    visible_paths.as_ref(),
+                    texture_target,
+                    folder_target,
+                    rgba_budget,
+                ) {
+                    log::debug!(
+                        "[MEMORY] file-operation cache trim visible_items={} textures_removed={} folder_previews_removed={} rgba_before={:.1}MB rgba_target={:.1}MB icons_removed={} extension_icons_removed={}",
+                        visible_items,
+                        trim.textures_removed,
+                        trim.folder_previews_removed,
+                        bytes_to_mb(trim.rgba_bytes_before as u64),
+                        bytes_to_mb(rgba_budget as u64),
+                        trim.icons_removed,
+                        trim.extension_icons_removed,
+                    );
+                }
+            } else {
+                let texture_keep = self.current_dynamic_texture_keep_count();
+                let texture_count = self.cache_manager.texture_cache.len();
+                // Trim when cache holds more than ~1.5× what the current view
+                // needs. After navigation, cap is reset to the minimum and grows
+                // via retune; during normal scrolling it overshoots by ~1.5× for
+                // scroll-ahead. Trimming back to 1.25× releases excess without
+                // causing visible flashing.
+                let excess_threshold =
+                    (texture_keep + (texture_keep / 2)).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+                if texture_count > excess_threshold {
+                    let target = texture_keep
+                        .saturating_add(texture_keep / 4)
+                        .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+                    let mut visible_for_proactive = self.visible_grid_paths_snapshot();
+                    if let Some(detail_panel_paths) =
+                        self.detail_panel_folder_preview_paths_for_trim()
+                    {
+                        visible_for_proactive
+                            .get_or_insert_with(FxHashSet::default)
+                            .extend(detail_panel_paths);
+                    }
+                    self.cache_manager.trim_thumbnail_caches(
+                        target,
+                        self.current_thumbnail_rgba_budget_bytes(),
+                        self.current_dynamic_folder_preview_keep_count(),
+                        visible_for_proactive.as_ref(),
+                    );
+                    log::debug!(
+                        "[MEMORY] proactive trim: textures={}/{} target={} visible_keep={}",
+                        texture_count,
+                        self.cache_manager.texture_cache.cap().get(),
+                        target,
+                        texture_keep,
+                    );
+                }
             }
         }
 
