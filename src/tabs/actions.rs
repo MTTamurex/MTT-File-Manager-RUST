@@ -13,6 +13,8 @@ pub enum TabAction {
     UnpinQuickAccess,
     ExpandFolderTree,
     CollapseFolderTree,
+    ToggleAutoExpandFolderTree,
+    SaveTabsAsGroup,
 }
 
 pub(crate) fn close_candidates<T>(

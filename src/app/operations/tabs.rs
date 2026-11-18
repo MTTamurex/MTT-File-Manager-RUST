@@ -381,6 +381,8 @@ impl ImageViewerApp {
             self.load_folder(false);
         }
 
+        self.auto_reveal_active_tab();
+
         let sync_ms = sync_start.elapsed().as_millis();
         if sync_ms > 80 {
             let source_tab_path = self.tab_manager.active().path.clone();

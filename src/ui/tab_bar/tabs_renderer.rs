@@ -15,6 +15,7 @@ pub(super) fn render_tabs(
     pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
     live_path: &str,
     tree_state: &crate::app::state::sidebar_tree_state::SidebarTreeState,
+    auto_expand_tree: bool,
     svg_icons: &mut SvgIconManager,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
@@ -354,14 +355,14 @@ pub(super) fn render_tabs(
                         if is_active { live_path } else { &tab.path },
                         pinned_folders,
                     ),
-                    tree_action: tree_state.tab_tree_action(
-                        crate::app::state::sidebar_tree_state::reveal::RevealOwner::workspace(
-                            tab.id,
-                        )
-                        .in_sidebar(tab_manager.active().id),
-                        if is_active { live_path } else { &tab.path },
-                    ),
+                    tree_actions_available: tree_state.tree_actions_available(if is_active {
+                        live_path
+                    } else {
+                        &tab.path
+                    }),
                     can_reopen: Some(tab_manager.can_reopen_closed_tab()),
+                    can_save_group: true,
+                    auto_expand_tree,
                 },
             ) {
                 action = TabBarAction::Context(idx, command);

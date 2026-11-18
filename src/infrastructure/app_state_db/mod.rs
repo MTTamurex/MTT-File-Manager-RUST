@@ -5,7 +5,7 @@
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ mod conditional_preferences;
 mod file_entry_cache;
 mod file_tags;
 mod folder_covers;
+mod folder_groups;
 mod folder_locks;
 pub(crate) mod gc;
 mod organizer_conflict_registration;
@@ -340,6 +341,22 @@ impl AppStateDb {
         )
         .unwrap_or(0);
 
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS folder_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                position INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS folder_group_paths (
+                group_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (group_id, position)
+            );",
+        )?;
+
+        Self::migrate_quick_access_order(conn)?;
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS file_tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -565,6 +582,54 @@ impl AppStateDb {
         Ok(())
     }
 
+    fn migrate_quick_access_order(conn: &Connection) -> rusqlite::Result<()> {
+        let transaction =
+            rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let initialized: bool = transaction.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM user_preferences WHERE key = 'quick_access_order_v1'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if initialized {
+            return transaction.commit();
+        }
+
+        let pinned_paths = {
+            let mut statement =
+                transaction.prepare("SELECT path FROM pinned_folders ORDER BY position, path")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let group_ids = {
+            let mut statement =
+                transaction.prepare("SELECT id FROM folder_groups ORDER BY position, id")?;
+            let rows = statement.query_map([], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        for (position, path) in pinned_paths.iter().enumerate() {
+            transaction.execute(
+                "UPDATE pinned_folders SET position = ? WHERE path = ?",
+                rusqlite::params![position as i64, path],
+            )?;
+        }
+        let group_offset = pinned_paths.len() as i64;
+        for (position, group_id) in group_ids.iter().enumerate() {
+            transaction.execute(
+                "UPDATE folder_groups SET position = ? WHERE id = ?",
+                rusqlite::params![group_offset + position as i64, group_id],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO user_preferences (key, value)
+             VALUES ('quick_access_order_v1', 'true')",
+            [],
+        )?;
+        transaction.commit()
+    }
+
     fn migrate_file_tag_assignments_to_nocase(conn: &Connection) {
         let create_sql = conn
             .query_row(
@@ -700,5 +765,58 @@ mod fallback_tests {
         db.set_preference("fallback_probe", "ok")
             .expect("in-memory fallback must be writable");
         assert_eq!(db.get_preference("fallback_probe").as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn quick_access_order_migration_preserves_legacy_order_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE pinned_folders (
+                 path TEXT PRIMARY KEY,
+                 display_name TEXT NOT NULL,
+                 position INTEGER NOT NULL
+             );
+             CREATE TABLE folder_groups (
+                 id INTEGER PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 position INTEGER NOT NULL
+             );
+             INSERT INTO pinned_folders VALUES ('folder-a', 'A', 2);
+             INSERT INTO pinned_folders VALUES ('folder-b', 'B', 8);
+             INSERT INTO folder_groups VALUES (1, 'Group A', 0);
+             INSERT INTO folder_groups VALUES (2, 'Group B', 4);",
+        )
+        .unwrap();
+
+        AppStateDb::migrate_quick_access_order(&conn).unwrap();
+        let pinned_positions: Vec<i64> = {
+            let mut statement = conn
+                .prepare("SELECT position FROM pinned_folders ORDER BY position")
+                .unwrap();
+            let rows = statement.query_map([], |row| row.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        let group_positions: Vec<i64> = {
+            let mut statement = conn
+                .prepare("SELECT position FROM folder_groups ORDER BY position")
+                .unwrap();
+            let rows = statement.query_map([], |row| row.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(pinned_positions, [0, 1]);
+        assert_eq!(group_positions, [2, 3]);
+
+        conn.execute("UPDATE folder_groups SET position = 0 WHERE id = 1", [])
+            .unwrap();
+        AppStateDb::migrate_quick_access_order(&conn).unwrap();
+        let interleaved_group_position: i64 = conn
+            .query_row(
+                "SELECT position FROM folder_groups WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(interleaved_group_position, 0);
     }
 }

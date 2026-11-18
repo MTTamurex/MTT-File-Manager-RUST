@@ -43,6 +43,39 @@ fn hinted_font(data: Vec<u8>, index: u32) -> egui::FontData {
     font
 }
 
+/// Add one small startup fallback only for Chinese UI locales. The asynchronous
+/// loader still replaces this with the full system font catalog.
+pub(crate) fn install_startup_chinese_font(fonts: &mut egui::FontDefinitions, language: &str) {
+    if !language
+        .split('-')
+        .next()
+        .is_some_and(|language| language.eq_ignore_ascii_case("zh"))
+    {
+        return;
+    }
+    let Some(fonts_dir) = std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .map(|windows_dir| windows_dir.join("Fonts"))
+    else {
+        return;
+    };
+    let Ok(data) = std::fs::read(fonts_dir.join("msyh.ttc")) else {
+        return;
+    };
+
+    let key = "startup_chinese_fallback".to_owned();
+    fonts
+        .font_data
+        .insert(key.clone(), std::sync::Arc::new(hinted_font(data, 0)));
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(fallbacks) = fonts.families.get_mut(&family) {
+            if !fallbacks.contains(&key) {
+                fallbacks.push(key.clone());
+            }
+        }
+    }
+}
+
 /// Loads the Windows system fonts into `fonts` and registers them as fallbacks
 /// in the proportional and monospace families.
 ///

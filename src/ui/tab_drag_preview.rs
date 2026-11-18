@@ -1,4 +1,4 @@
-//! Shared paint-only movement for tabs and column headers.
+//! Shared paint-only movement for reorderable strips and rows.
 //! Hit testing and committed order stay unchanged.
 use eframe::egui::{self, layers::ShapeIdx};
 
@@ -14,6 +14,12 @@ pub(crate) fn finish_frame(ctx: &egui::Context) {
 #[derive(Default)]
 pub(crate) struct TabDragPreview {
     tabs: Vec<(egui::Rect, ShapeIdx, ShapeIdx)>,
+}
+
+#[derive(Clone, Copy)]
+enum Axis {
+    Horizontal,
+    Vertical,
 }
 
 impl TabDragPreview {
@@ -75,6 +81,39 @@ impl TabDragPreview {
         strip: egui::Rect,
         gap: Option<usize>,
     ) {
+        self.paint_at_gap_on_axis(ui, id, source, strip, gap, None, Axis::Horizontal);
+    }
+
+    pub fn paint_at_vertical_gap(
+        &self,
+        ui: &egui::Ui,
+        id: egui::Id,
+        source: Option<usize>,
+        strip: egui::Rect,
+        gap: Option<usize>,
+        source_grab_offset_y: Option<f32>,
+    ) {
+        self.paint_at_gap_on_axis(
+            ui,
+            id,
+            source,
+            strip,
+            gap,
+            source_grab_offset_y,
+            Axis::Vertical,
+        );
+    }
+
+    fn paint_at_gap_on_axis(
+        &self,
+        ui: &egui::Ui,
+        id: egui::Id,
+        source: Option<usize>,
+        strip: egui::Rect,
+        gap: Option<usize>,
+        source_grab_offset_y: Option<f32>,
+        axis: Axis,
+    ) {
         let pointer = ui.input(|input| input.pointer.interact_pos());
         let source = source.filter(|&index| index < self.tabs.len()).filter(|_| {
             !ui.input(|input| input.pointer.primary_released())
@@ -84,7 +123,7 @@ impl TabDragPreview {
         let mut lifted = Vec::new();
         for (index, &(rect, start, end)) in self.tabs.iter().enumerate() {
             let target = source.zip(gap).map_or(0.0, |(source, gap)| {
-                neighbor_offset(index, source, gap, &self.tabs)
+                neighbor_offset(index, source, gap, &self.tabs, axis)
             });
             let animation = id.with(index);
             let offset = ui.ctx().animate_value_with_time(
@@ -100,13 +139,29 @@ impl TabDragPreview {
                 let origin = ui
                     .input(|input| input.pointer.press_origin())
                     .unwrap_or(rect.center());
-                let x = (rect.left() + pointer.unwrap().x - origin.x).clamp(
-                    strip.left(),
-                    (strip.right() - rect.width()).max(strip.left()),
-                );
-                egui::vec2(x - rect.left(), 0.0)
+                match axis {
+                    Axis::Horizontal => {
+                        let x = (rect.left() + pointer.unwrap().x - origin.x).clamp(
+                            strip.left(),
+                            (strip.right() - rect.width()).max(strip.left()),
+                        );
+                        egui::vec2(x - rect.left(), 0.0)
+                    }
+                    Axis::Vertical => {
+                        let grab_offset_y =
+                            source_grab_offset_y.unwrap_or_else(|| origin.y - rect.top());
+                        let y = (pointer.unwrap().y - grab_offset_y).clamp(
+                            strip.top(),
+                            (strip.bottom() - rect.height()).max(strip.top()),
+                        );
+                        egui::vec2(0.0, y - rect.top())
+                    }
+                }
             } else {
-                egui::vec2(offset, 0.0)
+                match axis {
+                    Axis::Horizontal => egui::vec2(offset, 0.0),
+                    Axis::Vertical => egui::vec2(0.0, offset),
+                }
             };
             if !is_source && delta == egui::Vec2::ZERO {
                 continue;
@@ -158,187 +213,26 @@ fn neighbor_offset(
     source: usize,
     gap: usize,
     tabs: &[(egui::Rect, ShapeIdx, ShapeIdx)],
+    axis: Axis,
 ) -> f32 {
+    let extent = |rect: egui::Rect| match axis {
+        Axis::Horizontal => rect.width(),
+        Axis::Vertical => rect.height(),
+    };
+    let gap_after = |left: egui::Rect, right: egui::Rect| match axis {
+        Axis::Horizontal => right.left() - left.right(),
+        Axis::Vertical => right.top() - left.bottom(),
+    };
+
     if index < source && index >= gap {
-        tabs[source].0.width() + (tabs[index + 1].0.left() - tabs[index].0.right())
+        extent(tabs[source].0) + gap_after(tabs[index].0, tabs[index + 1].0)
     } else if index > source && index < gap {
-        -(tabs[source].0.width() + (tabs[index].0.left() - tabs[index - 1].0.right()))
+        -(extent(tabs[source].0) + gap_after(tabs[index - 1].0, tabs[index].0))
     } else {
         0.0
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn neighbors_open_exactly_one_slot_in_both_directions() {
-        let tabs: Vec<_> = (0..4)
-            .map(|i| {
-                (
-                    egui::Rect::from_min_size(
-                        egui::pos2(i as f32 * 102.0, 0.0),
-                        egui::vec2(100.0, 28.0),
-                    ),
-                    ShapeIdx(0),
-                    ShapeIdx(0),
-                )
-            })
-            .collect();
-        for source in 0..4 {
-            for gap in 0..=4 {
-                let destination = if gap > source { gap - 1 } else { gap };
-                let mut occupied = std::collections::HashSet::new();
-                for index in 0..4 {
-                    if index == source {
-                        continue;
-                    }
-                    let offset = neighbor_offset(index, source, gap, &tabs);
-                    let slot = index as isize + (offset / 102.0) as isize;
-                    assert_ne!(slot, destination as isize);
-                    assert!((0..4).contains(&slot));
-                    assert!(occupied.insert(slot));
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn unequal_widths_open_a_gap_matching_the_source_width() {
-        for spacing in [0.0, 2.0] {
-            let mut x = 0.0;
-            let tabs: Vec<_> = [300.0, 80.0, 160.0, 120.0]
-                .into_iter()
-                .map(|width| {
-                    let rect =
-                        egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(width, 22.0));
-                    x += width + spacing;
-                    (rect, ShapeIdx(0), ShapeIdx(0))
-                })
-                .collect();
-            for source in 0..tabs.len() {
-                for gap in 0..=tabs.len() {
-                    let mut order: Vec<_> = (0..tabs.len()).collect();
-                    order.remove(source);
-                    let destination = if gap > source { gap - 1 } else { gap };
-                    order.insert(destination, source);
-                    let mut x = 0.0;
-                    for index in order {
-                        if index != source {
-                            assert_eq!(
-                                tabs[index].0.left() + neighbor_offset(index, source, gap, &tabs),
-                                x
-                            );
-                        }
-                        x += tabs[index].0.width() + spacing;
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn lifted_tab_preserves_grab_offset_clip_and_draws_above_neighbors() {
-        let ctx = egui::Context::default();
-        let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(300.0, 28.0));
-        let press = egui::pos2(30.0, 24.0);
-        let pointer = egui::pos2(170.0, 24.0);
-        let mut shapes = Vec::new();
-        for events in [
-            vec![
-                egui::Event::PointerMoved(press),
-                egui::Event::PointerButton {
-                    pos: press,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-            vec![egui::Event::PointerMoved(pointer)],
-        ] {
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    let mut preview = TabDragPreview::default();
-                    for index in 0..3 {
-                        let rect = egui::Rect::from_min_size(
-                            strip.min + egui::vec2(index as f32 * 100.0, 0.0),
-                            egui::vec2(100.0, 28.0),
-                        );
-                        let start = TabDragPreview::begin(ui);
-                        ui.painter().with_clip_rect(strip).rect_filled(
-                            rect,
-                            8.0,
-                            if index == 0 {
-                                egui::Color32::RED
-                            } else {
-                                egui::Color32::BLUE
-                            },
-                        );
-                        preview.record(ui, rect, start);
-                    }
-                    preview.paint(ui, egui::Id::new("preview_test"), Some(0), strip);
-                    shapes = ctx.graphics(|graphics| {
-                        graphics
-                            .get(ui.layer_id())
-                            .unwrap()
-                            .all_entries()
-                            .cloned()
-                            .collect()
-                    });
-                },
-            );
-        }
-        assert!(matches!(shapes[0].shape, egui::Shape::Noop));
-        let lifted = shapes.last().unwrap();
-        let egui::Shape::Rect(rect) = &lifted.shape else {
-            panic!("expected lifted tab");
-        };
-        assert_eq!(rect.fill, egui::Color32::RED);
-        assert_eq!(rect.rect.left(), pointer.x - (press.x - strip.left()));
-        assert_eq!(rect.rect.top(), strip.top());
-        assert_eq!(lifted.clip_rect, strip);
-    }
-
-    #[test]
-    fn finishing_or_cancelling_never_applies_stale_animation_to_committed_order() {
-        for source in [None, Some(99)] {
-            let ctx = egui::Context::default();
-            let id = egui::Id::new("reset_preview");
-            let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 28.0));
-            let _ = ctx.run_ui(egui::RawInput::default(), |_| {
-                for index in 0..3 {
-                    ctx.animate_value_with_time(id.with(index), 100.0, 0.0);
-                }
-            });
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let mut preview = TabDragPreview::default();
-                for index in 0..3 {
-                    let rect = egui::Rect::from_min_size(
-                        egui::pos2(index as f32 * 100.0, 0.0),
-                        egui::vec2(100.0, 28.0),
-                    );
-                    let start = TabDragPreview::begin(ui);
-                    ui.painter().rect_filled(rect, 8.0, egui::Color32::BLUE);
-                    preview.record(ui, rect, start);
-                }
-                preview.paint(ui, id, source, strip);
-                ctx.graphics(|graphics| {
-                    let entries: Vec<_> =
-                        graphics.get(ui.layer_id()).unwrap().all_entries().collect();
-                    assert_eq!(entries.len(), 3, "no lifted copy or shadow after reset");
-                    for (index, entry) in entries.iter().enumerate() {
-                        let egui::Shape::Rect(rect) = &entry.shape else {
-                            panic!("expected tab");
-                        };
-                        assert_eq!(rect.rect.left(), index as f32 * 100.0);
-                    }
-                });
-            });
-        }
-    }
-}
+#[path = "tab_drag_preview/tests.rs"]
+mod tests;

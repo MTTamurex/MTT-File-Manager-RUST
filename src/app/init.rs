@@ -101,7 +101,6 @@ impl ImageViewerApp {
     ) -> Self {
         crate::viewer_runtime::backend::register_context(cc);
         let ctx = cc.egui_ctx.clone();
-        ctx.set_fonts(font_definitions_with_embedded_icons());
 
         let AppBootstrap {
             file_entry_sender,
@@ -190,6 +189,12 @@ impl ImageViewerApp {
                 .ok()
         });
         let mut startup_preferences = startup_preferences;
+        let mut initial_fonts = font_definitions_with_embedded_icons();
+        crate::ui::fonts::install_startup_chinese_font(
+            &mut initial_fonts,
+            &startup_preferences.language,
+        );
+        ctx.set_fonts(initial_fonts);
         let mut fixed_startup_path =
             startup_preferences.prepare_fixed_startup(startup_folder_path.as_deref());
         if let Some(session) = crate::app::tab_transfer::startup_session()
@@ -226,6 +231,7 @@ impl ImageViewerApp {
             show_recycle_bin,
             show_quick_access,
             quick_access_placement,
+            auto_expand_folder_tree,
             show_tags,
             language,
             theme_mode,
@@ -280,6 +286,7 @@ impl ImageViewerApp {
 
         // Load Quick Access pinned folders from database
         let pinned_folders = app_state_db.get_all_pinned_folders();
+        let folder_groups = app_state_db.get_all_folder_groups();
 
         // Load file tag metadata and path assignments once at startup.
         let tag_definitions: rustc_hash::FxHashMap<_, _> = app_state_db
@@ -887,6 +894,12 @@ impl ImageViewerApp {
             pending_pinned_navigation: None,
 
             pinned_folders,
+            folder_groups,
+            auto_expand_folder_tree,
+            auto_reveal_last_path: String::new(),
+            auto_reveal_last_owner: None,
+            save_group_name: String::new(),
+            show_save_group_dialog: false,
 
             tag_definitions,
             sorted_tag_ids,
@@ -1099,6 +1112,7 @@ impl ImageViewerApp {
         if let Some(path) = startup_folder_path {
             app.open_integrated_folder_in_new_context(&path);
         }
+        app.auto_reveal_active_tab();
 
         // Log GPU adapter info to file for diagnostics (works without console).
         if let Some(render_state) = &cc.wgpu_render_state {

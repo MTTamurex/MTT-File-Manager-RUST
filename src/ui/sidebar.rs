@@ -10,8 +10,10 @@ use rust_i18n::t;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
+mod folder_groups;
 #[cfg(test)]
 mod middle_click_tests;
+mod quick_access_items;
 pub(crate) mod section_menu;
 #[cfg(test)]
 mod section_menu_tests;
@@ -63,6 +65,7 @@ pub struct SidebarContext<'a> {
     pub is_renaming: bool, // Blocks navigation during renaming
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub pinned_folders: &'a [PinnedFolder],
+    pub folder_groups: &'a [crate::domain::folder_group::FolderGroup],
     pub is_item_dragging: bool, // ANY item (file or folder) is being dragged
     pub can_drop_items_to_recycle_bin: bool,
     pub is_folder_dragging: bool, // A folder is being dragged from the main content area
@@ -112,7 +115,9 @@ pub enum SidebarAction {
     CancelTreeRename,
     PinFolder(String),
     UnpinFolder(String),
-    ReorderPinnedFolder {
+    OpenFolderGroup(i64),
+    DeleteFolderGroup(i64),
+    ReorderQuickAccessItem {
         from: usize,
         to: usize,
     },
@@ -390,7 +395,7 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
         }
 
         // 2. USER-PINNED FOLDERS
-        render_pinned_folders(ui, ctx, &mut action);
+        quick_access_items::render(ui, ctx, &mut action);
 
         // === Drag-to-pin drop zone ===
         if ctx.is_folder_dragging {
@@ -958,322 +963,4 @@ pub fn render_sidebar_drives(
     }
 
     action
-}
-
-/// Renders the user-pinned folders list with drag-to-reorder support.
-const QUICK_ACCESS_AUTO_SCROLL_MARGIN: f32 = 30.0;
-const QUICK_ACCESS_AUTO_SCROLL_SPEED: f32 = 8.0;
-
-fn render_pinned_folders(
-    ui: &mut egui::Ui,
-    ctx: &mut SidebarContext,
-    action: &mut Option<SidebarAction>,
-) {
-    if ctx.pinned_folders.is_empty() {
-        return;
-    }
-
-    let drag_id = egui::Id::new("qa_reorder_drag");
-    let drag_src: Option<usize> = ui.ctx().data(|d| d.get_temp(drag_id));
-    let viewport = ui.clip_rect();
-    let pointer_pos = ui.ctx().input(|input| {
-        input
-            .pointer
-            .hover_pos()
-            .or_else(|| input.pointer.interact_pos())
-    });
-    let pointer_in_viewport = pointer_pos.filter(|pointer| viewport.contains(*pointer));
-    let (primary_released, cancel_drag) = ui.ctx().input(|input| {
-        let primary_released = input.pointer.primary_released();
-        let cancel_drag = input.key_pressed(egui::Key::Escape)
-            || !input.viewport().focused.unwrap_or(true)
-            || (!input.pointer.primary_down() && !primary_released);
-        (primary_released, cancel_drag)
-    });
-    let mut hover_drop_idx: Option<usize> = None;
-
-    for (i, pinned) in ctx.pinned_folders.iter().enumerate() {
-        let is_selected =
-            !ctx.is_computer_view && !ctx.is_recycle_bin_view && ctx.current_path == pinned.path;
-
-        // Drop indicator line above this item
-        if let Some(src) = drag_src {
-            if src != i {
-                let cursor_y = ui.cursor().min.y;
-                let pointer_y = pointer_in_viewport.map(|pointer| pointer.y);
-                if pointer_y.is_some_and(|pointer_y| {
-                    viewport.top() <= cursor_y
-                        && cursor_y <= viewport.bottom()
-                        && pointer_y < cursor_y + 14.0
-                        && pointer_y >= cursor_y - 14.0
-                }) {
-                    hover_drop_idx = Some(i);
-                    ui.painter().hline(
-                        viewport.min.x..=viewport.max.x,
-                        cursor_y,
-                        egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-                    );
-                }
-            }
-        }
-
-        let (mut rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 28.0),
-            Sense::click_and_drag(),
-        );
-        rect.min.x = ui.clip_rect().min.x;
-        rect.max.x = ui.clip_rect().max.x;
-
-        // Start internal drag for reordering
-        if response.drag_started() {
-            ui.ctx().data_mut(|d| d.insert_temp(drag_id, i));
-        }
-
-        // Pin rect is computed outside the visibility check so it can be used for click detection
-        let pin_size = 22.0;
-        let pin_rect = Rect::from_center_size(
-            Pos2::new(rect.max.x - pin_size / 2.0 - 3.0, rect.center().y),
-            egui::vec2(pin_size, pin_size),
-        );
-
-        if ui.is_rect_visible(rect) {
-            let is_being_dragged = drag_src == Some(i);
-
-            if is_being_dragged {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    Color32::from_rgba_premultiplied(100, 120, 215, 60),
-                );
-            } else if is_selected {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(ui.ctx()));
-            } else if response.hovered() || response.dragged() {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    crate::ui::theme::selection_hover_color(ui.ctx()),
-                );
-            }
-
-            let mut cursor_x = rect.min.x + 12.0;
-
-            // Share the user's folder artwork while keeping special native icons.
-            let folder_icon = ctx
-                .icon_loader
-                .get_or_load_folder_navigation_icon(ui.ctx(), &pinned.path);
-            if let Some(icon) = folder_icon {
-                let size = icon.size_vec2();
-                let icon_rect = Rect::from_center_size(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    size * (16.0 / size.x.max(size.y).max(1.0)),
-                );
-                ui.painter().image(
-                    icon.id(),
-                    icon_rect,
-                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-                cursor_x += 24.0;
-            } else {
-                cursor_x += 24.0;
-            }
-
-            let text_color = if is_selected {
-                crate::ui::theme::selection_text_color(ui.ctx())
-            } else {
-                ui.visuals().text_color()
-            };
-            let display_name = crate::infrastructure::onedrive::special_folder_display_name(
-                std::path::Path::new(&pinned.path),
-            )
-            .unwrap_or_else(|| pinned.display_name.clone());
-            let text_max_x = (pin_rect.left() - 8.0).min(rect.right());
-            let text_max_width = (text_max_x - cursor_x).max(0.0);
-            let font_id = egui::FontId::proportional(11.5);
-            let visible_name = crate::ui::preview_panel::utils::truncate_text_to_fit(
-                &display_name,
-                text_max_width,
-                &font_id,
-                ui,
-            );
-            ui.painter().text(
-                Pos2::new(cursor_x, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &visible_name,
-                font_id,
-                text_color,
-            );
-            if visible_name != display_name {
-                response.clone().on_hover_text(display_name);
-            }
-
-            // Pin icon — always visible; click removes the shortcut
-            if !is_being_dragged {
-                ui.interact(
-                    pin_rect,
-                    ui.id().with(("quick_access_pin", &pinned.path)),
-                    Sense::hover(),
-                )
-                .on_hover_text(t!("sidebar.remove_from_quick_access").to_string());
-
-                let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
-                let pin_hovered = pointer_pos.map(|p| pin_rect.contains(p)).unwrap_or(false);
-                let pin_color = if pin_hovered {
-                    Color32::from_rgb(220, 60, 60)
-                } else {
-                    Color32::from_gray(140)
-                };
-                ui.painter().text(
-                    pin_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "📌",
-                    egui::FontId::proportional(13.0),
-                    pin_color,
-                );
-            }
-        }
-
-        // Handle click: check if the click landed on the pin icon or the rest of the row
-        if response.middle_clicked() && !ctx.is_renaming && action.is_none() {
-            *action = Some(SidebarAction::OpenInNewTab(pinned.path.clone()));
-        }
-        if response.clicked() && !ctx.is_renaming && action.is_none() {
-            let click_pos = ui.input(|inp| inp.pointer.interact_pos());
-            let clicked_pin = click_pos.map(|p| pin_rect.contains(p)).unwrap_or(false);
-            if clicked_pin {
-                *action = Some(SidebarAction::UnpinFolder(pinned.path.clone()));
-            } else {
-                *action = Some(SidebarAction::NavigateTo(pinned.path.clone()));
-            }
-        }
-
-        ui.add_space(2.0);
-    }
-
-    // Drop indicator line at end of list
-    if let Some(src) = drag_src {
-        let end_y = ui.cursor().min.y;
-        let pointer_y = pointer_in_viewport.map(|pointer| pointer.y);
-        if pointer_y.is_some_and(|pointer_y| {
-            viewport.top() <= end_y
-                && end_y <= viewport.bottom()
-                && pointer_y >= end_y - 14.0
-                && pointer_y <= end_y + 8.0
-                && hover_drop_idx.is_none()
-                && src < ctx.pinned_folders.len()
-        }) {
-            hover_drop_idx = Some(ctx.pinned_folders.len());
-            ui.painter().hline(
-                viewport.min.x..=viewport.max.x,
-                end_y,
-                egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-            );
-        }
-    }
-
-    // Handle drop (release while reordering)
-    if let Some(src) = drag_src {
-        if cancel_drag {
-            ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
-        } else {
-            auto_scroll_quick_access_during_drag(ui, pointer_pos, viewport);
-
-            if primary_released {
-                ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
-            }
-            if primary_released && pointer_in_viewport.is_some() {
-                if let Some(dst) = hover_drop_idx {
-                    if dst != src && action.is_none() {
-                        *action = Some(SidebarAction::ReorderPinnedFolder { from: src, to: dst });
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn auto_scroll_quick_access_during_drag(
-    ui: &mut egui::Ui,
-    pointer_pos: Option<Pos2>,
-    viewport: Rect,
-) {
-    let Some(pointer) = pointer_pos else {
-        return;
-    };
-    let delta = quick_access_auto_scroll_delta(pointer, viewport);
-    if delta == 0.0 {
-        return;
-    }
-
-    let target_y = if delta < 0.0 {
-        viewport.top() + delta
-    } else {
-        viewport.bottom() + delta
-    };
-    let target = Pos2::new(viewport.left(), target_y);
-    ui.scroll_to_rect(Rect::from_min_max(target, target), None);
-    ui.ctx().request_repaint();
-}
-
-fn quick_access_auto_scroll_delta(pointer: Pos2, viewport: Rect) -> f32 {
-    if pointer.x < viewport.left() || pointer.x > viewport.right() {
-        return 0.0;
-    }
-
-    let margin = QUICK_ACCESS_AUTO_SCROLL_MARGIN.min(viewport.height() * 0.5);
-    if pointer.y < viewport.top() + margin {
-        -((viewport.top() + margin - pointer.y).max(QUICK_ACCESS_AUTO_SCROLL_SPEED))
-    } else if pointer.y > viewport.bottom() - margin {
-        (pointer.y - (viewport.bottom() - margin)).max(QUICK_ACCESS_AUTO_SCROLL_SPEED)
-    } else {
-        0.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{allocate_sidebar_viewport_row, quick_access_auto_scroll_delta};
-    use eframe::egui::{pos2, vec2, Context, Rect, Sense};
-    use std::cell::Cell;
-
-    #[test]
-    fn quick_access_auto_scrolls_only_near_vertical_edges_inside_width() {
-        let viewport = Rect::from_min_max(pos2(10.0, 20.0), pos2(110.0, 220.0));
-
-        assert!(quick_access_auto_scroll_delta(pos2(50.0, 25.0), viewport) < 0.0);
-        assert!(quick_access_auto_scroll_delta(pos2(50.0, 215.0), viewport) > 0.0);
-        assert_eq!(
-            quick_access_auto_scroll_delta(pos2(50.0, 120.0), viewport),
-            0.0
-        );
-        assert_eq!(
-            quick_access_auto_scroll_delta(pos2(5.0, 25.0), viewport),
-            0.0
-        );
-
-        let short_viewport = Rect::from_min_max(pos2(10.0, 20.0), pos2(110.0, 44.0));
-        assert!(quick_access_auto_scroll_delta(pos2(50.0, 22.0), short_viewport) < 0.0);
-        assert!(quick_access_auto_scroll_delta(pos2(50.0, 42.0), short_viewport) > 0.0);
-    }
-
-    #[test]
-    fn drive_rows_remain_at_viewport_width_after_wide_tree_content() {
-        let ctx = Context::default();
-        let tree_width = Cell::new(0.0);
-        let drive_width = Cell::new(0.0);
-        let sidebar_viewport_width = 220.0;
-
-        let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            ui.set_width(sidebar_viewport_width);
-            let (tree_rect, _) = ui.allocate_exact_size(vec2(640.0, 20.0), Sense::hover());
-            let (drive_rect, _) =
-                allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 32.0, Sense::click());
-            tree_width.set(tree_rect.width());
-            drive_width.set(drive_rect.width());
-        });
-
-        assert_eq!(tree_width.get(), 640.0);
-        assert_eq!(drive_width.get(), sidebar_viewport_width);
-    }
 }

@@ -64,6 +64,40 @@ impl SidebarTreeState {
         self.set_reveal_sidebar_workspace(owner.sidebar_workspace);
         self.reveal_undo
             .insert(owner, RevealUndo::new(root, target, self.expanded.clone()));
+        self.begin_tab_reveal(owner, root, target);
+    }
+
+    /// Keep the active tab's previous reveal reversible while following
+    /// navigation. Only ancestors opened by the previous reveal are closed.
+    pub(crate) fn replace_tab_reveal(
+        &mut self,
+        owner: RevealOwner,
+        root: &Path,
+        target: &Path,
+        force_same_target: bool,
+    ) -> bool {
+        if !contains_path(root, target) {
+            return false;
+        }
+
+        if let Some(previous_target) = self.reveal_undo.get(&owner).map(|undo| undo.target.clone())
+        {
+            if same_path(&previous_target, target) {
+                if !force_same_target {
+                    return false;
+                }
+                self.set_reveal_sidebar_workspace(owner.sidebar_workspace);
+                self.begin_tab_reveal(owner, root, target);
+                return true;
+            }
+            self.undo_tab_reveal(owner, &previous_target);
+        }
+
+        self.request_tab_reveal(owner, root, target);
+        true
+    }
+
+    fn begin_tab_reveal(&mut self, owner: RevealOwner, root: &Path, target: &Path) {
         *self.reveal.borrow_mut() = Some(RevealRequest {
             owner,
             root: root.to_path_buf(),

@@ -127,6 +127,10 @@ impl ImageViewerApp {
             self.tab_preferences.custom_path.clone(),
         ));
         prefs.push((
+            "auto_expand_folder_tree",
+            self.auto_expand_folder_tree.to_string(),
+        ));
+        prefs.push((
             "archives_in_new_tab",
             self.tab_preferences.archives_in_new_tab.to_string(),
         ));

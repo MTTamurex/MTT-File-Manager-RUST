@@ -628,9 +628,46 @@ pub fn show_properties_dialog(hwnd: HWND, path: &std::path::Path) -> Result<()> 
     }
 }
 
+fn find_properties_command(items: &[ShellMenuItem]) -> Option<u32> {
+    items.iter().find_map(|item| {
+        if item
+            .command_string
+            .as_deref()
+            .is_some_and(|verb| verb.eq_ignore_ascii_case("properties"))
+        {
+            Some(item.id)
+        } else {
+            find_properties_command(&item.sub_items)
+        }
+    })
+}
+
+/// Prefer the Shell's multi-select Properties command for items in one folder.
+/// If the Shell cannot expose that command, fall back to one dialog per path.
+pub fn show_properties_dialogs(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<()> {
+    if paths.len() > 1 && selection_has_single_parent(paths) {
+        if let Ok(context) = extract_shell_menu(hwnd, paths) {
+            let command = find_properties_command(&context.items.borrow());
+            if let Some(command) = command {
+                if invoke_menu_command(hwnd, &context.context_menu, command, 0, 0, None).is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    let mut first_error = None;
+    for path in paths {
+        if let Err(error) = show_properties_dialog(hwnd, path) {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::selection_has_single_parent;
+    use super::{find_properties_command, selection_has_single_parent, ShellMenuItem};
     use std::path::PathBuf;
 
     #[test]
@@ -663,5 +700,32 @@ mod tests {
         ] {
             assert!(!selection_has_single_parent(&paths));
         }
+    }
+
+    #[test]
+    fn properties_verb_is_found_in_nested_shell_menu_items() {
+        let item = ShellMenuItem {
+            id: 17,
+            text: "Properties".to_owned(),
+            icon_rgba: None,
+            sub_items: Vec::new(),
+            is_separator: false,
+            is_enabled: true,
+            command_string: Some("PROPERTIES".to_owned()),
+            pending_submenu_handle: None,
+            parent_index: 0,
+        };
+        let parent = ShellMenuItem {
+            id: 3,
+            text: "More".to_owned(),
+            icon_rgba: None,
+            sub_items: vec![item],
+            is_separator: false,
+            is_enabled: true,
+            command_string: None,
+            pending_submenu_handle: None,
+            parent_index: 0,
+        };
+        assert_eq!(find_properties_command(&[parent]), Some(17));
     }
 }

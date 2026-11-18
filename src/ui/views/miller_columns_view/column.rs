@@ -24,6 +24,7 @@ const CHEVRON_W: f32 = 14.0;
 pub enum MillerColumnAction {
     Clicked(usize),
     DoubleClicked(usize),
+    RenameClicked(usize),
     SecondaryClicked(usize, egui::Pos2),
     DragStarted(usize),
     EmptyClicked,
@@ -76,6 +77,7 @@ pub(super) fn render_row(
     dark: bool,
     rectangle_start: &mut Option<egui::Pos2>,
     rename_update: &mut Option<MillerRenameUpdate>,
+    rename_click_scope: egui::Id,
 ) -> Option<MillerColumnAction> {
     let width = ui.available_width();
     let row_height = crate::ui::fonts::layout::row_height(ui, COL_ROW_HEIGHT, 13.0, 6.0);
@@ -105,6 +107,7 @@ pub(super) fn render_row(
             ui,
             rectangle_start,
             is_selected,
+            false,
         );
     }
 
@@ -248,6 +251,10 @@ pub(super) fn render_row(
     let font = FontId::proportional(13.0);
     let max_text_w = (row_rect.right() - text_x - CHEVRON_W - 4.0).max(0.0);
     let display = truncate_text_for_column(&item.name, max_text_w, &font, ui);
+    let name_rect = Rect::from_min_size(
+        egui::pos2(text_x, row_rect.top() + 3.0),
+        egui::vec2(max_text_w, row_rect.height() - 6.0),
+    );
     ui.painter().text(
         egui::pos2(text_x, row_rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -255,6 +262,24 @@ pub(super) fn render_row(
         font,
         text_color,
     );
+    let single_selected = ctx.multi_selection.len() <= 1
+        && (ctx
+            .selected_file
+            .is_some_and(|path| path == item.path.as_path())
+            || ctx
+                .selected_child
+                .is_some_and(|path| path == item.path.as_path())
+            || ctx.multi_selection.contains(&item.path));
+    let rename_clicked = !ctx.is_item_dragging
+        && (single_selected || response.clicked() || response.double_clicked())
+        && crate::ui::components::inline_rename::selected_name_click_starts_rename(
+            ui,
+            rename_click_scope,
+            &response,
+            &item.path,
+            name_rect,
+            single_selected,
+        );
 
     // Chevron for directories (drill-down affordance).
     if item.is_dir {
@@ -275,6 +300,7 @@ pub(super) fn render_row(
         ui,
         rectangle_start,
         is_selected,
+        rename_clicked,
     )
 }
 
@@ -286,6 +312,7 @@ fn interaction(
     ui: &Ui,
     rectangle_start: &mut Option<egui::Pos2>,
     is_selected: bool,
+    rename_clicked: bool,
 ) -> Option<MillerColumnAction> {
     let (press_origin, pointer_position, primary_button_down) = ui.input(|input| {
         (
@@ -311,6 +338,8 @@ fn interaction(
             *rectangle_start = press_origin;
             None
         }
+    } else if rename_clicked {
+        Some(MillerColumnAction::RenameClicked(index))
     } else if response.double_clicked() {
         Some(MillerColumnAction::DoubleClicked(index))
     } else if response.secondary_clicked() {

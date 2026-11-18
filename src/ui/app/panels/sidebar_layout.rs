@@ -65,6 +65,7 @@ pub(super) fn render_stable_drives_block<R>(
 pub(super) fn quick_access_content_height(
     collapsed: bool,
     pinned_count: usize,
+    folder_group_count: usize,
     show_recycle_bin: bool,
     spacing: f32,
 ) -> f32 {
@@ -75,8 +76,9 @@ pub(super) fn quick_access_content_height(
         + 4.0
         + if show_recycle_bin { 28.0 } else { 0.0 }
         + pinned_count as f32 * 30.0
+        + folder_group_count as f32 * 30.0
         + 8.0
-        + (1 + usize::from(show_recycle_bin) + pinned_count) as f32 * spacing
+        + (1 + usize::from(show_recycle_bin) + pinned_count + folder_group_count) as f32 * spacing
 }
 
 pub(super) fn drives_available_height(available: f32, tags_visible: bool, spacing: f32) -> f32 {
@@ -124,9 +126,9 @@ mod tests {
 
     #[test]
     fn collapsed_headers_do_not_depend_on_item_count() {
-        assert_eq!(quick_access_content_height(true, 0, false, 3.0), 24.0);
-        assert_eq!(quick_access_content_height(true, 20, true, 3.0), 24.0);
-        assert!(quick_access_content_height(false, 20, true, 3.0) > 24.0);
+        assert_eq!(quick_access_content_height(true, 0, 0, false, 3.0), 24.0);
+        assert_eq!(quick_access_content_height(true, 20, 20, true, 3.0), 24.0);
+        assert!(quick_access_content_height(false, 20, 20, true, 3.0) > 24.0);
     }
 
     #[test]

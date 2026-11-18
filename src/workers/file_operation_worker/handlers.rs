@@ -1352,18 +1352,12 @@ pub(super) fn handle_empty_recycle_bin(
     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
 }
 
-/// Shows Windows Properties dialog for each path in the background.
-/// Fire-and-forget: `SHObjectProperties` opens a modeless dialog that manages its own lifetime.
+/// Shows grouped Windows Properties where possible, falling back to individual
+/// dialogs when the Shell cannot handle the selection together.
 pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendHwnd) {
-    use crate::infrastructure::windows::native_menu::show_properties_dialog;
-    for path in &paths {
-        if let Err(e) = show_properties_dialog(hwnd.0, path) {
-            log::warn!(
-                "[PROPERTIES] Failed to show properties for {}: {:?}",
-                path.display(),
-                e
-            );
-        }
+    use crate::infrastructure::windows::native_menu::show_properties_dialogs;
+    if let Err(error) = show_properties_dialogs(hwnd.0, &paths) {
+        log::warn!("[PROPERTIES] Failed to show properties dialog: {error:?}");
     }
 }
 

@@ -10,6 +10,7 @@ pub mod default_file_manager_settings;
 pub mod drag_move_confirmation_modal;
 mod explorer_settings;
 pub(crate) mod folder_export;
+pub mod folder_group_modal;
 mod font_settings;
 pub mod general_settings;
 pub mod gif_manager;

@@ -16,6 +16,17 @@ fn frame(
     collapsed: &FxHashSet<GroupKey>,
     events: Vec<egui::Event>,
 ) -> (egui::FullOutput, MillerColumnOutput) {
+    frame_with_selection(ctx, mode, collapsed, events, None, None)
+}
+
+fn frame_with_selection(
+    ctx: &egui::Context,
+    mode: GroupMode,
+    collapsed: &FxHashSet<GroupKey>,
+    events: Vec<egui::Event>,
+    selected_file: Option<&Path>,
+    time: Option<f64>,
+) -> (egui::FullOutput, MillerColumnOutput) {
     let items: Vec<_> = ["zeta", "alpha"]
         .iter()
         .map(|name| FileEntry {
@@ -46,6 +57,7 @@ fn frame(
                 egui::Pos2::ZERO,
                 egui::vec2(240.0, 300.0),
             )),
+            time,
             events,
             ..Default::default()
         },
@@ -59,7 +71,7 @@ fn frame(
                     collapsed_groups: collapsed,
                     directory: Path::new("folder"),
                     selected_child: None,
-                    selected_file: None,
+                    selected_file,
                     multi_selection: &selected,
                     renaming_state: None,
                     focus_rename: false,
@@ -79,6 +91,125 @@ fn frame(
         },
     );
     (full_output, output.unwrap())
+}
+
+#[test]
+fn clicking_blank_name_cell_space_starts_delayed_rename() {
+    let ctx = egui::Context::default();
+    let collapsed = FxHashSet::default();
+    let selected = Path::new("zeta");
+    let (paint, _) = frame_with_selection(
+        &ctx,
+        GroupMode::None,
+        &collapsed,
+        vec![],
+        Some(selected),
+        Some(0.0),
+    );
+    let position = egui::pos2(200.0, text_y(&paint, "zeta").unwrap() + 6.0);
+
+    for (pressed, time) in [(true, 0.1), (false, 0.12)] {
+        let _ = frame_with_selection(
+            &ctx,
+            GroupMode::None,
+            &collapsed,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            Some(selected),
+            Some(time),
+        );
+    }
+
+    let (_, output) = frame_with_selection(
+        &ctx,
+        GroupMode::None,
+        &collapsed,
+        vec![],
+        Some(selected),
+        Some(1.0),
+    );
+    assert!(matches!(
+        output.action,
+        Some(MillerColumnAction::RenameClicked(_))
+    ));
+}
+
+#[test]
+fn single_click_on_an_unselected_directory_keeps_the_navigation_action() {
+    let ctx = egui::Context::default();
+    let collapsed = FxHashSet::default();
+    let (paint, _) = frame(&ctx, GroupMode::None, &collapsed, vec![]);
+    let position = egui::pos2(200.0, text_y(&paint, "zeta").unwrap() + 6.0);
+    let mut action = None;
+
+    for pressed in [true, false] {
+        let (_, output) = frame(
+            &ctx,
+            GroupMode::None,
+            &collapsed,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        action = output.action.or(action);
+    }
+
+    assert!(matches!(action, Some(MillerColumnAction::Clicked(_))));
+}
+
+#[test]
+fn double_clicking_blank_name_cell_space_keeps_the_directory_action() {
+    let ctx = egui::Context::default();
+    let collapsed = FxHashSet::default();
+    let selected = Path::new("zeta");
+    let (paint, _) = frame_with_selection(
+        &ctx,
+        GroupMode::None,
+        &collapsed,
+        vec![],
+        Some(selected),
+        Some(0.0),
+    );
+    let position = egui::pos2(200.0, text_y(&paint, "zeta").unwrap() + 6.0);
+    let mut final_action = None;
+
+    for (pressed, time) in [(true, 0.1), (false, 0.12), (true, 0.2), (false, 0.3)] {
+        let (_, output) = frame_with_selection(
+            &ctx,
+            GroupMode::None,
+            &collapsed,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            Some(selected),
+            Some(time),
+        );
+        final_action = output.action.or(final_action);
+    }
+
+    assert!(matches!(
+        final_action,
+        Some(MillerColumnAction::DoubleClicked(_))
+    ));
 }
 
 fn text_y(output: &egui::FullOutput, text: &str) -> Option<f32> {

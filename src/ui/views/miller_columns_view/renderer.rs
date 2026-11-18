@@ -21,6 +21,18 @@ pub fn render_miller_column(
     let rect = ui.max_rect();
     let row_height = crate::ui::fonts::layout::row_height(ui, COL_ROW_HEIGHT, 13.0, 6.0);
     let column_id = ui.make_persistent_id(id_salt);
+    let rename_click_scope = column_id.with("rename_click");
+    crate::ui::components::inline_rename::clear_pending_name_click_outside(
+        ui.ctx(),
+        rename_click_scope,
+        ctx.selected_file
+            .filter(|selected| {
+                ctx.items
+                    .iter()
+                    .any(|item| item.path.as_path() == *selected)
+            })
+            .or(ctx.selected_child),
+    );
     let background_response =
         ui.interact(rect, column_id.with("background"), Sense::click_and_drag());
     let pointer_pos = ctx
@@ -129,6 +141,7 @@ pub fn render_miller_column(
                         dark,
                         &mut rectangle_start,
                         &mut rename_update,
+                        rename_click_scope,
                     ) {
                         action = Some(a);
                     }

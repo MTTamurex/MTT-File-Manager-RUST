@@ -100,6 +100,7 @@ fn context(app: &mut ImageViewerApp, can_drop_items_to_recycle_bin: bool) -> Sid
             || app.sidebar_folder_rename.is_some(),
         icon_loader: &mut app.item_icon_loader,
         pinned_folders: &app.pinned_folders,
+        folder_groups: &app.folder_groups,
         is_item_dragging: app.is_item_dragging,
         can_drop_items_to_recycle_bin,
         is_folder_dragging,

@@ -51,8 +51,10 @@ fn clicking_empty_title_strip_dismisses_tab_menu_without_opening_a_tab_or_draggi
                     can_close_left: false,
                     can_close_right: false,
                     quick_access_action: None,
-                    tree_action: None,
+                    tree_actions_available: false,
                     can_reopen: Some(false),
+                    can_save_group: false,
+                    auto_expand_tree: false,
                 },
             ));
             new_tab_clicked |= super::new_tab_area::render_new_tab_and_drag_area(
@@ -113,8 +115,10 @@ fn reopen_menu_entry_is_disabled_without_history_and_hidden_for_pane_tabs() {
                     can_close_left: false,
                     can_close_right: false,
                     quick_access_action: None,
-                    tree_action: None,
+                    tree_actions_available: false,
                     can_reopen: availability,
+                    can_save_group: false,
+                    auto_expand_tree: false,
                 },
             ));
         };
@@ -204,12 +208,13 @@ fn click_command_without_selecting_tab(
                 can_close_left: false,
                 can_close_right: false,
                 quick_access_action: quick_access,
-                tree_action: matches!(
+                tree_actions_available: matches!(
                     expected,
                     TabAction::ExpandFolderTree | TabAction::CollapseFolderTree
-                )
-                .then_some(expected),
+                ),
                 can_reopen: Some(true),
+                can_save_group: false,
+                auto_expand_tree: false,
             },
         ) {
             action = Some(command);
@@ -254,6 +259,45 @@ fn click_command_without_selecting_tab(
     }
     assert_eq!(action, Some(expected));
     assert!(!selected);
+}
+
+#[test]
+fn manual_tree_commands_are_hidden_while_automatic_sync_is_enabled() {
+    for (automatic, visible) in [(false, true), (true, false)] {
+        let ctx = Context::default();
+        let mut render = |ui: &mut egui::Ui| {
+            let response = ui.allocate_response(vec2(180.0, 36.0), Sense::click());
+            let _ = tab_context_menu(
+                &response,
+                TabContextMenuOptions {
+                    pinned: false,
+                    can_duplicate: true,
+                    can_close_left: false,
+                    can_close_right: false,
+                    quick_access_action: None,
+                    tree_actions_available: true,
+                    can_reopen: None,
+                    can_save_group: false,
+                    auto_expand_tree: automatic,
+                },
+            );
+        };
+        let _ = ctx.run_ui(RawInput::default(), &mut render);
+        for pressed in [true, false] {
+            let _ = ctx.run_ui(
+                pointer_input(pos2(40.0, 20.0), PointerButton::Secondary, pressed),
+                &mut render,
+            );
+        }
+        let output = ctx.run_ui(RawInput::default(), &mut render);
+        for label in ["tabs.expand_folder_tree", "tabs.collapse_folder_tree"] {
+            let found = output.shapes.iter().any(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => text.galley.text() == rust_i18n::t!(label),
+                _ => false,
+            });
+            assert_eq!(found, visible, "{label}, auto sync: {automatic}");
+        }
+    }
 }
 
 #[test]

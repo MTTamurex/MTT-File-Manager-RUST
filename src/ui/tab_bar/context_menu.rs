@@ -8,9 +8,11 @@ pub(crate) struct TabContextMenuOptions {
     pub can_close_left: bool,
     pub can_close_right: bool,
     pub quick_access_action: Option<TabAction>,
-    pub tree_action: Option<TabAction>,
+    pub tree_actions_available: bool,
     /// Pane strips do not share workspace closed-tab history and use `None`.
     pub can_reopen: Option<bool>,
+    pub can_save_group: bool,
+    pub auto_expand_tree: bool,
 }
 
 /// Commands do not select the clicked tab.
@@ -24,8 +26,10 @@ pub(crate) fn tab_context_menu(
         can_close_left,
         can_close_right,
         quick_access_action,
-        tree_action,
+        tree_actions_available,
         can_reopen,
+        can_save_group,
+        mut auto_expand_tree,
     } = options;
     let mut action = None;
     response.context_menu(|ui| {
@@ -62,17 +66,26 @@ pub(crate) fn tab_context_menu(
                 ui.close();
             }
         }
-        ui.separator();
-        let tree_label = if tree_action == Some(TabAction::CollapseFolderTree) {
-            t!("tabs.collapse_folder_tree")
-        } else {
-            t!("tabs.expand_folder_tree")
-        };
+        if tree_actions_available && !auto_expand_tree {
+            ui.separator();
+            for (command, label) in [
+                (TabAction::ExpandFolderTree, t!("tabs.expand_folder_tree")),
+                (
+                    TabAction::CollapseFolderTree,
+                    t!("tabs.collapse_folder_tree"),
+                ),
+            ] {
+                if ui.button(label).clicked() {
+                    action = Some(command);
+                    ui.close();
+                }
+            }
+        }
         if ui
-            .add_enabled(tree_action.is_some(), egui::Button::new(tree_label))
-            .clicked()
+            .checkbox(&mut auto_expand_tree, t!("tabs.auto_expand_folder_tree"))
+            .changed()
         {
-            action = tree_action;
+            action = Some(TabAction::ToggleAutoExpandFolderTree);
             ui.close();
         }
         if let Some(command @ (TabAction::PinQuickAccess | TabAction::UnpinQuickAccess)) =
@@ -86,6 +99,13 @@ pub(crate) fn tab_context_menu(
             };
             if ui.button(label).clicked() {
                 action = Some(command);
+                ui.close();
+            }
+        }
+        if can_save_group {
+            ui.separator();
+            if ui.button(t!("tabs.save_group")).clicked() {
+                action = Some(TabAction::SaveTabsAsGroup);
                 ui.close();
             }
         }

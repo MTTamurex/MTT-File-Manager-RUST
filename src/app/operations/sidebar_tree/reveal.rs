@@ -11,6 +11,86 @@ enum Section {
 }
 
 impl ImageViewerApp {
+    pub(crate) fn set_auto_expand_folder_tree(
+        &mut self,
+        enabled: bool,
+        owner: RevealOwner,
+        path: &str,
+    ) {
+        let previous_owner = self.auto_reveal_last_owner;
+        self.auto_expand_folder_tree = enabled;
+        self.auto_reveal_last_path.clear();
+        if enabled {
+            self.auto_reveal_last_path = path.to_owned();
+            self.auto_reveal_last_owner = Some(owner);
+            let mut tree_changed = false;
+            if let Some(previous) = previous_owner.filter(|previous| {
+                *previous != owner && previous.sidebar_workspace == owner.sidebar_workspace
+            }) {
+                tree_changed |= self.sidebar_tree.clear_tab_reveal(previous);
+            }
+            if self.sidebar_reveal_destination(path).is_some() {
+                self.reveal_tab_path(owner, path, true, true);
+                return;
+            }
+            tree_changed |= self.sidebar_tree.clear_tab_reveal(owner);
+            if tree_changed {
+                self.sync_to_tab();
+                self.ui_ctx.request_repaint();
+            }
+        }
+        self.save_preferences();
+    }
+
+    /// React only when the active location changes; never reveal the tree on
+    /// every rendered frame.
+    pub(crate) fn auto_reveal_active_tab(&mut self) {
+        if !self.auto_expand_folder_tree || self.in_inactive_panel_context {
+            return;
+        }
+        let path = self.navigation_state.current_path.clone();
+        let owner = self.active_tree_reveal_owner();
+        if path.is_empty()
+            || (path == self.auto_reveal_last_path && self.auto_reveal_last_owner == Some(owner))
+        {
+            return;
+        }
+        let previous_owner = self.auto_reveal_last_owner;
+        self.auto_reveal_last_path = path.clone();
+        self.auto_reveal_last_owner = Some(owner);
+        let owner_changed = previous_owner.is_some_and(|previous| previous != owner);
+        let mut tree_changed = false;
+        if let Some(previous) = previous_owner.filter(|previous| {
+            *previous != owner && previous.sidebar_workspace == owner.sidebar_workspace
+        }) {
+            tree_changed |= self.sidebar_tree.clear_tab_reveal(previous);
+        }
+        if crate::domain::special_paths::is_virtual_path(&path)
+            || self.sidebar_reveal_destination(&path).is_none()
+        {
+            tree_changed |= self.sidebar_tree.clear_tab_reveal(owner);
+            if tree_changed {
+                self.sync_to_tab();
+                self.ui_ctx.request_repaint();
+            }
+            return;
+        }
+        self.reveal_tab_path(owner, &path, true, owner_changed);
+    }
+
+    pub(crate) fn active_tree_reveal_owner(&self) -> RevealOwner {
+        let workspace_id = self.tab_manager.active().id;
+        if self.dual_panel_enabled {
+            if let Some(tabs) = self.tab_manager.active().dual_panel_tabs.as_ref() {
+                let panel_tabs = tabs.panel(self.dual_panel_active);
+                if let Some(tab) = panel_tabs.tabs.get(panel_tabs.active_tab) {
+                    return RevealOwner::panel(workspace_id, tab.id).in_sidebar(workspace_id);
+                }
+            }
+        }
+        RevealOwner::workspace(workspace_id).in_sidebar(workspace_id)
+    }
+
     fn sidebar_reveal_destination(&self, path: &str) -> Option<(PathBuf, Section)> {
         let current = Path::new(path);
         if crate::domain::special_paths::is_virtual_path(path) {
@@ -51,14 +131,37 @@ impl ImageViewerApp {
         action: crate::tabs::TabAction,
     ) {
         if action == crate::tabs::TabAction::CollapseFolderTree {
-            self.sidebar_tree.undo_tab_reveal(owner, Path::new(path));
+            if let Some((root, _)) = self.sidebar_reveal_destination(path) {
+                self.sidebar_tree
+                    .collapse_tab_tree_to(owner, &root, Path::new(path));
+            }
             self.sync_to_tab();
             self.ui_ctx.request_repaint();
             return;
         }
+        self.reveal_tab_path(owner, path, false, false);
+    }
+
+    fn reveal_tab_path(
+        &mut self,
+        owner: RevealOwner,
+        path: &str,
+        replace_previous: bool,
+        force_same_target: bool,
+    ) {
         let Some((root, section)) = self.sidebar_reveal_destination(path) else {
             return;
         };
+        if replace_previous
+            && !self.sidebar_tree.replace_tab_reveal(
+                owner,
+                &root,
+                Path::new(path),
+                force_same_target,
+            )
+        {
+            return;
+        }
         let before = [
             self.collapse_cloud_drives,
             self.collapse_local_disks,
@@ -71,8 +174,10 @@ impl ImageViewerApp {
             Section::NetworkDrive => self.collapse_network_drives = false,
             Section::NetworkLocation => self.collapse_network_locations = false,
         }
-        self.sidebar_tree
-            .request_tab_reveal(owner, &root, Path::new(path));
+        if !replace_previous {
+            self.sidebar_tree
+                .request_tab_reveal(owner, &root, Path::new(path));
+        }
         let after = [
             self.collapse_cloud_drives,
             self.collapse_local_disks,

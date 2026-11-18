@@ -56,19 +56,8 @@ impl SidebarTreeState {
         self.reveal_sidebar_workspace = Some(workspace);
     }
 
-    pub(crate) fn tab_tree_action(
-        &self,
-        owner: RevealOwner,
-        path: &str,
-    ) -> Option<crate::tabs::TabAction> {
-        if path.is_empty() || crate::domain::special_paths::is_virtual_path(path) {
-            return None;
-        }
-        Some(if self.can_undo_tab_reveal(owner, Path::new(path)) {
-            crate::tabs::TabAction::CollapseFolderTree
-        } else {
-            crate::tabs::TabAction::ExpandFolderTree
-        })
+    pub(crate) fn tree_actions_available(&self, path: &str) -> bool {
+        !path.is_empty() && !crate::domain::special_paths::is_virtual_path(path)
     }
 
     pub(crate) fn can_undo_tab_reveal(&self, owner: RevealOwner, target: &Path) -> bool {
@@ -119,6 +108,54 @@ impl SidebarTreeState {
             }) {
                 self.expanded.remove(&path);
             }
+        }
+        self.prune_collapsed_children_cache();
+    }
+
+    /// Remove the current reveal record and undo only the nodes it opened.
+    pub(crate) fn clear_tab_reveal(&mut self, owner: RevealOwner) -> bool {
+        let Some(target) = self.reveal_undo.get(&owner).map(|undo| undo.target.clone()) else {
+            return false;
+        };
+        if self.can_undo_tab_reveal(owner, &target) {
+            self.undo_tab_reveal(owner, &target);
+        } else if self
+            .reveal
+            .borrow()
+            .as_ref()
+            .is_some_and(|request| request.owner == owner)
+        {
+            self.cancel_reveal();
+        }
+        self.reveal_undo.remove(&owner);
+        true
+    }
+
+    /// Explicitly collapse the branch from its tree root through `target`.
+    pub(crate) fn collapse_tab_tree_to(&mut self, owner: RevealOwner, root: &Path, target: &Path) {
+        if !contains_path(root, target) {
+            return;
+        }
+        if self
+            .reveal
+            .borrow()
+            .as_ref()
+            .is_some_and(|request| request.owner == owner)
+        {
+            self.cancel_reveal();
+        }
+        self.reveal_undo.remove(&owner);
+
+        let mut path = target;
+        loop {
+            self.expanded.retain(|expanded| !same_path(expanded, path));
+            if same_path(path, root) {
+                break;
+            }
+            let Some(parent) = path.parent() else {
+                break;
+            };
+            path = parent;
         }
         self.prune_collapsed_children_cache();
     }

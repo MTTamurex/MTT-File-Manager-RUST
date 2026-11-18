@@ -1,6 +1,7 @@
-use super::AppStateDb;
+use super::{AppStateDb, AppStateWriteError};
 use crate::domain::pinned_folder::PinnedFolder;
-use rusqlite::params;
+use crate::domain::quick_access_item::QuickAccessItem;
+use rusqlite::{params, TransactionBehavior};
 
 impl AppStateDb {
     /// Load all pinned folders ordered by position. [READER]
@@ -64,15 +65,33 @@ impl AppStateDb {
         }
     }
 
-    /// Reassign sequential positions 0..n for the given ordered list of paths. [WRITER]
-    pub fn update_pinned_positions(&self, ordered_paths: &[String]) {
-        if let Ok(db) = self.writer.lock() {
-            for (i, path) in ordered_paths.iter().enumerate() {
-                let _ = db.execute(
-                    "UPDATE pinned_folders SET position = ? WHERE path = ?",
-                    params![i as i64, path],
-                );
+    /// Reassign positions for the combined Quick Access sequence atomically. [WRITER]
+    pub fn update_quick_access_positions(
+        &self,
+        ordered_items: &[QuickAccessItem],
+    ) -> Result<(), AppStateWriteError> {
+        let mut db = self
+            .writer
+            .lock()
+            .map_err(|_| AppStateWriteError::WriterLockPoisoned)?;
+        let transaction = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for (position, item) in ordered_items.iter().enumerate() {
+            match item {
+                QuickAccessItem::PinnedFolder(path) => {
+                    transaction.execute(
+                        "UPDATE pinned_folders SET position = ? WHERE path = ?",
+                        params![position as i64, path],
+                    )?;
+                }
+                QuickAccessItem::FolderGroup(group_id) => {
+                    transaction.execute(
+                        "UPDATE folder_groups SET position = ? WHERE id = ?",
+                        params![position as i64, group_id],
+                    )?;
+                }
             }
         }
+        transaction.commit()?;
+        Ok(())
     }
 }

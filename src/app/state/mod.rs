@@ -799,6 +799,16 @@ pub struct ImageViewerApp {
 
     // Quick Access pinned folders (ordered by position)
     pub pinned_folders: Vec<crate::domain::pinned_folder::PinnedFolder>,
+    /// Saved workspace tab groups shown alongside pinned folders.
+    pub folder_groups: Vec<crate::domain::folder_group::FolderGroup>,
+    /// Automatically reveal the active location in the sidebar folder tree.
+    pub auto_expand_folder_tree: bool,
+    /// Last location handled by auto-reveal, to keep it event-driven.
+    pub auto_reveal_last_path: String,
+    /// Last tree owner paired with the path, so equal paths in another tab still sync.
+    pub(crate) auto_reveal_last_owner: Option<sidebar_tree_state::reveal::RevealOwner>,
+    pub save_group_name: String,
+    pub show_save_group_dialog: bool,
 
     // File tags / color labels (persistent metadata keyed by path)
     pub tag_definitions: rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,

@@ -9,6 +9,7 @@ mod navigation_input;
 pub mod notifications;
 pub mod panels;
 mod quick_search;
+mod startup_fonts;
 mod view_mode_input;
 
 pub use input::*;
@@ -16,3 +17,4 @@ pub use lifecycle::*;
 pub use menu_handler::*;
 pub use notifications::*;
 pub use panels::*;
+pub(crate) use startup_fonts::apply_ready_startup_fonts;

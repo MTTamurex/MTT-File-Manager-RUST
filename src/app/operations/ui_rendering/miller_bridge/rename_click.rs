@@ -56,6 +56,7 @@ fn clicked_item_index(action: &MillerColumnAction) -> Option<usize> {
     match action {
         MillerColumnAction::Clicked(index)
         | MillerColumnAction::DoubleClicked(index)
+        | MillerColumnAction::RenameClicked(index)
         | MillerColumnAction::SecondaryClicked(index, _) => Some(*index),
         MillerColumnAction::DragStarted(_)
         | MillerColumnAction::EmptyClicked

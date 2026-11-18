@@ -2,6 +2,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::pinned_folder::PinnedFolder;
+use crate::domain::quick_access_item::ordered_quick_access_items;
 
 impl ImageViewerApp {
     /// Pin a folder to Quick Access. No-op if already pinned.
@@ -20,7 +21,14 @@ impl ImageViewerApp {
             .unwrap_or(path)
             .to_string();
 
-        let position = self.pinned_folders.len() as i64;
+        let position = self
+            .pinned_folders
+            .iter()
+            .map(|folder| folder.position)
+            .chain(self.folder_groups.iter().map(|group| group.position))
+            .max()
+            .unwrap_or(-1)
+            + 1;
         let pinned = PinnedFolder {
             path: path.to_string(),
             display_name: display_name.clone(),
@@ -39,17 +47,8 @@ impl ImageViewerApp {
         let path = path.as_ref();
         self.pinned_folders.retain(|pf| pf.path != path);
         self.app_state_db.remove_pinned_folder(path);
-
-        // Reassign positions sequentially after removal
-        let ordered: Vec<String> = self
-            .pinned_folders
-            .iter()
-            .map(|pf| pf.path.clone())
-            .collect();
-        for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
-            pf.position = i as i64;
-        }
-        self.app_state_db.update_pinned_positions(&ordered);
+        let order = ordered_quick_access_items(&self.pinned_folders, &self.folder_groups);
+        self.persist_quick_access_order(&order);
     }
 
     /// Remove pinned folders whose paths no longer exist on disk.
@@ -111,27 +110,5 @@ impl ImageViewerApp {
         if std::mem::take(&mut self.file_operation_state.pinned_cleanup_pending) {
             self.cleanup_deleted_pinned_folders();
         }
-    }
-
-    /// Reorder pinned folders by moving item at `from` to position `to`.
-    pub fn reorder_pinned_folder(&mut self, from: usize, to: usize) {
-        if from == to || from >= self.pinned_folders.len() {
-            return;
-        }
-
-        let item = self.pinned_folders.remove(from);
-        let insert_at = to.min(self.pinned_folders.len());
-        self.pinned_folders.insert(insert_at, item);
-
-        // Update positions in memory and DB
-        let ordered: Vec<String> = self
-            .pinned_folders
-            .iter()
-            .map(|pf| pf.path.clone())
-            .collect();
-        for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
-            pf.position = i as i64;
-        }
-        self.app_state_db.update_pinned_positions(&ordered);
     }
 }

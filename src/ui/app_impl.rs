@@ -235,7 +235,8 @@ impl eframe::App for ImageViewerApp {
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
         self.track_frame_interval();
         // Startup must advance while the root viewport is still hidden.
-        app::lifecycle::handle_startup_sequence(self, ctx);
+        let startup_fonts_ready = app::apply_ready_startup_fonts(self, ctx);
+        app::lifecycle::handle_startup_sequence(self, ctx, startup_fonts_ready);
         app::lifecycle::track_window_state(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
         self.ensure_window_handle(frame);
@@ -303,19 +304,6 @@ impl eframe::App for ImageViewerApp {
         diagnostic_frame.checkpoint("frame_input_setup");
         self.run_background_updates(ctx, true);
         diagnostic_frame.checkpoint("frame_background_updates");
-
-        // Apply asynchronously loaded fonts as soon as the worker finishes.
-        if let Some(rx) = &self.font_loader_rx {
-            if let Ok(fonts) = rx.try_recv() {
-                crate::ui::fonts::selection::install(
-                    ctx,
-                    fonts,
-                    crate::ui::fonts::sizing::FontSizes::load(&self.app_state_db),
-                );
-                self.font_loader_rx = None; // Disable loader once done
-                ctx.request_repaint(); // Force refresh with new fonts
-            }
-        }
 
         crate::ui::fonts::selection::poll(ctx, &self.app_state_db);
 
@@ -736,6 +724,8 @@ impl eframe::App for ImageViewerApp {
         if self.batch_rename_state.is_some() {
             crate::ui::components::batch_rename_modal::render_batch_rename_modal(self, ctx);
         }
+
+        crate::ui::components::folder_group_modal::render_save_group_modal(self, ctx);
 
         if self.show_tag_manager {
             crate::ui::components::tag_manager_modal::render_tag_manager_modal(self, ctx);

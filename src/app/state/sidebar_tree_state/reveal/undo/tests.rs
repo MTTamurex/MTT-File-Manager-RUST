@@ -1,7 +1,6 @@
 use super::*;
 use crate::app::state::sidebar_tree_state::FolderNode;
 use crate::infrastructure::directory_cache::DirectoryCache;
-use crate::tabs::TabAction;
 use std::sync::Arc;
 
 fn node(path: &Path) -> FolderNode {
@@ -33,18 +32,12 @@ fn undo_only_removes_the_ancestors_opened_by_this_tab() {
     tree.expanded.insert("D:\\".into());
     tree.request_tab_reveal(owner, Path::new("C:\\"), target);
     tree.take_reveal_row(Path::new("C:\\"), target);
-    assert_eq!(
-        tree.tab_tree_action(owner, &target.to_string_lossy()),
-        Some(TabAction::CollapseFolderTree)
-    );
+    assert!(tree.can_undo_tab_reveal(owner, target));
     tree.undo_tab_reveal(owner, target);
     assert!(tree.is_expanded(Path::new("C:\\")));
     assert!(tree.is_expanded(Path::new("D:\\")));
     assert!(!tree.is_expanded(Path::new("C:\\Folder")));
-    assert_eq!(
-        tree.tab_tree_action(owner, &target.to_string_lossy()),
-        Some(TabAction::ExpandFolderTree)
-    );
+    assert!(!tree.can_undo_tab_reveal(owner, target));
 }
 
 #[test]
@@ -77,7 +70,7 @@ fn undo_preserves_branches_opened_manually_after_the_action() {
 }
 
 #[test]
-fn a_manually_collapsed_ancestor_changes_the_menu_back_to_expand() {
+fn collapsing_an_ancestor_disables_the_undo_record() {
     let mut tree = tree();
     let owner = RevealOwner::workspace(1);
     let root = Path::new("C:\\");
@@ -85,10 +78,7 @@ fn a_manually_collapsed_ancestor_changes_the_menu_back_to_expand() {
     tree.request_tab_reveal(owner, root, target);
     tree.take_reveal_row(root, target);
     tree.toggle_expand(root);
-    assert_eq!(
-        tree.tab_tree_action(owner, &target.to_string_lossy()),
-        Some(TabAction::ExpandFolderTree)
-    );
+    assert!(!tree.can_undo_tab_reveal(owner, target));
 }
 
 #[test]
@@ -131,8 +121,59 @@ fn undo_during_loading_does_not_reopen_ancestors_when_results_arrive() {
 fn virtual_views_never_offer_tree_actions() {
     let tree = tree();
     for path in ["::computer::", "::recycle_bin::", "::tag::1", ""] {
-        assert_eq!(tree.tab_tree_action(RevealOwner::workspace(1), path), None);
+        assert!(!tree.tree_actions_available(path));
     }
+    assert!(tree.tree_actions_available("C:\\Folder"));
+}
+
+#[test]
+fn automatic_reveal_replaces_the_previous_path_but_preserves_preexisting_expansion() {
+    let mut tree = tree();
+    let owner = RevealOwner::workspace(1);
+    let root = Path::new("C:\\");
+    let previous_target = Path::new("C:\\Folder\\Child");
+    let next_folder = Path::new("C:\\Other");
+    let next_target = next_folder.join("Leaf");
+    tree.children.insert(
+        root.into(),
+        vec![node(Path::new("C:\\Folder")), node(&next_folder)],
+    );
+    tree.children
+        .insert(next_folder.into(), vec![node(&next_target)]);
+    tree.expanded.insert(root.into());
+
+    tree.request_tab_reveal(owner, root, previous_target);
+    assert!(tree.is_expanded(Path::new("C:\\Folder")));
+    assert!(tree.replace_tab_reveal(owner, root, &next_target, false));
+
+    assert!(tree.is_expanded(root));
+    assert!(!tree.is_expanded(Path::new("C:\\Folder")));
+    assert!(tree.is_expanded(next_folder));
+    assert!(tree.can_undo_tab_reveal(owner, &next_target));
+}
+
+#[test]
+fn explicit_collapse_closes_the_path_to_the_target_and_preserves_other_branches() {
+    let mut tree = tree();
+    let owner = RevealOwner::workspace(1);
+    let root = Path::new("C:\\");
+    let target = Path::new("C:\\Folder\\Child");
+    let unrelated = Path::new("D:\\Other");
+    tree.expanded.extend([
+        root.into(),
+        Path::new("C:\\Folder").into(),
+        target.into(),
+        unrelated.into(),
+    ]);
+    tree.request_tab_reveal(owner, root, target);
+
+    tree.collapse_tab_tree_to(owner, root, target);
+
+    assert!(!tree.is_expanded(root));
+    assert!(!tree.is_expanded(Path::new("C:\\Folder")));
+    assert!(!tree.is_expanded(target));
+    assert!(tree.is_expanded(unrelated));
+    assert!(!tree.can_undo_tab_reveal(owner, target));
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::state::sidebar_tree_state::SidebarTreeState;
 use crate::domain::file_tag::{FileTag, TagColor};
+use crate::domain::folder_group::FolderGroup;
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use rustc_hash::FxHashMap;
@@ -36,6 +37,34 @@ fn with_sidebar<R>(
 
 fn with_sidebar_tree<R>(
     pinned_count: usize,
+    tag_count: usize,
+    collapsed: bool,
+    wide_tree: bool,
+    run: impl FnOnce(&Context, &mut SidebarContext<'_>) -> R,
+) -> R {
+    with_sidebar_tree_and_groups(pinned_count, &[], tag_count, collapsed, wide_tree, run)
+}
+
+fn with_sidebar_and_groups<R>(
+    pinned_count: usize,
+    folder_groups: &[FolderGroup],
+    tag_count: usize,
+    collapsed: bool,
+    run: impl FnOnce(&Context, &mut SidebarContext<'_>) -> R,
+) -> R {
+    with_sidebar_tree_and_groups(
+        pinned_count,
+        folder_groups,
+        tag_count,
+        collapsed,
+        false,
+        run,
+    )
+}
+
+fn with_sidebar_tree_and_groups<R>(
+    pinned_count: usize,
+    folder_groups: &[FolderGroup],
     tag_count: usize,
     collapsed: bool,
     wide_tree: bool,
@@ -113,6 +142,7 @@ fn with_sidebar_tree<R>(
         is_renaming: false,
         icon_loader: &mut icons,
         pinned_folders: &pinned,
+        folder_groups,
         is_item_dragging: false,
         can_drop_items_to_recycle_bin: false,
         is_folder_dragging: false,
@@ -183,6 +213,73 @@ fn dropping_a_folder_on_quick_access_still_pins_it() {
     ));
 }
 
+#[test]
+fn saved_group_can_be_reordered_before_a_pinned_folder_in_vertical_quick_access() {
+    let group = FolderGroup {
+        id: 7,
+        name: "Saved group".to_owned(),
+        position: 1,
+        paths: Vec::new(),
+    };
+    with_sidebar_and_groups(1, &[group], 0, false, |ctx, sidebar| {
+        let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(240.0, 500.0));
+        let mut render = |events| {
+            let mut action = None;
+            let output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen_rect),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.set_max_size(vec2(240.0, 500.0));
+                    action = render_content(ui, sidebar, true).inner;
+                },
+            );
+            (output, action)
+        };
+        let text_position = |output: &egui::FullOutput, text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text_shape) if text_shape.galley.text() == text => {
+                        Some(shape.shape.visual_bounding_rect().center())
+                    }
+                    _ => None,
+                })
+                .expect("Quick Access item text is visible")
+        };
+
+        let (initial, _) = render(Vec::new());
+        let group_position = text_position(&initial, "Saved group");
+        let folder_position = text_position(&initial, "Folder 0");
+        let drop_position = egui::Pos2::new(group_position.x, folder_position.y - 8.0);
+        let press = egui::Event::PointerButton {
+            pos: group_position,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        render(vec![egui::Event::PointerMoved(group_position), press]);
+        render(vec![egui::Event::PointerMoved(drop_position)]);
+        let (_, action) = render(vec![
+            egui::Event::PointerMoved(drop_position),
+            egui::Event::PointerButton {
+                pos: drop_position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+
+        assert!(matches!(
+            action,
+            Some(SidebarAction::ReorderQuickAccessItem { from: 1, to: 0 })
+        ));
+    });
+}
+
 fn drop_folder_on(label: &str) -> Option<SidebarAction> {
     with_sidebar(0, 1, false, |ctx, sidebar| {
         sidebar.is_item_dragging = true;
@@ -199,7 +296,7 @@ fn releasing_a_pinned_folder_over_tags_does_not_reorder_quick_access() {
     });
     assert!(!matches!(
         action,
-        Some(SidebarAction::ReorderPinnedFolder { .. })
+        Some(SidebarAction::ReorderQuickAccessItem { .. })
     ));
 }
 
@@ -279,7 +376,9 @@ fn release_on_label(
             },
         );
         if pressed && reorder {
-            ctx.data_mut(|data| data.insert_temp(egui::Id::new("qa_reorder_drag"), 0usize));
+            ctx.data_mut(|data| {
+                data.insert_temp(egui::Id::new("qa_reorder_drag"), (0usize, 14.0f32))
+            });
         }
     }
     action

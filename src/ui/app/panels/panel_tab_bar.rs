@@ -57,6 +57,7 @@ pub(super) fn render_panel_tab_bar(
     pinned_folders: &[crate::domain::pinned_folder::PinnedFolder],
     live_path: Option<&str>,
     tree_state: &crate::app::state::sidebar_tree_state::SidebarTreeState,
+    auto_expand_tree: bool,
     is_item_dragging: bool,
     can_add_tab: bool,
     computer_icon: Option<&egui::TextureHandle>,
@@ -139,7 +140,8 @@ pub(super) fn render_panel_tab_bar(
                         let mut preview = crate::ui::tab_drag_preview::TabDragPreview::default();
                         for (index, tab) in tabs.tabs.iter().enumerate() {
                             ui.push_id((workspace_id, panel, tab.id), |ui| {
-                                let paint_start = crate::ui::tab_drag_preview::TabDragPreview::begin(ui);
+                                let paint_start =
+                                    crate::ui::tab_drag_preview::TabDragPreview::begin(ui);
                                 let path = if index == tabs.active_tab {
                                     live_path.unwrap_or(&tab.snapshot.path)
                                 } else {
@@ -310,16 +312,17 @@ pub(super) fn render_panel_tab_bar(
                                 }
                                 if !is_item_dragging {
                                     use crate::tabs::actions::{close_candidates, TabAction};
-                                    use crate::ui::tab_bar::context_menu::{tab_context_menu, TabContextMenuOptions};
+                                    use crate::ui::tab_bar::context_menu::{
+                                        tab_context_menu, TabContextMenuOptions,
+                                    };
                                     let context_response = if tab.pinned {
                                         tab_response.union(close_response)
                                     } else {
                                         tab_response
                                     };
-                                    if let Some(command) =
-                                        tab_context_menu(
-                                            &context_response,
-                                            TabContextMenuOptions {
+                                    if let Some(command) = tab_context_menu(
+                                        &context_response,
+                                        TabContextMenuOptions {
                                             pinned: tab.pinned,
                                             can_duplicate: can_add_tab,
                                             can_close_left: !close_candidates(
@@ -336,18 +339,18 @@ pub(super) fn render_panel_tab_bar(
                                                 |t| t.pinned,
                                             )
                                             .is_empty(),
-                                            quick_access_action: crate::tabs::quick_access::tab_quick_access_action(
-                                                path,
-                                                pinned_folders,
-                                            ),
-                                            tree_action: tree_state.tab_tree_action(
-                                                crate::app::state::sidebar_tree_state::reveal::RevealOwner::panel(workspace_id, tab.id),
-                                                path,
-                                            ),
+                                            quick_access_action:
+                                                crate::tabs::quick_access::tab_quick_access_action(
+                                                    path,
+                                                    pinned_folders,
+                                                ),
+                                            tree_actions_available: tree_state
+                                                .tree_actions_available(path),
                                             can_reopen: None,
-                                            },
-                                        )
-                                    {
+                                            can_save_group: false,
+                                            auto_expand_tree,
+                                        },
+                                    ) {
                                         action =
                                             Some(PanelTabAction::Context(panel, index, command));
                                     }
@@ -355,7 +358,12 @@ pub(super) fn render_panel_tab_bar(
                                 preview.record(ui, tab_rect, paint_start);
                             });
                         }
-                        preview.paint(ui, ui.id().with(("tab_preview", workspace_id, panel)), drag.preview_source(ui), scroll_rect);
+                        preview.paint(
+                            ui,
+                            ui.id().with(("tab_preview", workspace_id, panel)),
+                            drag.preview_source(ui),
+                            scroll_rect,
+                        );
                         if let Some(index) = drag.detach_source(ui) {
                             action = Some(PanelTabAction::Detach(panel, index));
                         } else if let Some((from, gap)) = drag.finish(ui, scroll_rect) {

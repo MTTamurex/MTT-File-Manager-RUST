@@ -119,6 +119,7 @@ fn render_section_with_feedback(
             is_renaming: renaming,
             icon_loader: &mut icon_loader,
             pinned_folders: &[],
+            folder_groups: &[],
             is_item_dragging: dragging,
             can_drop_items_to_recycle_bin: false,
             is_folder_dragging: false,

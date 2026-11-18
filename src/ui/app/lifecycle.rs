@@ -47,8 +47,16 @@ fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: 
     app.ui_ctx.request_repaint();
 }
 
-pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
+pub fn handle_startup_sequence(
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    startup_fonts_ready: bool,
+) {
     if app.startup_tick < STARTUP_REVEAL_TICK {
+        if should_hold_startup_reveal(app.startup_tick, startup_fonts_ready) {
+            ctx.request_repaint();
+            return;
+        }
         app.startup_tick += 1;
 
         if app.startup_tick == 1 {
@@ -125,6 +133,10 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Keep the loop running fast during startup
         ctx.request_repaint();
     }
+}
+
+fn should_hold_startup_reveal(startup_tick: usize, startup_fonts_ready: bool) -> bool {
+    startup_tick + 1 == STARTUP_REVEAL_TICK && !startup_fonts_ready
 }
 
 pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -508,7 +520,15 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
 
 #[cfg(test)]
 mod tests {
-    use super::should_flush_gpu_textures_after_focus_restore;
+    use super::{should_flush_gpu_textures_after_focus_restore, should_hold_startup_reveal};
+
+    #[test]
+    fn startup_waits_for_fonts_only_before_the_reveal_tick() {
+        assert!(!should_hold_startup_reveal(0, false));
+        assert!(should_hold_startup_reveal(1, false));
+        assert!(!should_hold_startup_reveal(1, true));
+        assert!(!should_hold_startup_reveal(2, false));
+    }
 
     #[test]
     fn prolonged_glow_focus_restore_keeps_warm_texture_handles() {

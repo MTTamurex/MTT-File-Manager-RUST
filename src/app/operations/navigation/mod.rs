@@ -185,6 +185,7 @@ impl ImageViewerApp {
             diagnostic_stage.lap("navigation_load_folder");
             self.load_folder(false);
         }
+        self.auto_reveal_active_tab();
     }
 
     /// Removes deleted filesystem paths from every open navigation timeline.
@@ -298,6 +299,7 @@ impl ImageViewerApp {
                 self.load_folder(false);
             }
         }
+        self.auto_reveal_active_tab();
     }
 
     /// Moves forward in history
@@ -378,6 +380,7 @@ impl ImageViewerApp {
                 self.load_folder(false);
             }
         }
+        self.auto_reveal_active_tab();
     }
 
     /// Navigates to the "This PC" view (adding to history)

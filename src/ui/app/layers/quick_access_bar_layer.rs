@@ -1,11 +1,19 @@
 use crate::app::navigation_state::QuickAccessPlacement;
 use crate::app::ImageViewerApp;
+use crate::domain::quick_access_item::{
+    destination_for_quick_access_gap, ordered_quick_access_items, QuickAccessItem,
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
 use rust_i18n::t;
 
-pub(crate) const QUICK_ACCESS_BAR_HEIGHT: f32 = 34.0;
-const CHIP_WIDTH: f32 = 124.0;
+mod actions;
+mod chips;
+#[cfg(test)]
+mod tests;
 
+use chips::{chip_label, paint_chip, paint_group_chip, CHIP_WIDTH};
+
+pub(crate) const QUICK_ACCESS_BAR_HEIGHT: f32 = 34.0;
 pub(crate) fn quick_access_bar_visible(app: &ImageViewerApp) -> bool {
     app.show_quick_access && app.quick_access_placement == QuickAccessPlacement::Horizontal
 }
@@ -29,15 +37,13 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
         .iter()
         .map(|folder| (folder.path.clone(), folder.display_name.clone()))
         .collect();
-    let mut reorder = None;
-    let mut navigate = None;
-    let mut new_tab_path = None;
-    let mut context_menu_path = None;
-    let mut unpin_path = None;
-    let mut pin_path = None;
-    let mut pin_current_path = None;
-    let mut cancel_drag_on_bar = false;
-    let mut drop_to_recycle_bin = false;
+    let group_items: Vec<(i64, String, usize)> = app
+        .folder_groups
+        .iter()
+        .map(|group| (group.id, group.name.clone(), group.paths.len()))
+        .collect();
+    let quick_access_items = ordered_quick_access_items(&app.pinned_folders, &app.folder_groups);
+    let mut deferred = actions::DeferredActions::default();
     let can_drop_items_to_recycle_bin = app.can_drop_drag_payload_to_recycle_bin();
 
     egui::Panel::top("quick_access_bar")
@@ -116,11 +122,14 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             add_response = add_response
                                 .on_hover_text(t!("quick_access_bar.pin_current_folder_tooltip"));
                             if add_response.clicked() {
-                                pin_current_path = Some(current_path);
+                                deferred.pin_current_path = Some(current_path);
                             }
                         }
 
-                        if folder_items.is_empty() && !app.show_recycle_bin {
+                        if folder_items.is_empty()
+                            && group_items.is_empty()
+                            && !app.show_recycle_bin
+                        {
                             ui.label(
                                 egui::RichText::new(t!("sidebar.quick_access"))
                                     .color(ui.visuals().weak_text_color()),
@@ -160,13 +169,13 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 && !app.is_item_dragging
                                 && app.renaming_state.is_none()
                             {
-                                navigate = Some(None);
+                                deferred.navigate = Some(None);
                             }
                             if response.middle_clicked()
                                 && !app.is_item_dragging
                                 && app.renaming_state.is_none()
                             {
-                                new_tab_path = Some(
+                                deferred.new_tab_path = Some(
                                     crate::domain::special_paths::RECYCLE_BIN_VIEW_ID.to_string(),
                                 );
                             }
@@ -174,155 +183,225 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
 
                         let drag_id = egui::Id::new("qa_bar_reorder_drag");
                         let drag_src: Option<usize> = ui.ctx().data(|data| data.get_temp(drag_id));
-                        let mut pointer_over_item = None;
                         let pointer_over_recycle_bin = pointer.is_some_and(|position| {
                             recycle_bin_rect.is_some_and(|rect| rect.contains(position))
                         });
-                        let pointer_before_first_item = pointer.is_some_and(|position| {
-                            !pointer_over_recycle_bin
-                                && viewport.contains(position)
-                                && (folder_items.is_empty() || position.x < ui.cursor().min.x)
-                        });
+                        let mut item_rects = Vec::with_capacity(quick_access_items.len());
+                        let mut source_owns_drag = false;
+                        let mut preview = crate::ui::tab_drag_preview::TabDragPreview::default();
 
-                        for (index, (path, display_name)) in folder_items.iter().enumerate() {
-                            let label =
-                                crate::infrastructure::onedrive::special_folder_display_name(
-                                    std::path::Path::new(path),
-                                )
-                                .unwrap_or_else(|| display_name.clone());
-                            let visible_label = chip_label(ui, &label);
-                            let (rect, response) = ui
-                                .allocate_exact_size(egui::vec2(CHIP_WIDTH, 26.0), Sense::hover());
-                            let pin_size = 22.0;
-                            let pin_rect = Rect::from_center_size(
-                                Pos2::new(rect.right() - pin_size / 2.0 - 2.0, rect.center().y),
-                                egui::vec2(pin_size, pin_size),
-                            );
-                            let item_rect = Rect::from_min_max(
-                                rect.min,
-                                Pos2::new(pin_rect.left(), rect.max.y),
-                            );
-                            let item_response = ui.interact(
-                                item_rect,
-                                response.id.with("navigate"),
-                                Sense::click_and_drag(),
-                            );
-                            let pin_response = ui
-                                .interact(pin_rect, response.id.with("unpin"), Sense::click())
-                                .on_hover_text(t!("sidebar.remove_from_quick_access"));
-                            if let Some(position) =
-                                pointer.filter(|position| rect.contains(*position))
-                            {
-                                let after_item = position.x >= rect.center().x;
-                                let insertion_index = index + if after_item { 1 } else { 0 };
-                                pointer_over_item = Some(insertion_index);
-                                if drag_src.is_some() {
-                                    let marker_x = if after_item {
-                                        rect.right()
-                                    } else {
-                                        rect.left()
+                        for (index, item) in quick_access_items.iter().enumerate() {
+                            let paint_start =
+                                crate::ui::tab_drag_preview::TabDragPreview::begin(ui);
+                            match item {
+                                QuickAccessItem::PinnedFolder(path) => {
+                                    let Some((_, display_name)) =
+                                        folder_items.iter().find(|(item_path, _)| item_path == path)
+                                    else {
+                                        continue;
                                     };
-                                    ui.painter().vline(
-                                        marker_x,
-                                        rect.y_range(),
-                                        egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
+                                    let label =
+                                        crate::infrastructure::onedrive::special_folder_display_name(
+                                            std::path::Path::new(path),
+                                        )
+                                        .unwrap_or_else(|| display_name.clone());
+                                    let visible_label = chip_label(ui, &label);
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(CHIP_WIDTH, 26.0),
+                                        Sense::hover(),
                                     );
+                                    let pin_size = 22.0;
+                                    let pin_rect = Rect::from_center_size(
+                                        Pos2::new(
+                                            rect.right() - pin_size / 2.0 - 2.0,
+                                            rect.center().y,
+                                        ),
+                                        egui::vec2(pin_size, pin_size),
+                                    );
+                                    let item_rect = Rect::from_min_max(
+                                        rect.min,
+                                        Pos2::new(pin_rect.left(), rect.max.y),
+                                    );
+                                    let item_response = ui.interact(
+                                        item_rect,
+                                        response.id.with("navigate"),
+                                        Sense::click_and_drag(),
+                                    );
+                                    let pin_response = ui
+                                        .interact(
+                                            pin_rect,
+                                            response.id.with("unpin"),
+                                            Sense::click(),
+                                        )
+                                        .on_hover_text(t!("sidebar.remove_from_quick_access"));
+                                    if item_response.drag_started() {
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(drag_id, index)
+                                        });
+                                    }
+                                    if drag_src == Some(index) {
+                                        source_owns_drag = item_response
+                                            .dragged_by(egui::PointerButton::Primary)
+                                            || item_response.drag_stopped_by(
+                                                egui::PointerButton::Primary,
+                                            );
+                                    }
+
+                                    let selected = !app.navigation_state.is_computer_view
+                                        && !app.navigation_state.is_recycle_bin_view
+                                        && app.navigation_state.current_path == *path;
+                                    let icon = app
+                                        .item_icon_loader
+                                        .get_or_load_folder_navigation_icon(ui.ctx(), path);
+                                    paint_chip(
+                                        ui,
+                                        rect,
+                                        &visible_label,
+                                        icon.as_ref(),
+                                        selected,
+                                        item_response.hovered()
+                                            || item_response.dragged()
+                                            || pin_response.hovered(),
+                                    );
+                                    let item_response = if visible_label != label {
+                                        item_response.on_hover_text(&label)
+                                    } else {
+                                        item_response.on_hover_text(path)
+                                    };
+                                    let pin_color = if pin_response.hovered() {
+                                        Color32::from_rgb(220, 60, 60)
+                                    } else {
+                                        Color32::from_gray(140)
+                                    };
+                                    ui.painter().text(
+                                        pin_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "📌",
+                                        egui::FontId::proportional(12.0),
+                                        pin_color,
+                                    );
+                                    preview.record(ui, rect, paint_start);
+                                    item_rects.push(rect);
+
+                                    if item_response.clicked()
+                                        && !item_response.dragged()
+                                        && app.renaming_state.is_none()
+                                    {
+                                        deferred.navigate = Some(Some(path.clone()));
+                                    }
+                                    if item_response.middle_clicked()
+                                        && app.renaming_state.is_none()
+                                    {
+                                        deferred.new_tab_path = Some(path.clone());
+                                    }
+                                    if pin_response.clicked() {
+                                        deferred.unpin_path = Some(path.clone());
+                                    }
+                                    if item_response.secondary_clicked()
+                                        || pin_response.secondary_clicked()
+                                    {
+                                        deferred.context_menu_path = Some(path.clone());
+                                    }
                                 }
-                            }
-                            if item_response.drag_started() {
-                                ui.ctx().data_mut(|data| data.insert_temp(drag_id, index));
-                            }
-
-                            let selected = !app.navigation_state.is_computer_view
-                                && !app.navigation_state.is_recycle_bin_view
-                                && app.navigation_state.current_path == *path;
-                            let icon = app
-                                .item_icon_loader
-                                .get_or_load_folder_navigation_icon(ui.ctx(), path);
-                            paint_chip(
-                                ui,
-                                rect,
-                                &visible_label,
-                                icon.as_ref(),
-                                selected,
-                                item_response.hovered()
-                                    || item_response.dragged()
-                                    || pin_response.hovered(),
-                            );
-                            let item_response = if visible_label != label {
-                                item_response.on_hover_text(&label)
-                            } else {
-                                item_response.on_hover_text(path)
-                            };
-                            let pin_color = if pin_response.hovered() {
-                                Color32::from_rgb(220, 60, 60)
-                            } else {
-                                Color32::from_gray(140)
-                            };
-                            ui.painter().text(
-                                pin_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "📌",
-                                egui::FontId::proportional(12.0),
-                                pin_color,
-                            );
-
-                            if item_response.clicked()
-                                && !item_response.dragged()
-                                && app.renaming_state.is_none()
-                            {
-                                navigate = Some(Some(path.clone()));
-                            }
-                            if item_response.middle_clicked() && app.renaming_state.is_none() {
-                                new_tab_path = Some(path.clone());
-                            }
-                            if pin_response.clicked() {
-                                unpin_path = Some(path.clone());
-                            }
-                            if item_response.secondary_clicked() || pin_response.secondary_clicked()
-                            {
-                                context_menu_path = Some(path.clone());
+                                QuickAccessItem::FolderGroup(group_id) => {
+                                    let Some((_, name, path_count)) =
+                                        group_items.iter().find(|(id, _, _)| id == group_id)
+                                    else {
+                                        continue;
+                                    };
+                                    let label = chip_label(ui, name);
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(CHIP_WIDTH, 26.0),
+                                        Sense::click_and_drag(),
+                                    );
+                                    let response = response.on_hover_text(
+                                        t!("sidebar.group_open_count", count = path_count),
+                                    );
+                                    if response.drag_started() {
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(drag_id, index)
+                                        });
+                                    }
+                                    if drag_src == Some(index) {
+                                        source_owns_drag = response
+                                            .dragged_by(egui::PointerButton::Primary)
+                                            || response.drag_stopped_by(
+                                                egui::PointerButton::Primary,
+                                            );
+                                    }
+                                    paint_group_chip(
+                                        ui,
+                                        rect,
+                                        &label,
+                                        response.hovered() || response.dragged(),
+                                    );
+                                    preview.record(ui, rect, paint_start);
+                                    item_rects.push(rect);
+                                    if response.clicked()
+                                        && !response.dragged()
+                                        && !app.is_item_dragging
+                                        && app.renaming_state.is_none()
+                                    {
+                                        deferred.open_group_id = Some(*group_id);
+                                    }
+                                    response.context_menu(|ui| {
+                                        if ui.button(t!("sidebar.group_open_all")).clicked() {
+                                            deferred.open_group_id = Some(*group_id);
+                                            ui.close();
+                                        }
+                                        ui.separator();
+                                        if ui.button(t!("sidebar.group_delete")).clicked() {
+                                            deferred.delete_group_id = Some(*group_id);
+                                            ui.close();
+                                        }
+                                    });
+                                }
                             }
                         }
 
                         if let Some(source) = drag_src {
-                            if pointer_over_item.is_none()
-                                && !pointer_over_recycle_bin
-                                && pointer.is_some_and(|position| viewport.contains(position))
-                            {
-                                ui.painter().vline(
-                                    ui.cursor().min.x,
-                                    viewport.y_range(),
-                                    egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-                                );
-                            }
                             let released = ui.ctx().input(|input| input.pointer.primary_released());
                             let cancelled = ui.ctx().input(|input| {
                                 input.key_pressed(egui::Key::Escape)
                                     || !input.viewport().focused.unwrap_or(true)
                                     || (!input.pointer.primary_down() && !released)
                             });
+                            let pointer_in_viewport =
+                                pointer.is_some_and(|position| viewport.contains(position));
+                            let insertion_gap = if pointer_over_recycle_bin {
+                                None
+                            } else {
+                                horizontal_drop_gap(pointer, &item_rects, viewport)
+                            };
+                            preview.paint_at_gap(
+                                ui,
+                                drag_id.with("preview"),
+                                (!cancelled && source_owns_drag).then_some(source),
+                                viewport,
+                                insertion_gap,
+                            );
                             if cancelled || released {
                                 ui.ctx().data_mut(|data| data.remove::<usize>(drag_id));
                             }
                             if released
-                                && pointer.is_some_and(|position| viewport.contains(position))
+                                && !cancelled
+                                && source_owns_drag
+                                && pointer_in_viewport
+                                && !pointer_over_recycle_bin
                             {
                                 let insertion_index =
-                                    pointer_over_item.unwrap_or(if pointer_before_first_item {
-                                        0
-                                    } else {
-                                        folder_items.len()
-                                    });
-                                let destination = reorder_destination(
+                                    insertion_gap.unwrap_or(item_rects.len());
+                                let destination = destination_for_quick_access_gap(
                                     source,
                                     insertion_index,
-                                    folder_items.len(),
+                                    item_rects.len(),
                                 );
                                 if destination != source {
-                                    reorder = Some((source, destination));
+                                    deferred.reorder = Some((source, destination));
                                 }
                             } else if let Some(position) = pointer.filter(|position| {
+                                !released
+                                    &&
                                 viewport.y_range().contains(position.y)
                                     && (position.x < viewport.left() + 28.0
                                         || position.x > viewport.right() - 28.0)
@@ -353,11 +432,11 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                     ui.ctx().input(|input| input.pointer.primary_released());
                                 if released {
                                     if can_drop_items_to_recycle_bin && pointer_over_recycle_bin {
-                                        drop_to_recycle_bin = true;
+                                        deferred.drop_to_recycle_bin = true;
                                     } else {
-                                        cancel_drag_on_bar = true;
+                                        deferred.cancel_drag_on_bar = true;
                                         if is_folder_drop {
-                                            pin_path = app
+                                            deferred.pin_path = app
                                                 .drag_payload_paths
                                                 .first()
                                                 .and_then(|path| path.to_str())
@@ -376,220 +455,15 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                 });
         });
 
-    if drop_to_recycle_bin {
-        app.complete_item_drag_to_recycle_bin();
-    }
-    if cancel_drag_on_bar {
-        app.cancel_item_drag();
-    }
-    if let Some(target) = navigate {
-        match target {
-            Some(path) => app.navigate_to(&path),
-            None => app.navigate_to_recycle_bin(),
-        }
-    }
-    if let Some(path) = new_tab_path {
-        app.open_location_in_new_tab(app.dual_panel_active, &path);
-    }
-    if let Some((from, to)) = reorder {
-        app.reorder_pinned_folder(from, to);
-    }
-    if let Some(path) = unpin_path {
-        app.unpin_folder(&path);
-    }
-    if let Some(path) = pin_path {
-        app.pin_folder(&path);
-    }
-    if let Some(path) = pin_current_path {
-        app.pin_folder(&path);
-    }
-    if let Some(path) = context_menu_path {
-        let path_buf = std::path::PathBuf::from(path);
-        let position = root_ui
-            .ctx()
-            .input(|input| input.pointer.hover_pos().unwrap_or_default());
-        app.context_menu
-            .open(position, None, vec![path_buf.clone()], false);
-        app.context_menu.primary_is_directory = Some(true);
-        app.populate_context_menu(root_ui.ctx(), &[path_buf], false, None);
-    }
+    actions::apply(app, root_ui, deferred);
 }
 
-fn reorder_destination(source: usize, insertion_index: usize, item_count: usize) -> usize {
-    let insertion_index = insertion_index.min(item_count);
-    insertion_index.saturating_sub(if insertion_index > source { 1 } else { 0 })
-}
-
-fn chip_label(ui: &egui::Ui, label: &str) -> String {
-    crate::ui::preview_panel::utils::truncate_text_to_fit(
-        label,
-        CHIP_WIDTH - 56.0,
-        &egui::FontId::proportional(12.0),
-        ui,
+fn horizontal_drop_gap(pointer: Option<Pos2>, rects: &[Rect], viewport: Rect) -> Option<usize> {
+    let pointer = pointer.filter(|position| viewport.contains(*position))?;
+    Some(
+        rects
+            .iter()
+            .position(|rect| pointer.x < rect.center().x)
+            .unwrap_or(rects.len()),
     )
-}
-
-fn paint_chip(
-    ui: &egui::Ui,
-    rect: Rect,
-    label: &str,
-    icon: Option<&egui::TextureHandle>,
-    selected: bool,
-    hovered: bool,
-) {
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-
-    let fill = if selected {
-        crate::ui::theme::selection_color(ui.ctx())
-    } else if hovered {
-        crate::ui::theme::selection_hover_color(ui.ctx())
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, 5.0, fill);
-
-    let mut text_x = rect.left() + 10.0;
-    if let Some(icon) = icon {
-        let size = icon.size_vec2();
-        let icon_rect = Rect::from_center_size(
-            Pos2::new(text_x + 8.0, rect.center().y),
-            size * (16.0 / size.x.max(size.y).max(1.0)),
-        );
-        ui.painter().image(
-            icon.id(),
-            icon_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
-        text_x += 22.0;
-    } else {
-        text_x += 22.0;
-    }
-    ui.painter().text(
-        Pos2::new(text_x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(12.0),
-        if selected {
-            crate::ui::theme::selection_text_color(ui.ctx())
-        } else {
-            ui.visuals().text_color()
-        },
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{chip_label, reorder_destination, CHIP_WIDTH};
-
-    #[test]
-    fn fixed_width_labels_fit_without_overlapping_the_pin() {
-        let ctx = eframe::egui::Context::default();
-        let _ = ctx.run_ui(Default::default(), |ui| {
-            assert_eq!(CHIP_WIDTH, 124.0);
-            for label in ["Documents", "Recycle Bin", "A", ""] {
-                assert_eq!(chip_label(ui, label), label);
-            }
-            for label in [
-                "A very long folder display name that needs truncation",
-                "A very long translated recycle bin display name",
-                "日本語のとても長いフォルダー表示名のテスト",
-            ] {
-                let visible_label = chip_label(ui, label);
-                assert_ne!(visible_label, label);
-                assert!(visible_label.ends_with("..."));
-                let galley = ui.painter().layout_no_wrap(
-                    visible_label,
-                    eframe::egui::FontId::proportional(12.0),
-                    eframe::egui::Color32::WHITE,
-                );
-                assert!(galley.rect.width() <= CHIP_WIDTH - 56.0);
-            }
-        });
-    }
-
-    #[test]
-    fn reorder_destination_maps_horizontal_gaps_to_final_indices() {
-        assert_eq!(reorder_destination(0, 0, 4), 0);
-        assert_eq!(reorder_destination(0, 1, 4), 0);
-        assert_eq!(reorder_destination(0, 2, 4), 1);
-        assert_eq!(reorder_destination(2, 1, 4), 1);
-        assert_eq!(reorder_destination(2, 3, 4), 2);
-        assert_eq!(reorder_destination(2, 4, 4), 3);
-    }
-
-    /// Regression test: the row wrappers used before pushed the chips 4px down,
-    /// overflowing the panel bottom margin. Chips and the "+" slot must stay
-    /// strictly between the panel margin top/bottom.
-    #[test]
-    fn quick_access_bar_row_stays_inside_panel_margins() {
-        use eframe::egui;
-        use eframe::egui::scroll_area::ScrollBarVisibility;
-        use eframe::egui::{pos2, vec2, Color32, Margin, RawInput, Sense, Ui};
-        use std::cell::Cell;
-
-        let ctx = eframe::egui::Context::default();
-        let bar_range = Cell::new((f32::NAN, f32::NAN));
-        let chip_range = Cell::new((f32::NAN, f32::NAN));
-        let add_range = Cell::new((f32::NAN, f32::NAN));
-
-        let _ = ctx.run_ui(
-            RawInput {
-                screen_rect: Some(eframe::egui::Rect::from_min_size(
-                    pos2(0.0, 0.0),
-                    vec2(800.0, 600.0),
-                )),
-                ..RawInput::default()
-            },
-            |ui: &mut Ui| {
-                egui::Panel::top("quick_access_bar")
-                    .show_separator_line(false)
-                    .exact_size(34.0)
-                    .frame(egui::Frame {
-                        fill: Color32::from_rgb(243, 243, 243),
-                        inner_margin: Margin {
-                            left: 8,
-                            right: 8,
-                            top: 3,
-                            bottom: 3,
-                        },
-                        ..Default::default()
-                    })
-                    .show(ui, |panel_ui: &mut Ui| {
-                        let bar_rect = panel_ui.max_rect();
-                        bar_range.set((bar_rect.top(), bar_rect.bottom()));
-
-                        let scroll_output = egui::ScrollArea::horizontal()
-                            .id_salt("quick_access_bar_scroll")
-                            .auto_shrink([false, false])
-                            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                            .show(panel_ui, |scroll_ui: &mut Ui| {
-                                scroll_ui.horizontal(|row_ui: &mut Ui| {
-                                    row_ui.spacing_mut().item_spacing.x = 4.0;
-                                    let (add_rect, _) = row_ui
-                                        .allocate_exact_size(vec2(26.0, 26.0), Sense::click());
-                                    add_range.set((add_rect.top(), add_rect.bottom()));
-                                    let (chip_rect, _) = row_ui.allocate_exact_size(
-                                        vec2(CHIP_WIDTH, 26.0),
-                                        Sense::hover(),
-                                    );
-                                    assert_eq!(chip_rect.width(), CHIP_WIDTH);
-                                    chip_range.set((chip_rect.top(), chip_rect.bottom()));
-                                });
-                            });
-                        assert!(!scroll_output.inner_rect.is_negative());
-                    });
-            },
-        );
-
-        let (bar_top, bar_bottom) = bar_range.get();
-        let (chip_top, chip_bottom) = chip_range.get();
-        let (add_top, add_bottom) = add_range.get();
-        assert!(chip_top >= bar_top, "chip overlaps top margin");
-        assert!(chip_bottom <= bar_bottom, "chip overflows bottom margin");
-        assert!(add_top >= bar_top, "+ slot overlaps top margin");
-        assert!(add_bottom <= bar_bottom, "+ slot overflows bottom margin");
-    }
 }

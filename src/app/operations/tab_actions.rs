@@ -63,6 +63,12 @@ impl ImageViewerApp {
                 .clone();
                 self.apply_tab_tree_action(owner, &path, action);
             }
+            TabAction::ToggleAutoExpandFolderTree => {
+                let owner = self.active_tree_reveal_owner();
+                let path = self.navigation_state.current_path.clone();
+                self.set_auto_expand_folder_tree(!self.auto_expand_folder_tree, owner, &path);
+            }
+            TabAction::SaveTabsAsGroup => self.begin_save_tabs_as_group(),
             TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
                 let path = if index == self.tab_manager.active_tab {
                     &self.navigation_state.current_path
@@ -134,6 +140,12 @@ impl ImageViewerApp {
                 let path = set.tabs[index].snapshot.path.clone();
                 self.apply_tab_tree_action(owner, &path, action);
             }
+            TabAction::ToggleAutoExpandFolderTree => {
+                let owner = self.active_tree_reveal_owner();
+                let path = self.navigation_state.current_path.clone();
+                self.set_auto_expand_folder_tree(!self.auto_expand_folder_tree, owner, &path);
+            }
+            TabAction::SaveTabsAsGroup => self.begin_save_tabs_as_group(),
             TabAction::PinQuickAccess | TabAction::UnpinQuickAccess => {
                 let path = set.tabs[index].snapshot.path.clone();
                 self.apply_tab_quick_access_action(&path, action);

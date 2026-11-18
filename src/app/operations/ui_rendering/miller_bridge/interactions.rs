@@ -64,6 +64,11 @@ pub(super) fn apply_ancestor_interactions(
         }
 
         match action {
+            MillerColumnAction::RenameClicked(index) => {
+                if let Some(entry) = listing.get(index) {
+                    app.begin_rename_path(&entry.path);
+                }
+            }
             MillerColumnAction::Clicked(index) => {
                 if let Some(entry) = listing.get(index).cloned() {
                     let (ctrl, shift) =

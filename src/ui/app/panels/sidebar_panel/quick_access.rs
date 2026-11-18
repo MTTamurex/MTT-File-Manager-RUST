@@ -17,6 +17,7 @@ pub(super) fn render(app: &mut ImageViewerApp, ui: &mut egui::Ui, can_drop: bool
         sidebar_layout::quick_access_content_height(
             app.collapse_quick_access,
             app.pinned_folders.len(),
+            app.folder_groups.len(),
             app.show_recycle_bin,
             ui.spacing().item_spacing.y,
         )
