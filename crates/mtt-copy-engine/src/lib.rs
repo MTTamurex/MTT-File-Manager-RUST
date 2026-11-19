@@ -16,7 +16,9 @@ mod target;
 mod telemetry;
 pub use control::PauseState;
 pub use profile::PolicyInfo;
-pub use telemetry::{Phase, Telemetry};
+pub use telemetry::{
+    InventorySnapshot, MoveStrategy, Phase, StageTimingSnapshot, Telemetry, TimingSnapshot,
+};
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,6 +28,7 @@ use std::sync::Mutex;
 #[derive(Default)]
 pub struct Progress {
     pub files_moved: AtomicUsize,
+    pub directories_moved: AtomicUsize,
     pub sources_retained: AtomicUsize,
     interactive_started: AtomicBool,
     pub conflicts: conflicts::Conflicts,
@@ -44,9 +47,12 @@ pub struct Progress {
 #[derive(Default, Debug)]
 pub struct Summary {
     pub files_moved: usize,
+    pub directories_moved: usize,
     pub sources_retained: usize,
     /// Only sources actually removed by this operation, with their final targets.
     pub moved_pairs: Vec<(PathBuf, PathBuf)>,
+    /// Directory roots moved as atomic namespace operations, without enumeration.
+    pub fast_moved_directory: Option<(PathBuf, PathBuf)>,
     pub items_skipped: usize,
     /// Includes partially populated roots so callers can refresh their views.
     pub destinations: Vec<PathBuf>,
@@ -89,6 +95,8 @@ pub fn copy_with_conflicts(
 
 /// Interactive movement. Completed moves are not undone on cancellation.
 /// A fresh Progress is required; failed/skipped sources are never removed.
+/// A single directory with an unused same-volume destination may be moved by
+/// handle-based rename without enumerating its descendants.
 pub fn move_with_conflicts(
     sources: &[PathBuf],
     destination: &Path,
@@ -131,9 +139,30 @@ fn run(
     moving: bool,
 ) -> io::Result<Summary> {
     let _run = progress.telemetry.run();
+    let preparation_timer = progress
+        .telemetry
+        .measure(progress, telemetry::TimingStage::Preparation);
     let coordinator = progress.participant();
     if moving {
+        progress
+            .telemetry
+            .set_move_strategy(MoveStrategy::Undetermined);
         moving::validate_selection(sources, destination, progress)?;
+    }
+    #[cfg(windows)]
+    if moving {
+        if let Some(summary) = moving::try_rename_single_directory(sources, destination, progress)?
+        {
+            progress
+                .telemetry
+                .set_move_strategy(MoveStrategy::FastDirectoryRename);
+            drop(preparation_timer);
+            progress.telemetry.set_phase(Phase::Transferring);
+            return Ok(summary);
+        }
+    }
+    if moving {
+        progress.telemetry.set_move_strategy(MoveStrategy::PerEntry);
     }
     let plan = if moving {
         plan::build_move(sources, destination, progress)?
@@ -182,6 +211,7 @@ fn run(
         }
     }
 
+    drop(preparation_timer);
     progress.telemetry.set_phase(Phase::Profiling);
     let policy = profile::profile(sources, destination);
     let workers = policy.info.workers.min(plan.files.len()).max(1);
@@ -296,6 +326,7 @@ fn run(
     }
     summary.cancelled |= progress.is_cancelled();
     summary.files_moved = progress.files_moved.load(Ordering::Relaxed);
+    summary.directories_moved = progress.directories_moved.load(Ordering::Relaxed);
     summary.sources_retained = progress.sources_retained.load(Ordering::Relaxed);
     if moving {
         moving::report_paths(&plan, &mut summary);

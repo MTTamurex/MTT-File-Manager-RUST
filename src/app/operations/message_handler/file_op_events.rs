@@ -203,6 +203,7 @@ impl ImageViewerApp {
                             dest_folder,
                             moved_files,
                             known_moved_pairs,
+                            fast_moved_directory,
                             clipboard_paste_token,
                         } => {
                             let current_sequence = self.clipboard.current_sequence();
@@ -241,6 +242,7 @@ impl ImageViewerApp {
                                 dest_folder,
                                 moved_files,
                                 known_moved_pairs,
+                                fast_moved_directory,
                                 current_path_norm,
                             );
                             self.cleanup_deleted_pinned_folders();
@@ -1118,6 +1120,7 @@ impl ImageViewerApp {
         dest_folder: PathBuf,
         moved_files: Vec<PathBuf>,
         known_moved_pairs: Vec<(PathBuf, PathBuf)>,
+        fast_moved_directory: Option<(PathBuf, PathBuf)>,
         current_path_norm: &str,
     ) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
@@ -1144,6 +1147,14 @@ impl ImageViewerApp {
         self.enqueue_thumbnail_cache_renames(&known_moved_pairs);
         if !known_moved_pairs.is_empty() {
             self.reload_visible_tag_views();
+        }
+        if let Some((source, destination)) = fast_moved_directory {
+            // Descendant paths were intentionally not enumerated. Invalidate
+            // both subtree caches and rediscover folder covers at the new root.
+            self.invalidate_folder_listing_and_tab_caches(&source);
+            self.invalidate_folder_listing_and_tab_caches(&destination);
+            self.enqueue_disk_cache_invalidations_forced(vec![source, destination.clone()]);
+            self.schedule_folder_cover_refresh(&destination);
         }
 
         for source_folder in &source_folders {

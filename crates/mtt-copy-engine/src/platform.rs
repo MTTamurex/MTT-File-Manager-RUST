@@ -1,13 +1,19 @@
-use crate::{cache::CacheMode, plan, scheduler::Permit, staging::StagingFile, Progress};
+use crate::{
+    cache::CacheMode, plan, scheduler::Permit, staging::StagingFile, telemetry::TimingStage,
+    Progress,
+};
 use std::cell::Cell;
 use std::io;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 struct Transfer<'a> {
     progress: &'a Progress,
     permit: Option<&'a Permit<'a>>,
     bytes: Cell<u64>,
     committed: bool,
+    first_progress_started: Option<Duration>,
+    first_progress_delay: Cell<Option<Duration>>,
 }
 
 impl Transfer<'_> {
@@ -27,6 +33,16 @@ impl Transfer<'_> {
             .telemetry
             .transferred
             .fetch_add(current.saturating_sub(previous), Ordering::Relaxed);
+    }
+    fn mark_first_progress(&self) {
+        if self.first_progress_delay.get().is_none() {
+            if let Some(started) = self.first_progress_started {
+                let elapsed = self.progress.active_elapsed();
+                self.first_progress_delay
+                    .set(Some(elapsed.saturating_sub(started)));
+                self.progress.telemetry.record_first_copy_progress(elapsed);
+            }
+        }
     }
 }
 
@@ -72,6 +88,7 @@ pub(crate) fn copy_file_impl<'a>(
     permit: Option<&'a Permit<'a>>,
     cache: CacheMode,
 ) -> io::Result<Option<crate::replacement::Snapshot>> {
+    let setup_timer = progress.telemetry.measure(progress, TimingStage::FileSetup);
     match permit {
         Some(permit) => permit.checkpoint()?,
         None => progress.checkpoint()?,
@@ -91,14 +108,33 @@ pub(crate) fn copy_file_impl<'a>(
         }
     };
     let _active_file = progress.track_file(&item.source);
+    drop(setup_timer);
+    let staging_timer = progress
+        .telemetry
+        .measure(progress, TimingStage::StagingCreate);
     let temporary = StagingFile::new(parent)?;
+    drop(staging_timer);
+    let copy_api_timer = progress.telemetry.measure(progress, TimingStage::CopyApi);
+    let first_progress_started = copy_api_timer.as_ref().map(|_| progress.active_elapsed());
     let mut transfer = Transfer {
         progress,
         permit,
         bytes: Cell::new(0),
         committed: false,
+        first_progress_started,
+        first_progress_delay: Cell::new(None),
     };
-    copy_contents(&item.source, temporary.path(), &transfer, cache)?;
+    let copy_result = copy_contents(&item.source, temporary.path(), &transfer, cache);
+    if let Some(delay) = transfer.first_progress_delay.get() {
+        progress
+            .telemetry
+            .record_timing(TimingStage::FirstProgress, delay);
+    }
+    drop(copy_api_timer);
+    copy_result?;
+    let verify_timer = progress
+        .telemetry
+        .measure(progress, TimingStage::CopyVerify);
     transfer.checkpoint()?;
     check_source(item)?;
     if std::fs::metadata(temporary.path())?.len() != item.size {
@@ -113,15 +149,20 @@ pub(crate) fn copy_file_impl<'a>(
     if let Some(snapshot) = &item.replacement {
         snapshot.validate(&item.destination)?;
     }
+    drop(verify_timer);
     // Windows replacement can require all target handles to be closed. Keep
     // the write guard through verification, then release it for the atomic
     // same-directory rename (never delete/truncate the old file first).
     drop(existing_guard);
+    let publish_timer = progress
+        .telemetry
+        .measure(progress, TimingStage::CopyPublish);
     if item.replacement.is_some() {
         temporary.publish_with_replacement(&item.destination, true)?;
     } else {
         temporary.publish(&item.destination)?;
     }
+    drop(publish_timer);
     // Include empty files and APIs that did not issue a final progress callback.
     transfer.update(item.size);
     transfer.committed = true;
@@ -143,7 +184,11 @@ unsafe extern "system" fn callback(
     use windows::Win32::Storage::FileSystem::{PROGRESS_CANCEL, PROGRESS_CONTINUE};
     // CopyFileEx invokes this synchronously while Transfer remains alive.
     let state = unsafe { &*data.cast::<Transfer<'_>>() };
-    state.update(transferred.max(0) as u64);
+    let transferred = transferred.max(0) as u64;
+    if transferred > 0 {
+        state.mark_first_progress();
+    }
+    state.update(transferred);
     if state.checkpoint().is_err() {
         return PROGRESS_CANCEL;
     }
@@ -198,6 +243,7 @@ fn copy_contents(
         }
         target.write_all(&buffer[..count])?;
         copied += count as u64;
+        transfer.mark_first_progress();
         transfer.update(copied);
     }
     Ok(())
@@ -217,6 +263,8 @@ mod tests {
                 permit: None,
                 bytes: Cell::new(0),
                 committed: false,
+                first_progress_started: None,
+                first_progress_delay: Cell::new(None),
             };
             transfer.update(12);
             transfer.update(8);
@@ -225,6 +273,27 @@ mod tests {
         }
         assert_eq!(progress.bytes_copied.load(Ordering::Relaxed), 100);
         assert_eq!(progress.telemetry.transferred.load(Ordering::Relaxed), 16);
+    }
+
+    #[test]
+    fn first_progress_delay_is_recorded_only_once() {
+        let progress = Progress::default();
+        progress.telemetry.enable_detailed_timings();
+        let transfer = Transfer {
+            progress: &progress,
+            permit: None,
+            bytes: Cell::new(0),
+            committed: false,
+            first_progress_started: Some(progress.active_elapsed()),
+            first_progress_delay: Cell::new(None),
+        };
+
+        transfer.mark_first_progress();
+        let first_delay = transfer.first_progress_delay.get().unwrap();
+        assert!(progress.telemetry.first_copy_progress_time().is_some());
+        transfer.mark_first_progress();
+
+        assert_eq!(transfer.first_progress_delay.get(), Some(first_delay));
     }
 
     #[cfg(windows)]
@@ -240,6 +309,8 @@ mod tests {
             permit: None,
             bytes: Cell::new(0),
             committed: false,
+            first_progress_started: None,
+            first_progress_delay: Cell::new(None),
         };
         let call = || unsafe {
             callback(
@@ -276,6 +347,8 @@ mod tests {
                 permit: None,
                 bytes: Cell::new(0),
                 committed: false,
+                first_progress_started: None,
+                first_progress_delay: Cell::new(None),
             };
             assert!(copy_contents(&source, staged.path(), &transfer, CacheMode::Buffered).is_err());
         }
@@ -307,6 +380,8 @@ mod tests {
                         permit: None,
                         bytes: Cell::new(0),
                         committed: false,
+                        first_progress_started: None,
+                        first_progress_delay: Cell::new(None),
                     };
                     ready.send(()).unwrap();
                     let result = unsafe {

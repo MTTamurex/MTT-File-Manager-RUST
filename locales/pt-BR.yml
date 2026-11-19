@@ -1622,6 +1622,7 @@ delete_engine:
 move_engine:
   preparing: "Preparando movimentação…"
   moving: "Movendo arquivos"
+  folders_moved: "Pastas movidas: %{count}"
   completed: "Movimentação concluída"
   cancelled_title: "Movimentação cancelada"
   failed_title: "Falha na movimentação"
@@ -1672,7 +1673,7 @@ copy_engine:
   settings_title: "Motor de cópia, movimentação e exclusão"
   enable: "Usar motor de cópia, movimentação e exclusão MTT (experimental)"
   description: "Desativado por padrão. Aplica-se a cópias, movimentações manuais (arrastar/soltar e recortar/colar) e exclusões. Organizador, extrações e itens virtuais mantêm o mecanismo atual. Cancelar não desfaz movimentações concluídas."
-  limitations: "Cópia: conflitos permitem substituir, ignorar, manter ambos ou mesclar pastas. Cópias concluídas são mantidas ao cancelar. Exclusão: cancelar não restaura itens removidos. Caminhos selecionados com links ou pontos de nova análise são recusados."
+  limitations: "Cópia: conflitos permitem substituir, ignorar, manter ambos ou mesclar pastas. Cópias concluídas são mantidas ao cancelar. Exclusão: cancelar não restaura itens removidos. Caminhos selecionados com links ou pontos de nova análise são recusados. Movimentações rápidas de pastas no mesmo volume preservam links/pontos de nova análise internos sem segui-los."
   preparing: "Preparando cópia…"
   cancelled: "Cópia cancelada. Os arquivos já concluídos foram mantidos."
   failed: "Cópia finalizada com %{count} erros."

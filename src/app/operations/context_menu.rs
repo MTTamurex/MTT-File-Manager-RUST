@@ -672,6 +672,8 @@ impl ImageViewerApp {
                             &path.to_string_lossy().to_lowercase(),
                         )
                 })
+        } else if paths.len() > 1 {
+            self.can_batch_rename()
         } else if let Some(idx) = _item_index {
             self.can_rename_item(idx)
         } else if paths.len() == 1 && !is_drive {

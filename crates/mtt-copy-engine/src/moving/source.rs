@@ -40,6 +40,17 @@ impl Directory {
         }
         remove(&file)
     }
+
+    pub(crate) fn validate_open_handle(&self, file: &File) -> io::Result<()> {
+        let metadata = file.metadata()?;
+        if !metadata.is_dir()
+            || crate::plan::is_link(&metadata)
+            || crate::replacement::identity(file, &metadata)? != self.identity
+        {
+            return Err(io::Error::other("Move directory changed after preflight"));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(windows)]

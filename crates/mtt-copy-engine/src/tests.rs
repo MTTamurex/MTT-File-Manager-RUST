@@ -33,6 +33,31 @@ fn copies_tree_and_empty_directories_without_changing_source() {
 }
 
 #[test]
+fn diagnostics_count_inventory_and_measure_preparation() {
+    let (_root, source, target) = fixture();
+    let nested = source.join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::write(source.join("top.bin"), b"top").unwrap();
+    fs::write(nested.join("nested.bin"), b"nested").unwrap();
+
+    let progress = Progress::default();
+    progress.telemetry.enable_detailed_timings();
+    copy(std::slice::from_ref(&source), &target, &progress).unwrap();
+
+    assert_eq!(
+        progress.telemetry.inventory_snapshot(),
+        telemetry::InventorySnapshot {
+            directories: 2,
+            files: 2,
+            file_bytes: 9,
+        }
+    );
+    let preparation = progress.telemetry.timing_snapshot().preparation;
+    assert_eq!(preparation.count, 1);
+    assert!(preparation.total >= preparation.max);
+}
+
+#[test]
 fn refuses_same_sized_existing_file_without_changing_either_file() {
     let (_root, source, target) = fixture();
     let file = source.join("file.txt");

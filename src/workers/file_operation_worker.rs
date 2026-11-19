@@ -71,6 +71,8 @@ pub enum FileOperationResult {
         moved_files: Vec<PathBuf>,
         /// Source/destination pairs whose destination was known to be unambiguous.
         known_moved_pairs: Vec<(PathBuf, PathBuf)>,
+        /// A single root moved atomically without scanning its descendants.
+        fast_moved_directory: Option<(PathBuf, PathBuf)>,
         /// Present only for a move dispatched by clipboard paste.
         clipboard_paste_token: Option<u64>,
     },

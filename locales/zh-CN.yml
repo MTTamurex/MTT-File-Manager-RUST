@@ -1613,6 +1613,7 @@ delete_engine:
 move_engine:
   preparing: "正在准备移动…"
   moving: "正在移动文件"
+  folders_moved: "已移动 %{count} 个文件夹"
   completed: "移动完成"
   cancelled_title: "移动已取消"
   failed_title: "移动失败"
@@ -1663,7 +1664,7 @@ copy_engine:
   settings_title: "复制、移动和删除引擎"
   enable: "使用 MTT 复制、移动和删除引擎（实验性）"
   description: "默认关闭。用于文件系统的复制、手动移动（拖放和剪切粘贴）及删除。整理器、解压和虚拟项目仍使用现有机制。取消不会撤销已完成的移动。"
-  limitations: "复制：冲突时可替换、跳过、保留两者或合并文件夹；取消后保留已完成的副本。删除：取消不会恢复已移除项目。拒绝选中含重解析点的路径。"
+  limitations: "复制：冲突时可替换、跳过、保留两者或合并文件夹；取消后保留已完成的副本。删除：取消不会恢复已移除项目。拒绝选中含重解析点的路径。同卷快速移动文件夹时，内部链接/重解析点会原样保留且不会跟随。"
   preparing: "正在准备复制…"
   cancelled: "复制已取消，已完成的文件已保留。"
   failed: "复制结束，发生 %{count} 个错误。"

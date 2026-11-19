@@ -329,6 +329,13 @@ fn primary_context_target(
     Some((path, is_directory))
 }
 
+fn should_batch_rename_context_targets(
+    context_menu: &crate::application::context_menu::ContextMenuState,
+) -> bool {
+    context_menu.origin == crate::application::context_menu::ContextMenuOrigin::FileView
+        && context_menu.target_paths.len() > 1
+}
+
 fn run_in_context_panel<R>(
     app: &mut ImageViewerApp,
     origin_panel_is_left: Option<bool>,
@@ -760,7 +767,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -3 | -30 => app.cut_paths_to_clipboard(&context_menu.target_paths),
                 -4 | -32 => app.command_paste(None),
                 -5 | -33 => {
-                    if let Some(path) = context_menu.target_paths.first().cloned() {
+                    if should_batch_rename_context_targets(&context_menu) {
+                        let origin_panel = context_menu.origin_panel_is_left;
+                        run_in_context_panel(app, origin_panel, |app| {
+                            app.begin_batch_rename();
+                        });
+                    } else if let Some(path) = context_menu.target_paths.first().cloned() {
                         if context_menu.origin
                             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
                         {
@@ -1004,11 +1016,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 mod tests {
     use super::{
         base64_encode, context_origin_is_inactive, context_origin_panel,
-        powershell_location_script, primary_context_target, system_powershell_path,
-        terminal_executables, utf16le_base64, wide_null, windows_parameters,
-        windows_terminal_path_from_local_app_data, TerminalExecutable,
+        powershell_location_script, primary_context_target, should_batch_rename_context_targets,
+        system_powershell_path, terminal_executables, utf16le_base64, wide_null,
+        windows_parameters, windows_terminal_path_from_local_app_data, TerminalExecutable,
     };
-    use crate::application::context_menu::ContextMenuState;
+    use crate::application::context_menu::{ContextMenuOrigin, ContextMenuState};
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use std::path::PathBuf;
@@ -1106,6 +1118,23 @@ mod tests {
         let (path, is_directory) = primary_context_target(&context_menu).unwrap();
         assert_eq!(path, std::path::Path::new(r"C:\inactive\folder"));
         assert!(is_directory);
+    }
+
+    #[test]
+    fn context_menu_batches_rename_only_for_multiple_file_view_targets() {
+        let mut context_menu = ContextMenuState::default();
+        context_menu.target_paths = vec![PathBuf::from("selected-a"), PathBuf::from("selected-b")];
+        assert!(should_batch_rename_context_targets(&context_menu));
+
+        context_menu.target_paths.pop();
+        assert!(!should_batch_rename_context_targets(&context_menu));
+
+        context_menu.target_paths = vec![PathBuf::from("selected-a"), PathBuf::from("selected-b")];
+        context_menu.origin = ContextMenuOrigin::GlobalSearch;
+        assert!(!should_batch_rename_context_targets(&context_menu));
+
+        context_menu.origin = ContextMenuOrigin::SidebarTree;
+        assert!(!should_batch_rename_context_targets(&context_menu));
     }
 
     #[test]

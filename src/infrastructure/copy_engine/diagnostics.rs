@@ -2,8 +2,9 @@
 use super::{CopyOperation, OutcomeKind};
 use crate::infrastructure::diagnostic_logger::{
     self, diag_info, diag_warn, field_bool, field_duration_ms, field_label, field_u64,
+    DiagnosticField,
 };
-use mtt_copy_engine::{PauseState, Phase};
+use mtt_copy_engine::{MoveStrategy, PauseState, Phase, StageTimingSnapshot, TimingSnapshot};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -48,6 +49,7 @@ impl Probe {
 pub(crate) struct Monitor {
     stop: Arc<(Mutex<bool>, Condvar)>,
     thread: Option<std::thread::JoinHandle<()>>,
+    operation: Arc<CopyOperation>,
 }
 
 impl Monitor {
@@ -55,6 +57,11 @@ impl Monitor {
         if !diagnostic_logger::is_enabled() {
             return None;
         }
+        let timing_operation = operation.clone();
+        timing_operation
+            .progress
+            .telemetry
+            .enable_detailed_timings();
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = stop.clone();
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -71,6 +78,7 @@ impl Monitor {
                     "started",
                     &[
                         field_u64("copy_id", id),
+                        field_label("operation", if operation.moving { "move" } else { "copy" }),
                         field_label("cache", "buffered"),
                         field_label("priority", "unchanged"),
                     ],
@@ -116,7 +124,7 @@ impl Monitor {
                     let stagnant = probe.observe(sample);
                     let sample_interval = last_sample.elapsed();
                     last_sample = Instant::now();
-                    let fields = [
+                    let mut fields = vec![
                         field_duration_ms("sample_interval", sample_interval),
                         field_u64("copy_id", id),
                         field_label(
@@ -146,6 +154,8 @@ impl Monitor {
                         field_duration_ms("no_advance", stagnant),
                         field_bool("running", sample.running),
                     ];
+                    append_operation_fields(&mut fields, &operation);
+                    append_timing_fields(&mut fields, telemetry.timing_snapshot());
                     if stagnant >= Duration::from_secs(4) {
                         diag_warn("copy_engine", "progress_sample", &fields);
                     } else {
@@ -183,12 +193,24 @@ impl Monitor {
                         field_bool("conservative", policy.conservative),
                     ]);
                 }
+                append_operation_fields(&mut fields, &operation);
+                append_timing_fields(&mut fields, telemetry.timing_snapshot());
                 diag_info("copy_engine", "finished", &fields);
-            })
-            .ok()?;
+            });
+        let thread = match thread {
+            Ok(thread) => thread,
+            Err(_) => {
+                timing_operation
+                    .progress
+                    .telemetry
+                    .disable_detailed_timings();
+                return None;
+            }
+        };
         Some(Self {
             stop,
             thread: Some(thread),
+            operation: timing_operation,
         })
     }
 }
@@ -201,7 +223,136 @@ impl Drop for Monitor {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        self.operation.progress.telemetry.disable_detailed_timings();
     }
+}
+
+fn append_stage_timing(
+    fields: &mut Vec<DiagnosticField>,
+    count_name: &'static str,
+    total_name: &'static str,
+    max_name: &'static str,
+    timing: StageTimingSnapshot,
+) {
+    fields.push(field_u64(count_name, timing.count));
+    fields.push(field_duration_ms(total_name, timing.total));
+    fields.push(field_duration_ms(max_name, timing.max));
+}
+
+fn append_timing_fields(fields: &mut Vec<DiagnosticField>, timings: TimingSnapshot) {
+    append_stage_timing(
+        fields,
+        "preparation_count",
+        "preparation_total_ms",
+        "preparation_max_ms",
+        timings.preparation,
+    );
+    append_stage_timing(
+        fields,
+        "file_setup_count",
+        "file_setup_total_ms",
+        "file_setup_max_ms",
+        timings.file_setup,
+    );
+    append_stage_timing(
+        fields,
+        "staging_create_count",
+        "staging_create_total_ms",
+        "staging_create_max_ms",
+        timings.staging_create,
+    );
+    append_stage_timing(
+        fields,
+        "copy_api_count",
+        "copy_api_total_ms",
+        "copy_api_max_ms",
+        timings.copy_api,
+    );
+    append_stage_timing(
+        fields,
+        "first_progress_count",
+        "first_progress_total_ms",
+        "first_progress_max_ms",
+        timings.first_progress,
+    );
+    append_stage_timing(
+        fields,
+        "copy_verify_count",
+        "copy_verify_total_ms",
+        "copy_verify_max_ms",
+        timings.copy_verify,
+    );
+    append_stage_timing(
+        fields,
+        "copy_publish_count",
+        "copy_publish_total_ms",
+        "copy_publish_max_ms",
+        timings.copy_publish,
+    );
+    append_stage_timing(
+        fields,
+        "move_setup_count",
+        "move_setup_total_ms",
+        "move_setup_max_ms",
+        timings.move_setup,
+    );
+    append_stage_timing(
+        fields,
+        "move_rename_count",
+        "move_rename_total_ms",
+        "move_rename_max_ms",
+        timings.move_rename,
+    );
+    append_stage_timing(
+        fields,
+        "move_finalize_count",
+        "move_finalize_total_ms",
+        "move_finalize_max_ms",
+        timings.move_finalize,
+    );
+    append_stage_timing(
+        fields,
+        "source_remove_count",
+        "source_remove_total_ms",
+        "source_remove_max_ms",
+        timings.source_remove,
+    );
+}
+
+fn append_operation_fields(fields: &mut Vec<DiagnosticField>, operation: &CopyOperation) {
+    let telemetry = &operation.progress.telemetry;
+    let inventory = telemetry.inventory_snapshot();
+    fields.extend([
+        field_label("operation", if operation.moving { "move" } else { "copy" }),
+        field_u64("examined_directories", inventory.directories),
+        field_u64("examined_files", inventory.files),
+        field_u64("discovered_file_bytes", inventory.file_bytes),
+    ]);
+    if operation.moving {
+        let strategy: MoveStrategy = telemetry.move_strategy();
+        fields.extend([
+            field_label("move_strategy", strategy.as_label()),
+            field_u64(
+                "cross_volume_directory_fallbacks",
+                telemetry.cross_volume_directory_fallbacks(),
+            ),
+            field_u64(
+                "cross_volume_file_fallbacks",
+                telemetry.cross_volume_file_fallbacks(),
+            ),
+        ]);
+    }
+    let first_copy_progress = telemetry.first_copy_progress_time();
+    fields.extend([
+        field_bool(
+            "first_copy_progress_observed",
+            first_copy_progress.is_some(),
+        ),
+        field_duration_ms(
+            "time_to_first_copy_progress_ms",
+            first_copy_progress.unwrap_or_default(),
+        ),
+    ]);
 }
 
 #[cfg(test)]

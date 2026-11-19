@@ -1247,6 +1247,7 @@ pub(super) fn handle_move_batch(
                     dest_folder,
                     moved_files,
                     known_moved_pairs,
+                    fast_moved_directory: None,
                     clipboard_paste_token: clipboard_paste_token.filter(|_| fully_completed),
                 });
             }

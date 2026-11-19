@@ -206,7 +206,7 @@ fn overlapping_or_same_folder_selection_is_refused_before_any_changes() {
 }
 
 #[test]
-fn reparse_source_is_refused_without_a_prompt_or_destination_writes() {
+fn tree_enumerating_move_refuses_nested_reparse_points_before_writing() {
     let (root, source, target) = fixture();
     let protected = root.path().join("protected");
     fs::create_dir(&protected).unwrap();
@@ -220,7 +220,9 @@ fn reparse_source_is_refused_without_a_prompt_or_destination_writes() {
         .unwrap()
         .status
         .success());
-    let (result, progress) = run(vec![source], target.clone(), |_| {
+    let other = root.path().join("other");
+    fs::create_dir(&other).unwrap();
+    let (result, progress) = run(vec![source.clone(), other], target.clone(), |_| {
         panic!("Reparse paths must not prompt")
     });
     assert!(result.is_err());
@@ -228,6 +230,46 @@ fn reparse_source_is_refused_without_a_prompt_or_destination_writes() {
     assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
     assert_eq!(progress.files_moved.load(Ordering::Relaxed), 0);
     fs::remove_dir(junction).unwrap();
+    root.close().unwrap();
+}
+
+#[test]
+fn atomic_directory_move_carries_nested_reparse_points_without_following_them() {
+    let (root, source, target) = fixture();
+    let protected = root.path().join("protected");
+    fs::create_dir(&protected).unwrap();
+    fs::write(protected.join("file.txt"), b"preserved").unwrap();
+    let junction = source.join("link");
+    assert!(std::process::Command::new("cmd.exe")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&protected)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let progress = Progress::default();
+    let result =
+        crate::move_with_conflicts(std::slice::from_ref(&source), &target, &progress).unwrap();
+    let moved_root = target.join("source");
+    let moved_junction = moved_root.join("link");
+    assert_eq!(result.failures, 0, "{:?}", result.first_error);
+    assert_eq!(result.directories_moved, 1);
+    assert_eq!(
+        result.fast_moved_directory,
+        Some((source.clone(), moved_root.clone()))
+    );
+    assert!(!source.exists());
+    assert!(crate::plan::is_link(
+        &fs::symlink_metadata(&moved_junction).unwrap()
+    ));
+    assert_eq!(
+        fs::read(moved_junction.join("file.txt")).unwrap(),
+        b"preserved"
+    );
+    assert_eq!(fs::read(protected.join("file.txt")).unwrap(), b"preserved");
+    fs::remove_dir(moved_junction).unwrap();
     root.close().unwrap();
 }
 

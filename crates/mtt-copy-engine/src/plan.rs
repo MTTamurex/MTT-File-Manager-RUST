@@ -203,6 +203,11 @@ fn build_impl(
                 "Links and reparse points are not supported",
             ));
         }
+        if metadata.is_dir() {
+            progress.telemetry.record_examined_directory();
+        } else if metadata.is_file() {
+            progress.telemetry.record_examined_file(metadata.len());
+        }
         let move_source = if moving && metadata.is_file() {
             Some(crate::replacement::Snapshot::capture(&source)?)
         } else {

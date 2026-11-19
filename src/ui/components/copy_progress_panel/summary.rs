@@ -12,6 +12,7 @@ pub(super) struct Summary {
     preparing: bool,
     files: usize,
     total_files: usize,
+    folders_moved: usize,
     speed: f64,
 }
 
@@ -30,6 +31,7 @@ impl Summary {
         let active = snapshots.iter().any(|(_, _, outcome)| outcome.is_none());
         let (mut bytes, mut total_bytes) = (0u128, 0u128);
         let (mut files, mut total_files) = (0usize, 0usize);
+        let mut folders_moved = 0usize;
         let mut speed = 0.0;
         let mut preparing = false;
         let mut completed = true;
@@ -60,6 +62,8 @@ impl Summary {
             bytes += u128::from(if done { total } else { copied });
             let total_count = progress.total_files.load(Ordering::Relaxed);
             total_files = total_files.saturating_add(total_count);
+            folders_moved =
+                folders_moved.saturating_add(progress.directories_moved.load(Ordering::Relaxed));
             files = files.saturating_add(if done {
                 total_count
             } else {
@@ -98,6 +102,7 @@ impl Summary {
             preparing,
             files,
             total_files,
+            folders_moved,
             speed: speed.min(f64::MAX),
         })
     }
@@ -108,6 +113,9 @@ impl Summary {
                 || super::deletion_counts::Counts::default().label(),
                 |counts| counts.label(),
             );
+        }
+        if self.files == 0 && self.total_files == 0 && self.folders_moved > 0 {
+            return t!("move_engine.folders_moved", count = self.folders_moved).to_string();
         }
         let progress = self
             .fraction

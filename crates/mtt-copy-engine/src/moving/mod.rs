@@ -1,8 +1,141 @@
 //! Move files by identity-bound handles. Copy failures never authorize removal.
 pub(crate) mod source;
-use crate::{cache::CacheMode, plan, scheduler::Permit, Progress, Summary};
+use crate::{cache::CacheMode, plan, scheduler::Permit, telemetry::TimingStage, Progress, Summary};
 use std::io;
 use std::sync::atomic::Ordering;
+
+pub(crate) fn try_rename_single_directory(
+    sources: &[std::path::PathBuf],
+    destination: &std::path::Path,
+    progress: &Progress,
+) -> io::Result<Option<Summary>> {
+    try_rename_single_directory_with(sources, destination, progress, |file, target| {
+        source::rename(file, target, false)
+    })
+}
+
+fn try_rename_single_directory_with(
+    sources: &[std::path::PathBuf],
+    destination: &std::path::Path,
+    progress: &Progress,
+    rename: impl FnOnce(&std::fs::File, &std::path::Path) -> io::Result<()>,
+) -> io::Result<Option<Summary>> {
+    if sources.len() != 1 {
+        return Ok(None);
+    }
+    progress.checkpoint()?;
+
+    let submitted_source = &sources[0];
+    plan::check_path(submitted_source)?;
+    plan::check_path(destination)?;
+    let resolved_source = crate::path_resolution::resolve(submitted_source).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("Source path resolution failed: {error}"),
+        )
+    })?;
+    let resolved_destination = crate::path_resolution::resolve(destination).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("Destination path resolution failed: {error}"),
+        )
+    })?;
+    let source_path = resolved_source.path;
+    let destination_path = resolved_destination.path;
+    plan::check_path(&source_path)?;
+    plan::check_path(&destination_path)?;
+
+    if !destination_path.is_dir() {
+        return Err(io::Error::other("Destination must be a directory"));
+    }
+    let metadata = std::fs::symlink_metadata(&source_path)?;
+    if plan::is_link(&metadata) {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Links and reparse points are not supported",
+        ));
+    }
+    if !metadata.is_dir() {
+        return Ok(None);
+    }
+    if crate::path_resolution::contains_directory(&source_path, &destination_path)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Cannot move a directory into itself",
+        ));
+    }
+
+    let name = source_path
+        .file_name()
+        .ok_or_else(|| io::Error::other("Cannot move a volume root"))?;
+    let target = destination_path.join(name);
+    match plan::require_absent(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
+        Err(error) => return Err(error),
+    }
+
+    let expected_source = source::Directory::capture(&source_path, &target)?;
+    let expected_destination = source::Directory::capture(&destination_path, &target)?;
+    let source_parent = source_path
+        .parent()
+        .ok_or_else(|| io::Error::other("Invalid source parent"))?;
+    let _source_pins = source::pin_parents(source_parent)?;
+    let destination_pins = source::pin_parents(&destination_path)?;
+    expected_destination.validate_open_handle(
+        destination_pins
+            .last()
+            .ok_or_else(|| io::Error::other("Destination directory was not pinned"))?,
+    )?;
+
+    // Parent handles prevent path substitution. Recheck the target after pinning;
+    // the eventual handle rename also refuses replacement if it appears later.
+    match plan::require_absent(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
+        Err(error) => return Err(error),
+    }
+
+    let file = source::open(&source_path, true)?;
+    expected_source.validate_open_handle(&file)?;
+    match plan::require_absent(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    progress.checkpoint()?;
+
+    let rename_result = {
+        let _rename_timer = progress
+            .telemetry
+            .measure(progress, TimingStage::MoveRename);
+        rename(&file, &target)
+    };
+    match rename_result {
+        Ok(()) => {
+            let reported_target = destination.join(name);
+            progress.directories_moved.fetch_add(1, Ordering::Relaxed);
+            progress.copying.store(true, Ordering::Relaxed);
+            Ok(Some(Summary {
+                directories_moved: 1,
+                moved_pairs: vec![(submitted_source.clone(), reported_target.clone())],
+                fast_moved_directory: Some((submitted_source.clone(), reported_target.clone())),
+                destinations: vec![reported_target],
+                cancelled: progress.is_cancelled(),
+                ..Summary::default()
+            }))
+        }
+        // The handle rename is atomic and does not replace an existing target.
+        // Let the established inventory/conflict flow handle cross-volume and
+        // other rename failures. It revalidates sources before transferring.
+        Err(error) => {
+            if error.raw_os_error() == Some(17) {
+                progress.telemetry.record_cross_volume_directory_fallback();
+            }
+            Ok(None)
+        }
+    }
+}
 
 pub(crate) fn validate_selection(
     sources: &[std::path::PathBuf],
@@ -61,6 +194,7 @@ fn transfer_with<'a>(
     force_copy: bool,
     after_publish: impl FnOnce() -> io::Result<()>,
 ) -> io::Result<Option<io::Error>> {
+    let move_setup_timer = progress.telemetry.measure(progress, TimingStage::MoveSetup);
     let checkpoint = || match permit {
         Some(permit) => permit.checkpoint(),
         None => progress.checkpoint(),
@@ -84,7 +218,7 @@ fn transfer_with<'a>(
     if crate::replacement::Snapshot::from_file(&file)? != *expected {
         return Err(io::Error::other("Move source changed after preflight"));
     }
-    if !force_copy {
+    let target_guard = if !force_copy {
         let target_guard = match &item.replacement {
             Some(snapshot) => Some(snapshot.hold(&item.destination)?),
             None => {
@@ -96,9 +230,21 @@ fn transfer_with<'a>(
         if let Some(snapshot) = &item.replacement {
             snapshot.validate(&item.destination)?;
         }
-        drop(target_guard);
+        target_guard
+    } else {
+        None
+    };
+    drop(target_guard);
+    drop(move_setup_timer);
+    if !force_copy {
         let _active = progress.track_file(&item.source);
-        match source::rename(&file, &item.destination, item.replacement.is_some()) {
+        let rename_result = {
+            let _rename_timer = progress
+                .telemetry
+                .measure(progress, TimingStage::MoveRename);
+            source::rename(&file, &item.destination, item.replacement.is_some())
+        };
+        match rename_result {
             Ok(()) => {
                 progress
                     .bytes_copied
@@ -106,7 +252,9 @@ fn transfer_with<'a>(
                 return Ok(None);
             }
             // Only an explicit cross-device failure selects staged copying.
-            Err(error) if error.raw_os_error() == Some(17) => {}
+            Err(error) if error.raw_os_error() == Some(17) => {
+                progress.telemetry.record_cross_volume_file_fallback();
+            }
             Err(error) => return Err(error),
         }
     }
@@ -118,6 +266,9 @@ fn transfer_with<'a>(
     // Bind the published destination to the staged identity before removing the
     // source. Deny writes/deletes until disposition completes.
     let finish = || -> io::Result<()> {
+        let finalize_timer = progress
+            .telemetry
+            .measure(progress, TimingStage::MoveFinalize);
         after_publish()?;
         checkpoint()?;
         let destination = source::protect_destination(&item.destination)?;
@@ -127,6 +278,10 @@ fn transfer_with<'a>(
             ));
         }
         checkpoint()?;
+        drop(finalize_timer);
+        let _remove_timer = progress
+            .telemetry
+            .measure(progress, TimingStage::SourceRemove);
         source::remove(&file)
     };
     Ok(finish().err())
@@ -143,9 +298,12 @@ pub(crate) fn cleanup(
             break;
         }
         match directory.remove_empty() {
-            Ok(()) => summary
-                .moved_pairs
-                .push((directory.path.clone(), directory.destination.clone())),
+            Ok(()) => {
+                progress.directories_moved.fetch_add(1, Ordering::Relaxed);
+                summary
+                    .moved_pairs
+                    .push((directory.path.clone(), directory.destination.clone()));
+            }
             // Nonempty directories include skipped items and new arrivals. Do
             // not enumerate/delete them recursively or claim they were moved.
             Err(error) if error.raw_os_error() == Some(145) => {

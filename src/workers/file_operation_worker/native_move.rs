@@ -56,6 +56,10 @@ pub(super) fn try_handle(
         .as_ref()
         .map(|summary| summary.moved_pairs.clone())
         .unwrap_or_default();
+    let fast_moved_directory = result
+        .as_ref()
+        .ok()
+        .and_then(|summary| summary.fast_moved_directory.clone());
     let mut source_folders: Vec<_> = paths
         .iter()
         .filter_map(|path| path.parent().map(std::path::Path::to_path_buf))
@@ -74,6 +78,7 @@ pub(super) fn try_handle(
         dest_folder: destination.clone(),
         moved_files: pairs.iter().map(|(source, _)| source.clone()).collect(),
         known_moved_pairs: pairs,
+        fast_moved_directory,
         clipboard_paste_token: token.filter(|_| complete),
     });
     // Retained copies and partial roots still need destination view refresh.

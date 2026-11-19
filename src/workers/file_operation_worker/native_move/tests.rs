@@ -79,6 +79,70 @@ fn manual_move_dispatch_and_clipboard_move_report_actual_pairs_and_success_token
 }
 
 #[test]
+fn same_volume_folder_move_reports_the_root_and_preserves_all_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("tree");
+    let nested = source.join("nested");
+    let destination = root.path().join("target");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir(&destination).unwrap();
+    let file = nested.join("file.bin");
+    std::fs::write(&file, [0, 1, 2, 3, 254, 255]).unwrap();
+
+    let runtime = Arc::new(CopyRuntime::default());
+    runtime.enabled.store(true, Ordering::Relaxed);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let request = FileOperationRequest::move_batch(
+        vec![source.clone()],
+        destination.clone(),
+        windows::Win32::Foundation::HWND::default(),
+    );
+
+    assert!(try_handle(&request, &sender, &runtime));
+    match receiver.try_recv().unwrap() {
+        FileOperationResult::MoveBatchCompleted {
+            moved_files,
+            known_moved_pairs,
+            fast_moved_directory,
+            clipboard_paste_token,
+            ..
+        } => {
+            assert_eq!(moved_files, vec![source.clone()]);
+            assert_eq!(
+                known_moved_pairs,
+                vec![(source.clone(), destination.join("tree"))]
+            );
+            assert_eq!(
+                fast_moved_directory,
+                Some((source.clone(), destination.join("tree")))
+            );
+            assert_eq!(clipboard_paste_token, None);
+        }
+        _ => panic!("Expected move completion"),
+    }
+    match receiver.try_recv().unwrap() {
+        FileOperationResult::CopyCompleted { copied_dests, .. } => {
+            assert_eq!(copied_dests, vec![destination.join("tree")]);
+        }
+        _ => panic!("Expected destination refresh"),
+    }
+    assert!(receiver.try_recv().is_err());
+    assert!(!source.exists());
+    assert_eq!(
+        std::fs::read(destination.join("tree/nested/file.bin")).unwrap(),
+        [0, 1, 2, 3, 254, 255]
+    );
+    let operation = runtime.jobs()[0].1.clone();
+    assert_eq!(operation.progress.files_moved.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        operation.progress.directories_moved.load(Ordering::Relaxed),
+        1
+    );
+    assert_eq!(operation.progress.total_files.load(Ordering::Relaxed), 0);
+    assert_eq!(operation.outcome().unwrap().kind, OutcomeKind::Completed);
+}
+
+#[test]
 fn skipped_or_cancelled_clipboard_move_keeps_source_and_releases_token_without_moved_pairs() {
     use mtt_copy_engine::conflicts::ConflictAction;
     for action in [ConflictAction::Skip, ConflictAction::Cancel] {

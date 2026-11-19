@@ -1622,6 +1622,7 @@ delete_engine:
 move_engine:
   preparing: "Preparing move…"
   moving: "Moving files"
+  folders_moved: "Folders moved: %{count}"
   completed: "Move completed"
   cancelled_title: "Move cancelled"
   failed_title: "Move failed"
@@ -1672,7 +1673,7 @@ copy_engine:
   settings_title: "Copy, move and deletion engine"
   enable: "Use MTT copy, move and deletion engine (experimental)"
   description: "Off by default. Applies to filesystem copies, manual moves (drag/drop and cut/paste) and deletions. Organizer, extraction and virtual items keep their current mechanism. Completed moves are not undone on cancellation."
-  limitations: "Copy: conflicts ask whether to replace, skip, keep both or merge folders. Completed copies remain on cancellation. Deletion: cancellation does not restore removed items. Selected reparse paths are refused."
+  limitations: "Copy: conflicts ask whether to replace, skip, keep both or merge folders. Completed copies remain on cancellation. Deletion: cancellation does not restore removed items. Selected reparse paths are refused. Fast same-volume folder moves carry nested links/reparse points intact without following them."
   preparing: "Preparing copy…"
   cancelled: "Copy cancelled. Already completed files were kept."
   failed: "Copy finished with %{count} errors."

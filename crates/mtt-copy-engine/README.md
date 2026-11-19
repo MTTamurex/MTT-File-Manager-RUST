@@ -142,7 +142,16 @@ active, closing dismisses the retained results.
   targets can fail without being silently unlocked or deleted first.
 - Newly created or detectably changed targets after preflight fail safely rather
   than inheriting an old decision. There is no automatic retry through Shell.
-- Rejects symlinks/reparse points and recursive destinations during preflight.
+- A single directory moved to an unused destination on the same volume is
+  renamed as one handle-based filesystem operation before tree enumeration.
+  This preserves file identities and contents, does not replace a destination
+  created concurrently, and reports the moved folder without inventing descendant
+  file/byte totals. Cross-volume moves, conflicts/merges, multi-item batches and
+  failed handle renames retain the existing per-entry preflight and transfer path.
+- Selected roots and their ancestors are checked for reparse points. Tree-
+  enumerating transfers also reject nested reparse points; the atomic same-volume
+  directory move does not enumerate descendants and carries nested reparse entries
+  intact without following them.
 - WinFsp local mounts that return Windows error 1005 while resolving DOS volume
   names use normalized volume-relative names instead. This compatibility path
   still checks ancestors for reparse points and checks directory identities to
@@ -172,15 +181,30 @@ active, closing dismisses the retained results.
 
 ## Diagnosing stalls and comparing cache strategies
 
+These measurements cover manual filesystem copy/move jobs routed through the
+optional MTT engine; Shell, virtual-item and archive transfers are not included.
 Enable the application's diagnostic mode **before** starting a controlled copy.
 The opt-in background sampler records `copy_engine` policy/progress events every
 two seconds independently of rendering. Records contain only numeric counters
 and static labels: workers, active/waiting transfers, API-reported bytes, phase,
-pause state and time without byte advancement. They do not include source or
-destination paths, filenames, volume identifiers or disk serials. UI frame traces
-also include copy activity and the `copy_dashboard` stage. API progress is not a
-measurement of physical flush completion, and a no-progress interval alone does
-not identify the controller/driver/cache/antivirus responsible for it.
+pause state and time without byte advancement. They also contain per-operation
+counts, cumulative durations and maximum durations for file setup, staging-file
+creation, time to first positive copy callback, total copy API time, verification,
+publication, and move-specific setup/rename/finalization/source removal. Timings
+exclude explicit user-requested pauses. Preparation duration includes preflight
+conflict-decision waits. Its aggregated directory/file counts cover encountered
+entries; discovered regular-file bytes can include individually skipped files,
+while skipped directory contents are not enumerated. Operation events label copy
+versus move, the move route (per-entry, fast directory rename, or undetermined if
+validation fails), cross-volume directory-rename and per-file fallback counts,
+and operation time to the first positive copy-progress callback when one occurs.
+Same-volume renames do not produce copy-progress callbacks. These metrics are
+collected only while diagnostic mode is enabled. Records do not include source or
+destination paths, filenames, volume identifiers or disk serials.
+UI frame traces also include copy activity and the `copy_dashboard` stage. API
+progress is not a measurement of physical flush completion, and a no-progress
+interval alone does not identify the controller/driver/cache/antivirus responsible
+for it.
 
 On Windows, **all file sizes use buffered `CopyFileExW` copying**. There is no
 256 MiB cache-policy threshold and no application-owned fixed-size copy buffer;

@@ -217,14 +217,20 @@ fn card_with_paths(
                 .fill(theme::accent_color(ui.ctx()))
                 .show_percentage(),
         );
-        ui.add(
-            egui::Label::new(format!(
-                "{:.1} / {:.1} MiB",
-                bytes as f64 / 1_048_576.0,
-                total_bytes as f64 / 1_048_576.0
-            ))
-            .truncate(),
-        );
+        let folder_only_move = operation.moving
+            && total_files == 0
+            && total_bytes == 0
+            && progress.directories_moved.load(Ordering::Relaxed) > 0;
+        if !folder_only_move {
+            ui.add(
+                egui::Label::new(format!(
+                    "{:.1} / {:.1} MiB",
+                    bytes as f64 / 1_048_576.0,
+                    total_bytes as f64 / 1_048_576.0
+                ))
+                .truncate(),
+            );
+        }
         ui.add_space(6.0);
         let skipped = progress.items_skipped.load(Ordering::Relaxed);
         if skipped > 0 {

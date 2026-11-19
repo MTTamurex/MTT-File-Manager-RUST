@@ -128,6 +128,7 @@ pub(crate) fn start_archive_extraction_worker(
                                 dest_folder,
                                 moved_files,
                                 known_moved_pairs,
+                                fast_moved_directory: None,
                                 clipboard_paste_token,
                             });
                         }

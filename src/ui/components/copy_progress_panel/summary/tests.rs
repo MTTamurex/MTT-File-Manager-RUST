@@ -99,6 +99,29 @@ fn empty_files_completed_results_and_failures_have_meaningful_progress() {
 }
 
 #[test]
+fn atomic_directory_move_reports_folder_count_without_fabricating_file_totals() {
+    let runtime = CopyRuntime::default();
+    let moved = runtime.start_move(vec![PathBuf::from("source/tree")], PathBuf::from("target"));
+    moved
+        .operation
+        .progress
+        .directories_moved
+        .store(1, Ordering::Relaxed);
+    moved.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+
+    let summary = Summary::from_jobs(&runtime.jobs(), &CopyPanelState::default()).unwrap();
+    assert_eq!(summary.folders_moved, 1);
+    assert_eq!((summary.files, summary.total_files), (0, 0));
+    assert_eq!(
+        summary.label(),
+        t!("move_engine.folders_moved", count = 1).to_string()
+    );
+}
+
+#[test]
 fn counters_above_totals_and_large_sums_do_not_overflow_or_exceed_100_percent() {
     let runtime = CopyRuntime::default();
     let _first = job(&runtime, u64::MAX, u64::MAX, usize::MAX, usize::MAX);
