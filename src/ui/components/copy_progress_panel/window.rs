@@ -25,7 +25,7 @@ fn show_with(
         &mut egui::Ui,
         &CopyOperation,
         &mut crate::app::copy_panel_state::TransferMetrics,
-    ),
+    ) -> bool,
 ) -> Vec<u64> {
     if jobs.is_empty() {
         return Vec::new();
@@ -116,9 +116,14 @@ fn show_with(
             .max_height((screen.height() - 150.0).max(100.0))
             .show(ui, |ui| {
                 for (id, operation) in jobs {
-                    ui.push_id(id, |ui| {
-                        render_card(ui, operation, panel.metrics.entry(*id).or_default());
-                    });
+                    if ui
+                        .push_id(id, |ui| {
+                            render_card(ui, operation, panel.metrics.entry(*id).or_default())
+                        })
+                        .inner
+                    {
+                        dismissed.push(*id);
+                    }
                     ui.add_space(8.0);
                 }
             });

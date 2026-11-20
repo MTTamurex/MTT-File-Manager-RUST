@@ -11,7 +11,7 @@ mod window;
 
 use crate::app::copy_panel_state::TransferMetrics;
 use crate::app::ImageViewerApp;
-use crate::infrastructure::copy_engine::{CopyOperation, OutcomeKind};
+use crate::infrastructure::copy_engine::{CopyOperation, CopyRuntime, OutcomeKind};
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use mtt_copy_engine::PauseState;
@@ -22,7 +22,12 @@ use std::time::Duration;
 pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let _stage =
         crate::infrastructure::diagnostic_logger::navigation_trace::Stage::new("copy_dashboard");
-    let jobs = app.file_operation_state.copy_runtime.jobs();
+    let mut jobs = app.file_operation_state.copy_runtime.jobs();
+    dismiss_successful_transfers(
+        &app.file_operation_state.copy_runtime,
+        &mut jobs,
+        app.explorer_preferences.auto_dismiss_successful_transfers,
+    );
     app.file_operation_state
         .copy_panel
         .metrics
@@ -78,6 +83,26 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
+fn dismiss_successful_transfers(
+    runtime: &CopyRuntime,
+    jobs: &mut Vec<(u64, std::sync::Arc<CopyOperation>)>,
+    enabled: bool,
+) {
+    if !enabled {
+        return;
+    }
+    jobs.retain(|(id, operation)| {
+        let completed_successfully = operation.deletion.is_none()
+            && operation
+                .outcome()
+                .is_some_and(|outcome| outcome.kind == OutcomeKind::Completed);
+        if completed_successfully {
+            runtime.dismiss(*id);
+        }
+        !completed_successfully
+    });
+}
+
 fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
     if operation.deletion.is_some() {
         return;
@@ -94,7 +119,7 @@ fn sample(operation: &CopyOperation, metrics: &mut TransferMetrics) {
     );
 }
 
-fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) {
+fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetrics) -> bool {
     let paths = if let Some(deletion) = &operation.deletion {
         deletion.current()
     } else {
@@ -108,12 +133,18 @@ fn card(ui: &mut egui::Ui, operation: &CopyOperation, metrics: &mut TransferMetr
     }
 }
 
+fn dismiss_button(ui: &mut egui::Ui) -> bool {
+    ui.small_button("×")
+        .on_hover_text(t!("copy_engine.dismiss"))
+        .clicked()
+}
+
 fn card_with_paths(
     ui: &mut egui::Ui,
     operation: &CopyOperation,
     metrics: &mut TransferMetrics,
     active_paths: &[std::path::PathBuf],
-) {
+) -> bool {
     let progress = &operation.progress;
     let outcome = operation.outcome();
     let active = outcome.is_none();
@@ -124,6 +155,7 @@ fn card_with_paths(
     let total_bytes = progress.total_bytes.load(Ordering::Relaxed);
     let files = progress.files_copied.load(Ordering::Relaxed);
     let total_files = progress.total_files.load(Ordering::Relaxed);
+    let mut dismissed = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
         if active && !cancelled {
@@ -155,7 +187,16 @@ fn card_with_paths(
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.add(egui::Label::new(RichText::new(status).strong().color(status_color)).truncate());
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !active {
+                    dismissed = dismiss_button(ui);
+                }
+                ui.add(
+                    egui::Label::new(RichText::new(status).strong().color(status_color)).truncate(),
+                );
+            });
+        });
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -268,6 +309,7 @@ fn card_with_paths(
             ui.label(message);
         }
     });
+    dismissed
 }
 
 fn path_row(ui: &mut egui::Ui, label: &str, value: &str, tooltip: impl FnOnce() -> String) {
@@ -313,59 +355,4 @@ fn format_duration(duration: Duration) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn elapsed_duration_formats_seconds_minutes_and_hours() {
-        assert_eq!(format_duration(Duration::ZERO), "0 min 00 s");
-        assert_eq!(format_duration(Duration::from_secs(65)), "1 min 05 s");
-        assert_eq!(
-            format_duration(Duration::from_secs(3665)),
-            "1 h 01 min 05 s"
-        );
-    }
-
-    #[test]
-    fn progress_handles_empty_files_rollback_and_completed_empty_trees() {
-        assert_eq!(fraction(0, 0, 0, 0, false), 0.0);
-        assert_eq!(fraction(0, 0, 1, 2, false), 0.5);
-        assert_eq!(fraction(0, 0, 0, 0, true), 1.0);
-        assert_eq!(fraction(120, 100, 1, 1, false), 1.0);
-    }
-
-    #[test]
-    fn cards_render_in_application_themes_without_changing_operation_state() {
-        use crate::app::navigation_state::ThemeMode;
-        use crate::infrastructure::copy_engine::{CopyRuntime, Outcome};
-        use std::path::PathBuf;
-        use std::sync::Arc;
-        let runtime = Arc::new(CopyRuntime::default());
-        let job = runtime.start(
-            vec![PathBuf::from("source/file.txt")],
-            PathBuf::from("target"),
-        );
-        let ctx = egui::Context::default();
-        let mut metrics = TransferMetrics::default();
-        for mode in [
-            ThemeMode::Light,
-            ThemeMode::Dark,
-            ThemeMode::DarkDeep,
-            ThemeMode::GitHubDark,
-        ] {
-            theme::apply_theme_visuals(&ctx, mode);
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                card(ui, &job.operation, &mut metrics);
-            });
-            assert!(!output.shapes.is_empty());
-            assert!(!job.operation.progress.is_cancelled());
-        }
-        job.finish(Outcome {
-            kind: OutcomeKind::Failed,
-            message: Some("Copy error".into()),
-        });
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            card(ui, &job.operation, &mut metrics);
-        });
-        assert_eq!(job.operation.outcome().unwrap().kind, OutcomeKind::Failed);
-    }
-}
+mod tests;

@@ -73,7 +73,10 @@ fn deletion_uses_shared_window_without_copy_units_or_pause_controls() {
         for shape in output.shapes {
             texts(&shape.shape, &mut labels);
         }
-        assert!(!labels.iter().any(|label| label == "×"));
+        assert_eq!(
+            labels.iter().filter(|label| label.as_str() == "×").count(),
+            1
+        );
         assert_eq!(job.operation.elapsed(), elapsed);
     }
 }

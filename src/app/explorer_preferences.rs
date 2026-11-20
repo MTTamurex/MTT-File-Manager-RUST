@@ -37,6 +37,7 @@ pub struct ExplorerPreferences {
     pub hover_preview: bool,
     pub sidebar_unified_scroll: bool,
     pub native_copy_engine: bool,
+    pub auto_dismiss_successful_transfers: bool,
 }
 
 impl Default for ExplorerPreferences {
@@ -46,6 +47,7 @@ impl Default for ExplorerPreferences {
             hover_preview: true,
             sidebar_unified_scroll: false,
             native_copy_engine: false,
+            auto_dismiss_successful_transfers: false,
         }
     }
 }
@@ -82,10 +84,14 @@ impl ExplorerPreferences {
                 .get("native_copy_engine")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(false),
+            auto_dismiss_successful_transfers: prefs
+                .get("auto_dismiss_successful_transfers")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(false),
         }
     }
 
-    pub(crate) fn preferences(self) -> [(&'static str, String); 4] {
+    pub(crate) fn preferences(self) -> [(&'static str, String); 5] {
         [
             (
                 "list_column_size_mode",
@@ -93,6 +99,10 @@ impl ExplorerPreferences {
             ),
             ("hover_preview", self.hover_preview.to_string()),
             ("native_copy_engine", self.native_copy_engine.to_string()),
+            (
+                "auto_dismiss_successful_transfers",
+                self.auto_dismiss_successful_transfers.to_string(),
+            ),
             (
                 "sidebar_unified_scroll",
                 self.sidebar_unified_scroll.to_string(),
@@ -120,6 +130,7 @@ mod tests {
             ("hover_preview".into(), "invalid".into()),
             ("sidebar_unified_scroll".into(), "invalid".into()),
             ("native_copy_engine".into(), "invalid".into()),
+            ("auto_dismiss_successful_transfers".into(), "invalid".into()),
         ]);
         assert_eq!(
             ExplorerPreferences::load(&prefs),
@@ -165,18 +176,21 @@ mod tests {
         ] {
             for hover_preview in [false, true] {
                 for sidebar_unified_scroll in [false, true] {
-                    let options = ExplorerPreferences {
-                        column_size_mode,
-                        hover_preview,
-                        sidebar_unified_scroll,
-                        native_copy_engine: false,
-                    };
-                    let prefs = options
-                        .preferences()
-                        .into_iter()
-                        .map(|(key, value)| (key.to_string(), value))
-                        .collect();
-                    assert_eq!(ExplorerPreferences::load(&prefs), options);
+                    for auto_dismiss_successful_transfers in [false, true] {
+                        let options = ExplorerPreferences {
+                            column_size_mode,
+                            hover_preview,
+                            sidebar_unified_scroll,
+                            native_copy_engine: false,
+                            auto_dismiss_successful_transfers,
+                        };
+                        let prefs = options
+                            .preferences()
+                            .into_iter()
+                            .map(|(key, value)| (key.to_string(), value))
+                            .collect();
+                        assert_eq!(ExplorerPreferences::load(&prefs), options);
+                    }
                 }
             }
         }
@@ -197,6 +211,7 @@ mod tests {
             hover_preview: false,
             sidebar_unified_scroll: true,
             native_copy_engine: true,
+            auto_dismiss_successful_transfers: true,
         };
         for (key, value) in options.preferences() {
             db.set_preference(key, &value).unwrap();

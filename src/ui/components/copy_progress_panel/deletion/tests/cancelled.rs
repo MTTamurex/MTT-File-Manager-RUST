@@ -33,7 +33,10 @@ fn cancelled_result_keeps_its_message_without_a_progress_bar_or_duplicated_statu
                         .count(),
                     1
                 );
-                assert!(!labels.iter().any(|label| label == "×"));
+                assert_eq!(
+                    labels.iter().filter(|label| label.as_str() == "×").count(),
+                    1
+                );
                 // Keep the explanatory outcome text, independently of the bar.
                 let message = t!("delete_engine.cancelled").to_string();
                 job.finish(Outcome {

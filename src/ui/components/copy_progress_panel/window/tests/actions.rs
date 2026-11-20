@@ -156,3 +156,79 @@ fn close_with_mixed_jobs_cancels_active_jobs_without_creating_minimized_entries(
     assert!(active.operation.progress.is_cancelled());
     assert!(super::super::super::indicator::CopyIndicator::from_runtime(&runtime).is_none());
 }
+
+#[test]
+fn completed_operations_can_be_dismissed_individually() {
+    let ctx = egui::Context::default();
+    let runtime = CopyRuntime::default();
+    let completed_copy = runtime.start(
+        vec![PathBuf::from("source/first.txt")],
+        PathBuf::from("target"),
+    );
+    completed_copy.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+    let cancelled_deletion = runtime.start_delete(vec![PathBuf::from("source/second.txt")], false);
+    cancelled_deletion.finish(Outcome {
+        kind: OutcomeKind::Cancelled,
+        message: None,
+    });
+    let active_move = runtime.start_move(
+        vec![PathBuf::from("source/third.txt")],
+        PathBuf::from("target"),
+    );
+    let jobs = runtime.jobs();
+    let completed_copy_id = jobs[0].0;
+    let cancelled_deletion_id = jobs[1].0;
+    let active_move_id = jobs[2].0;
+    let mut panel = CopyPanelState::default();
+    let size = egui::vec2(1200.0, 1000.0);
+    let mut texts = Vec::new();
+    for _ in 0..8 {
+        texts = draw(&ctx, &runtime, &mut panel, size);
+    }
+
+    let mut dismiss_positions: Vec<_> = texts
+        .iter()
+        .filter(|text| text.value == "×")
+        .map(|text| text.rect.center())
+        .collect();
+    assert_eq!(dismiss_positions.len(), 2);
+    dismiss_positions.sort_by(|left, right| left.y.total_cmp(&right.y));
+
+    let mut dismissed = Vec::new();
+    for pressed in [true, false] {
+        let position = dismiss_positions[0];
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events: vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| dismissed.extend(show(ui.ctx(), &runtime.jobs(), &mut panel)),
+        );
+    }
+
+    assert_eq!(dismissed, vec![completed_copy_id]);
+    runtime.dismiss(completed_copy_id);
+    let remaining = runtime.jobs();
+    assert_eq!(
+        remaining.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![cancelled_deletion_id, active_move_id]
+    );
+    assert_eq!(
+        cancelled_deletion.operation.outcome().unwrap().kind,
+        OutcomeKind::Cancelled
+    );
+    assert!(active_move.operation.outcome().is_none());
+    assert!(!active_move.operation.progress.is_cancelled());
+}

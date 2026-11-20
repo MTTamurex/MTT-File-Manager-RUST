@@ -1674,6 +1674,8 @@ copy_engine:
   enable: "Use MTT copy, move and deletion engine (experimental)"
   description: "Off by default. Applies to filesystem copies, manual moves (drag/drop and cut/paste) and deletions. Organizer, extraction and virtual items keep their current mechanism. Completed moves are not undone on cancellation."
   limitations: "Copy: conflicts ask whether to replace, skip, keep both or merge folders. Completed copies remain on cancellation. Deletion: cancellation does not restore removed items. Selected reparse paths are refused. Fast same-volume folder moves carry nested links/reparse points intact without following them."
+  auto_dismiss_successful_transfers: "Automatically dismiss successful copies and moves"
+  auto_dismiss_successful_transfers_description: "Immediately remove completed copies and moves from the operations panel. Errors, cancellations, and deletions remain until dismissed manually."
   preparing: "Preparing copy…"
   cancelled: "Copy cancelled. Already completed files were kept."
   failed: "Copy finished with %{count} errors."

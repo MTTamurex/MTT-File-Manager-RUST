@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 mod confirmation;
 
-pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBuf]) {
+pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBuf]) -> bool {
     let progress = operation.deletion.as_ref().unwrap();
     let outcome = operation.outcome();
     let active = outcome.is_none();
@@ -21,6 +21,7 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
     let mut counts = super::deletion_counts::Counts::default();
     counts.include(progress);
     let failures = progress.failures.load(Ordering::Relaxed);
+    let mut dismissed = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 2.0).max(0.0));
         // Confirmation is its own phase: progress statistics and source/mode
@@ -48,7 +49,17 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
         } else {
             theme::accent_color(ui.ctx())
         };
-        ui.add(egui::Label::new(RichText::new(status.clone()).strong().color(color)).truncate());
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !active {
+                    dismissed = super::dismiss_button(ui);
+                }
+                ui.add(
+                    egui::Label::new(RichText::new(status.clone()).strong().color(color))
+                        .truncate(),
+                );
+            });
+        });
         ui.add_space(6.0);
         let source = if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
@@ -143,6 +154,7 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             ui.label(message);
         }
     });
+    dismissed
 }
 
 #[cfg(test)]
