@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use windows::core::Interface;
 use windows::core::*;
@@ -14,45 +13,46 @@ use super::{
     PKEY_RECYCLE_DELETED_FROM, PKEY_SIZE,
 };
 
+/// Own all PIDLs returned by one Next call, including unprocessed items when
+/// navigation cancels the load or the batch callback unwinds.
+struct PidlBatch([*mut ITEMIDLIST; 32]);
+
+impl Drop for PidlBatch {
+    fn drop(&mut self) {
+        for pidl in self.0 {
+            if !pidl.is_null() {
+                unsafe { CoTaskMemFree(Some(pidl.cast())) };
+            }
+        }
+    }
+}
+
 pub(super) fn enumerate_recycle_bin_streaming(
-    sender: Sender<Vec<RecycleBinItem>>,
+    mut on_batch: impl FnMut(Vec<RecycleBinItem>),
     generation: Arc<AtomicUsize>,
     my_gen: usize,
     batch_size: usize,
-) {
+) -> Result<()> {
+    if generation.load(Ordering::Relaxed) != my_gen {
+        return Ok(());
+    }
     unsafe {
         log::debug!("[Lixeira] Starting streaming enumeration (Shell API)...");
 
         let _com = ComApartmentGuard::init_sta_best_effort();
 
         // 1. Get Desktop Folder
-        let desktop: IShellFolder = match SHGetDesktopFolder() {
-            Ok(d) => d,
-            Err(e) => {
-                log::error!("[Lixeira] Failed to get desktop folder: {:?}", e);
-                let _ = sender.send(Vec::new());
-                return;
-            }
-        };
+        let desktop: IShellFolder = SHGetDesktopFolder()?;
 
         // 2. Get Recycle Bin PIDL
-        let recycle_bin_pidl = match SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None) {
-            Ok(pidl) => pidl,
-            Err(e) => {
-                log::error!("[Lixeira] Failed to get Recycle Bin PIDL: {:?}", e);
-                let _ = sender.send(Vec::new());
-                return;
-            }
-        };
+        let recycle_bin_pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
 
         // 3. Bind to Recycle Bin Folder (IShellFolder)
         let recycle_bin_folder: IShellFolder = match desktop.BindToObject(recycle_bin_pidl, None) {
-            Ok(f) => f,
-            Err(e) => {
-                log::error!("[Lixeira] Failed to bind to Recycle Bin folder: {:?}", e);
+            Ok(folder) => folder,
+            Err(error) => {
                 CoTaskMemFree(Some(recycle_bin_pidl as *mut _));
-                let _ = sender.send(Vec::new());
-                return;
+                return Err(error);
             }
         };
         CoTaskMemFree(Some(recycle_bin_pidl as *mut _)); // Release PIDL
@@ -62,132 +62,86 @@ pub(super) fn enumerate_recycle_bin_streaming(
         let flags = (SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0) as u32;
         let mut enum_list_opt: Option<IEnumIDList> = None;
 
-        if recycle_bin_folder
-            .EnumObjects(HWND::default(), flags, &mut enum_list_opt)
-            .is_err()
-        {
-            log::error!("[Lixeira] Failed to get enumerator");
-            let _ = sender.send(Vec::new());
-            return;
+        let enum_result =
+            recycle_bin_folder.EnumObjects(HWND::default(), flags, &mut enum_list_opt);
+        if enum_result.is_err() {
+            return Err(Error::from_hresult(enum_result));
         }
         let enum_list = match enum_list_opt {
             Some(list) => list,
-            None => {
-                // EnumObjects succeeded but returned no enumerator (e.g., empty bin)
-                let _ = sender.send(Vec::new());
-                return;
-            }
+            None => return Ok(()), // Empty Recycle Bin
         };
 
+        let batch_size = batch_size.max(1);
         let mut batch = Vec::with_capacity(batch_size);
         let mut total_count = 0;
 
         loop {
             // Check cancellation
             if generation.load(Ordering::Relaxed) != my_gen {
-                return;
+                return Ok(());
             }
 
             let mut fetched: u32 = 0;
-            let mut pidl_child: *mut ITEMIDLIST = std::ptr::null_mut();
+            let mut pidls = PidlBatch([std::ptr::null_mut(); 32]);
 
-            // Next expects a slice of pointers. We want 1 item.
-            if enum_list
-                .Next(std::slice::from_mut(&mut pidl_child), Some(&mut fetched))
-                .is_err()
-                || fetched == 0
-            {
+            // Fetch several PIDLs per COM call to reduce per-item enumeration overhead.
+            let next_result = enum_list.Next(&mut pidls.0, Some(&mut fetched));
+            if fetched == 0 {
+                if next_result.is_err() {
+                    return Err(Error::from_hresult(next_result));
+                }
                 break;
             }
 
-            // --- PROCESS SINGLE ITEM ---
-            // Create IShellItem from PIDL (child).
-            // SHCreateShellItem logic: pidlParent=None, psfParent=Some(folder), pidl=child
-            if let Ok(shell_item) = SHCreateShellItem(None, Some(&recycle_bin_folder), pidl_child) {
-                // Get deletion date using the Shell Folder API + PIDL
-                let date_deleted = get_date_deleted_from_pidl(&recycle_bin_folder, pidl_child);
+            for pidl_child in pidls.0.iter().take(fetched as usize).copied() {
+                if generation.load(Ordering::Relaxed) != my_gen {
+                    return Ok(());
+                }
+                // SHCreateShellItem uses the current folder as the parent and this child PIDL.
+                if let Ok(shell_item) =
+                    SHCreateShellItem(None, Some(&recycle_bin_folder), pidl_child)
+                {
+                    if let Some(mut item) = process_shell_item(&shell_item) {
+                        // GetDetailsOf is an extra Shell call; use it only when the item
+                        // properties did not provide a usable deletion date.
+                        if item.date_deleted_unix == 0
+                            && crate::domain::date_format::DateFormat::YearMonthDay
+                                .reformat_year_first(&item.date_deleted)
+                                .is_none()
+                        {
+                            item.date_deleted =
+                                get_date_deleted_from_pidl(&recycle_bin_folder, pidl_child);
+                        }
 
-                // Process other properties using existing helper
-                if let Some(mut item) = process_shell_item(&shell_item) {
-                    // Keep the unambiguous property value for sorting and live formatting.
-                    // The localized column text is only a last-resort display fallback.
-                    if item.date_deleted_unix == 0
-                        && crate::domain::date_format::DateFormat::YearMonthDay
-                            .reformat_year_first(&item.date_deleted)
-                            .is_none()
-                    {
-                        item.date_deleted = date_deleted;
+                        batch.push(item);
+                        total_count += 1;
                     }
+                }
 
-                    batch.push(item);
-                    total_count += 1;
+                if batch.len() >= batch_size {
+                    if generation.load(Ordering::Relaxed) != my_gen {
+                        return Ok(());
+                    }
+                    on_batch(std::mem::take(&mut batch));
+                    batch = Vec::with_capacity(batch_size);
                 }
             }
 
-            // Validate PIDL release
-            CoTaskMemFree(Some(pidl_child as *mut _));
-
-            // Send batch
-            if batch.len() >= batch_size {
-                if generation.load(Ordering::Relaxed) != my_gen {
-                    return;
-                }
-                let _ = sender.send(std::mem::take(&mut batch));
-                batch = Vec::with_capacity(batch_size);
+            if next_result.is_err() {
+                return Err(Error::from_hresult(next_result));
             }
         }
 
         if !batch.is_empty() && generation.load(Ordering::Relaxed) == my_gen {
-            let _ = sender.send(batch);
+            on_batch(batch);
         }
 
-        // Completion signal
-        let _ = sender.send(Vec::new());
         log::debug!(
             "[Lixeira] Enumeration complete (Shell API). Total items: {}",
             total_count
         );
-    }
-}
-
-/// Legacy function for backwards compatibility - enumerates all at once.
-pub(super) fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
-    unsafe {
-        log::debug!("[Lixeira] Starting enumeration...");
-
-        let mut items = Vec::new();
-        let _com = ComApartmentGuard::init_sta_best_effort();
-
-        let recycle_bin_folder: IShellItem =
-            SHGetKnownFolderItem(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)?;
-
-        let enum_items: IEnumShellItems =
-            recycle_bin_folder.BindToHandler(None, &BHID_EnumItems)?;
-
-        loop {
-            let mut shell_items: [Option<IShellItem>; 1] = [None];
-            let mut fetched: u32 = 0;
-
-            if enum_items
-                .Next(&mut shell_items, Some(&mut fetched))
-                .is_err()
-                || fetched == 0
-            {
-                break;
-            }
-
-            if let Some(shell_item) = shell_items[0].take() {
-                if let Some(item) = process_shell_item(&shell_item) {
-                    items.push(item);
-                }
-            }
-        }
-
-        log::debug!(
-            "[Lixeira] Enumeration complete. Total items: {}",
-            items.len()
-        );
-        Ok(items)
+        Ok(())
     }
 }
 

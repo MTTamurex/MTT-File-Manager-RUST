@@ -451,6 +451,7 @@ operations:
   shortcut_suffix: "%{name} - ярлык"
   shortcut_suffix_n: "%{name} - ярлык (%{n})"
   error_cancelled: "Операция отменена или завершилась с ошибкой"
+  empty_recycle_bin_failed: "Не удалось очистить корзину: %{error}"
   error_invalid_name: "Недопустимое имя для переименования"
   error_folder_limit: "Ошибка при создании папки: превышено число попыток"
   error_folder_create: "Ошибка при создании папки: %{error}"

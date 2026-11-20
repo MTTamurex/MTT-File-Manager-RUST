@@ -51,6 +51,13 @@ impl ImageViewerApp {
                 }
 
                 crate::infrastructure::windows::system_tray::coordinator::initialize(hwnd);
+                if let Err(error) =
+                    crate::infrastructure::windows::recycle_bin::register_change_notifications(hwnd)
+                {
+                    log::warn!(
+                        "[RECYCLE] Failed to register Shell change notifications: {error:?}"
+                    );
+                }
 
                 // Create the invisible proxy window used as owner for Shell
                 // file-operation dialogs so the Shell cannot disable the app's

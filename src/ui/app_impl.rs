@@ -136,6 +136,7 @@ impl ImageViewerApp {
             return;
         }
 
+        self.poll_recycle_bin_notifications(ctx);
         self.poll_system_theme(ctx);
 
         let t0 = std::time::Instant::now();

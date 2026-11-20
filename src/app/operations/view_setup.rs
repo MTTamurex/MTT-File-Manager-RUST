@@ -3,17 +3,13 @@
 //! This module handles setting up special views like "This PC" and "Recycle Bin".
 
 use std::collections::HashSet;
-use std::path::PathBuf;
-use std::sync::atomic::Ordering as AtomicOrdering;
-use std::sync::Arc;
 use std::time::Instant;
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::FileEntry;
-use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 use crate::infrastructure::windows as windows_infra;
 
 mod computer;
+mod recycle_bin;
 
 impl ImageViewerApp {
     fn refresh_inactive_computer_view_if_visible(&mut self) {
@@ -67,127 +63,6 @@ impl ImageViewerApp {
         }
         self.ui_ctx.request_repaint();
         true
-    }
-
-    pub fn setup_recycle_bin_view(&mut self) {
-        self.active_tag_filter = None;
-        self.navigation_state.current_path = RECYCLE_BIN_VIEW_ID.to_string();
-        self.navigation_state.is_computer_view = false;
-        self.navigation_state.is_recycle_bin_view = true;
-        self.navigation_state.path_input = RECYCLE_BIN_VIEW_ID.to_string();
-
-        // Restore unlocked defaults for settings that folder_lock may have overridden.
-        // "Lixeira" cannot be locked, so always clear the locked state.
-        self.sort_descending = self.sort_descending_normal;
-        self.folders_position = self.folders_position_normal;
-        self.view_mode = self.view_mode_normal;
-        self.group_mode = self.group_mode_normal;
-        self.group_descending = self.group_descending_normal;
-        self.current_folder_locked = false;
-
-        self.is_loading_folder = true;
-        self.folder_load_error = None;
-        self.items = Arc::new(Vec::new());
-        self.group_projection = Arc::new(Default::default());
-        self.all_items_mut().clear();
-        self.total_items = 0;
-        self.reset_selection_and_search();
-
-        // Use the same globally-unique generation space as folder loads so
-        // delayed dual-panel batches cannot be routed into this special view.
-        self.bump_folder_load_generation();
-        if self.should_preserve_inactive_dual_panel_thumbnail_pipeline() {
-            self.prune_thumbnail_pipeline_for_dual_panel_navigation("recycle-bin");
-        } else {
-            self.release_thumbnail_pipeline_for_inactive_view("recycle-bin", true);
-        }
-
-        let my_gen = self.generation;
-        let gen_clone = self.folder_load_generation.clone();
-        let file_entry_sender = self.file_entry_sender.clone();
-        let ctx = self.ui_ctx.clone();
-
-        // Load Recycle Bin items in a separate thread (ASYNC) with batching
-        std::thread::spawn(move || {
-            use crate::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
-
-            // Enumerate Recycle Bin items via COM
-            match enumerate_recycle_bin() {
-                Ok(recycle_items) => {
-                    const BATCH_SIZE: usize = 100;
-                    let mut batch = Vec::with_capacity(BATCH_SIZE);
-
-                    for item in recycle_items {
-                        // Check if generation is still valid (fast cancellation)
-                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            return;
-                        }
-
-                        // Create a "virtual" path based on extension to load the correct icon
-                        // The real path no longer exists, but the icon is based on the extension
-                        // The real path ($R) is needed to read the deletion date ($I creation time)
-                        // If physical_path is empty (read failure), fall back to the old dummy logic.
-                        let file_path = if !item.physical_path.as_os_str().is_empty() {
-                            item.physical_path.clone()
-                        } else if item.is_directory {
-                            PathBuf::from("C:\\folder")
-                        } else if !item.extension.is_empty() {
-                            PathBuf::from(format!("dummy{}", item.extension))
-                        } else {
-                            item.original_path.clone()
-                        };
-
-                        let entry = FileEntry {
-                            path: file_path, // Physical path ($R) to allow get_deletion_date
-                            name: item.name,
-                            is_dir: item.is_directory,
-                            size: item.size,
-                            // Store deletion timestamp for stable numeric sort in Recycle Bin view.
-                            modified: item.date_deleted_unix,
-                            created: None,
-                            folder_cover: None,
-                            drive_info: None,
-                            sync_status: crate::domain::file_entry::SyncStatus::None,
-                            is_hidden: false,
-                            recycle_bin: Some(Box::new(
-                                crate::domain::file_entry::RecycleBinMeta {
-                                    deletion_date: item.date_deleted,
-                                    original_path: item.original_path,
-                                },
-                            )),
-                        };
-                        batch.push(entry);
-
-                        // Send batch when full
-                        if batch.len() >= BATCH_SIZE {
-                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                return;
-                            }
-                            let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
-                            ctx.request_repaint();
-                            batch = Vec::with_capacity(BATCH_SIZE);
-                        }
-                    }
-
-                    // Send remaining items
-                    if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let _ = file_entry_sender.send((my_gen, batch));
-                        ctx.request_repaint();
-                    }
-
-                    // End-of-loading signal
-                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let _ = file_entry_sender.send((my_gen, Vec::new()));
-                        ctx.request_repaint();
-                    }
-                }
-                Err(e) => {
-                    log::error!("[RECYCLE BIN] Error enumerating: {:?}", e);
-                    let _ = file_entry_sender.send((my_gen, Vec::new()));
-                    ctx.request_repaint();
-                }
-            }
-        });
     }
 
     /// Launches a background thread to scan drives. Non-blocking.

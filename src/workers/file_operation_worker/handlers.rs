@@ -1380,7 +1380,19 @@ pub(super) fn handle_empty_recycle_bin(
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
 ) {
-    let _ = recycle_bin::empty_recycle_bin(hwnd.0);
+    if let Err(error) = recycle_bin::empty_recycle_bin(hwnd.0) {
+        let message = if error.code() == windows::Win32::Foundation::E_ABORT {
+            rust_i18n::t!("operations.error_cancelled").to_string()
+        } else {
+            rust_i18n::t!(
+                "operations.empty_recycle_bin_failed",
+                error = error.to_string()
+            )
+            .to_string()
+        };
+        log::warn!("[FILE-OP] Empty Recycle Bin failed: {error:?}");
+        let _ = result_sender.send(FileOperationResult::OperationFailed { message });
+    }
     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
 }
 

@@ -844,13 +844,9 @@ impl ImageViewerApp {
     }
 
     fn handle_recycle_bin_changed(&mut self) {
-        if self.navigation_state.is_recycle_bin_view {
-            #[cfg(debug_assertions)]
-            log::debug!("[RECYCLE] Operation finished, refreshing view.");
-            self.setup_recycle_bin_view();
-            // Keep tab manager synchronized with recycle-bin virtual view.
-            self.sync_to_tab();
-        }
+        #[cfg(debug_assertions)]
+        log::debug!("[RECYCLE] Change detected; scheduling a debounced refresh.");
+        self.queue_recycle_bin_refresh();
     }
 
     pub(super) fn handle_parent_folder_updates(

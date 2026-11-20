@@ -269,6 +269,7 @@ pub struct ImageViewerApp {
         crate::app::operations::network_drive_dialog::NetworkDriveDialogState,
     pub is_loading_folder: bool,
     pub loading_started_at: Instant, // Track when loading started for timeout safety
+    pub(crate) recycle_bin_refresh_pending_at: Option<Instant>,
 
     // Async rebuild (filter/sort) to keep UI smooth during heavy loads
     pub items_rebuild_sender: Sender<ItemsRebuildResult>,

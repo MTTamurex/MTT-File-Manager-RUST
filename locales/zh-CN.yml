@@ -451,6 +451,7 @@ operations:
   shortcut_suffix: "%{name} ‑ 快捷方式"
   shortcut_suffix_n: "%{name} ‑ 快捷方式 (%{n})"
   error_cancelled: "操作已取消或失败"
+  empty_recycle_bin_failed: "无法清空回收站：%{error}"
   error_invalid_name: "重命名使用了无效名称"
   error_folder_limit: "创建文件夹出错：超出尝试次数限制"
   error_folder_create: "创建文件夹出错：%{error}"

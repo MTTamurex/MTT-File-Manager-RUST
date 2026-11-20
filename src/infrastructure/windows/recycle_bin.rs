@@ -11,6 +11,7 @@ use windows::Win32::System::Com::*;
 use windows::Win32::UI::Shell::*;
 
 mod enumeration;
+mod notifications;
 mod operations;
 mod recycle_commit;
 
@@ -103,12 +104,41 @@ pub fn enumerate_recycle_bin_streaming(
     my_gen: usize,
     batch_size: usize,
 ) {
-    enumeration::enumerate_recycle_bin_streaming(sender, generation, my_gen, batch_size);
+    let result = enumerate_recycle_bin_streaming_with(
+        |batch| {
+            let _ = sender.send(batch);
+        },
+        generation.clone(),
+        my_gen,
+        batch_size,
+    );
+    if let Err(error) = result {
+        log::error!("[Lixeira] Streaming enumeration failed: {error:?}");
+    }
+    if generation.load(std::sync::atomic::Ordering::Relaxed) == my_gen {
+        let _ = sender.send(Vec::new());
+    }
 }
 
-/// Legacy function for backwards compatibility - enumerates all at once.
+pub(crate) fn enumerate_recycle_bin_streaming_with(
+    on_batch: impl FnMut(Vec<RecycleBinItem>),
+    generation: Arc<AtomicUsize>,
+    my_gen: usize,
+    batch_size: usize,
+) -> Result<()> {
+    enumeration::enumerate_recycle_bin_streaming(on_batch, generation, my_gen, batch_size)
+}
+
+/// Enumerate all Recycle Bin items at once for callers that need the full list.
 pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
-    enumeration::enumerate_recycle_bin()
+    let mut items = Vec::new();
+    enumerate_recycle_bin_streaming_with(
+        |mut batch| items.append(&mut batch),
+        Arc::new(AtomicUsize::new(0)),
+        0,
+        128,
+    )?;
+    Ok(items)
 }
 
 /// Restore a file from the Recycle Bin to its original location.
@@ -130,5 +160,10 @@ pub fn delete_permanently(physical_path: &std::path::Path, hwnd: HWND) -> Result
 pub fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     operations::empty_recycle_bin(hwnd)
 }
+
+pub(crate) use notifications::{
+    handle_change_message, register_change_notifications, take_change_notification,
+    unregister_change_notifications, CHANGE_MESSAGE,
+};
 
 pub(crate) use recycle_commit::RecycleCommitBatch;

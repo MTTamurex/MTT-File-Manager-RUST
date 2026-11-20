@@ -451,6 +451,7 @@ operations:
   shortcut_suffix: "%{name} - Shortcut"
   shortcut_suffix_n: "%{name} - Shortcut (%{n})"
   error_cancelled: "Operation cancelled or failed"
+  empty_recycle_bin_failed: "Could not empty the Recycle Bin: %{error}"
   error_invalid_name: "Invalid name for renaming"
   error_folder_limit: "Error creating folder: attempt limit exceeded"
   error_folder_create: "Error creating folder: %{error}"

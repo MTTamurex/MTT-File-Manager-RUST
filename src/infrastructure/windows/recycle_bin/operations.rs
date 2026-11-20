@@ -88,9 +88,11 @@ pub(super) fn delete_permanently(physical_path: &Path, hwnd: HWND) -> Result<()>
 /// Shows native Windows confirmation dialog before emptying.
 pub(super) fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     unsafe {
+        let _com = ComApartmentGuard::init_sta_best_effort();
         // SHEmptyRecycleBinW with NULL path empties all drives.
         // No SHERB_NOCONFIRMATION = Windows shows native confirmation dialog.
-        SHEmptyRecycleBinW(Some(hwnd), PCWSTR::default(), SHERB_NOPROGRESSUI)?;
+        // Leaving SHERB_NOPROGRESSUI unset also keeps Windows' progress UI visible.
+        SHEmptyRecycleBinW(Some(hwnd), PCWSTR::default(), 0)?;
         Ok(())
     }
 }

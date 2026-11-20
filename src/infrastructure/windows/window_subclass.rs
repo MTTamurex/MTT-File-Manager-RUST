@@ -301,6 +301,7 @@ extern "system" fn borderless_subclass_proc(
     _dw_ref_data: usize,
 ) -> LRESULT {
     if msg == WM_NCDESTROY {
+        crate::infrastructure::windows::recycle_bin::unregister_change_notifications();
         super::system_tray::coordinator::shutdown(hwnd);
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
         SIZE_MOVE_STARTED.store(false, Ordering::SeqCst);
@@ -342,6 +343,11 @@ extern "system" fn borderless_subclass_proc(
 
     if msg == super::system_tray::TRAY_CALLBACK_MESSAGE {
         super::system_tray::handle_callback(hwnd, lparam);
+        return LRESULT(0);
+    }
+
+    if msg == crate::infrastructure::windows::recycle_bin::CHANGE_MESSAGE {
+        crate::infrastructure::windows::recycle_bin::handle_change_message(wparam, lparam);
         return LRESULT(0);
     }
 

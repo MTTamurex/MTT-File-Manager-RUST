@@ -451,6 +451,7 @@ operations:
   shortcut_suffix: "%{name} - Atalho"
   shortcut_suffix_n: "%{name} - Atalho (%{n})"
   error_cancelled: "Operação cancelada ou falhou"
+  empty_recycle_bin_failed: "Não foi possível esvaziar a Lixeira: %{error}"
   error_invalid_name: "Nome inválido para renomear"
   error_folder_limit: "Erro ao criar pasta: limite de tentativas excedido"
   error_folder_create: "Erro ao criar pasta: %{error}"

@@ -451,6 +451,7 @@ operations:
   shortcut_suffix: "%{name} - Συντόμευση"
   shortcut_suffix_n: "%{name} - Συντόμευση (%{n})"
   error_cancelled: "Η λειτουργία ακυρώθηκε ή απέτυχε"
+  empty_recycle_bin_failed: "Δεν ήταν δυνατή η εκκένωση του Κάδου Απορριμμάτων: %{error}"
   error_invalid_name: "Μη έγκυρο όνομα για μετονομασία"
   error_folder_limit: "Σφάλμα δημιουργίας φακέλου: ξεπέρασε το όριο προσπαθειών"
   error_folder_create: "Σφάλμα δημιουργίας φακέλου: %{error}"
