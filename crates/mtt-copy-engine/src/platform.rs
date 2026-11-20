@@ -3,9 +3,15 @@ use crate::{
     Progress,
 };
 use std::cell::Cell;
+use std::fs::File;
 use std::io;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+pub(crate) struct PublishedFile {
+    pub(crate) snapshot: crate::replacement::Snapshot,
+    pub(crate) _staging_guard: File,
+}
 
 struct Transfer<'a> {
     progress: &'a Progress,
@@ -87,7 +93,7 @@ pub(crate) fn copy_file_impl<'a>(
     progress: &'a Progress,
     permit: Option<&'a Permit<'a>>,
     cache: CacheMode,
-) -> io::Result<Option<crate::replacement::Snapshot>> {
+) -> io::Result<Option<PublishedFile>> {
     let setup_timer = progress.telemetry.measure(progress, TimingStage::FileSetup);
     match permit {
         Some(permit) => permit.checkpoint()?,
@@ -140,8 +146,20 @@ pub(crate) fn copy_file_impl<'a>(
     if std::fs::metadata(temporary.path())?.len() != item.size {
         return Err(io::Error::other("Copy size verification failed"));
     }
-    let published_snapshot = if item.move_source.is_some() {
-        Some(crate::replacement::Snapshot::capture(temporary.path())?)
+    let published_file = if item.move_source.is_some() {
+        // Acquire a no-write handle before publication and retain it until the
+        // caller has protected the final destination and removed the source.
+        // Capture metadata only after writes are blocked, rather than comparing
+        // two unlocked observations of timestamps that may still be settling.
+        let staging_guard = crate::replacement::Snapshot::protect_staging(temporary.path())?;
+        let snapshot = crate::replacement::Snapshot::from_file(&staging_guard)?;
+        if staging_guard.metadata()?.len() != item.size {
+            return Err(io::Error::other("Copy size verification failed"));
+        }
+        Some(PublishedFile {
+            snapshot,
+            _staging_guard: staging_guard,
+        })
     } else {
         None
     };
@@ -166,7 +184,7 @@ pub(crate) fn copy_file_impl<'a>(
     // Include empty files and APIs that did not issue a final progress callback.
     transfer.update(item.size);
     transfer.committed = true;
-    Ok(published_snapshot)
+    Ok(published_file)
 }
 
 #[cfg(windows)]

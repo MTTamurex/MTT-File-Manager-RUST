@@ -258,7 +258,8 @@ fn transfer_with<'a>(
             Err(error) => return Err(error),
         }
     }
-    let Some(snapshot) = crate::platform::copy_file_impl(item, progress, permit, cache)? else {
+    let Some(published_file) = crate::platform::copy_file_impl(item, progress, permit, cache)?
+    else {
         return Ok(Some(io::Error::other(
             "Published move identity unavailable; source retained",
         )));
@@ -272,10 +273,15 @@ fn transfer_with<'a>(
         after_publish()?;
         checkpoint()?;
         let destination = source::protect_destination(&item.destination)?;
-        if crate::replacement::Snapshot::from_file(&destination)? != snapshot {
-            return Err(io::Error::other(
-                "Published move target changed; source retained",
-            ));
+        let published = crate::replacement::Snapshot::from_file(&destination)?;
+        let changed_fields = published_file
+            .snapshot
+            .published_move_difference_fields(&published);
+        if !changed_fields.is_empty() {
+            return Err(io::Error::other(format!(
+                "Published move target changed ({}); source retained",
+                changed_fields.join(", ")
+            )));
         }
         checkpoint()?;
         drop(finalize_timer);

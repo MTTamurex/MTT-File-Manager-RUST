@@ -116,7 +116,7 @@ fn source_guard_blocks_writers_and_renames_during_a_cross_volume_copy() {
 }
 
 #[test]
-fn changed_published_destination_never_authorizes_removing_the_source() {
+fn published_stage_guard_prevents_destination_changes_before_source_removal() {
     let (root, source, target) = fixture();
     let file = source.join("file.txt");
     fs::write(&file, b"contents").unwrap();
@@ -129,17 +129,93 @@ fn changed_published_destination_never_authorizes_removing_the_source() {
         CacheMode::Buffered,
         true,
         || {
-            fs::write(target.join("file.txt"), b"changed externally")?;
+            let error = fs::write(target.join("file.txt"), b"modified").unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(32));
             Ok(())
         },
     )
     .unwrap();
-    assert!(retained.is_some());
+    assert!(retained.is_none(), "{retained:?}");
+    assert!(!file.exists());
+    assert_eq!(fs::read(target.join("file.txt")).unwrap(), b"contents");
+    root.close().unwrap();
+}
+
+#[test]
+fn substituted_published_file_of_equal_size_retains_source() {
+    let (root, source, target) = fixture();
+    let file = source.join("file.txt");
+    fs::write(&file, b"contents").unwrap();
+    let progress = Progress::default();
+    let plan = one_file_plan(&file, &target, &progress);
+    let retained = transfer_with(
+        &plan.files[0],
+        &progress,
+        None,
+        CacheMode::Buffered,
+        true,
+        || {
+            fs::rename(target.join("file.txt"), target.join("published.txt"))?;
+            fs::write(target.join("file.txt"), b"modified")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(retained.unwrap().to_string().contains("file ID"));
     assert_eq!(fs::read(&file).unwrap(), b"contents");
-    assert_eq!(
-        fs::read(target.join("file.txt")).unwrap(),
-        b"changed externally"
-    );
+    assert_eq!(fs::read(target.join("published.txt")).unwrap(), b"contents");
+    assert_eq!(fs::read(target.join("file.txt")).unwrap(), b"modified");
+    root.close().unwrap();
+}
+
+#[test]
+fn timestamp_changes_on_protected_published_file_do_not_fail_move() {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::{FILETIME, HANDLE};
+    use windows::Win32::Storage::FileSystem::{SetFileTime, FILE_WRITE_ATTRIBUTES};
+
+    let (root, source, target) = fixture();
+    let file = source.join("file.txt");
+    fs::write(&file, b"contents").unwrap();
+    let progress = Progress::default();
+    let plan = one_file_plan(&file, &target, &progress);
+    let retained = transfer_with(
+        &plan.files[0],
+        &progress,
+        None,
+        CacheMode::Buffered,
+        true,
+        || {
+            let destination = target.join("file.txt");
+            let before = fs::metadata(&destination)?;
+            let attributes = fs::OpenOptions::new()
+                .access_mode(FILE_WRITE_ATTRIBUTES.0)
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+                .open(&destination)?;
+            let time = FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 30_000_000,
+            };
+            unsafe {
+                SetFileTime(
+                    HANDLE(attributes.as_raw_handle()),
+                    Some(&time),
+                    None,
+                    Some(&time),
+                )
+            }
+            .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xffff))?;
+            drop(attributes);
+            let after = fs::metadata(&destination)?;
+            assert_ne!(before.created()?, after.created()?);
+            assert_ne!(before.modified()?, after.modified()?);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(retained.is_none(), "{retained:?}");
+    assert!(!file.exists());
+    assert_eq!(fs::read(target.join("file.txt")).unwrap(), b"contents");
     root.close().unwrap();
 }
 

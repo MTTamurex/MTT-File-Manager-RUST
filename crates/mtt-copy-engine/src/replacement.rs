@@ -18,6 +18,11 @@ impl Snapshot {
         Self::from_file(&file)
     }
 
+    pub(crate) fn protect_staging(path: &Path) -> io::Result<File> {
+        crate::plan::check_path(path)?;
+        open_target(path, true)
+    }
+
     pub(crate) fn from_file(file: &File) -> io::Result<Self> {
         let metadata = file.metadata()?;
         if !metadata.is_file() || crate::plan::is_link(&metadata) {
@@ -29,6 +34,23 @@ impl Snapshot {
             modified: metadata.modified().ok(),
             created: metadata.created().ok(),
         })
+    }
+
+    /// Compare fields that remain stable when a staged file is published.
+    /// The caller holds a handle that prevents writes across publication, so
+    /// timestamps may be ignored when the filesystem adjusts them on rename.
+    pub(crate) fn published_move_difference_fields(&self, other: &Self) -> Vec<&'static str> {
+        let mut fields = Vec::with_capacity(3);
+        if self.identity.0 != other.identity.0 {
+            fields.push("volume/device ID");
+        }
+        if self.identity.1 != other.identity.1 {
+            fields.push("file ID");
+        }
+        if self.size != other.size {
+            fields.push("size");
+        }
+        fields
     }
 
     pub(crate) fn hold(&self, path: &Path) -> io::Result<File> {
@@ -139,5 +161,59 @@ pub(crate) fn pin_parents(path: &Path) -> io::Result<Vec<File>> {
     {
         crate::plan::check_path(path)?;
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Snapshot;
+    use std::time::{Duration, SystemTime};
+
+    fn snapshot(
+        identity: (u64, u64),
+        size: u64,
+        modified: Option<SystemTime>,
+        created: Option<SystemTime>,
+    ) -> Snapshot {
+        Snapshot {
+            identity,
+            size,
+            modified,
+            created,
+        }
+    }
+
+    #[test]
+    fn published_move_comparison_ignores_timestamps_but_checks_identity_and_size() {
+        let modified = SystemTime::UNIX_EPOCH;
+        let created = modified + Duration::from_secs(1);
+        let expected = snapshot((1, 2), 3, Some(modified), Some(created));
+        let cases = [
+            (
+                snapshot((4, 2), 3, Some(modified), Some(created)),
+                "volume/device ID",
+            ),
+            (
+                snapshot((1, 4), 3, Some(modified), Some(created)),
+                "file ID",
+            ),
+            (snapshot((1, 2), 4, Some(modified), Some(created)), "size"),
+        ];
+
+        assert!(expected
+            .published_move_difference_fields(&expected)
+            .is_empty());
+        for (actual, field) in cases {
+            assert_eq!(expected.published_move_difference_fields(&actual), [field]);
+        }
+        let timestamps_changed = snapshot(
+            (1, 2),
+            3,
+            Some(modified + Duration::from_secs(2)),
+            Some(created + Duration::from_secs(2)),
+        );
+        assert!(expected
+            .published_move_difference_fields(&timestamps_changed)
+            .is_empty());
     }
 }
