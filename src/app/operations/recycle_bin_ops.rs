@@ -6,6 +6,18 @@ use crate::app::state::ImageViewerApp;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
+    pub fn can_empty_recycle_bin(&self) -> bool {
+        self.navigation_state.is_recycle_bin_view
+            && !self.is_loading_folder
+            && self.folder_load_error.is_none()
+            && !self.all_items.is_empty()
+            && !self
+                .file_operation_state
+                .copy_runtime
+                .empty_recycle_bin_running
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     pub fn restore_from_recycle_bin(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
             return;
@@ -121,11 +133,14 @@ impl ImageViewerApp {
     }
 
     pub fn empty_recycle_bin(&mut self) {
+        if !self.can_empty_recycle_bin() {
+            return;
+        }
+
         // Clear selection first so details panel resets immediately
         self.reset_selection_and_search();
 
-        // Send request to background worker.
-        // Windows will show a native confirmation dialog before emptying.
+        // The worker presents the themed confirmation and progress UI.
         let hwnd = self.shell_op_hwnd();
         self.file_operation_state.file_ops_in_progress += 1;
         if self

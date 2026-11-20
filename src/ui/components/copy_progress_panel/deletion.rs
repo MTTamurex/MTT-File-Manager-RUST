@@ -61,18 +61,22 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             });
         });
         ui.add_space(6.0);
-        let source = if operation.sources.len() == 1 {
+        let source = if let Some(label) = &operation.source_label {
+            label.clone()
+        } else if operation.sources.len() == 1 {
             operation.sources[0].display().to_string()
         } else {
             t!("copy_engine.source_count", count = operation.sources.len()).to_string()
         };
         path_row(ui, &t!("copy_engine.source"), &source, || {
-            operation
-                .sources
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
+            operation.source_label.clone().unwrap_or_else(|| {
+                operation
+                    .sources
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
         });
         let mode = if progress.permanently {
             t!("delete_engine.permanent")
@@ -115,7 +119,27 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             }
         });
         ui.add_space(8.0);
-        if active {
+        let expected_total = progress.total.load(Ordering::Relaxed);
+        let attempted = counts.permanent.saturating_add(failures);
+        if expected_total > 0 {
+            let complete = outcome
+                .as_ref()
+                .is_some_and(|result| result.kind == OutcomeKind::Completed);
+            let fraction = if complete {
+                1.0
+            } else {
+                (attempted as f32 / expected_total as f32).clamp(0.0, 1.0)
+            };
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .fill(theme::accent_color(ui.ctx()))
+                    .text(t!(
+                        "delete_engine.progress_count",
+                        completed = attempted,
+                        total = expected_total
+                    )),
+            );
+        } else if active {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.weak(t!("delete_engine.unknown_total"));
@@ -134,7 +158,14 @@ pub(super) fn card(ui: &mut egui::Ui, operation: &CopyOperation, paths: &[PathBu
             );
         }
         if failures > 0 {
-            ui.label(t!("delete_engine.failed", count = failures));
+            let failure_count = t!("delete_engine.failed", count = failures).to_string();
+            let shown_in_terminal_message = outcome
+                .as_ref()
+                .and_then(|result| result.message.as_ref())
+                .is_some_and(|message| message.lines().any(|line| line == failure_count));
+            if !shown_in_terminal_message {
+                ui.label(failure_count);
+            }
         }
         ui.add_space(6.0);
         if active {

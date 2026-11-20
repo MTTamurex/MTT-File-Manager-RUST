@@ -73,3 +73,59 @@ fn completed_recycle_permanent_and_mixed_operations_show_the_correct_counts_and_
         }
     }
 }
+
+#[test]
+fn terminal_deletion_errors_are_shown_once() {
+    let context = egui::Context::default();
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], true);
+    let progress = job.operation.deletion.as_ref().unwrap();
+    progress.total.store(1, Ordering::Relaxed);
+    progress.failed();
+    let failure_message = t!("delete_engine.failed", count = 1).to_string();
+    job.finish(Outcome {
+        kind: OutcomeKind::Failed,
+        message: Some(failure_message.clone()),
+    });
+
+    let mut labels = Vec::new();
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        super::super::card(ui, &job.operation, &[]);
+    });
+    for shape in output.shapes {
+        texts(&shape.shape, &mut labels);
+    }
+
+    assert_eq!(
+        labels
+            .iter()
+            .filter(|label| label.as_str() == failure_message.as_str())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn terminal_deletion_error_keeps_failure_count_when_message_is_different() {
+    let context = egui::Context::default();
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(vec![PathBuf::from("source/file.txt")], true);
+    let progress = job.operation.deletion.as_ref().unwrap();
+    progress.failed();
+    let failure_count = t!("delete_engine.failed", count = 1).to_string();
+    job.finish(Outcome {
+        kind: OutcomeKind::Failed,
+        message: Some("operation failed".to_string()),
+    });
+
+    let mut labels = Vec::new();
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        super::super::card(ui, &job.operation, &[]);
+    });
+    for shape in output.shapes {
+        texts(&shape.shape, &mut labels);
+    }
+
+    assert!(labels.iter().any(|label| label == &failure_count));
+    assert!(labels.iter().any(|label| label == "operation failed"));
+}

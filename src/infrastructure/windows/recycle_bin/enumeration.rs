@@ -27,6 +27,59 @@ impl Drop for PidlBatch {
     }
 }
 
+pub(super) fn enumerate_recycle_bin_shell_items(
+    cancelled: impl Fn() -> bool,
+) -> Result<Vec<super::RecycleBinShellItem>> {
+    if cancelled() {
+        return Err(Error::from_hresult(E_ABORT));
+    }
+    // The worker owns the STA for the whole lifetime of the returned COM items.
+    unsafe {
+        let recycle_bin_folder = bind_recycle_bin_shell_folder()?;
+        let flags = (SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0) as u32;
+        let mut enum_list_opt: Option<IEnumIDList> = None;
+        let enum_result =
+            recycle_bin_folder.EnumObjects(HWND::default(), flags, &mut enum_list_opt);
+        if enum_result.is_err() {
+            return Err(Error::from_hresult(enum_result));
+        }
+        let Some(enum_list) = enum_list_opt else {
+            return Ok(Vec::new());
+        };
+
+        let mut items = Vec::new();
+        loop {
+            if cancelled() {
+                return Err(Error::from_hresult(E_ABORT));
+            }
+
+            let mut fetched = 0;
+            let mut pidls = PidlBatch([std::ptr::null_mut(); 32]);
+            let next_result = enum_list.Next(&mut pidls.0, Some(&mut fetched));
+            if fetched == 0 {
+                if next_result.is_err() {
+                    return Err(Error::from_hresult(next_result));
+                }
+                break;
+            }
+
+            for pidl in pidls.0.iter().take(fetched as usize).copied() {
+                if cancelled() {
+                    return Err(Error::from_hresult(E_ABORT));
+                }
+                let item: IShellItem = SHCreateShellItem(None, Some(&recycle_bin_folder), pidl)?;
+                items.push(super::RecycleBinShellItem { item });
+            }
+
+            if next_result.is_err() {
+                return Err(Error::from_hresult(next_result));
+            }
+        }
+
+        Ok(items)
+    }
+}
+
 pub(super) fn enumerate_recycle_bin_streaming(
     mut on_batch: impl FnMut(Vec<RecycleBinItem>),
     generation: Arc<AtomicUsize>,
@@ -41,21 +94,7 @@ pub(super) fn enumerate_recycle_bin_streaming(
 
         let _com = ComApartmentGuard::init_sta_best_effort();
 
-        // 1. Get Desktop Folder
-        let desktop: IShellFolder = SHGetDesktopFolder()?;
-
-        // 2. Get Recycle Bin PIDL
-        let recycle_bin_pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
-
-        // 3. Bind to Recycle Bin Folder (IShellFolder)
-        let recycle_bin_folder: IShellFolder = match desktop.BindToObject(recycle_bin_pidl, None) {
-            Ok(folder) => folder,
-            Err(error) => {
-                CoTaskMemFree(Some(recycle_bin_pidl as *mut _));
-                return Err(error);
-            }
-        };
-        CoTaskMemFree(Some(recycle_bin_pidl as *mut _)); // Release PIDL
+        let recycle_bin_folder = bind_recycle_bin_shell_folder()?;
 
         // 4. Enumerate Objects (as PIDLs)
         // Fix SHCONTF flags: cast to u32 because EnumObjects takes u32
@@ -142,6 +181,21 @@ pub(super) fn enumerate_recycle_bin_streaming(
             total_count
         );
         Ok(())
+    }
+}
+
+unsafe fn bind_recycle_bin_shell_folder() -> Result<IShellFolder> {
+    let desktop: IShellFolder = SHGetDesktopFolder()?;
+    let recycle_bin_pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
+    match desktop.BindToObject(recycle_bin_pidl, None) {
+        Ok(folder) => {
+            CoTaskMemFree(Some(recycle_bin_pidl as *mut _));
+            Ok(folder)
+        }
+        Err(error) => {
+            CoTaskMemFree(Some(recycle_bin_pidl as *mut _));
+            Err(error)
+        }
     }
 }
 

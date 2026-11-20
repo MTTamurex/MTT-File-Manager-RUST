@@ -19,6 +19,7 @@ pub struct DeleteProgress {
     pub recycled: AtomicU64,
     pub permanently_removed: AtomicU64,
     pub failures: AtomicU64,
+    pub total: AtomicU64,
     current: Mutex<Option<PathBuf>>,
 }
 
@@ -33,6 +34,7 @@ impl DeleteProgress {
             recycled: AtomicU64::new(0),
             permanently_removed: AtomicU64::new(0),
             failures: AtomicU64::new(0),
+            total: AtomicU64::new(0),
             current: Mutex::new(None),
         }
     }

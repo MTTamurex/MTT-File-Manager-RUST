@@ -22,6 +22,7 @@ pub struct Outcome {
 pub struct CopyOperation {
     pub moving: bool,
     pub deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
+    pub source_label: Option<String>,
     pub sources: Vec<PathBuf>,
     pub destination: PathBuf,
     pub progress: mtt_copy_engine::Progress,
@@ -61,6 +62,7 @@ impl CopyOperation {
 #[derive(Default)]
 pub struct CopyRuntime {
     pub enabled: AtomicBool,
+    pub(crate) empty_recycle_bin_running: AtomicBool,
     pub delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
     next_id: AtomicU64,
     jobs: Mutex<BTreeMap<u64, Arc<CopyOperation>>>,
@@ -68,14 +70,23 @@ pub struct CopyRuntime {
 
 impl CopyRuntime {
     pub fn start(&self, sources: Vec<PathBuf>, destination: PathBuf) -> CopyJob {
-        self.start_operation(sources, destination, None, false)
+        self.start_operation(sources, destination, None, false, None)
     }
 
     pub fn start_move(&self, sources: Vec<PathBuf>, destination: PathBuf) -> CopyJob {
-        self.start_operation(sources, destination, None, true)
+        self.start_operation(sources, destination, None, true, None)
     }
 
     pub fn start_delete(&self, sources: Vec<PathBuf>, permanently: bool) -> CopyJob {
+        self.start_delete_with_label(sources, permanently, None)
+    }
+
+    pub fn start_delete_with_label(
+        &self,
+        sources: Vec<PathBuf>,
+        permanently: bool,
+        source_label: Option<String>,
+    ) -> CopyJob {
         self.start_operation(
             sources,
             PathBuf::new(),
@@ -83,6 +94,7 @@ impl CopyRuntime {
                 permanently,
             )),
             false,
+            source_label,
         )
     }
 
@@ -92,11 +104,13 @@ impl CopyRuntime {
         destination: PathBuf,
         deletion: Option<crate::infrastructure::delete_engine::DeleteProgress>,
         moving: bool,
+        source_label: Option<String>,
     ) -> CopyJob {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let operation = Arc::new(CopyOperation {
             moving,
             deletion,
+            source_label,
             sources,
             destination,
             progress: Default::default(),

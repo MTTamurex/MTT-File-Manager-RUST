@@ -5,6 +5,7 @@ use windows::Win32::System::Com::*;
 use windows::Win32::UI::Shell::*;
 
 use super::ComApartmentGuard;
+use super::RecycleBinShellItem;
 
 /// Restore a file from the Recycle Bin to its original location.
 pub(super) fn restore_from_recycle_bin(physical_path: &Path, original_path: &Path) -> Result<()> {
@@ -84,15 +85,69 @@ pub(super) fn delete_permanently(physical_path: &Path, hwnd: HWND) -> Result<()>
     }
 }
 
-/// Empty the entire Recycle Bin.
-/// Shows native Windows confirmation dialog before emptying.
+/// Queue permanent removal of Recycle Bin namespace items through the Shell.
+/// The caller owns the COM apartment and supplies a sink for themed progress.
+pub(super) fn delete_recycle_bin_items_with_progress(
+    hwnd: HWND,
+    items: &[RecycleBinShellItem],
+    sink: &IFileOperationProgressSink,
+    item_sink: impl Fn(usize, &IShellItem) -> IFileOperationProgressSink,
+    cancelled: impl Fn() -> bool,
+) -> Result<bool> {
+    unsafe {
+        let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
+        file_op.SetOwnerWindow(hwnd)?;
+        file_op.SetOperationFlags(empty_bin_flags())?;
+        // Item-specific sinks do not receive UpdateProgress/FinishOperations.
+        let cookie = file_op.Advise(sink)?;
+        let result = (|| {
+            for (index, item) in items.iter().enumerate() {
+                if cancelled() {
+                    return Err(Error::from_hresult(E_ABORT));
+                }
+                file_op.DeleteItem(&item.item, &item_sink(index, &item.item))?;
+            }
+            if cancelled() {
+                return Err(Error::from_hresult(E_ABORT));
+            }
+            file_op.PerformOperations()?;
+            Ok(file_op.GetAnyOperationsAborted()?.as_bool())
+        })();
+        let unadvise = file_op.Unadvise(cookie);
+        // Always disconnect, including setup failure/cancellation.
+        result.and_then(|aborted| unadvise.map(|()| aborted))
+    }
+}
+
+pub(super) fn empty_bin_flags() -> FILEOPERATION_FLAGS {
+    FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_NO_CONNECTED_ELEMENTS | FOFX_EARLYFAILURE
+}
+
+/// Legacy synchronous API retained for callers that explicitly want Windows Shell UI.
 pub(super) fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     unsafe {
         let _com = ComApartmentGuard::init_sta_best_effort();
-        // SHEmptyRecycleBinW with NULL path empties all drives.
-        // No SHERB_NOCONFIRMATION = Windows shows native confirmation dialog.
-        // Leaving SHERB_NOPROGRESSUI unset also keeps Windows' progress UI visible.
         SHEmptyRecycleBinW(Some(hwnd), PCWSTR::default(), 0)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod empty_bin_tests {
+    use super::*;
+
+    #[test]
+    fn empty_recycle_bin_flags_suppress_native_ui_without_expanding_deletion_scope() {
+        let flags = empty_bin_flags();
+        assert_eq!(
+            flags & (FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI),
+            FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI
+        );
+        assert_ne!(flags & FOF_NO_CONNECTED_ELEMENTS, FILEOPERATION_FLAGS(0));
+        assert_ne!(flags & FOFX_EARLYFAILURE, FILEOPERATION_FLAGS(0));
+        assert_eq!(
+            flags & (FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE | FOF_WANTNUKEWARNING),
+            FILEOPERATION_FLAGS(0)
+        );
     }
 }

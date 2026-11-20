@@ -452,6 +452,7 @@ operations:
   shortcut_suffix_n: "%{name} - Atalho (%{n})"
   error_cancelled: "Operação cancelada ou falhou"
   empty_recycle_bin_failed: "Não foi possível esvaziar a Lixeira: %{error}"
+  empty_recycle_bin_unconfirmed: "Não foi possível confirmar a remoção de todos os itens. A lista da Lixeira será atualizada."
   error_invalid_name: "Nome inválido para renomear"
   error_folder_limit: "Erro ao criar pasta: limite de tentativas excedido"
   error_folder_create: "Erro ao criar pasta: %{error}"
@@ -1620,6 +1621,9 @@ delete_engine:
   indicator: "Operações (%{count}) · %{active} ativas · %{failed} erros"
   restore_tooltip: "Restaurar painel de operações. %{active} em andamento, %{finished} finalizadas, %{failed} erros."
   recycle_confirm: "Enviar %{count} itens selecionados para a Lixeira?"
+  empty_recycle_bin_confirm: "Excluir permanentemente os %{count} itens da Lixeira? Esta ação não pode ser desfeita."
+  confirm_empty_recycle_bin: "Esvaziar Lixeira"
+  progress_count: "%{completed} de %{total} itens"
 move_engine:
   preparing: "Preparando movimentação…"
   moving: "Movendo arquivos"

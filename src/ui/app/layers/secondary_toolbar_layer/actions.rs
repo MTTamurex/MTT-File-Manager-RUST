@@ -71,7 +71,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder = app.can_create_folder_in_current_location();
     let can_delete = has_selection && !in_archive_namespace && !selection_cannot_move;
-    let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
+    let can_empty_recycle_bin = is_recycle_bin_view && app.can_empty_recycle_bin();
     let can_export = crate::app::folder_export_state::available(app);
 
     let icon_color = if ui.visuals().dark_mode {

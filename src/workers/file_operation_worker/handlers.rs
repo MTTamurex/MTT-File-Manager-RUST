@@ -1376,26 +1376,6 @@ pub(super) fn handle_delete_permanently(
     }
 }
 
-pub(super) fn handle_empty_recycle_bin(
-    hwnd: SendHwnd,
-    result_sender: &Sender<FileOperationResult>,
-) {
-    if let Err(error) = recycle_bin::empty_recycle_bin(hwnd.0) {
-        let message = if error.code() == windows::Win32::Foundation::E_ABORT {
-            rust_i18n::t!("operations.error_cancelled").to_string()
-        } else {
-            rust_i18n::t!(
-                "operations.empty_recycle_bin_failed",
-                error = error.to_string()
-            )
-            .to_string()
-        };
-        log::warn!("[FILE-OP] Empty Recycle Bin failed: {error:?}");
-        let _ = result_sender.send(FileOperationResult::OperationFailed { message });
-    }
-    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
-}
-
 /// Shows grouped Windows Properties where possible, falling back to individual
 /// dialogs when the Shell cannot handle the selection together.
 pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendHwnd) {

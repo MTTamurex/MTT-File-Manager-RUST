@@ -10,10 +10,16 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Req
     let message = match request.kind {
         Kind::Permanent => t!(
             "operations.search_delete_permanent_confirm",
-            count = request.paths.len()
+            count = request.total
         ),
         Kind::Recycle => t!("delete_engine.recycle_confirm", count = request.paths.len()),
         Kind::RecycleUnavailable => t!("delete_engine.fallback_confirm"),
+        Kind::EmptyRecycleBin => {
+            t!(
+                "delete_engine.empty_recycle_bin_confirm",
+                count = request.total
+            )
+        }
     };
     ui.add_space(4.0);
     let color = if permanent {
@@ -27,26 +33,28 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Req
     // fifth row is not fractionally clipped at either interface scale.
     let row_height = ui.text_style_height(&egui::TextStyle::Body).ceil();
     let list_height = 5.0 * row_height + 4.0 * ui.spacing().item_spacing.y;
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        egui::ScrollArea::vertical()
-            .id_salt("delete_confirmation_paths")
-            .max_height(list_height)
-            .min_scrolled_height(row_height)
-            .auto_shrink([false, true])
-            .show_rows(ui, row_height, request.paths.len(), |ui, range| {
-                for index in range {
-                    let path = &request.paths[index];
-                    let name = path
-                        .file_name()
-                        .unwrap_or(path.as_os_str())
-                        .to_string_lossy();
-                    ui.add(egui::Label::new(name).truncate().halign(egui::Align::Min))
-                        .on_hover_text(super::super::display_paths::text(
-                            &path.display().to_string(),
-                        ));
-                }
-            });
-    });
+    if !request.paths.is_empty() {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("delete_confirmation_paths")
+                .max_height(list_height)
+                .min_scrolled_height(row_height)
+                .auto_shrink([false, true])
+                .show_rows(ui, row_height, request.paths.len(), |ui, range| {
+                    for index in range {
+                        let path = &request.paths[index];
+                        let name = path
+                            .file_name()
+                            .unwrap_or(path.as_os_str())
+                            .to_string_lossy();
+                        ui.add(egui::Label::new(name).truncate().halign(egui::Align::Min))
+                            .on_hover_text(super::super::display_paths::text(
+                                &path.display().to_string(),
+                            ));
+                    }
+                });
+        });
+    }
     ui.add_space(12.0);
     let mut apply_to_remaining = false;
     let mut scope_had_focus = false;
@@ -75,7 +83,11 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Req
             ui.data_mut(|data| data.insert_temp(focus_id, request.id));
         }
         let label = if permanent {
-            t!("delete_engine.confirm_permanent")
+            if request.kind == Kind::EmptyRecycleBin {
+                t!("delete_engine.confirm_empty_recycle_bin")
+            } else {
+                t!("delete_engine.confirm_permanent")
+            }
         } else {
             t!("delete_engine.confirm_recycle")
         };

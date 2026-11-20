@@ -120,6 +120,10 @@ pub fn enumerate_recycle_bin_streaming(
     }
 }
 
+pub(crate) struct RecycleBinShellItem {
+    pub item: IShellItem,
+}
+
 pub(crate) fn enumerate_recycle_bin_streaming_with(
     on_batch: impl FnMut(Vec<RecycleBinItem>),
     generation: Arc<AtomicUsize>,
@@ -141,6 +145,22 @@ pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
     Ok(items)
 }
 
+pub(crate) fn enumerate_recycle_bin_shell_items(
+    cancelled: impl Fn() -> bool,
+) -> Result<Vec<RecycleBinShellItem>> {
+    enumeration::enumerate_recycle_bin_shell_items(cancelled)
+}
+
+pub(crate) fn delete_recycle_bin_items_with_progress(
+    hwnd: HWND,
+    items: &[RecycleBinShellItem],
+    sink: &IFileOperationProgressSink,
+    item_sink: impl Fn(usize, &IShellItem) -> IFileOperationProgressSink,
+    cancelled: impl Fn() -> bool,
+) -> Result<bool> {
+    operations::delete_recycle_bin_items_with_progress(hwnd, items, sink, item_sink, cancelled)
+}
+
 /// Restore a file from the Recycle Bin to its original location.
 pub fn restore_from_recycle_bin(
     physical_path: &std::path::Path,
@@ -155,8 +175,7 @@ pub fn delete_permanently(physical_path: &std::path::Path, hwnd: HWND) -> Result
     operations::delete_permanently(physical_path, hwnd)
 }
 
-/// Empty the entire Recycle Bin.
-/// Shows native Windows confirmation dialog before emptying.
+/// Legacy synchronous API for callers that explicitly want Windows Shell UI.
 pub fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     operations::empty_recycle_bin(hwnd)
 }

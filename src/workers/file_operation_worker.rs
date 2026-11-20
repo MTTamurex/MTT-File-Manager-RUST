@@ -953,8 +953,8 @@ fn run_file_operation_loop(
                     physical_paths,
                     hwnd,
                 } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
-                FileOperationRequest::EmptyRecycleBin { hwnd } => {
-                    handlers::handle_empty_recycle_bin(hwnd, &result_sender);
+                FileOperationRequest::EmptyRecycleBin { .. } => {
+                    unreachable!("EmptyRecycleBin requests are handled by native_delete")
                 }
                 FileOperationRequest::ShowProperties { paths, hwnd } => {
                     handlers::handle_show_properties(paths, hwnd);

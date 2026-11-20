@@ -452,6 +452,7 @@ operations:
   shortcut_suffix_n: "%{name} - Shortcut (%{n})"
   error_cancelled: "Operation cancelled or failed"
   empty_recycle_bin_failed: "Could not empty the Recycle Bin: %{error}"
+  empty_recycle_bin_unconfirmed: "Could not confirm removal of all items. The Recycle Bin list will be refreshed."
   error_invalid_name: "Invalid name for renaming"
   error_folder_limit: "Error creating folder: attempt limit exceeded"
   error_folder_create: "Error creating folder: %{error}"
@@ -1620,6 +1621,9 @@ delete_engine:
   indicator: "Operations (%{count}) · %{active} active · %{failed} errors"
   restore_tooltip: "Restore operations panel. %{active} active, %{finished} finished, %{failed} errors."
   recycle_confirm: "Send %{count} selected items to the Recycle Bin?"
+  empty_recycle_bin_confirm: "Permanently remove all %{count} items from the Recycle Bin? This cannot be undone."
+  confirm_empty_recycle_bin: "Empty Recycle Bin"
+  progress_count: "%{completed} of %{total} items"
 move_engine:
   preparing: "Preparing move…"
   moving: "Moving files"

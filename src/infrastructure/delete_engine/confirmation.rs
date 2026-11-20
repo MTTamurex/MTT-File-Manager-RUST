@@ -10,6 +10,7 @@ pub enum Kind {
     Recycle,
     Permanent,
     RecycleUnavailable,
+    EmptyRecycleBin,
 }
 
 #[derive(Clone)]
@@ -17,6 +18,7 @@ pub struct Request {
     pub id: u64,
     pub kind: Kind,
     pub paths: Vec<PathBuf>,
+    pub total: usize,
 }
 
 #[derive(Default)]
@@ -76,7 +78,13 @@ impl Confirmation {
         true
     }
 
-    fn request(&self, kind: Kind, paths: &[PathBuf], control: &mtt_copy_engine::Progress) -> bool {
+    fn request(
+        &self,
+        kind: Kind,
+        paths: &[PathBuf],
+        total: usize,
+        control: &mtt_copy_engine::Progress,
+    ) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if control.is_cancelled() || state.waiting {
             return false;
@@ -92,6 +100,7 @@ impl Confirmation {
             id,
             kind,
             paths: paths.to_vec(),
+            total,
         });
         loop {
             if control.is_cancelled() {
@@ -122,7 +131,15 @@ pub(crate) fn ask(operation: &CopyOperation, kind: Kind, paths: &[PathBuf]) -> b
     operation.deletion.as_ref().is_some_and(|deletion| {
         deletion
             .confirmation
-            .request(kind, paths, &operation.progress)
+            .request(kind, paths, paths.len(), &operation.progress)
+    })
+}
+
+pub(crate) fn ask_empty_recycle_bin(operation: &CopyOperation, total: usize) -> bool {
+    operation.deletion.as_ref().is_some_and(|deletion| {
+        deletion
+            .confirmation
+            .request(Kind::EmptyRecycleBin, &[], total, &operation.progress)
     })
 }
 

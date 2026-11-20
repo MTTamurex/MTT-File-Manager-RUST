@@ -452,6 +452,7 @@ operations:
   shortcut_suffix_n: "%{name} - ярлык (%{n})"
   error_cancelled: "Операция отменена или завершилась с ошибкой"
   empty_recycle_bin_failed: "Не удалось очистить корзину: %{error}"
+  empty_recycle_bin_unconfirmed: "Не удалось подтвердить удаление всех элементов. Список корзины будет обновлён."
   error_invalid_name: "Недопустимое имя для переименования"
   error_folder_limit: "Ошибка при создании папки: превышено число попыток"
   error_folder_create: "Ошибка при создании папки: %{error}"
@@ -1611,6 +1612,9 @@ delete_engine:
   indicator: "Операции (%{count}) · %{active} активных · %{failed} ошибок"
   restore_tooltip: "Открыть панель операций. Активных: %{active}, завершённых: %{finished}, ошибок: %{failed}."
   recycle_confirm: "Отправить %{count} выбранных объектов в Корзину?"
+  empty_recycle_bin_confirm: "Безвозвратно удалить все %{count} объектов из Корзины? Это действие нельзя отменить."
+  confirm_empty_recycle_bin: "Очистить корзину"
+  progress_count: "%{completed} из %{total} объектов"
 move_engine:
   preparing: "Подготовка перемещения…"
   moving: "Перемещение файлов"

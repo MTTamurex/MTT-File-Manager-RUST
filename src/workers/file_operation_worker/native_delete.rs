@@ -5,6 +5,7 @@ use crate::infrastructure::delete_engine::{confirmation, permanent};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{atomic::Ordering, mpsc::Sender, Arc};
+mod empty_recycle_bin;
 mod recycling;
 mod refresh;
 
@@ -13,6 +14,9 @@ pub(super) fn try_handle(
     sender: &Sender<FileOperationResult>,
     runtime: &Arc<CopyRuntime>,
 ) -> bool {
+    if empty_recycle_bin::try_handle(request, sender, runtime) {
+        return true;
+    }
     handle_with_confirmation(request, sender, runtime, confirmation::ask)
 }
 

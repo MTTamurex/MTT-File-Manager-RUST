@@ -452,6 +452,7 @@ operations:
   shortcut_suffix_n: "%{name} ‑ 快捷方式 (%{n})"
   error_cancelled: "操作已取消或失败"
   empty_recycle_bin_failed: "无法清空回收站：%{error}"
+  empty_recycle_bin_unconfirmed: "无法确认所有项目均已删除。回收站列表将刷新。"
   error_invalid_name: "重命名使用了无效名称"
   error_folder_limit: "创建文件夹出错：超出尝试次数限制"
   error_folder_create: "创建文件夹出错：%{error}"
@@ -1611,6 +1612,9 @@ delete_engine:
   indicator: "操作 (%{count}) · %{active} 个进行中 · %{failed} 个错误"
   restore_tooltip: "恢复操作面板。%{active} 个进行中，%{finished} 个已结束，%{failed} 个错误。"
   recycle_confirm: "将选中的 %{count} 个项目移至回收站？"
+  empty_recycle_bin_confirm: "永久删除回收站中的全部 %{count} 个项目？此操作无法撤销。"
+  confirm_empty_recycle_bin: "清空回收站"
+  progress_count: "%{completed} / %{total} 个项目"
 move_engine:
   preparing: "正在准备移动…"
   moving: "正在移动文件"

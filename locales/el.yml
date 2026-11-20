@@ -452,6 +452,7 @@ operations:
   shortcut_suffix_n: "%{name} - Συντόμευση (%{n})"
   error_cancelled: "Η λειτουργία ακυρώθηκε ή απέτυχε"
   empty_recycle_bin_failed: "Δεν ήταν δυνατή η εκκένωση του Κάδου Απορριμμάτων: %{error}"
+  empty_recycle_bin_unconfirmed: "Δεν ήταν δυνατή η επιβεβαίωση της αφαίρεσης όλων των στοιχείων. Η λίστα του Κάδου Απορριμμάτων θα ανανεωθεί."
   error_invalid_name: "Μη έγκυρο όνομα για μετονομασία"
   error_folder_limit: "Σφάλμα δημιουργίας φακέλου: ξεπέρασε το όριο προσπαθειών"
   error_folder_create: "Σφάλμα δημιουργίας φακέλου: %{error}"
@@ -1610,6 +1611,9 @@ delete_engine:
   indicator: "Εργασίες (%{count}) · %{active} ενεργές · %{failed} σφάλματα"
   restore_tooltip: "Επαναφορά πίνακα εργασιών. %{active} ενεργές, %{finished} ολοκληρωμένες, %{failed} σφάλματα."
   recycle_confirm: "Μεταφορά %{count} επιλεγμένων στοιχείων στον Κάδο;"
+  empty_recycle_bin_confirm: "Να διαγραφούν οριστικά και τα %{count} στοιχεία από τον Κάδο Απορριμμάτων; Αυτή η ενέργεια δεν αναιρείται."
+  confirm_empty_recycle_bin: "Άδειασμα Κάδου"
+  progress_count: "%{completed} από %{total} στοιχεία"
 move_engine:
   preparing: "Προετοιμασία μετακίνησης…"
   moving: "Μετακίνηση αρχείων"

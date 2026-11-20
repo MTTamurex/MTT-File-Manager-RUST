@@ -498,7 +498,8 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-54, t!("context_menu.empty_recycle_bin"))
                     .with_command("empty_recycle_bin")
-                    .with_svg_icon("broom"),
+                    .with_svg_icon("broom")
+                    .enabled(self.can_empty_recycle_bin()),
             );
             items.push(ContextMenuItem::separator());
             items.extend(background::view_items(self));
