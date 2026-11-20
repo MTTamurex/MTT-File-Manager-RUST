@@ -24,7 +24,50 @@ pub(super) fn run(
         operation,
         observer,
         confirm,
-        |paths, operation, observer| recycle::delete(paths, hwnd, operation, observer),
+        |paths, operation, observer| {
+            let progress = operation.deletion.as_ref().unwrap();
+            let mut shell_paths = Vec::new();
+            for (index, path) in paths.iter().enumerate() {
+                if operation.progress.is_cancelled() {
+                    let pending = shell_paths
+                        .into_iter()
+                        .chain(paths[index..].iter().cloned())
+                        .collect();
+                    return Ok(recycle::BatchOutcome {
+                        pending,
+                        cancelled: true,
+                        ..Default::default()
+                    });
+                }
+                progress.set_current(Some(path));
+                if crate::infrastructure::windows::recycle_bin::try_recycle_cancellable(
+                    path,
+                    true,
+                    || operation.progress.is_cancelled(),
+                ) {
+                    progress.recycled();
+                    observer(path);
+                } else {
+                    if operation.progress.is_cancelled() {
+                        let pending = shell_paths
+                            .into_iter()
+                            .chain(paths[index..].iter().cloned())
+                            .collect();
+                        return Ok(recycle::BatchOutcome {
+                            pending,
+                            cancelled: true,
+                            ..Default::default()
+                        });
+                    }
+                    shell_paths.push(path.clone());
+                }
+            }
+            if shell_paths.is_empty() {
+                Ok(recycle::BatchOutcome::default())
+            } else {
+                recycle::delete(&shell_paths, hwnd, operation, observer)
+            }
+        },
     )
 }
 

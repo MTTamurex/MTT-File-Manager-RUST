@@ -12,6 +12,7 @@ use windows::Win32::UI::Shell::*;
 
 mod enumeration;
 mod operations;
+mod recycle_commit;
 
 // Property keys for Recycle Bin items.
 pub const PKEY_SIZE: PROPERTYKEY = PROPERTYKEY {
@@ -129,3 +130,5 @@ pub fn delete_permanently(physical_path: &std::path::Path, hwnd: HWND) -> Result
 pub fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     operations::empty_recycle_bin(hwnd)
 }
+
+pub(crate) use recycle_commit::{try_recycle, try_recycle_cancellable};

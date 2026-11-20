@@ -45,7 +45,30 @@ pub(super) fn handle_delete(
                 return;
             }
 
-            if !shell_operations::delete_items_with_shell(&valid_paths, hwnd.0) {
+            let mut recycled_paths = Vec::new();
+            let mut shell_paths = Vec::new();
+            for path in &valid_paths {
+                if crate::infrastructure::windows::recycle_bin::try_recycle(path, false) {
+                    recycled_paths.push(path.clone());
+                } else {
+                    shell_paths.push(path.clone());
+                }
+            }
+
+            let existing_shell_paths: Vec<_> = shell_paths
+                .iter()
+                .filter(|path| std::fs::symlink_metadata(path).is_ok())
+                .cloned()
+                .collect();
+            let shell_succeeded = shell_paths.is_empty()
+                || shell_operations::delete_items_with_shell(&shell_paths, hwnd.0);
+            // SHFileOperation can remove some items before cancellation/failure.
+            // Only report paths that existed before and are now definitely absent.
+            recycled_paths.extend(existing_shell_paths.into_iter().filter(|path| {
+                matches!(std::fs::symlink_metadata(path), Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound)
+            }));
+            if !shell_succeeded && recycled_paths.is_empty() {
                 log::warn!(
                     "[FileOps] Delete cancelled or failed for {} paths",
                     valid_paths.len()
@@ -65,10 +88,17 @@ pub(super) fn handle_delete(
             if !parents.is_empty() {
                 let _ = result_sender.send(FileOperationResult::DeleteCompleted {
                     parent_folders: parents.into_iter().collect(),
-                    deleted_paths: valid_paths.clone(),
+                    deleted_paths: recycled_paths.clone(),
                 });
             }
-            let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
+            if shell_succeeded || !recycled_paths.is_empty() {
+                let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
+            }
+            if !shell_succeeded {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
+            }
         }
         Err(err) => {
             log::warn!("[SECURITY] Delete blocked: {}", err);

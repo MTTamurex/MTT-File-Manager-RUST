@@ -106,8 +106,28 @@ pub(crate) fn delete_search_selection(
         .filter(|path| std::fs::symlink_metadata(path).is_ok())
         .cloned()
         .collect();
+    let mut shell_paths = Vec::new();
+    if permanently {
+        shell_paths.extend_from_slice(paths);
+    } else {
+        for path in paths {
+            if !crate::infrastructure::windows::recycle_bin::try_recycle(path, true) {
+                shell_paths.push(path.clone());
+            }
+        }
+    }
+    if shell_paths.is_empty() {
+        return Ok(Some(DeleteOutcome {
+            deleted_paths: existing
+                .into_iter()
+                .filter(|path| is_definitely_absent(path))
+                .collect(),
+            completed: true,
+        }));
+    }
+
     let mut from = Vec::new();
-    for path in paths {
+    for path in &shell_paths {
         from.extend(path.as_os_str().encode_wide());
         from.push(0);
     }
