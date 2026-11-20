@@ -1,4 +1,6 @@
-use std::os::windows::ffi::OsStrExt;
+mod batch;
+pub(super) use batch::EligibilityBatch;
+
 use std::path::{Path, PathBuf};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
@@ -9,17 +11,15 @@ use windows::Win32::Security::{
     GetTokenInformation, IsValidSid, TokenUser, TOKEN_QUERY, TOKEN_USER,
 };
 use windows::Win32::Storage::FileSystem::{
-    GetDriveTypeW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW, FILE_ATTRIBUTE_HIDDEN,
-    FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_SYSTEM,
 };
 use windows::Win32::System::Registry::{
     RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_DWORD, REG_VALUE_TYPE,
     RRF_RT_REG_DWORD,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows::Win32::UI::Shell::{
-    SHGetSetSettings, SHQueryRecycleBinW, SHELLSTATEA, SHQUERYRBINFO, SSF_NOCONFIRMRECYCLE,
-};
+use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_NOCONFIRMRECYCLE};
 
 const EXPLORER_BITBUCKET: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket";
 const VOLUME_SETTINGS: &str =
@@ -28,99 +28,8 @@ const EXPLORER_POLICIES: &str = r"Software\Microsoft\Windows\CurrentVersion\Poli
 
 pub(super) struct RecycleContext {
     pub(super) recycle_directory: PathBuf,
+    pub(super) volume_key: PathBuf,
     pub(super) item_size: u64,
-}
-
-pub(super) fn prepare(path: &Path, confirmation_already_shown: bool) -> Option<RecycleContext> {
-    if !confirmation_already_shown && shell_confirmation_is_enabled().unwrap_or(true) {
-        return None;
-    }
-    if !path.is_absolute()
-        || path.file_name().is_none()
-        || is_recycle_bin_path(path)
-        || crate::infrastructure::security::validate_no_reparse_points(path).is_err()
-    {
-        return None;
-    }
-    if registry_dword(HKEY_LOCAL_MACHINE, EXPLORER_BITBUCKET, "NukeOnDelete")
-        .ok()?
-        .is_some_and(|value| value != 0)
-    {
-        return None;
-    }
-
-    let drive_root = drive_root(path)?;
-    let root_wide: Vec<u16> = drive_root
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    if unsafe { GetDriveTypeW(PCWSTR(root_wide.as_ptr())) } != 3 {
-        return None;
-    }
-
-    let mut file_system = [0u16; 32];
-    if unsafe {
-        GetVolumeInformationW(
-            PCWSTR(root_wide.as_ptr()),
-            None,
-            None,
-            None,
-            None,
-            Some(&mut file_system),
-        )
-    }
-    .is_err()
-        || !String::from_utf16_lossy(&file_system)
-            .trim_end_matches('\0')
-            .eq_ignore_ascii_case("NTFS")
-    {
-        return None;
-    }
-
-    let volume_guid = volume_guid(&drive_root)?;
-    let max_bytes = configured_max_bytes(&volume_guid)?;
-    let recycle_root = drive_root.join("$Recycle.Bin");
-    let recycle_root_metadata = std::fs::symlink_metadata(&recycle_root).ok()?;
-    if !recycle_root_metadata.is_dir() || is_reparse_point(&recycle_root_metadata) {
-        return None;
-    }
-
-    let recycle_directory = recycle_root.join(current_user_sid()?);
-    let user_bin_metadata = std::fs::symlink_metadata(&recycle_directory).ok()?;
-    if !user_bin_metadata.is_dir() || is_reparse_point(&user_bin_metadata) {
-        return None;
-    }
-
-    let source_metadata = std::fs::symlink_metadata(path).ok()?;
-    if requires_shell_attributes(&source_metadata)
-        || (!source_metadata.is_file() && !source_metadata.is_dir())
-    {
-        return None;
-    }
-    let item_size = if source_metadata.is_dir() {
-        crate::infrastructure::global_search::folder_size(path)
-            .ok()
-            .map(|result| result.0)?
-    } else {
-        source_metadata.len()
-    };
-
-    let mut bin_info = SHQUERYRBINFO {
-        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
-        ..Default::default()
-    };
-    if unsafe { SHQueryRecycleBinW(PCWSTR(root_wide.as_ptr()), &mut bin_info) }.is_err()
-        || bin_info.i64Size < 0
-        || (bin_info.i64Size as u64).checked_add(item_size)? > max_bytes
-    {
-        return None;
-    }
-
-    Some(RecycleContext {
-        recycle_directory,
-        item_size,
-    })
 }
 
 fn drive_root(path: &Path) -> Option<PathBuf> {
@@ -134,7 +43,10 @@ fn drive_root(path: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    Some(PathBuf::from(format!("{}:\\", bytes[0] as char)))
+    Some(PathBuf::from(format!(
+        "{}:\\",
+        (bytes[0] as char).to_ascii_uppercase()
+    )))
 }
 
 fn is_recycle_bin_path(path: &Path) -> bool {
@@ -163,26 +75,6 @@ fn requires_shell_attributes(metadata: &std::fs::Metadata) -> bool {
             | FILE_ATTRIBUTE_HIDDEN)
             .0
         != 0
-}
-
-fn volume_guid(drive_root: &Path) -> Option<String> {
-    let root: Vec<u16> = drive_root
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    let mut name = [0u16; 50];
-    if unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(root.as_ptr()), &mut name) }.is_err() {
-        return None;
-    }
-    let end = name
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(name.len());
-    let value = String::from_utf16(&name[..end]).ok()?;
-    let start = value.find('{')?;
-    let finish = value[start..].find('}')? + start + 1;
-    Some(value[start..finish].to_string())
 }
 
 fn configured_max_bytes(volume_guid: &str) -> Option<u64> {

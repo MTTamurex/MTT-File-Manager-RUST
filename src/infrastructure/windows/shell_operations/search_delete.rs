@@ -1,4 +1,5 @@
 //! A confirmed batch honors each origin's Shell recycling policy, without per-item confirmations.
+use crate::infrastructure::windows::recycle_bin::RecycleCommitBatch;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows::core::{Error, Result, PCWSTR};
@@ -107,11 +108,12 @@ pub(crate) fn delete_search_selection(
         .cloned()
         .collect();
     let mut shell_paths = Vec::new();
+    let mut recycle_batch = RecycleCommitBatch::new(true);
     if permanently {
         shell_paths.extend_from_slice(paths);
     } else {
         for path in paths {
-            if !crate::infrastructure::windows::recycle_bin::try_recycle(path, true) {
+            if !recycle_batch.try_recycle(path, || false) {
                 shell_paths.push(path.clone());
             }
         }

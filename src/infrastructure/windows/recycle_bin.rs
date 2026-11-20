@@ -131,4 +131,4 @@ pub fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     operations::empty_recycle_bin(hwnd)
 }
 
-pub(crate) use recycle_commit::{try_recycle, try_recycle_cancellable};
+pub(crate) use recycle_commit::RecycleCommitBatch;

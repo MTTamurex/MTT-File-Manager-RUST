@@ -15,33 +15,45 @@ use windows::Win32::Storage::FileSystem::{
     MoveFileW, SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
 };
 
-/// Move one item into the current user's Recycle Bin without walking its contents.
-///
-/// `confirmation_already_shown` is true only when MTT has already asked for
-/// confirmation. The standard Delete path instead falls back to Shell whenever
-/// Windows is configured to show a delete confirmation.
-pub(crate) fn try_recycle(path: &Path, confirmation_already_shown: bool) -> bool {
-    try_recycle_cancellable(path, confirmation_already_shown, || false)
+pub(crate) struct RecycleCommitBatch {
+    eligibility: eligibility::EligibilityBatch,
 }
 
-pub(crate) fn try_recycle_cancellable(
-    path: &Path,
-    confirmation_already_shown: bool,
-    is_cancelled: impl Fn() -> bool,
-) -> bool {
-    if is_cancelled() {
-        return false;
+impl RecycleCommitBatch {
+    /// `true` only after MTT has obtained confirmation for this selection.
+    pub(crate) fn new(confirmation_already_shown: bool) -> Self {
+        Self {
+            eligibility: eligibility::EligibilityBatch::new(confirmation_already_shown),
+        }
     }
-    let Some(context) = eligibility::prepare(path, confirmation_already_shown) else {
-        return false;
-    };
-    if is_cancelled() {
-        return false;
+
+    /// Shell may change both occupancy and settings, including on partial failure.
+    pub(crate) fn invalidate_after_shell(&mut self) {
+        self.eligibility.invalidate_after_shell();
     }
-    let Some(index_data) = metadata_record::version_two_index(path, context.item_size) else {
-        return false;
-    };
-    commit_item_with_cancel(path, &context.recycle_directory, &index_data, &is_cancelled).is_some()
+
+    pub(crate) fn try_recycle(&mut self, path: &Path, is_cancelled: impl Fn() -> bool) -> bool {
+        if is_cancelled() {
+            return false;
+        }
+        let Some(context) = self.eligibility.prepare(path) else {
+            return false;
+        };
+        if is_cancelled() {
+            return false;
+        }
+        let Some(index_data) = metadata_record::version_two_index(path, context.item_size) else {
+            return false;
+        };
+        if commit_item_with_cancel(path, &context.recycle_directory, &index_data, &is_cancelled)
+            .is_some()
+        {
+            self.eligibility.record_recycled(&context);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 fn commit_item_with_cancel(

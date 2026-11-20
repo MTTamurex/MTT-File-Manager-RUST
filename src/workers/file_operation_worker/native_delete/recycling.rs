@@ -19,6 +19,8 @@ pub(super) fn run(
     observer: RemovalObserver,
     confirm: &impl Fn(&CopyOperation, Kind, &[PathBuf]) -> bool,
 ) -> bool {
+    let mut recycle_batch =
+        crate::infrastructure::windows::recycle_bin::RecycleCommitBatch::new(true);
     run_with_recycler(
         paths,
         operation,
@@ -40,11 +42,7 @@ pub(super) fn run(
                     });
                 }
                 progress.set_current(Some(path));
-                if crate::infrastructure::windows::recycle_bin::try_recycle_cancellable(
-                    path,
-                    true,
-                    || operation.progress.is_cancelled(),
-                ) {
+                if recycle_batch.try_recycle(path, || operation.progress.is_cancelled()) {
                     progress.recycled();
                     observer(path);
                 } else {
@@ -65,6 +63,8 @@ pub(super) fn run(
             if shell_paths.is_empty() {
                 Ok(recycle::BatchOutcome::default())
             } else {
+                // A partial Shell operation can also change bin occupancy.
+                recycle_batch.invalidate_after_shell();
                 recycle::delete(&shell_paths, hwnd, operation, observer)
             }
         },

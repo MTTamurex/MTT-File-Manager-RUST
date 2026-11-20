@@ -47,8 +47,9 @@ pub(super) fn handle_delete(
 
             let mut recycled_paths = Vec::new();
             let mut shell_paths = Vec::new();
+            let mut recycle_batch = recycle_bin::RecycleCommitBatch::new(false);
             for path in &valid_paths {
-                if crate::infrastructure::windows::recycle_bin::try_recycle(path, false) {
+                if recycle_batch.try_recycle(path, || false) {
                     recycled_paths.push(path.clone());
                 } else {
                     shell_paths.push(path.clone());
