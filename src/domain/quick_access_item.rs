@@ -90,12 +90,14 @@ mod tests {
                 name: "Group".to_owned(),
                 position: 1,
                 paths: Vec::new(),
+                saved_tabs: None,
             },
             FolderGroup {
                 id: 9,
                 name: "Another group".to_owned(),
                 position: 3,
                 paths: Vec::new(),
+                saved_tabs: None,
             },
         ];
 

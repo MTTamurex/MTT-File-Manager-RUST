@@ -12,6 +12,7 @@ pub(crate) mod disclosure;
 pub(crate) mod disk_analysis;
 pub(crate) mod drive_health_badge;
 pub(crate) mod folder_appearance;
+pub(crate) mod folder_group_tooltip;
 pub mod fonts;
 pub mod global_search_overlay;
 

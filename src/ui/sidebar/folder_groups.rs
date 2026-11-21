@@ -17,8 +17,9 @@ pub(super) fn render(
     );
     rect.min.x = ui.clip_rect().min.x;
     rect.max.x = ui.clip_rect().max.x;
-    let response =
-        response.on_hover_text(t!("sidebar.group_open_count", count = group.paths.len()));
+    let response = response.on_hover_ui(|ui| {
+        crate::ui::folder_group_tooltip::render(ui, group, ctx.tag_definitions);
+    });
     if response.drag_started() {
         super::quick_access_items::store_drag_source(ui, rect, index, drag_id);
     }

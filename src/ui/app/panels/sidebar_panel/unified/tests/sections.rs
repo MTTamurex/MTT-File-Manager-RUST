@@ -220,6 +220,7 @@ fn saved_group_can_be_reordered_before_a_pinned_folder_in_vertical_quick_access(
         name: "Saved group".to_owned(),
         position: 1,
         paths: Vec::new(),
+        saved_tabs: None,
     };
     with_sidebar_and_groups(1, &[group], 0, false, |ctx, sidebar| {
         let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(240.0, 500.0));

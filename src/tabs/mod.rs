@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub(crate) mod actions;
 mod creation;
+mod group;
 mod panel_tabs;
 pub(crate) mod quick_access;
 mod reopen;
@@ -31,7 +32,7 @@ mod transfer;
 pub use session::TabManagerSession;
 pub(crate) use transfer::TabTransfer;
 
-fn tab_title_for_path(path: &str) -> String {
+pub(crate) fn tab_title_for_path(path: &str) -> String {
     Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

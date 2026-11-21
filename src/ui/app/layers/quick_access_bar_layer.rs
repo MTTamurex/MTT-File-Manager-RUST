@@ -37,10 +37,10 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
         .iter()
         .map(|folder| (folder.path.clone(), folder.display_name.clone()))
         .collect();
-    let group_items: Vec<(i64, String, usize)> = app
+    let group_items: Vec<(i64, String)> = app
         .folder_groups
         .iter()
-        .map(|group| (group.id, group.name.clone(), group.paths.len()))
+        .map(|group| (group.id, group.name.clone()))
         .collect();
     let quick_access_items = ordered_quick_access_items(&app.pinned_folders, &app.folder_groups);
     let mut deferred = actions::DeferredActions::default();
@@ -304,8 +304,8 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                     }
                                 }
                                 QuickAccessItem::FolderGroup(group_id) => {
-                                    let Some((_, name, path_count)) =
-                                        group_items.iter().find(|(id, _, _)| id == group_id)
+                                    let Some((_, name)) =
+                                        group_items.iter().find(|(id, _)| id == group_id)
                                     else {
                                         continue;
                                     };
@@ -314,9 +314,19 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                         egui::vec2(CHIP_WIDTH, 26.0),
                                         Sense::click_and_drag(),
                                     );
-                                    let response = response.on_hover_text(
-                                        t!("sidebar.group_open_count", count = path_count),
-                                    );
+                                    let response = response.on_hover_ui(|ui| {
+                                        if let Some(group) = app
+                                            .folder_groups
+                                            .iter()
+                                            .find(|group| group.id == *group_id)
+                                        {
+                                            crate::ui::folder_group_tooltip::render(
+                                                ui,
+                                                group,
+                                                &app.tag_definitions,
+                                            );
+                                        }
+                                    });
                                     if response.drag_started() {
                                         ui.ctx().data_mut(|data| {
                                             data.insert_temp(drag_id, index)

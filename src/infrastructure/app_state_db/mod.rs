@@ -93,6 +93,8 @@ fn process_owner_is_active(owner_id: &str) -> bool {
 pub enum AppStateWriteError {
     #[error("app-state database writer lock is poisoned")]
     WriterLockPoisoned,
+    #[error("saved tab group workspace state is invalid or too large")]
+    InvalidFolderGroupState,
     #[error(transparent)]
     Database(#[from] rusqlite::Error),
 }
@@ -341,19 +343,7 @@ impl AppStateDb {
         )
         .unwrap_or(0);
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS folder_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                position INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS folder_group_paths (
-                group_id INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (group_id, position)
-            );",
-        )?;
+        Self::migrate_folder_group_workspace_state(conn)?;
 
         Self::migrate_quick_access_order(conn)?;
 
@@ -579,6 +569,33 @@ impl AppStateDb {
 
         file_tags::seed_default_file_tags(conn);
         auto_tag_rules::create_auto_tag_rules_table(conn);
+        Ok(())
+    }
+
+    fn migrate_folder_group_workspace_state(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS folder_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                position INTEGER NOT NULL DEFAULT 0,
+                tabs_json TEXT
+            );
+            CREATE TABLE IF NOT EXISTS folder_group_paths (
+                group_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (group_id, position)
+            );",
+        )?;
+
+        // Older groups only stored outer tab paths, so leave their new state
+        // null and let the loader continue opening them as mono-panel tabs.
+        if conn
+            .prepare("SELECT tabs_json FROM folder_groups LIMIT 0")
+            .is_err()
+        {
+            conn.execute("ALTER TABLE folder_groups ADD COLUMN tabs_json TEXT", [])?;
+        }
         Ok(())
     }
 
@@ -818,5 +835,46 @@ mod fallback_tests {
             )
             .unwrap();
         assert_eq!(interleaved_group_position, 0);
+    }
+
+    #[test]
+    fn folder_group_workspace_migration_preserves_legacy_paths() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE folder_groups (
+                 id INTEGER PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 position INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE folder_group_paths (
+                 group_id INTEGER NOT NULL,
+                 path TEXT NOT NULL,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (group_id, position)
+             );
+             INSERT INTO folder_groups VALUES (1, 'Legacy', 0);
+             INSERT INTO folder_group_paths VALUES (1, 'folder-a', 0);",
+        )
+        .unwrap();
+
+        AppStateDb::migrate_folder_group_workspace_state(&conn).unwrap();
+        AppStateDb::migrate_folder_group_workspace_state(&conn).unwrap();
+
+        let tabs_json: Option<String> = conn
+            .query_row(
+                "SELECT tabs_json FROM folder_groups WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let path: String = conn
+            .query_row(
+                "SELECT path FROM folder_group_paths WHERE group_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tabs_json, None);
+        assert_eq!(path, "folder-a");
     }
 }

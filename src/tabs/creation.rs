@@ -45,6 +45,29 @@ impl TabManager {
         true
     }
 
+    /// Replace every unpinned workspace tab with fully prepared tab states.
+    /// Fresh ids are assigned so restored inner panel tabs and caches never
+    /// collide with tabs that already exist.
+    pub(crate) fn replace_unpinned_tabs_with_states(&mut self, mut tabs: Vec<TabState>) -> bool {
+        if !self.can_replace_unpinned_tabs_with(tabs.len()) {
+            return false;
+        }
+
+        let first_id = self.next_id;
+        for (offset, tab) in tabs.iter_mut().enumerate() {
+            tab.id = first_id + offset;
+            tab.pinned = false;
+        }
+
+        self.tabs.retain(|tab| tab.pinned);
+        let pinned_count = self.tabs.len();
+        let restored_count = tabs.len();
+        self.tabs.extend(tabs);
+        self.next_id = first_id + restored_count;
+        self.active_tab = pinned_count;
+        true
+    }
+
     /// Add a tab without disturbing the active tab or its live state.
     pub(crate) fn new_background_tab_at(&mut self, path: &str) -> Option<usize> {
         if !self.can_add_tab() {
@@ -127,6 +150,45 @@ mod tests {
         assert_eq!(manager.tabs[1].path, r"F:\First");
         assert_eq!(manager.tabs[2].path, r"G:\Second");
         assert_eq!(manager.active_tab, 1);
+    }
+
+    #[test]
+    fn replacing_tabs_with_prepared_states_keeps_pinned_tabs_and_assigns_fresh_ids() {
+        let mut manager = TabManager::new_at_path(r"C:\Users\user\Documents\Project");
+        manager.tabs[0].pinned = true;
+        manager.new_tab_at(r"D:\Videos\Folder");
+
+        let prepared = vec![
+            TabState::new_at_path(0, r"E:\Media\FolderA"),
+            TabState::new_at_path(0, r"F:\Media\FolderB"),
+        ];
+        assert!(manager.replace_unpinned_tabs_with_states(prepared));
+
+        assert_eq!(manager.tabs.len(), 3);
+        assert!(manager.tabs[0].pinned);
+        assert_eq!(manager.tabs[0].path, r"C:\Users\user\Documents\Project");
+        assert_eq!(manager.tabs[1].path, r"E:\Media\FolderA");
+        assert_eq!(manager.tabs[2].path, r"F:\Media\FolderB");
+        assert_eq!(manager.tabs[1].id, 2);
+        assert_eq!(manager.tabs[2].id, 3);
+        assert_eq!(manager.active_tab, 1);
+    }
+
+    #[test]
+    fn replacing_tabs_with_prepared_states_respects_the_capacity_limit() {
+        let mut manager = TabManager::new_at_path(r"C:\Users\user\Documents\Project");
+        manager.tabs[0].pinned = true;
+        for index in 1..MAX_TABS {
+            assert!(manager
+                .new_background_tab_at(&format!(r"C:\Users\user\Documents\Project\Folder{index}"))
+                .is_some());
+            manager.tabs[index].pinned = true;
+        }
+
+        let prepared = vec![TabState::new_at_path(0, r"D:\Videos\Folder")];
+        assert!(!manager.replace_unpinned_tabs_with_states(prepared));
+        assert_eq!(manager.tabs.len(), MAX_TABS);
+        assert_eq!(manager.active_tab, 0);
     }
 
     #[test]

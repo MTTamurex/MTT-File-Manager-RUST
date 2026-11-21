@@ -10,6 +10,7 @@ use std::sync::Arc;
 mod column_autofit;
 mod detach;
 pub(crate) use detach::{render_transfer_progress, transfer_pending};
+mod reload;
 mod staleness;
 mod sync_to;
 
@@ -296,7 +297,7 @@ impl ImageViewerApp {
         let inactive_load_to_restart = self
             .dual_panel_inactive_state
             .as_ref()
-            .is_some_and(|snapshot| snapshot.is_loading_folder);
+            .is_some_and(reload::inactive_panel_needs_load);
         if inactive_load_to_restart {
             self.with_inactive_panel(|app| {
                 app.loaded_path.clear();
