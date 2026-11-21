@@ -12,8 +12,9 @@ pub(crate) fn spawn_volume_indexer(
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
+    discovery_revision: u64,
 ) {
-    let Some(ticket) = lifecycle.claim_worker(&volume) else {
+    let Some(ticket) = lifecycle.claim_discovered_worker(&volume, discovery_revision) else {
         return;
     };
 

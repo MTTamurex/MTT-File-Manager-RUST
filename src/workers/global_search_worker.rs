@@ -6,58 +6,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-use mtt_search_protocol::{IndexStatusInfo, SearchResultItem, VolumeStatus};
+use crate::infrastructure::drive_indexing::SharedDriveIndexing;
+use mtt_search_protocol::{SearchResultItem, VolumeStatus};
 
-/// Requests sent from the UI to the global search worker.
-pub enum GlobalSearchRequest {
-    /// Search for files matching the query.
-    Search {
-        query: String,
-        offset: u32,
-        limit: u32,
-    },
-    /// Check if the search service is available.
-    CheckStatus,
-    /// Enable or disable proactive status polling while the overlay is open.
-    SetStatusTracking { active: bool },
-}
-
-/// Responses sent from the global search worker to the UI.
-pub enum GlobalSearchResponse {
-    /// Search results for a given query.
-    Results {
-        query: String,
-        items: Vec<SearchResultItem>,
-        offset: u32,
-        limit: u32,
-        has_more: bool,
-        total_matches: Option<u32>,
-    },
-    TotalCount {
-        query: String,
-        total_matches: u32,
-    },
-    /// Service availability status.
-    Status {
-        available: bool,
-        total_indexed: u64,
-        session_total_indexed: u64,
-        indexing_in_progress: bool,
-        volumes: Vec<VolumeStatus>,
-    },
-    /// Error message.
-    Error {
-        query: String,
-        message: String,
-    },
-}
+mod messages;
+mod status;
+mod total_count;
+pub use messages::{GlobalSearchRequest, GlobalSearchResponse};
+use status::refresh_and_send_status;
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 1;
 const SEARCH_RETRY_COUNT: usize = 2;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 1;
 const MIN_QUERY_LEN_FOR_EXACT_TOTAL_COUNT: usize = 2;
-const TOTAL_COUNT_PAGE_LIMIT: u32 = 1_000;
 const ACTIVE_STATUS_POLL_MS: u64 = 250;
 const IDLE_STATUS_POLL_MS: u64 = 1_000;
 
@@ -173,190 +135,12 @@ fn should_load_exact_total_matches(query: &str) -> bool {
     query.chars().count() >= MIN_QUERY_LEN_FOR_EXACT_TOTAL_COUNT
 }
 
-fn load_exact_service_total_matches(
-    query: &str,
-    generation: u64,
-    active_generation: &AtomicU64,
-) -> Result<Option<u32>, String> {
-    let mut offset = 0u32;
-
-    loop {
-        if active_generation.load(Ordering::Relaxed) != generation {
-            return Ok(None);
-        }
-
-        let page = query_service_with_retry(query, offset, TOTAL_COUNT_PAGE_LIMIT)?;
-        let page_len = page.items.len() as u32;
-
-        if !page.has_more {
-            return Ok(Some(
-                page.total_matches
-                    .unwrap_or(offset.saturating_add(page_len)),
-            ));
-        }
-
-        if page_len == 0 {
-            return Ok(Some(offset));
-        }
-
-        offset = offset.saturating_add(page_len);
-    }
-}
-
-fn spawn_total_count_task(
-    sender: Sender<GlobalSearchResponse>,
-    ctx: eframe::egui::Context,
-    query: String,
-    local_total_matches: u32,
-    generation: u64,
-    active_generation: Arc<AtomicU64>,
-    in_flight: Arc<AtomicBool>,
-) {
-    // Limit to one in-flight total count task at a time to prevent unbounded
-    // thread accumulation during rapid typing.
-    if in_flight.swap(true, Ordering::AcqRel) {
-        return; // Another task is already running — skip this one.
-    }
-
-    let in_flight_for_task = Arc::clone(&in_flight);
-    let spawn_result = crate::spawn_named("global-search-total-count", move || {
-        // RAII guard to reset in_flight on any exit path (including panic).
-        struct InFlightGuard(Arc<AtomicBool>);
-        impl Drop for InFlightGuard {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
-            }
-        }
-        let _guard = InFlightGuard(in_flight_for_task);
-
-        match load_exact_service_total_matches(&query, generation, &active_generation) {
-            Ok(Some(service_total_matches)) => {
-                if active_generation.load(Ordering::Relaxed) != generation {
-                    return;
-                }
-
-                let _ = sender.send(GlobalSearchResponse::TotalCount {
-                    query,
-                    total_matches: service_total_matches.saturating_add(local_total_matches),
-                });
-                ctx.request_repaint();
-            }
-            Ok(None) => {}
-            Err(error) => {
-                if active_generation.load(Ordering::Relaxed) == generation {
-                    log::debug!(
-                        "[GLOBAL-SEARCH] Exact total count unavailable for '{}': {}",
-                        query,
-                        error
-                    );
-                }
-            }
-        }
-    });
-
-    if let Err(error) = spawn_result {
-        in_flight.store(false, Ordering::Release);
-        log::error!(
-            "[GLOBAL-SEARCH] Failed to spawn total count task: {}",
-            error
-        );
-    }
-}
-
-fn refresh_and_send_status(
-    sender: &Sender<GlobalSearchResponse>,
-    session_index: &mut crate::infrastructure::user_session_search::UserSessionSearchIndex,
-    last_known_available: &mut bool,
-    last_known_total_indexed: &mut u64,
-    last_known_status_volumes: &mut Vec<VolumeStatus>,
-    last_known_service_executable_path: &mut String,
-    consecutive_failures: &mut u8,
-) {
-    let ping_ok = crate::infrastructure::global_search::ping();
-    let mut status_ok: Option<IndexStatusInfo> = None;
-    let mut last_error: Option<String> = None;
-
-    if ping_ok {
-        for attempt in 0..STATUS_RETRY_COUNT {
-            match crate::infrastructure::global_search::get_status() {
-                Ok(status) => {
-                    status_ok = Some(status);
-                    break;
-                }
-                Err(e) => {
-                    last_error = Some(e.clone());
-                    if attempt + 1 < STATUS_RETRY_COUNT && is_transient_ipc_error(&e) {
-                        std::thread::sleep(std::time::Duration::from_millis(140));
-                        continue;
-                    }
-                    break;
-                }
-            }
-        }
-
-        if let Some(status) = status_ok {
-            if *last_known_service_executable_path != status.service_executable_path {
-                log::info!(
-                    "[GLOBAL-SEARCH] Connected to service binary: {}",
-                    status.service_executable_path
-                );
-                *last_known_service_executable_path = status.service_executable_path.clone();
-            }
-            *last_known_available = true;
-            *last_known_total_indexed = status.total_files_indexed;
-            *last_known_status_volumes = status.volumes.clone();
-            *consecutive_failures = 0;
-        } else {
-            *consecutive_failures = (*consecutive_failures).saturating_add(1);
-            let transient = last_error.as_deref().is_some_and(is_transient_ipc_error);
-            if !(transient && *last_known_available)
-                && *consecutive_failures >= OFFLINE_FAILURE_THRESHOLD
-            {
-                *last_known_available = false;
-            }
-            if let Some(error) = last_error.as_deref() {
-                log::warn!(
-                    "[GLOBAL-SEARCH] Service status refresh failed attempts={} consecutive_failures={} reason={}",
-                    STATUS_RETRY_COUNT,
-                    *consecutive_failures,
-                    error
-                );
-            }
-        }
-    } else {
-        *consecutive_failures = (*consecutive_failures).saturating_add(1);
-        if *consecutive_failures >= OFFLINE_FAILURE_THRESHOLD {
-            *last_known_available = false;
-        }
-        log::warn!(
-            "[GLOBAL-SEARCH] Search service ping failed consecutive_failures={}",
-            *consecutive_failures
-        );
-    }
-
-    let service_volume_letters = service_volume_letters(last_known_status_volumes);
-    session_index.refresh(&service_volume_letters, *last_known_available, false);
-    let local_total = session_index.total_indexed();
-    let available = *last_known_available || session_index.has_indexed_items();
-    let total_indexed = *last_known_total_indexed;
-    let indexing_in_progress = last_known_status_volumes
-        .iter()
-        .any(volume_is_actively_scanning);
-
-    let _ = sender.send(GlobalSearchResponse::Status {
-        available,
-        total_indexed,
-        session_total_indexed: local_total,
-        indexing_in_progress,
-        volumes: last_known_status_volumes.clone(),
-    });
-}
-
 /// Starts the global search worker thread.
 pub fn start_global_search_worker(
     receiver: Receiver<GlobalSearchRequest>,
     sender: Sender<GlobalSearchResponse>,
     ctx: eframe::egui::Context,
+    drive_indexing: SharedDriveIndexing,
 ) {
     std::thread::spawn(move || {
         let total_count_generation = Arc::new(AtomicU64::new(0));
@@ -459,6 +243,7 @@ pub fn start_global_search_worker(
 
             // ── Search always takes priority over status checks ──────────
             if let Some((query, offset, limit)) = latest_search {
+                let indexing_generation = drive_indexing.generation();
                 let total_count_token = if offset == 0 {
                     total_count_generation.fetch_add(1, Ordering::Relaxed) + 1
                 } else {
@@ -467,6 +252,7 @@ pub fn start_global_search_worker(
                 let max_limit = limit as usize;
                 if query.is_empty() || max_limit == 0 {
                     let _ = sender.send(GlobalSearchResponse::Results {
+                        indexing_generation,
                         query,
                         items: Vec::new(),
                         offset,
@@ -484,6 +270,7 @@ pub fn start_global_search_worker(
                     let (local_items, local_has_more) =
                         session_index.search_page(&query, offset as usize, max_limit);
                     let _ = sender.send(GlobalSearchResponse::Results {
+                        indexing_generation,
                         query,
                         items: local_items,
                         offset,
@@ -543,6 +330,7 @@ pub fn start_global_search_worker(
                         }
 
                         let _ = sender.send(GlobalSearchResponse::Results {
+                            indexing_generation,
                             query: query.clone(),
                             items: merged,
                             offset,
@@ -555,15 +343,18 @@ pub fn start_global_search_worker(
                             && total_matches.is_none()
                             && should_load_exact_total_matches(&query)
                         {
-                            spawn_total_count_task(
-                                sender.clone(),
-                                ctx.clone(),
+                            total_count::CountTask {
+                                sender: sender.clone(),
+                                ctx: ctx.clone(),
                                 query,
-                                local_total_matches.unwrap_or(0),
-                                total_count_token,
-                                Arc::clone(&total_count_generation),
-                                Arc::clone(&total_count_in_flight),
-                            );
+                                local_total_matches: local_total_matches.unwrap_or(0),
+                                generation: total_count_token,
+                                active_generation: Arc::clone(&total_count_generation),
+                                in_flight: Arc::clone(&total_count_in_flight),
+                                policy: drive_indexing.clone(),
+                                indexing_generation,
+                            }
+                            .spawn();
                         }
                     }
                     Err(e) => {
@@ -594,6 +385,7 @@ pub fn start_global_search_worker(
                                 e
                             );
                             let _ = sender.send(GlobalSearchResponse::Results {
+                                indexing_generation,
                                 query,
                                 items: local_items,
                                 offset,
@@ -602,7 +394,11 @@ pub fn start_global_search_worker(
                                 total_matches: Some(local_total_matches),
                             });
                         } else {
-                            let _ = sender.send(GlobalSearchResponse::Error { query, message: e });
+                            let _ = sender.send(GlobalSearchResponse::Error {
+                                query,
+                                message: e,
+                                indexing_generation,
+                            });
                         }
                     }
                 }

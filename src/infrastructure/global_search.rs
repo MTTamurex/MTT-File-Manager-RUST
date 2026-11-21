@@ -1,6 +1,8 @@
 //! Client for communicating with the MTT Search Service via Named Pipes.
 
 use mtt_search_protocol::*;
+mod drive_indexing;
+pub use drive_indexing::{get_drive_indexing_config, set_drive_indexing};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
 use windows::Win32::Storage::FileSystem::{

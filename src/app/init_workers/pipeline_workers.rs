@@ -100,6 +100,7 @@ pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandle
 
 pub(in crate::app) fn spawn_global_search_worker(
     ctx: &egui::Context,
+    drive_indexing: crate::infrastructure::drive_indexing::SharedDriveIndexing,
 ) -> (
     mpsc::Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
     mpsc::Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
@@ -110,6 +111,7 @@ pub(in crate::app) fn spawn_global_search_worker(
         global_search_rx_thread,
         global_search_res_tx,
         ctx.clone(),
+        drive_indexing,
     );
     (global_search_tx, global_search_res_rx)
 }

@@ -18,6 +18,7 @@ pub mod disk_analysis_query;
 pub mod disk_analysis_sorting;
 pub mod disk_analysis_state;
 pub mod drag_drop_state;
+pub mod drive_indexing_state;
 pub mod drive_state;
 pub mod dual_panel;
 pub mod explorer_preferences;

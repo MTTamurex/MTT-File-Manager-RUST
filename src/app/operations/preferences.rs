@@ -113,6 +113,12 @@ impl ImageViewerApp {
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
         let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(50);
+        if let Some(cache) = self.drive_indexing.cache_json() {
+            prefs.push((
+                crate::infrastructure::drive_indexing::CACHE_PREFERENCE_KEY,
+                cache,
+            ));
+        }
         prefs.push((
             "startup_location",
             self.startup_location.preference_value().to_owned(),

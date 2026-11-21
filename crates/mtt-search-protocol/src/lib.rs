@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 
 mod disk_analysis;
 mod drive_health;
+mod drive_indexing;
 pub mod name_query;
 mod pipe_access;
 pub use disk_analysis::*;
 pub use drive_health::*;
+pub use drive_indexing::*;
 pub use pipe_access::PIPE_CLIENT_ACCESS;
 
 /// Named pipe path for IPC between the search service and the file manager app.
@@ -56,6 +58,10 @@ pub enum SearchRequest {
     /// Request a full-volume snapshot for disk usage analysis (NTFS only).
     /// The service copies its in-memory MFT/USN index; no new disk I/O.
     DiskAnalysis { drive_letter: char },
+    /// Read machine-wide indexing preferences and service discovery coverage.
+    GetDriveIndexingConfig,
+    /// Set a machine-wide indexing preference without deleting cached records.
+    SetDriveIndexing { drive_letter: char, enabled: bool },
 }
 
 impl SearchRequest {
@@ -107,6 +113,11 @@ impl SearchRequest {
                 return Err("drive letter must be an ASCII letter".to_string());
             }
         }
+        if let SearchRequest::SetDriveIndexing { drive_letter, .. } = self {
+            if !drive_letter.is_ascii_alphabetic() {
+                return Err("drive letter must be an ASCII letter".to_string());
+            }
+        }
         Ok(())
     }
 }
@@ -127,7 +138,9 @@ pub enum SearchResponse {
     /// Acknowledge that index warming has started (or is already in progress).
     WarmStarted,
     /// Directories from the request that have been modified within the threshold.
-    PathsModified { modified: Vec<String> },
+    PathsModified {
+        modified: Vec<String>,
+    },
     /// Folder size result computed from the in-memory MFT index.
     FolderSize {
         path: String,
@@ -141,6 +154,15 @@ pub enum SearchResponse {
     DriveHealth(Box<DriveHealthSnapshot>),
     /// Full-volume snapshot for disk usage analysis (NTFS only).
     DiskAnalysis(Box<DiskAnalysisSnapshot>),
+    DriveIndexingConfig {
+        drives: Vec<DriveIndexingEntry>,
+        service_discovery_complete: bool,
+        enabled_service_volumes: Vec<char>,
+    },
+    DriveIndexingUpdated {
+        drive_letter: char,
+        enabled: bool,
+    },
 }
 
 impl SearchResponse {
@@ -160,6 +182,28 @@ impl SearchResponse {
         }
         if let SearchResponse::DiskAnalysis(snapshot) = self {
             snapshot.validate()?;
+        }
+        match self {
+            Self::DriveIndexingConfig {
+                drives,
+                enabled_service_volumes,
+                ..
+            } => {
+                validate_drive_letters(drives.iter().map(|drive| drive.drive_letter))?;
+                validate_drive_letters(enabled_service_volumes.iter().copied())?;
+                for letter in enabled_service_volumes {
+                    if !drives
+                        .iter()
+                        .any(|drive| drive.drive_letter == *letter && drive.enabled)
+                    {
+                        return Err("enabled service volume missing from configuration".into());
+                    }
+                }
+            }
+            Self::DriveIndexingUpdated { drive_letter, .. } => {
+                validate_drive_letters(std::iter::once(*drive_letter))?;
+            }
+            _ => {}
         }
         Ok(())
     }

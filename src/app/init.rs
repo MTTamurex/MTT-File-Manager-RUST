@@ -117,6 +117,7 @@ impl ImageViewerApp {
             directory_index,
             directory_cache,
             startup_preferences,
+            drive_indexing,
             cover_req_tx,
             cover_res_rx,
             #[cfg(feature = "notify-watcher")]
@@ -209,6 +210,7 @@ impl ImageViewerApp {
         }
 
         let StartupPreferences {
+            drive_indexing: _,
             sort_mode,
             sort_mode_computer,
             sort_mode_normal,
@@ -954,6 +956,7 @@ impl ImageViewerApp {
 
             // GLOBAL SEARCH
             global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
+            drive_indexing,
             initial_indexing_notice:
                 crate::app::initial_indexing_notice::InitialIndexingNotice::new(
                     initial_indexing_notice_generation,

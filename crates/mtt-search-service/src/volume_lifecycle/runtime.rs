@@ -1,21 +1,36 @@
 use super::*;
 
 impl VolumeLifecycle {
-    pub(super) fn ensure_runtime(&self, volume: &DiscoveredVolume) -> Option<Arc<VolumeRuntime>> {
-        self.ensure_runtime_until(volume, Instant::now() + REMOVE_WAIT_TIMEOUT)
-    }
-
+    #[cfg(test)]
     pub(super) fn ensure_runtime_until(
         &self,
         volume: &DiscoveredVolume,
         deadline: Instant,
+    ) -> Option<Arc<VolumeRuntime>> {
+        self.retire_indexing_drains();
+        self.ensure_runtime_for_revision(volume, deadline, self.drive_config_revision())
+    }
+
+    pub(super) fn ensure_runtime_for_revision(
+        &self,
+        volume: &DiscoveredVolume,
+        deadline: Instant,
+        revision: u64,
     ) -> Option<Arc<VolumeRuntime>> {
         if volume.volume_id.is_empty() {
             return None;
         }
 
         loop {
+            self.retire_indexing_drains();
             let (runtime, worker) = {
+                let config = self.drive_config.read();
+                if !config.matches_revision(revision)
+                    || !config.is_enabled(volume.drive_letter)
+                    || config.draining.contains_key(&volume.drive_letter)
+                {
+                    return None;
+                }
                 // Publication and invalidation always take registry -> worker.
                 let mut runtimes = self.runtimes.lock();
                 let Some(runtime) = runtimes.get(&volume.drive_letter).cloned() else {
@@ -23,7 +38,7 @@ impl VolumeLifecycle {
                         drive_letter: volume.drive_letter,
                         volume_id: volume.volume_id.clone(),
                         volume_serial: volume.volume_serial,
-                        usage: Arc::new(VolumeUsage::default()),
+                        usage: Arc::new(VolumeUsage::new(self.discovery_wake.clone())),
                         worker: Mutex::new(None),
                     });
                     runtimes.insert(volume.drive_letter, runtime.clone());
@@ -55,6 +70,10 @@ impl VolumeLifecycle {
                 // drained and wakes discovery to obtain the current identity.
                 return None;
             }
+            let config = self.drive_config.read();
+            if !config.matches_revision(revision) {
+                return None;
+            }
             let mut runtimes = self.runtimes.lock();
             if !runtime.usage.replacement_is_idle() {
                 return None; // A PnP maintenance/removal request still owns it.
@@ -69,6 +88,7 @@ impl VolumeLifecycle {
     }
 
     pub(super) fn retire_idle_replacements(&self) {
+        let mut config = self.drive_config.write();
         let mut runtimes = self.runtimes.lock();
         let before = runtimes.len();
         runtimes.retain(|_, runtime| {
@@ -76,6 +96,9 @@ impl VolumeLifecycle {
             !runtime.usage.replacement_is_idle() || worker.is_some()
         });
         if runtimes.len() != before {
+            // This pass may have skipped the suspended letter before retirement.
+            // Only a subsequent discovery can attest to complete coverage.
+            config.invalidate_discovery();
             let _ = self.discovery_wake.send(());
         }
     }

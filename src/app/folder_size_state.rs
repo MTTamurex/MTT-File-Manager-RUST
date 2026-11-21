@@ -15,6 +15,7 @@ pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_secs(
 
 mod batch;
 mod content_probe;
+mod indexing;
 mod panel;
 pub use content_probe::{DisplayFolderSize, PendingContentProbe};
 mod revalidation;
@@ -375,6 +376,7 @@ impl FolderSizeState {
         let cache = &self.cache;
         let batch_cache = &self.batch_cache;
         let pending_revalidation = &self.pending_revalidation;
+        let batch_request_epochs = &self.batch_request_epochs;
 
         self.batch_invalidation_epoch.retain(|path, _| {
             loading.contains(path)
@@ -383,6 +385,7 @@ impl FolderSizeState {
                 || cache.contains(path)
                 || batch_cache.contains(path)
                 || pending_revalidation.contains_key(path)
+                || batch_request_epochs.contains_key(path)
         });
     }
 }

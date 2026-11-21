@@ -880,6 +880,7 @@ pub struct ImageViewerApp {
 
     // GLOBAL SEARCH (via MTT Search Service)
     pub global_search: GlobalSearchState,
+    pub drive_indexing: crate::app::drive_indexing_state::DriveIndexingState,
     pub(crate) initial_indexing_notice: InitialIndexingNotice,
 
     // FILE OPERATION WORKER/TRACKING

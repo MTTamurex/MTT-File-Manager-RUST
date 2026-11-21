@@ -402,6 +402,20 @@ pub(super) fn handle_client_with_verifier(
     }
 
     match request {
+        SearchRequest::GetDriveIndexingConfig => {
+            super::drive_indexing::handle(pipe, volume_lifecycle, None, verify);
+        }
+        SearchRequest::SetDriveIndexing {
+            drive_letter,
+            enabled,
+        } => {
+            super::drive_indexing::handle(
+                pipe,
+                volume_lifecycle,
+                Some((drive_letter, enabled)),
+                verify,
+            );
+        }
         SearchRequest::Ping => {
             let _ = send_response(pipe, &SearchResponse::Pong);
         }
@@ -492,7 +506,8 @@ pub(super) fn handle_client_with_verifier(
             }
 
             let handles = volume_indices::snapshot_handles(indices);
-            let status = build_status_response(&handles, indexing_progress, security_policy);
+            let mut status = build_status_response(&handles, indexing_progress, security_policy);
+            volume_lifecycle.filter_disabled_status(&mut status);
 
             let _ = send_response(pipe, &SearchResponse::Status(status));
         }
@@ -564,6 +579,21 @@ pub(super) fn handle_client_with_verifier(
                 return;
             }
             let volume_access = volume_lifecycle.acquire_search_access();
+            // A successful empty response must not attest to coverage of a
+            // disabled drive. Check the same policy snapshot that acquired the
+            // leases, so a racing toggle cannot turn missing coverage into success.
+            for letter in paths
+                .iter()
+                .filter_map(|path| super::drive_indexing::path_drive_letter(path))
+            {
+                if !volume_access.is_indexing_enabled(letter) {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error(DRIVE_INDEXING_DISABLED_ERROR.into()),
+                    );
+                    return;
+                }
+            }
 
             // SEC: Impersonate the connecting client before checking any paths.
             // Without this, any local user could probe modification times of
@@ -636,14 +666,14 @@ pub(super) fn handle_client_with_verifier(
                 }
             };
 
-            let Some(_volume_use) =
-                super::volume_access::acquire_one(pipe, volume_lifecycle, drive_letter)
-            else {
-                return;
-            };
             if !require_index_client(pipe, "FolderSize", Some(&path), verify) {
                 return;
             }
+            let Some(_volume_use) =
+                super::volume_access::acquire_indexed(pipe, volume_lifecycle, drive_letter)
+            else {
+                return;
+            };
             let _active_operation =
                 crate::memory_trim::begin_active_operation("folder size request");
 
@@ -865,7 +895,7 @@ pub(super) fn handle_client_with_verifier(
                 return;
             }
             let Some(_volume_use) =
-                super::volume_access::acquire_one(pipe, volume_lifecycle, drive_letter)
+                super::volume_access::acquire_indexed(pipe, volume_lifecycle, drive_letter)
             else {
                 return;
             };

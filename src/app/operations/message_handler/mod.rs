@@ -108,6 +108,7 @@ impl ImageViewerApp {
         self.poll_folder_access();
         self.poll_network_location_wizard();
         self.poll_network_drive_dialog();
+        self.process_drive_indexing_events();
 
         if !upload_textures {
             let current_path_norm =

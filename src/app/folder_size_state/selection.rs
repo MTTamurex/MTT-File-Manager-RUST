@@ -29,6 +29,14 @@ pub struct SelectionSizeState {
 }
 
 impl SelectionSizeState {
+    pub(super) fn invalidate_indexing_drives(&mut self, mask: u32) {
+        for (path, value) in &mut self.folders {
+            if super::indexing::matches_drive(path, mask) {
+                *value = FolderSize::Pending;
+            }
+        }
+    }
+
     pub fn mark_worker_disconnected(&mut self) -> bool {
         let changed = !self.worker_disconnected;
         self.worker_disconnected = true;

@@ -2,6 +2,7 @@
 //! Uses the current test process as both peers, without spawning executables.
 
 mod candidate_acl;
+mod drive_indexing;
 mod endpoint_acl;
 mod endpoint_fixture;
 mod endpoint_policy;

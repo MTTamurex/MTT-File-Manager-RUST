@@ -13,6 +13,7 @@ pub mod directory_cache;
 pub mod directory_dirty_registry;
 pub mod directory_index;
 pub mod disk_cache;
+pub mod drive_indexing;
 pub mod drive_watcher;
 pub mod folder_compose;
 pub mod global_search;

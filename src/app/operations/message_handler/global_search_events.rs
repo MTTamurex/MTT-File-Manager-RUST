@@ -36,6 +36,9 @@ impl ImageViewerApp {
             };
             processed += 1;
 
+            if response.is_stale_for_indexing(self.drive_indexing.shared.generation()) {
+                continue;
+            }
             match response {
                 GlobalSearchResponse::Results {
                     query,
@@ -44,6 +47,7 @@ impl ImageViewerApp {
                     limit,
                     has_more,
                     total_matches,
+                    indexing_generation: _,
                 } => {
                     // Only apply if the query still matches (user may have typed more)
                     if query == self.global_search.query {
@@ -86,12 +90,14 @@ impl ImageViewerApp {
                 GlobalSearchResponse::TotalCount {
                     query,
                     total_matches,
+                    indexing_generation: _,
                 } => {
                     if query == self.global_search.query {
                         self.global_search.total_matches = Some(u64::from(total_matches));
                     }
                 }
                 GlobalSearchResponse::Status {
+                    service_available,
                     available,
                     total_indexed,
                     session_total_indexed,
@@ -99,6 +105,10 @@ impl ImageViewerApp {
                     volumes,
                 } => {
                     let now = Instant::now();
+                    if service_available && !self.global_search.service_available {
+                        self.drive_indexing.request_refresh();
+                    }
+                    self.global_search.service_available = service_available;
                     let progress_changed = total_indexed != self.global_search.total_indexed
                         || indexing_in_progress != self.global_search.indexing_in_progress
                         || status_volumes_changed(&self.global_search.status_volumes, &volumes);
@@ -114,7 +124,11 @@ impl ImageViewerApp {
                     }
                     self.update_initial_indexing_notice();
                 }
-                GlobalSearchResponse::Error { query, message } => {
+                GlobalSearchResponse::Error {
+                    query,
+                    message,
+                    indexing_generation: _,
+                } => {
                     if query == self.global_search.query {
                         self.global_search.loading = false;
                         self.global_search.in_flight_query = None;

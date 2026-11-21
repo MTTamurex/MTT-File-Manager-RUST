@@ -2,6 +2,7 @@ use crate::app::{navigation_state::SettingsSection, ImageViewerApp};
 
 impl ImageViewerApp {
     pub(crate) fn open_settings(&mut self, section: SettingsSection) {
+        self.drive_indexing.request_refresh();
         self.navigation_state.active_settings_section = section;
         self.navigation_state.show_settings_window = true;
     }

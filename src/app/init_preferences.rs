@@ -8,6 +8,7 @@ use crate::ui::theme;
 use std::time::SystemTime;
 
 pub(super) struct StartupPreferences {
+    pub(super) drive_indexing: crate::infrastructure::drive_indexing::SharedDriveIndexing,
     pub(super) sort_mode: SortMode,
     pub(super) sort_mode_computer: SortMode,
     pub(super) sort_mode_normal: SortMode,
@@ -364,6 +365,11 @@ impl StartupPreferences {
             .unwrap_or(false);
 
         Self {
+            drive_indexing: crate::infrastructure::drive_indexing::SharedDriveIndexing::from_cache(
+                prefs
+                    .get(crate::infrastructure::drive_indexing::CACHE_PREFERENCE_KEY)
+                    .map(String::as_str),
+            ),
             startup_location: crate::app::startup_location::StartupLocation::from_preference(
                 prefs
                     .get("startup_location")

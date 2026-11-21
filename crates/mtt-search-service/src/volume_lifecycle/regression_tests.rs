@@ -167,11 +167,13 @@ fn stale_generation_and_reconnected_runtime_cannot_publish() {
         .publish_index(&lifecycle.indices, index(&volume))
         .is_some());
     lifecycle.disconnect_by_identity(&volume.volume_id, volume.volume_serial);
-    let reconnected = lifecycle.claim_worker(&volume).unwrap();
+    assert!(lifecycle.claim_worker(&volume).is_none());
     assert!(current
         .stop_signal()
         .publish_index(&lifecycle.indices, index(&volume))
         .is_none());
+    drop(current);
+    let reconnected = lifecycle.claim_worker(&volume).unwrap();
     assert!(reconnected
         .stop_signal()
         .publish_index(&lifecycle.indices, index(&volume))

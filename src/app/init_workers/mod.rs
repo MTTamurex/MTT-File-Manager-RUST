@@ -5,6 +5,7 @@ mod cover_worker;
 mod filesystem_workers;
 pub(crate) mod folder_load_pool;
 mod folder_size_diagnostics;
+mod indexed_folder_size;
 mod pipeline_workers;
 mod visual_workers;
 

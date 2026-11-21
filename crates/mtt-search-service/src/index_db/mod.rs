@@ -1,4 +1,5 @@
 pub mod binary;
+mod drive_config;
 pub mod integrity;
 mod sync;
 
@@ -450,6 +451,7 @@ impl IndexDb {
         .map_err(|e| format!("Table creation error: {}", e))?;
 
         Self::migrate_schema(&conn)?;
+        drive_config::create_schema(&conn)?;
 
         Ok(Self {
             db_path: path.to_path_buf(),

@@ -1,18 +1,13 @@
+use super::indexed_folder_size::query as query_ntfs_folder_size_with_retry;
 use crate::app::folder_size_state::{FolderContentSummary, FolderSizeMessage, FolderSizeRequest};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::drive_indexing::SharedDriveIndexing;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
-
-const NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS: usize = 20;
-const NTFS_FOLDER_SIZE_SERVICE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(50);
-const NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
-/// Overall deadline for the retry loop to prevent blocking for minutes
-/// on persistent transient failures (20 attempts × 8s timeout = ~160s worst case).
-const NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS: u64 = 30;
 
 /// Payload for the disk-cache invalidation channel.
 /// When `force` is `true` the existence guard is skipped — used for
@@ -56,75 +51,6 @@ fn merge_cache_invalidation_entries(
 fn should_skip_exists_guard(path: &std::path::Path) -> bool {
     crate::infrastructure::onedrive::is_cloud_sync_path(path)
         || crate::infrastructure::io_priority::is_network_or_virtual(path)
-}
-
-fn is_retryable_folder_size_service_error(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("sizes not loaded")
-        || lower.contains("volume not ready")
-        || lower.contains("volume not indexed")
-        || lower.contains("index refresh pending")
-        || lower.contains("live path validation failed")
-        || lower.contains("all pipe instances are busy")
-        || lower.contains("no process is on the other end of the pipe")
-        || lower.contains("pipe closed during read")
-        || lower.contains("search service timeout")
-        || lower.contains("peeknamedpipe failed")
-        || lower.contains("readfile failed")
-        || lower.contains("writefile failed")
-}
-
-fn query_ntfs_folder_size_with_retry(
-    folder_path: &std::path::Path,
-    cancel: &Arc<AtomicBool>,
-) -> Result<(u64, u64, u64), String> {
-    let mut diagnostic = super::folder_size_diagnostics::Query::new();
-    let mut last_error = String::from("Search service not available");
-    let deadline = Instant::now() + Duration::from_secs(NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS);
-    let mut retry_delay = NTFS_FOLDER_SIZE_SERVICE_INITIAL_RETRY_DELAY;
-
-    for attempt in 0..NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
-        if cancel.load(Ordering::Acquire) {
-            diagnostic.outcome("cancelled");
-            return Err("cancelled".to_string());
-        }
-        if Instant::now() >= deadline {
-            diagnostic.outcome("deadline");
-            break;
-        }
-
-        diagnostic.attempt();
-        match crate::infrastructure::global_search::folder_size(folder_path) {
-            Ok(result) => {
-                diagnostic.outcome("completed");
-                return Ok(result);
-            }
-            Err(error) => {
-                let retryable = is_retryable_folder_size_service_error(&error);
-                last_error = error;
-                if !retryable || attempt + 1 >= NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
-                    break;
-                }
-
-                // Sleep in small steps to remain responsive to cancel.
-                let sleep_end = Instant::now() + retry_delay;
-                while Instant::now() < sleep_end {
-                    if cancel.load(Ordering::Acquire) {
-                        diagnostic.outcome("cancelled");
-                        return Err("cancelled".to_string());
-                    }
-                    let remaining = sleep_end.saturating_duration_since(Instant::now());
-                    std::thread::sleep(remaining.min(Duration::from_millis(50)));
-                }
-                retry_delay = retry_delay
-                    .checked_mul(2)
-                    .unwrap_or(NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY)
-                    .min(NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY);
-            }
-        }
-    }
-
-    Err(last_error)
 }
 
 fn is_cloud_sync_folder_size_service_lookup_error(
@@ -372,6 +298,7 @@ fn prepare_folder_size_request(
 pub(in crate::app) fn spawn_folder_size_worker(
     ctx: &egui::Context,
     delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
+    drive_indexing: SharedDriveIndexing,
 ) -> (
     mpsc::Sender<FolderSizeRequest>,
     mpsc::Receiver<FolderSizeMessage>,
@@ -428,7 +355,11 @@ pub(in crate::app) fn spawn_folder_size_worker(
 
             // NTFS fast path: use the service's indexed subtree total.
             if is_ntfs_volume(&folder_path) {
-                match query_ntfs_folder_size_with_retry(&folder_path, &folder_size_cancel_worker) {
+                match query_ntfs_folder_size_with_retry(
+                    &folder_path,
+                    &folder_size_cancel_worker,
+                    &drive_indexing,
+                ) {
                     Ok((total_size, file_count, folder_count)) => {
                         log::info!(
                             "[FOLDER-SIZE] IPC complete path={} total_gb={:.2} files={} folders={}",
@@ -614,6 +545,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
 pub(in crate::app) fn spawn_folder_size_batch_worker(
     ctx: &egui::Context,
     delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
+    drive_indexing: SharedDriveIndexing,
 ) -> (
     mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
     mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
@@ -672,7 +604,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
 
                 // NTFS fast path: use the service index instead of local recursion.
                 if is_ntfs_volume(&path) {
-                    match query_ntfs_folder_size_with_retry(&path, &cancel_worker) {
+                    match query_ntfs_folder_size_with_retry(&path, &cancel_worker, &drive_indexing) {
                         Ok((total_size, file_count, folder_count)) => {
                             acknowledge_cancel.acknowledged = true;
                             let _ = res_tx.send(BatchSizeResult {

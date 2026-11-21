@@ -1,6 +1,7 @@
 mod client_access;
 mod connection_lifecycle;
 mod connection_rejection;
+mod drive_indexing;
 mod folder_size_snapshot;
 mod handler;
 mod pipe_io;

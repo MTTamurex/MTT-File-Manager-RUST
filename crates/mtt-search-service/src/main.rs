@@ -205,6 +205,13 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
             return;
         }
     };
+    if let Err(error) = volume_lifecycle.initialize_drive_config(db.clone()) {
+        eprintln!(
+            "[SERVICE] Drive configuration unavailable; indexing not started: {}",
+            redact_paths(&error)
+        );
+        return;
+    }
 
     // Log baseline cache sizes without delaying IPC startup.
     std::thread::spawn(index_db::diagnose_cache_size);
@@ -231,8 +238,10 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         std::thread::spawn(move || {
             let mut handle_notifications =
                 device_notifications::VolumeHandleNotifications::default();
-            let discovered =
-                usn_journal::discover_volumes(|letter| lifecycle.is_drive_suspended(letter));
+            let discovery_revision = lifecycle.drive_config_revision();
+            let discovered = usn_journal::discover_volumes(|letter| {
+                !lifecycle.is_indexing_enabled(letter) || lifecycle.is_drive_suspended(letter)
+            });
             log_discovered_volumes(&discovered);
             spawn_indexers_for_discovered_volumes(
                 discovered,
@@ -241,6 +250,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                 &indexing_progress,
                 &db,
                 &mut handle_notifications,
+                discovery_revision,
             );
 
             const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
@@ -256,8 +266,10 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                     break;
                 }
 
-                let discovered =
-                    usn_journal::discover_volumes(|letter| lifecycle.is_drive_suspended(letter));
+                let discovery_revision = lifecycle.drive_config_revision();
+                let discovered = usn_journal::discover_volumes(|letter| {
+                    !lifecycle.is_indexing_enabled(letter) || lifecycle.is_drive_suspended(letter)
+                });
                 spawn_indexers_for_discovered_volumes(
                     discovered,
                     &lifecycle,
@@ -265,6 +277,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                     &indexing_progress,
                     &db,
                     &mut handle_notifications,
+                    discovery_revision,
                 );
             }
         });
@@ -313,12 +326,18 @@ fn spawn_indexers_for_discovered_volumes(
     indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     handle_notifications: &mut device_notifications::VolumeHandleNotifications,
+    discovery_revision: u64,
 ) {
-    lifecycle.reconcile_discovered_volumes(&discovered);
+    if !lifecycle.reconcile_drive_discovery(&discovered, discovery_revision)
+        || !lifecycle.record_drive_discovery(&discovered, discovery_revision)
+    {
+        lifecycle.wake_discovery();
+        return;
+    }
     handle_notifications.reconcile(&discovered);
 
     for volume in discovered {
-        if volume.volume_id.is_empty() {
+        if volume.volume_id.is_empty() || !lifecycle.is_indexing_enabled(volume.drive_letter) {
             continue;
         }
         if let Err(error) = handle_notifications.ensure(&volume, lifecycle) {
@@ -335,6 +354,7 @@ fn spawn_indexers_for_discovered_volumes(
             indices.clone(),
             indexing_progress.clone(),
             db.clone(),
+            discovery_revision,
         );
     }
 }

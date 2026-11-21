@@ -48,6 +48,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) directory_index: Option<Arc<DirectoryIndex>>,
     pub(in crate::app) directory_cache: Arc<DirectoryCache>,
     pub(in crate::app) startup_preferences: StartupPreferences,
+    pub(in crate::app) drive_indexing: crate::app::drive_indexing_state::DriveIndexingState,
 
     pub(in crate::app) cover_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) cover_res_rx: mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
@@ -399,6 +400,10 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
     let startup_preferences = StartupPreferences::load(&app_state_db);
+    let drive_indexing = crate::app::drive_indexing_state::DriveIndexingState::start(
+        startup_preferences.drive_indexing.clone(),
+        ctx.clone(),
+    );
     let font_rx = spawn_async_font_loader(
         app_state_db
             .get_preference(crate::ui::fonts::selection::PREFERENCE_KEY)
@@ -482,11 +487,20 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         copy_runtime,
     ) = spawn_file_operation_worker();
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel, folder_size_latest_request_id) =
-        spawn_folder_size_worker(ctx, copy_runtime.delete_activity.clone());
+        spawn_folder_size_worker(
+            ctx,
+            copy_runtime.delete_activity.clone(),
+            drive_indexing.shared.clone(),
+        );
     let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
-        spawn_folder_size_batch_worker(ctx, copy_runtime.delete_activity.clone());
+        spawn_folder_size_batch_worker(
+            ctx,
+            copy_runtime.delete_activity.clone(),
+            drive_indexing.shared.clone(),
+        );
     log_bootstrap_step!("visual_and_size_workers");
-    let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
+    let (global_search_tx, global_search_res_rx) =
+        spawn_global_search_worker(ctx, drive_indexing.shared.clone());
     let disk_cache_invalidation_tx =
         spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
@@ -526,6 +540,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         directory_index,
         directory_cache,
         startup_preferences,
+        drive_indexing,
         cover_req_tx,
         cover_res_rx,
         #[cfg(feature = "notify-watcher")]
