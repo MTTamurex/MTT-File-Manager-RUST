@@ -11,15 +11,7 @@ pub(super) struct Identity {
 impl Identity {
     pub(super) fn new(item: &IShellItem) -> Option<Self> {
         let unknown = item.cast().ok()?;
-        let parsing_name = unsafe {
-            item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)
-                .ok()
-                .and_then(|name| {
-                    let value = name.to_string().ok().filter(|name| !name.is_empty());
-                    CoTaskMemFree(Some(name.as_ptr().cast()));
-                    value
-                })
-        };
+        let parsing_name = parsing_name(item);
         Some(Self {
             unknown,
             parsing_name,
@@ -33,5 +25,17 @@ impl Identity {
                 .as_ref()
                 .zip(other.parsing_name.as_ref())
                 .is_some_and(|(left, right)| left == right)
+    }
+}
+
+pub(super) fn parsing_name(item: &IShellItem) -> Option<String> {
+    unsafe {
+        item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)
+            .ok()
+            .and_then(|name| {
+                let value = name.to_string().ok().filter(|name| !name.is_empty());
+                CoTaskMemFree(Some(name.as_ptr().cast()));
+                value
+            })
     }
 }

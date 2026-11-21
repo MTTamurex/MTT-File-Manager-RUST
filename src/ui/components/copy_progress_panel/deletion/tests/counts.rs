@@ -129,3 +129,42 @@ fn terminal_deletion_error_keeps_failure_count_when_message_is_different() {
     assert!(labels.iter().any(|label| label == &failure_count));
     assert!(labels.iter().any(|label| label == "operation failed"));
 }
+
+#[test]
+fn final_verified_counts_replace_partial_progress_without_an_error_status() {
+    let context = egui::Context::default();
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(Vec::new(), true);
+    let progress = job.operation.deletion.as_ref().unwrap();
+    progress.total.store(8, Ordering::Relaxed);
+    for _ in 0..5 {
+        progress.removed();
+    }
+    let _ = context.run_ui(egui::RawInput::default(), |ui| {
+        super::super::card(ui, &job.operation, &[]);
+    });
+    // A final verification supplies three removals missing from live callbacks.
+    for _ in 0..3 {
+        progress.removed();
+    }
+    job.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        super::super::card(ui, &job.operation, &[]);
+    });
+    let mut labels = Vec::new();
+    for shape in output.shapes {
+        texts(&shape.shape, &mut labels);
+    }
+    assert!(labels
+        .iter()
+        .any(|label| label == &t!("delete_engine.progress_count", completed = 8, total = 8)));
+    assert!(labels
+        .iter()
+        .any(|label| label == &t!("delete_engine.completed")));
+    assert!(!labels
+        .iter()
+        .any(|label| label == &t!("delete_engine.failed_title")));
+}

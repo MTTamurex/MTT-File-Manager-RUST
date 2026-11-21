@@ -140,7 +140,7 @@ impl ImageViewerApp {
         // Clear selection first so details panel resets immediately
         self.reset_selection_and_search();
 
-        // The worker presents the themed confirmation and progress UI.
+        // The worker selects app or Windows UI using the engine preference.
         let hwnd = self.shell_op_hwnd();
         self.file_operation_state.file_ops_in_progress += 1;
         if self

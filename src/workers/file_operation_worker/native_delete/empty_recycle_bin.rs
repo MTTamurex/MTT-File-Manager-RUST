@@ -1,10 +1,11 @@
-//! Themed, snapshot-scoped emptying. No fallback or automatic deletion retries.
+//! Select themed snapshot-scoped emptying or the legacy Shell UI by engine preference.
 use super::super::{FileOperationRequest, FileOperationResult, SendHwnd};
 use crate::infrastructure::copy_engine::{CopyRuntime, Outcome, OutcomeKind};
 use crate::infrastructure::delete_engine::confirmation;
 use crate::infrastructure::windows::recycle_bin;
 use std::sync::{atomic::Ordering, mpsc::Sender, Arc};
 mod identity;
+mod reconciliation;
 mod sink;
 mod tracking;
 
@@ -12,6 +13,22 @@ pub(super) fn try_handle(
     request: &FileOperationRequest,
     sender: &Sender<FileOperationResult>,
     runtime: &Arc<CopyRuntime>,
+) -> bool {
+    try_handle_with(
+        request,
+        sender,
+        runtime,
+        |hwnd| handle(hwnd, runtime),
+        |hwnd| handle_shell(hwnd, sender, recycle_bin::empty_recycle_bin),
+    )
+}
+
+fn try_handle_with(
+    request: &FileOperationRequest,
+    sender: &Sender<FileOperationResult>,
+    runtime: &Arc<CopyRuntime>,
+    themed: impl FnOnce(SendHwnd),
+    shell: impl FnOnce(SendHwnd),
 ) -> bool {
     let FileOperationRequest::EmptyRecycleBin { hwnd } = request else {
         return false;
@@ -21,8 +38,28 @@ pub(super) fn try_handle(
     };
     // Refresh even when a COM call panics after making partial progress.
     let _refresh = RefreshOnDrop(sender);
-    handle(*hwnd, runtime);
+    // Select once per request; changing the preference never retries an operation.
+    if runtime.enabled.load(Ordering::Relaxed) {
+        themed(*hwnd);
+    } else {
+        shell(*hwnd);
+    }
     true
+}
+
+fn handle_shell(
+    hwnd: SendHwnd,
+    sender: &Sender<FileOperationResult>,
+    empty: impl FnOnce(windows::Win32::Foundation::HWND) -> windows::core::Result<()>,
+) {
+    if let Err(error) = empty(hwnd.0) {
+        let message = if tracking::is_cancellation(error.code()) {
+            rust_i18n::t!("operations.error_cancelled").to_string()
+        } else {
+            tracking::error_message(&error)
+        };
+        let _ = sender.send(FileOperationResult::OperationFailed { message });
+    }
 }
 
 struct Running<'a>(&'a CopyRuntime);
@@ -99,6 +136,7 @@ fn handle(hwnd: SendHwnd, runtime: &Arc<CopyRuntime>) {
         return;
     }
 
+    let snapshot = reconciliation::Snapshot::capture(&items);
     let tracking = Arc::new(tracking::Tracking::new(operation.clone(), total));
     let sink = sink::global(tracking.clone());
     let result = recycle_bin::delete_recycle_bin_items_with_progress(
@@ -108,6 +146,7 @@ fn handle(hwnd: SendHwnd, runtime: &Arc<CopyRuntime>) {
         |index, item| sink::item(tracking.clone(), index, item),
         || operation.progress.is_cancelled(),
     );
+    snapshot.reconcile(&tracking);
     job.finish(tracking.outcome(result));
 }
 

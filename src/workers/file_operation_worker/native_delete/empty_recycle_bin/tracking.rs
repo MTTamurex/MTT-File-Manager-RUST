@@ -57,18 +57,22 @@ impl Tracking {
             return;
         }
         let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
-        if items[index] != ItemState::Pending {
+        if items[index] == ItemState::Failed {
             return;
         }
         let progress = self.operation.deletion.as_ref().unwrap();
-        if is_root && completed {
-            items[index] = ItemState::Removed;
-            progress.removed();
-        } else if result.is_err() {
+        if result.is_err() {
             // A failed child makes the selected folder incomplete, but counts
             // as one failed root even when more descendants subsequently fail.
+            if items[index] == ItemState::Removed {
+                progress.permanently_removed.fetch_sub(1, Ordering::Relaxed);
+                progress.removed.fetch_sub(1, Ordering::Relaxed);
+            }
             items[index] = ItemState::Failed;
             progress.failed();
+        } else if is_root && completed && items[index] == ItemState::Pending {
+            items[index] = ItemState::Removed;
+            progress.removed();
         }
     }
 
@@ -77,6 +81,27 @@ impl Tracking {
             self.operation.progress.cancel();
         } else if result.is_err() {
             *self.finish_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
+        }
+    }
+
+    pub(super) fn reconcile_item(&self, index: usize, present: bool) {
+        let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
+        let progress = self.operation.deletion.as_ref().unwrap();
+        match (items[index], present) {
+            (ItemState::Pending, false) => {
+                items[index] = ItemState::Removed;
+                progress.removed();
+            }
+            (ItemState::Removed, true) => {
+                // A callback is not sufficient if a fresh enumeration still
+                // contains that same selected namespace entry.
+                items[index] = ItemState::Pending;
+                progress.permanently_removed.fetch_sub(1, Ordering::Relaxed);
+                progress.removed.fetch_sub(1, Ordering::Relaxed);
+            }
+            // Preserve actual item failures even when the namespace entry has
+            // disappeared; verification must not hide a reported Shell error.
+            _ => {}
         }
     }
 
