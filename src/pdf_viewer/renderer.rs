@@ -77,6 +77,56 @@ pub struct RenderedPage {
     pub height: u32,
 }
 
+/// A single page rendered for the details panel.
+pub struct PdfPreviewPage {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub page_index: usize,
+    pub page_count: usize,
+}
+
+/// Open a PDF on the calling worker thread and render only the requested page.
+/// Pdfium may inspect document structure while opening the file, but this
+/// function does not copy the entire PDF into an application-owned buffer.
+pub fn render_preview_page(
+    path: &std::path::Path,
+    page_index: usize,
+    width: u32,
+) -> Result<PdfPreviewPage, String> {
+    super::validate_pdf_path(path)?;
+    let pdfium = pdfium()?;
+    let document = pdfium
+        .load_pdf_from_file(path, None)
+        .map_err(classify_open_error)
+        .map_err(|error| error.to_string())?;
+    let page_count = usize::from(document.pages().len());
+    if page_index >= page_count {
+        return Err("PDF page is out of range".into());
+    }
+
+    let page = document
+        .pages()
+        .get(page_index as PdfPageIndex)
+        .map_err(|error| error.to_string())?;
+    let render_width = width.clamp(64, 1200) as Pixels;
+    let bitmap = page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(render_width)
+                .set_maximum_height(render_width * 2),
+        )
+        .map_err(|error| format!("PDF page render failed: {error}"))?;
+
+    Ok(PdfPreviewPage {
+        pixels: bitmap.as_rgba_bytes(),
+        width: bitmap.width() as u32,
+        height: bitmap.height() as u32,
+        page_index,
+        page_count,
+    })
+}
+
 pub(super) fn classify_open_error(error: PdfiumError) -> PdfOpenError {
     if matches!(
         error,

@@ -110,6 +110,8 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) use renderer::{render_preview_page, PdfPreviewPage};
+
 /// Open a PDF in a new standalone viewer process (fire-and-forget).
 pub fn open_pdf_viewer(path: PathBuf) {
     // Validate the path before spawning a child process.

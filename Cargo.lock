@@ -1249,6 +1249,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chardetng"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14b8f0b65b7b08ae3c8187e8d77174de20cb6777864c6b832d8ad365999cf1ea"
+dependencies = [
+ "cfg-if",
+ "encoding_rs",
+ "memchr",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2315,6 +2326,12 @@ name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+
+[[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldhash"
@@ -3849,6 +3866,7 @@ dependencies = [
  "bincode",
  "blake3",
  "bzip2 0.5.2",
+ "chardetng",
  "clipboard-win",
  "criterion",
  "crossbeam-channel",
@@ -3856,6 +3874,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui_commonmark",
+ "encoding_rs",
  "env_logger",
  "flate2",
  "fontdb",
@@ -3876,6 +3895,7 @@ dependencies = [
  "parking_lot",
  "pdfium-render",
  "printpdf",
+ "pulldown-cmark",
  "raw-window-handle",
  "rayon",
  "reqwest",
@@ -3890,12 +3910,14 @@ dependencies = [
  "sevenz-rust",
  "sevenz-rust2",
  "sha2 0.10.9",
+ "syntect",
  "tar",
  "tempfile",
  "thiserror 2.0.19",
  "tiny-skia 0.11.4",
  "unicode-normalization",
  "unrar",
+ "url",
  "usvg",
  "walkdir",
  "webp",
@@ -4508,6 +4530,28 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "onig"
+version = "6.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc3cbf698f9438986c11a880c90a6d04b9de27575afd28bbf45b154b6c709e2"
+dependencies = [
+ "bitflags 2.13.1",
+ "libc",
+ "once_cell",
+ "onig_sys",
+]
+
+[[package]]
+name = "onig_sys"
+version = "69.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
 
 [[package]]
 name = "oorandom"
@@ -6213,6 +6257,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
+]
+
+[[package]]
+name = "syntect"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
+dependencies = [
+ "bincode",
+ "flate2",
+ "fnv",
+ "once_cell",
+ "onig",
+ "regex-syntax",
+ "serde",
+ "serde_derive",
+ "thiserror 2.0.19",
+ "walkdir",
 ]
 
 [[package]]

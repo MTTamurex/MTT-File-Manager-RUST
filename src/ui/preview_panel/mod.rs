@@ -1,8 +1,16 @@
 pub mod actions;
+mod background;
+mod content_preview;
 mod drive_details;
 pub mod fallback_renderer;
 pub mod file_info_table;
 pub mod image_preview;
+pub(crate) mod markdown_preview;
+pub(crate) mod markdown_safety;
+mod pdf_preview;
+mod svg_preview;
+mod text_preview;
+pub(crate) mod text_syntax;
 pub mod utils;
 pub mod video_preview;
 
@@ -126,84 +134,87 @@ pub fn render_preview_panel(
         return None;
     }
 
-    ui.vertical_centered(|ui| {
-        ui.add_space(20.0);
+    let has_content_preview = content_preview::render(ui, file, svg_manager);
+    if !has_content_preview {
+        ui.vertical_centered(|ui| {
+            ui.add_space(20.0);
 
-        // PERFORMANCE: Use is_media() method to avoid registry lookups
-        let is_media = file.is_media();
+            // PERFORMANCE: Use is_media() method to avoid registry lookups
+            let is_media = file.is_media();
 
-        let texture = if is_failed || !is_media {
-            None
-        } else if let Some(tex) = selected_thumbnail {
-            Some(tex.clone())
-        } else {
-            texture_cache_peek
-        };
-
-        if let Some(gif_player) = selected_gif {
-            // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
-            render_gif_preview(ui, file, gif_player, texture.as_ref(), svg_manager);
-        } else if let Some(preview) = media_preview {
-            if is_playable_media {
-                // VIDEO PLAYER LOGIC (MPV)
-                if let Some(act) = render_video_preview(
-                    ui,
-                    file,
-                    preview,
-                    svg_manager,
-                    frame,
-                    is_owner,
-                    texture.as_ref(),
-                ) {
-                    action = Some(act);
-                }
+            let texture = if is_failed || !is_media {
+                None
+            } else if let Some(tex) = selected_thumbnail {
+                Some(tex.clone())
             } else {
-                // === CURRENT FILE IS NOT A VIDEO (but media_preview exists for another file) ===
-                // Show the image thumbnail, NOT the video player
-                if let Some(tex) = &texture {
-                    if let Some(act) = render_texture_with_overlay(ui, file, tex, svg_manager) {
-                        action = Some(act);
-                    }
-                } else {
-                    // Fallback for non-video items when video is present elsewhere
-                    if let Some(act) = render_fallback(
+                texture_cache_peek
+            };
+
+            if let Some(gif_player) = selected_gif {
+                // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
+                render_gif_preview(ui, file, gif_player, texture.as_ref(), svg_manager);
+            } else if let Some(preview) = media_preview {
+                if is_playable_media {
+                    // VIDEO PLAYER LOGIC (MPV)
+                    if let Some(act) = render_video_preview(
                         ui,
                         file,
-                        is_recycle_bin_view,
-                        item_icon_loader,
+                        preview,
                         svg_manager,
-                        folder_preview_peek,
-                        is_folder_preview_loading,
-                        tag_color,
+                        frame,
+                        is_owner,
+                        texture.as_ref(),
                     ) {
                         action = Some(act);
                     }
+                } else {
+                    // === CURRENT FILE IS NOT A VIDEO (but media_preview exists for another file) ===
+                    // Show the image thumbnail, NOT the video player
+                    if let Some(tex) = &texture {
+                        if let Some(act) = render_texture_with_overlay(ui, file, tex, svg_manager) {
+                            action = Some(act);
+                        }
+                    } else {
+                        // Fallback for non-video items when video is present elsewhere
+                        if let Some(act) = render_fallback(
+                            ui,
+                            file,
+                            is_recycle_bin_view,
+                            item_icon_loader,
+                            svg_manager,
+                            folder_preview_peek,
+                            is_folder_preview_loading,
+                            tag_color,
+                        ) {
+                            action = Some(act);
+                        }
+                    }
                 }
-            }
-        } else if is_playable_media {
-            // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
-            if let Some(act) = render_media_launcher(ui, file, svg_manager, texture.as_ref()) {
+            } else if is_playable_media {
+                // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
+                if let Some(act) = render_media_launcher(ui, file, svg_manager, texture.as_ref()) {
+                    action = Some(act);
+                }
+            } else if let Some(tex) = &texture {
+                // Fallback: Static Thumbnail (No MediaPreview state)
+                if let Some(act) = render_texture_with_overlay(ui, file, tex, svg_manager) {
+                    action = Some(act);
+                }
+            } else if let Some(act) = render_fallback(
+                ui,
+                file,
+                is_recycle_bin_view,
+                item_icon_loader,
+                svg_manager,
+                folder_preview_peek,
+                is_folder_preview_loading,
+                tag_color,
+            ) {
                 action = Some(act);
             }
-        } else if let Some(tex) = &texture {
-            // Fallback: Static Thumbnail (No MediaPreview state)
-            if let Some(act) = render_texture_with_overlay(ui, file, tex, svg_manager) {
-                action = Some(act);
-            }
-        } else if let Some(act) = render_fallback(
-            ui,
-            file,
-            is_recycle_bin_view,
-            item_icon_loader,
-            svg_manager,
-            folder_preview_peek,
-            is_folder_preview_loading,
-            tag_color,
-        ) {
-            action = Some(act);
-        }
-        ui.add_space(20.0);
-    });
+            ui.add_space(20.0);
+        });
+    }
 
     // Detail Table
     if let Some(act) = render_file_info_table(

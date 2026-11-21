@@ -7,6 +7,25 @@ repository.
 Source repository:
 https://github.com/MTTamurex/MTT-File-Manager-RUST
 
+Contribution acknowledgment:
+Selected enhancements were inspired by and adapted after reviewing Lusp's
+work in the o-yale-o fork of this project:
+https://github.com/o-yale-o/MTT-File-Manager-RUST
+
+Enhancements recorded in local commit 89eb75c8:
+- Saved tab/folder groups in quick access (fork commit 438c546).
+- Event-driven automatic sidebar tree expansion (438c546, 50bf327).
+- Startup font fallback (be6dbdf).
+- Rename interactions in Miller's Columns view (dbe3e067).
+- Combined Windows Shell properties for multiple selected items (5a52cae6).
+
+Additional enhancements developed with reference to the fork:
+- Document, text, and SVG previews in the details panel.
+- Markdown rendering, text syntax highlighting, and encoding detection.
+
+These are local implementations and adaptations with additional fixes and
+tests; this acknowledgment does not imply co-authorship of all local changes.
+
 This repository also contains third-party components and assets that remain
 under their own licenses. See THIRD_PARTY_NOTICES.md for details.
 

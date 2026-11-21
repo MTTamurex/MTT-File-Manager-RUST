@@ -117,6 +117,10 @@ pub fn render_texture_with_overlay(
     None
 }
 
+pub(super) fn render_centered_preview(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    ui.vertical_centered(add_contents);
+}
+
 pub fn render_gif_preview(
     ui: &mut egui::Ui,
     file: &crate::domain::file_entry::FileEntry,
@@ -159,5 +163,34 @@ pub fn render_gif_preview(
     } else {
         let reserve = egui::vec2((ui.available_width() - 16.0).max(0.0), PREVIEW_MAX_HEIGHT);
         ui.allocate_response(reserve, egui::Sense::hover());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_preview_layout_centers_media_in_the_available_width() {
+        let context = egui::Context::default();
+        let mut media_rect = None;
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0));
+        let _ = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(viewport),
+                ..Default::default()
+            },
+            |ui| {
+                render_centered_preview(ui, |ui| {
+                    media_rect = Some(
+                        ui.allocate_response(egui::vec2(80.0, 40.0), egui::Sense::hover())
+                            .rect,
+                    );
+                });
+            },
+        );
+
+        let media_rect = media_rect.expect("centered preview should allocate media");
+        assert!((media_rect.center().x - viewport.center().x).abs() < 0.1);
     }
 }

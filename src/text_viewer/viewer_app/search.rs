@@ -444,11 +444,20 @@ impl TextViewerApp {
             .search
             .occurrences
             .lower_bound(line_start + line.len() as u32);
+        let syntax_job = self.syntax_job_for_line(line_index);
         let label = if first == last {
-            egui::Label::new(egui::RichText::new(line).monospace().size(self.font_size))
-                .selectable(true)
+            if let Some(mut job) = syntax_job {
+                crate::ui::preview_panel::text_syntax::set_layout_job_font_size(
+                    &mut job,
+                    self.font_size,
+                );
+                egui::Label::new(job).selectable(true)
+            } else {
+                egui::Label::new(egui::RichText::new(line).monospace().size(self.font_size))
+                    .selectable(true)
+            }
         } else {
-            egui::Label::new(highlighted_line_job(
+            let mut job = highlighted_line_job(
                 LineMatchSearch {
                     line,
                     line_start,
@@ -459,8 +468,11 @@ impl TextViewerApp {
                 },
                 self.font_size,
                 ui.visuals().text_color(),
-            ))
-            .selectable(true)
+            );
+            if let Some(syntax_job) = syntax_job {
+                crate::ui::preview_panel::text_syntax::apply_syntax_colors(&mut job, &syntax_job);
+            }
+            egui::Label::new(job).selectable(true)
         };
         if self.word_wrap {
             ui.add(label.wrap());
@@ -714,6 +726,55 @@ mod tests {
             job.sections[2].format.background,
             egui::Color32::from_rgba_unmultiplied(255, 190, 40, 72)
         );
+    }
+
+    #[test]
+    fn syntax_colors_and_search_backgrounds_are_composed() {
+        let line = "let needle = 42;";
+        let occurrences = {
+            let mut occurrences = OccurrenceIndex::default();
+            occurrences.push(4);
+            occurrences
+        };
+        let query = "needle".chars().collect::<Vec<_>>();
+        let syntax_job = crate::ui::preview_panel::text_syntax::build_highlight_job(
+            std::path::Path::new("source.rs"),
+            line,
+            true,
+        )
+        .unwrap();
+        let syntax_line =
+            crate::ui::preview_panel::text_syntax::slice_layout_job(&syntax_job, 0..line.len())
+                .unwrap();
+        let mut job = highlighted_line_job(
+            LineMatchSearch {
+                line,
+                line_start: 0,
+                occurrences: &occurrences,
+                query: &query,
+                match_range: 0..1,
+                current: 0,
+            },
+            14.0,
+            egui::Color32::WHITE,
+        );
+        crate::ui::preview_panel::text_syntax::apply_syntax_colors(&mut job, &syntax_line);
+
+        assert_eq!(job.text, line);
+        assert!(job.sections.iter().any(|section| {
+            section.format.background == egui::Color32::from_rgba_unmultiplied(255, 190, 40, 72)
+        }));
+        assert!(job
+            .sections
+            .iter()
+            .any(|section| { section.byte_range.start.0 <= 4 && section.byte_range.end.0 >= 10 }));
+        let mut colors = Vec::new();
+        for section in &job.sections {
+            if !colors.contains(&section.format.color) {
+                colors.push(section.format.color);
+            }
+        }
+        assert!(colors.len() > 1);
     }
 
     #[test]

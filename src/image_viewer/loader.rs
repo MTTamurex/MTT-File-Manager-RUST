@@ -556,7 +556,15 @@ const SVG_MAX_RENDER_SIDE: u32 = 4096;
 
 fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFrame> {
     let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(bytes, &options)
+    decode_svg_with_options(bytes, max_side, &options)
+}
+
+fn decode_svg_with_options(
+    bytes: &[u8],
+    max_side: Option<u32>,
+    options: &usvg::Options<'_>,
+) -> io::Result<DecodedFrame> {
+    let tree = usvg::Tree::from_data(bytes, options)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
     let svg_size = tree.size();
@@ -591,6 +599,14 @@ fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFr
         original_height: render_height,
         rgba: unpremultiply_rgba(pixmap.data()),
     })
+}
+
+pub(crate) fn decode_svg_preview_bytes(
+    bytes: &[u8],
+    max_side: u32,
+    options: &usvg::Options<'_>,
+) -> io::Result<DecodedFrame> {
+    decode_svg_with_options(bytes, Some(max_side), options)
 }
 
 fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {

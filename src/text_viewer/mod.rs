@@ -1,4 +1,4 @@
-//! Native text-file viewer — renders plain text with monospace font.
+//! Native file viewer — renders plain text with monospace font and Markdown as formatted content.
 //!
 //! Spawns a dedicated process (same executable with `--text-viewer` flag)
 //! so the viewer is fully independent from the main file-manager window.
@@ -8,12 +8,13 @@
 //! - Path validation: blocks UNC paths, null bytes, path traversal (`..`),
 //!   and non-text extensions before any file I/O.
 //! - File size limit: rejects files larger than [`MAX_TEXT_FILE_SIZE`].
-//! - Binary detection: rejects files with too many null bytes.
+//! - Binary detection: rejects embedded null bytes unless they belong to recognized UTF-16 text.
 
 use std::path::{Path, PathBuf};
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
+pub(crate) mod encoding;
 mod viewer_app;
 
 /// Maximum text file size accepted by the viewer (25 MB).
@@ -92,6 +93,8 @@ const TEXT_EXTENSIONS: &[&str] = &[
     // Documentation
     "md",
     "markdown",
+    "mdown",
+    "mkd",
     "rst",
     "tex",
     "adoc",
@@ -102,6 +105,14 @@ const TEXT_EXTENSIONS: &[&str] = &[
 pub fn is_text_extension(ext: &str) -> bool {
     let lower = ext.to_ascii_lowercase();
     TEXT_EXTENSIONS.iter().any(|&e| e == lower)
+}
+
+pub(crate) fn is_text_path(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("");
+    is_text_extension(extension) || crate::ui::preview_panel::markdown_preview::is_markdown(path)
 }
 
 // ── Path validation ───────────────────────────────────────────────────────────
@@ -138,7 +149,7 @@ fn validate_text_path(path: &Path) -> Result<(), String> {
 
     // 4. Extension check
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !is_text_extension(ext) {
+    if !is_text_path(path) {
         return Err(rust_i18n::t!("textviewer.invalid_extension", ext = ext).to_string());
     }
 
@@ -296,6 +307,14 @@ fn show_error_window(message: &str) -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_paths_are_openable_by_the_text_viewer() {
+        assert!(is_text_path(Path::new("guide.mdown")));
+        assert!(is_text_path(Path::new("guide.MKD")));
+        assert!(is_text_path(Path::new("README")));
+        assert!(!is_text_path(Path::new("picture.png")));
+    }
 
     #[test]
     fn text_viewer_uses_document_viewer_line_scroll_speed() {
