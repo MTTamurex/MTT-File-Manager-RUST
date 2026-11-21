@@ -14,6 +14,7 @@ mod incremental;
 mod persistence;
 mod ready;
 mod size_refresh;
+mod startup_catch_up;
 mod volume_io;
 
 pub(crate) fn index_volume(
@@ -83,27 +84,17 @@ pub(crate) fn index_volume(
             if persistence::should_prefer_sqlite_over_binary(
                 &sqlite_state,
                 &bin_state,
-                journal_info.journal_id,
+                &journal_info,
             ) =>
         {
             eprintln!(
-                "[USN] {}:\\ Discarding stale binary snapshot in favor of fresher SQLite metadata (bin_journal={}, bin_usn={}, db_journal={}, db_usn={})",
+                "[USN] {}:\\ Binary checkpoint cannot be replayed; using SQLite fallback (bin_journal={}, bin_usn={}, db_journal={}, db_usn={})",
                 drive_letter,
                 bin_state.journal_id,
                 bin_state.last_usn,
                 sqlite_state.journal_id,
                 sqlite_state.last_usn,
             );
-            if let Err(e) = std::fs::remove_file(crate::index_db::binary::index_path(drive_letter))
-            {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!(
-                        "[USN] {}:\\ Failed to remove stale binary snapshot: {}",
-                        drive_letter,
-                        crate::redact_paths(&e.to_string())
-                    );
-                }
-            }
             drop(bin_index);
             (Some(sqlite_state), false)
         }
@@ -231,11 +222,18 @@ pub(crate) fn index_volume(
 
                     // Catch up from last USN.
                     match volume_io::with_volume(drive_letter, &shutdown, |volume_handle| {
-                        usn_journal::read_usn_changes(
-                            volume_handle,
-                            &journal_info,
-                            index.last_usn,
+                        startup_catch_up::catch_up(
                             &mut index,
+                            journal_info.next_usn,
+                            |last_usn, index| {
+                                usn_journal::read_usn_changes(
+                                    volume_handle,
+                                    &journal_info,
+                                    last_usn,
+                                    index,
+                                )
+                            },
+                            || shutdown.is_stopped(),
                         )
                     }) {
                         Ok(new_usn) => {

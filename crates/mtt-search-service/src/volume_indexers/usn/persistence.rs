@@ -194,12 +194,12 @@ pub(super) fn flush_binary_snapshot_if_dirty(
 pub(super) fn should_prefer_sqlite_over_binary(
     sqlite_state: &index_db::PersistedVolumeState,
     binary_state: &index_db::PersistedVolumeState,
-    current_journal_id: u64,
+    journal: &crate::usn_journal::UsnJournalInfo,
 ) -> bool {
     prefer_sqlite_with_mode(
         sqlite_state,
         binary_state,
-        current_journal_id,
+        journal,
         crate::index_db::skip_sqlite_data_persistence(),
     )
 }
@@ -207,16 +207,21 @@ pub(super) fn should_prefer_sqlite_over_binary(
 fn prefer_sqlite_with_mode(
     sqlite_state: &index_db::PersistedVolumeState,
     binary_state: &index_db::PersistedVolumeState,
-    current_journal_id: u64,
+    journal: &crate::usn_journal::UsnJournalInfo,
     skip_sqlite_data: bool,
 ) -> bool {
-    let sqlite_matches_current = sqlite_state.journal_id == current_journal_id;
-    let binary_matches_current = binary_state.journal_id == current_journal_id;
-    let sqlite_is_fresher_same_journal = !skip_sqlite_data
-        && sqlite_state.journal_id == binary_state.journal_id
-        && sqlite_state.last_usn > binary_state.last_usn;
-
-    sqlite_is_fresher_same_journal || (sqlite_matches_current && !binary_matches_current)
+    // SQLite persists paths/checkpoints but not file metrics. Preferring it
+    // merely because its cursor is newer discards a complete binary cache and
+    // forces a volume-wide size pass. Replay retained journal entries instead.
+    let can_replay = |state: &index_db::PersistedVolumeState| {
+        state.journal_id == journal.journal_id
+            && state.last_usn >= journal.first_usn
+            && state.last_usn <= journal.next_usn
+            && state.files_indexed > 0
+            && state.has_hardlink_parent_data
+            && state.has_reparse_point_data
+    };
+    !skip_sqlite_data && !can_replay(binary_state) && can_replay(sqlite_state)
 }
 
 #[cfg(test)]

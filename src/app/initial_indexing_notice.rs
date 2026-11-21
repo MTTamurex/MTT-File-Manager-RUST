@@ -1,4 +1,4 @@
-//! Tracks the one-time initial-indexing notice for an installer generation.
+//! Shows the initial-indexing notice only after observing a real volume scan.
 
 use mtt_search_protocol::VolumeStatus;
 
@@ -7,11 +7,13 @@ pub(crate) enum InitialIndexingNoticeEvent {
     None,
     ProgressChanged,
     Completed,
+    CacheReused,
 }
 
 pub(crate) struct InitialIndexingNotice {
     installation_generation: Option<String>,
     last_total_indexed: Option<u64>,
+    observed_full_scan: bool,
     completed: bool,
     completion_persistence_finished: bool,
 }
@@ -21,6 +23,7 @@ impl InitialIndexingNotice {
         Self {
             installation_generation,
             last_total_indexed: None,
+            observed_full_scan: false,
             completed: false,
             completion_persistence_finished: false,
         }
@@ -31,7 +34,7 @@ impl InitialIndexingNotice {
     }
 
     pub(crate) fn completion_generation(&self) -> Option<&str> {
-        (!self.completion_persistence_finished)
+        (self.completed && !self.completion_persistence_finished)
             .then_some(())
             .and(self.installation_generation.as_deref())
     }
@@ -46,7 +49,20 @@ impl InitialIndexingNotice {
         total_indexed: u64,
         volumes: &[VolumeStatus],
     ) -> InitialIndexingNoticeEvent {
-        if !self.is_tracking() {
+        if !self.is_tracking() || !available {
+            return InitialIndexingNoticeEvent::None;
+        }
+
+        self.observed_full_scan |= volumes.iter().any(|volume| {
+            volume.state == "scanning"
+                && matches!(volume.phase.as_str(), "scanning_mft" | "filesystem_scan")
+        });
+
+        if !self.observed_full_scan {
+            if initial_indexing_complete(available, volumes) {
+                self.completed = true;
+                return InitialIndexingNoticeEvent::CacheReused;
+            }
             return InitialIndexingNoticeEvent::None;
         }
 
@@ -85,7 +101,11 @@ mod tests {
             drive_letter: 'C',
             state: state.to_string(),
             files_indexed: 10,
-            phase: state.to_string(),
+            phase: if state == "scanning" {
+                "scanning_mft".to_string()
+            } else {
+                state.to_string()
+            },
             phase_progress: None,
             phase_total: None,
             sizes_loading,
@@ -113,7 +133,7 @@ mod tests {
 
         assert_eq!(
             notice.observe_status(true, 0, &[]),
-            InitialIndexingNoticeEvent::ProgressChanged
+            InitialIndexingNoticeEvent::None
         );
         assert!(notice.is_tracking());
     }
@@ -135,5 +155,78 @@ mod tests {
             notice.observe_status(true, 2_000_000, &[volume("ready", false)]),
             InitialIndexingNoticeEvent::Completed
         );
+    }
+
+    #[test]
+    fn reinstall_with_existing_cache_never_reports_initial_indexing() {
+        let mut notice = InitialIndexingNotice::new(Some("new-generation".to_string()));
+        for (phase, count) in [
+            ("starting", 0),
+            ("loading_cache", 1),
+            ("loading_cache", 10),
+            ("catching_up", 11),
+            ("loading_sizes", 11),
+        ] {
+            let mut status = volume("scanning", false);
+            status.phase = phase.to_string();
+            assert_eq!(
+                notice.observe_status(true, count, &[status]),
+                InitialIndexingNoticeEvent::None
+            );
+            assert!(notice.completion_generation().is_none());
+        }
+        assert_eq!(
+            notice.observe_status(true, 11, &[volume("ready", false)]),
+            InitialIndexingNoticeEvent::CacheReused
+        );
+        assert!(!notice.is_tracking());
+        assert_eq!(notice.completion_generation(), Some("new-generation"));
+        notice.mark_completion_persistence_finished();
+        assert!(notice.completion_generation().is_none());
+    }
+
+    #[test]
+    fn already_ready_service_completes_silently_on_first_status() {
+        let mut notice = InitialIndexingNotice::new(Some("generation".to_string()));
+        assert_eq!(
+            notice.observe_status(true, 10, &[volume("ready", false)]),
+            InitialIndexingNoticeEvent::CacheReused
+        );
+        assert_eq!(
+            notice.observe_status(true, 10, &[volume("ready", false)]),
+            InitialIndexingNoticeEvent::None
+        );
+    }
+
+    #[test]
+    fn fallback_filesystem_scan_is_still_reported() {
+        let mut notice = InitialIndexingNotice::new(Some("generation".to_string()));
+        let mut status = volume("scanning", false);
+        status.phase = "filesystem_scan".to_string();
+        assert_eq!(
+            notice.observe_status(true, 10, &[status]),
+            InitialIndexingNoticeEvent::ProgressChanged
+        );
+    }
+
+    #[test]
+    fn progress_is_not_persisted_as_completion() {
+        let mut notice = InitialIndexingNotice::new(Some("generation".to_string()));
+        assert!(notice.completion_generation().is_none());
+        notice.observe_status(true, 10, &[volume("scanning", false)]);
+        assert!(notice.completion_generation().is_none());
+        notice.observe_status(true, 10, &[volume("ready", false)]);
+        assert_eq!(notice.completion_generation(), Some("generation"));
+    }
+
+    #[test]
+    fn unavailable_service_cannot_trigger_a_notice_from_stale_status() {
+        let mut notice = InitialIndexingNotice::new(Some("generation".to_string()));
+        assert_eq!(
+            notice.observe_status(false, 10, &[volume("scanning", false)]),
+            InitialIndexingNoticeEvent::None
+        );
+        assert!(notice.is_tracking());
+        assert!(notice.completion_generation().is_none());
     }
 }

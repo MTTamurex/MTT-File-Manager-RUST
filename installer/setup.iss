@@ -207,7 +207,7 @@ begin
     ExpandConstant('{autopf}\{#MyAppName}')) = 0;
 end;
 
-function StartSearchServiceAfterFailedCleanup: Boolean;
+function StartSearchServiceAfterFailedStop: Boolean;
 var
   ResultCode: Integer;
   Attempts: Integer;
@@ -271,6 +271,7 @@ end;
 // Before Inno Setup copies any files, stop the running service so that:
 //   1. The .exe is not locked and can be replaced.
 //   2. The service cannot be killed mid-write leaving .bin.tmp on disk.
+// The search index cache is retained across upgrades.
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ServiceWasRunning: Boolean;
@@ -283,17 +284,8 @@ begin
     if not StopSearchServiceIfRunning(ServiceWasRunning) then
     begin
       if ServiceWasRunning then
-        StartSearchServiceAfterFailedCleanup;
+        StartSearchServiceAfterFailedStop;
       RaiseException(CustomMessage('SearchServiceStopTimeout'));
-    end;
-
-    // Remove cache on upgrades and any cache pre-created before a fresh
-    // install. Only this regenerable ProgramData directory is affected.
-    if not DeleteProgramDataCache then
-    begin
-      if ServiceWasRunning and not StartSearchServiceAfterFailedCleanup then
-        Log('Failed to restart the previous search service after cache cleanup failure.');
-      RaiseException(CustomMessage('CacheCleanupError'));
     end;
   end;
 
@@ -338,28 +330,23 @@ english.InstallSearchService=Installing search service...
 english.StartSearchService=Starting search service...
 english.SecureInstallDirectoryError=MTT File Manager must be installed in its protected Program Files directory.
 english.SearchServiceStopTimeout=The search service did not stop within 30 seconds. Setup was stopped before updating any files.
-english.CacheCleanupError=Unable to securely remove the previous search index cache. Setup was stopped before installing the update.
 
 portuguese.InstallSearchService=Instalando o serviço de busca...
 portuguese.StartSearchService=Iniciando o serviço de busca...
 portuguese.SecureInstallDirectoryError=O MTT File Manager deve ser instalado na pasta protegida Arquivos de Programas.
 portuguese.SearchServiceStopTimeout=O serviço de busca não foi interrompido em 30 segundos. A instalação foi interrompida antes da atualização dos arquivos.
-portuguese.CacheCleanupError=Não foi possível remover com segurança o cache anterior do índice de busca. A instalação foi interrompida antes da atualização.
 
 chinese.InstallSearchService=正在安装搜索服务...
 chinese.StartSearchService=正在启动搜索服务...
 chinese.SecureInstallDirectoryError=MTT File Manager 必须安装在受保护的“程序文件”目录中。
 chinese.SearchServiceStopTimeout=搜索服务未能在 30 秒内停止。安装程序已停止，尚未更新任何文件。
-chinese.CacheCleanupError=无法安全删除之前的搜索索引缓存。安装程序已停止，尚未安装更新。
 
 russian.InstallSearchService=Установка службы поиска...
 russian.StartSearchService=Запуск службы поиска...
 russian.SecureInstallDirectoryError=MTT File Manager необходимо установить в защищённую папку Program Files.
 russian.SearchServiceStopTimeout=Служба поиска не остановилась за 30 секунд. Установка прервана до обновления файлов.
-russian.CacheCleanupError=Не удалось безопасно удалить предыдущий кэш индекса поиска. Установка прервана до установки обновления.
 
 greek.InstallSearchService=Εγκατάσταση της υπηρεσίας αναζήτησης...
 greek.StartSearchService=Εκκίνηση της υπηρεσίας αναζήτησης...
 greek.SecureInstallDirectoryError=Το MTT File Manager πρέπει να εγκατασταθεί στον προστατευμένο κατάλογο Program Files.
 greek.SearchServiceStopTimeout=Η υπηρεσία αναζήτησης δεν σταμάτησε εντός 30 δευτερολέπτων. Η εγκατάσταση διακόπηκε πριν ενημερωθούν αρχεία.
-greek.CacheCleanupError=Δεν ήταν δυνατή η ασφαλής αφαίρεση της προηγούμενης cache του ευρετηρίου αναζήτησης. Η εγκατάσταση διακόπηκε πριν από την εγκατάσταση της ενημέρωσης.

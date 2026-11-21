@@ -101,10 +101,8 @@ impl ImageViewerApp {
             return;
         }
 
-        self.notifications.persistent_info(
-            INITIAL_INDEXING_NOTIFICATION_KEY,
-            rust_i18n::t!("notifications.initial_indexing_preparing").to_string(),
-        );
+        // Wait for the service phase: a new installer generation does not
+        // imply that its existing index needs to be rebuilt.
         self.sync_global_search_status_tracking();
         self.request_global_search_status_refresh();
     }
@@ -136,6 +134,9 @@ impl ImageViewerApp {
                     INITIAL_INDEXING_NOTIFICATION_KEY,
                     rust_i18n::t!("notifications.initial_indexing_completed").to_string(),
                 );
+                self.sync_global_search_status_tracking();
+            }
+            InitialIndexingNoticeEvent::CacheReused => {
                 self.sync_global_search_status_tracking();
             }
         }

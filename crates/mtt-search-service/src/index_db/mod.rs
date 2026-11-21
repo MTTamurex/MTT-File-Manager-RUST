@@ -192,9 +192,10 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     Ok(data_dir().join("search_index.db"))
 }
 
-/// Invalidate all regenerable index artifacts before installing/updating the
-/// service. This also protects manual installs from files pre-created before
-/// the directory owner and DACL were hardened.
+/// Invalidate regenerable index artifacts before a fresh service installation.
+/// Existing service installations keep their cache across upgrades; this reset
+/// protects a fresh install from files pre-created before the directory owner
+/// and DACL were hardened.
 pub fn reset_storage_for_install() -> Result<(), String> {
     use std::os::windows::fs::MetadataExt;
 

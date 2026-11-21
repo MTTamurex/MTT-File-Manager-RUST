@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use windows::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
 use windows_service::service::{
     ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
     ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
@@ -18,8 +19,10 @@ const SERVICE_DISPLAY_NAME: &str = "MTT File Manager Search Indexer";
 
 /// Install the service into the Windows Service Control Manager.
 pub fn install_service() {
-    let manager =
-        ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CREATE_SERVICE);
+    let manager = ServiceManager::local_computer(
+        None::<&str>,
+        ServiceManagerAccess::CREATE_SERVICE | ServiceManagerAccess::CONNECT,
+    );
 
     let manager = match manager {
         Ok(m) => m,
@@ -49,12 +52,19 @@ pub fn install_service() {
         );
         return;
     }
-    if let Err(error) = crate::index_db::reset_storage_for_install() {
-        eprintln!(
-            "[SERVICE] Refusing to install without securely resetting the index cache: {}",
-            error
-        );
-        return;
+    match prepare_install(
+        manager.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS),
+        crate::index_db::reset_storage_for_install,
+    ) {
+        Ok(Some(_service)) => {
+            eprintln!("[SERVICE] Existing service found; preserving the search index cache.");
+            return;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("[SERVICE] Cannot prepare service installation: {}", error);
+            return;
+        }
     }
 
     let service_info = ServiceInfo {
@@ -87,6 +97,28 @@ pub fn install_service() {
         }
     }
 }
+
+/// Keep the existing registration and cache together. Lookup failures must not
+/// be mistaken for a fresh installation, which would erase a valid index.
+fn prepare_install<T>(
+    existing_service: windows_service::Result<T>,
+    reset_storage: impl FnOnce() -> Result<(), String>,
+) -> Result<Option<T>, String> {
+    match existing_service {
+        Ok(service) => Ok(Some(service)),
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST.0 as i32) =>
+        {
+            reset_storage()?;
+            Ok(None)
+        }
+        Err(error) => Err(format!("Service lookup failed: {error:?}")),
+    }
+}
+
+#[cfg(test)]
+#[path = "service_control/install_tests.rs"]
+mod install_tests;
 
 fn validate_service_install_path(exe_path: &Path) -> Result<(), String> {
     if env_flag_enabled("MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL") {

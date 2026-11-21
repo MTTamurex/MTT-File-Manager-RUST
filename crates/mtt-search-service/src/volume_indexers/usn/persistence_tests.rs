@@ -186,7 +186,7 @@ fn clean_binary_needs_no_io_and_unloaded_sizes_block_dirty_flush() {
 }
 
 #[test]
-fn sqlite_preference_respects_journal_freshness_and_binary_only_policy() {
+fn complete_binary_is_reused_unless_its_checkpoint_cannot_be_replayed() {
     let state = || PersistedVolumeState {
         drive_letter: 'R',
         volume_id: "volume-id".into(),
@@ -197,14 +197,26 @@ fn sqlite_preference_respects_journal_freshness_and_binary_only_policy() {
         has_hardlink_parent_data: true,
         has_reparse_point_data: true,
     };
+    let journal = crate::usn_journal::UsnJournalInfo {
+        journal_id: 7,
+        first_usn: 10,
+        next_usn: 100,
+    };
     for (sqlite_journal, sqlite_usn, binary_journal, binary_usn, skip, expected) in [
-        (7, 50, 7, 42, false, true),
+        (7, 50, 7, 42, false, false),
         (7, 50, 7, 42, true, false),
         (7, 42, 7, 50, false, false),
         (7, 42, 7, 42, false, false),
         (7, 10, 6, 100, false, true),
-        (7, 10, 6, 100, true, true),
+        (7, 10, 6, 100, true, false),
         (6, 100, 7, 10, false, false),
+        (7, 50, 7, 9, false, true),
+        (7, 50, 7, 9, true, false),
+        (7, 50, 7, 101, false, true),
+        (7, 9, 7, 8, false, false),
+        (7, 101, 7, 8, false, false),
+        (7, 50, 7, 10, false, false),
+        (7, 50, 7, 100, false, false),
     ] {
         let sqlite = PersistedVolumeState {
             journal_id: sqlite_journal,
@@ -216,6 +228,29 @@ fn sqlite_preference_respects_journal_freshness_and_binary_only_policy() {
             last_usn: binary_usn,
             ..state()
         };
-        assert_eq!(prefer_sqlite_with_mode(&sqlite, &binary, 7, skip), expected);
+        assert_eq!(
+            prefer_sqlite_with_mode(&sqlite, &binary, &journal, skip),
+            expected,
+            "SQLite ({sqlite_journal}, {sqlite_usn}), binary ({binary_journal}, {binary_usn}), binary-only {skip}",
+        );
+    }
+
+    let sqlite = state();
+    for binary in [
+        PersistedVolumeState {
+            files_indexed: 0,
+            ..state()
+        },
+        PersistedVolumeState {
+            has_hardlink_parent_data: false,
+            ..state()
+        },
+        PersistedVolumeState {
+            has_reparse_point_data: false,
+            ..state()
+        },
+    ] {
+        assert!(prefer_sqlite_with_mode(&sqlite, &binary, &journal, false));
+        assert!(!prefer_sqlite_with_mode(&sqlite, &binary, &journal, true));
     }
 }
