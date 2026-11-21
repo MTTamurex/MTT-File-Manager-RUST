@@ -17,6 +17,9 @@ use crate::volume_indices::{SharedVolumeIndices, VolumeIndexHandle};
 use crate::volume_lifecycle::VolumeStopSignal;
 
 mod cache;
+mod scan_schedule;
+
+use scan_schedule::ScanSchedule;
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -73,7 +76,8 @@ pub(crate) fn index_filesystem_fallback(
         }
     );
 
-    // Fast startup path: reuse persisted snapshot while a fresh scan runs.
+    // Publish the persisted snapshot immediately; reconcile it on the normal
+    // periodic/change-notification schedule instead of rescanning at startup.
     let mut handle: Option<VolumeIndexHandle> = None;
     if let Some(cached_index) = cache::load_cached_index(&db, &volume, persisted_record_estimate) {
         let cached_count = cached_index.records.len();
@@ -82,9 +86,13 @@ pub(crate) fn index_filesystem_fallback(
             return;
         };
         handle = Some(published);
+        // The dispatcher marks a new worker as `starting`. Once the persisted
+        // snapshot is published, clear that provisional state so clients see
+        // the usable cached index as ready while the fallback scan is deferred.
+        indexing_progress.clear(drive_letter);
         crate::memory_trim::request_trim(format!("{}:\\ fallback cache load", drive_letter));
         eprintln!(
-            "[SCAN] {}:\\ Loaded {} cached records for fallback index",
+            "[SCAN] {}:\\ Loaded {} cached records; deferring reconciliation scan",
             drive_letter, cached_count
         );
     }
@@ -99,9 +107,27 @@ pub(crate) fn index_filesystem_fallback(
     let max_interval = max_non_usn_scan_interval(&fs_lower, cadence.periodic_interval);
     let mut current_interval = cadence.periodic_interval;
     let mut prev_record_count: Option<usize> = persisted_record_estimate;
+    let mut scan_schedule = ScanSchedule::new(handle.as_ref());
 
     loop {
         if shutdown.is_stopped() {
+            break;
+        }
+
+        if !scan_schedule.wait_until_due(
+            &mut current_interval,
+            cadence,
+            |interval| {
+                if let Some(monitor) = &change_monitor {
+                    monitor.wait_for_change_or_timeout(&shutdown, interval)
+                } else if wait_for_shutdown_or_timeout(&shutdown, interval) {
+                    NonUsnWaitResult::Shutdown
+                } else {
+                    NonUsnWaitResult::Timeout
+                }
+            },
+            |delay| wait_for_shutdown_or_timeout(&shutdown, delay),
+        ) {
             break;
         }
 
@@ -120,14 +146,21 @@ pub(crate) fn index_filesystem_fallback(
         scanned_index.volume_id = volume_id.clone();
         scanned_index.volume_serial = volume_serial;
         scanned_index.state = file_index::IndexState::Scanning;
-        indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
+        // A refresh keeps the published snapshot available. Do not report it
+        // as the initial creation of an index to clients.
+        let scan_phase = if handle.is_some() {
+            "filesystem_refresh"
+        } else {
+            "filesystem_scan"
+        };
+        indexing_progress.set_scanning(drive_letter, 0, scan_phase);
 
         match fs_walker::scan_volume(drive_letter, &mut scanned_index, &shutdown, |count| {
             indexing_progress.update(
                 drive_letter,
                 "scanning",
                 count,
-                "filesystem_scan",
+                scan_phase,
                 Some(count),
                 None,
             )
@@ -203,7 +236,7 @@ pub(crate) fn index_filesystem_fallback(
                 indexing_progress.set_error(
                     drive_letter,
                     scanned_index.records.len() as u64,
-                    "filesystem_scan",
+                    scan_phase,
                 );
                 eprintln!(
                     "[SCAN] {}:\\ Full scan failed: {}",
@@ -226,27 +259,6 @@ pub(crate) fn index_filesystem_fallback(
             drive_letter
         ));
         drop(_build_permit);
-
-        let wait_result = if let Some(monitor) = &change_monitor {
-            monitor.wait_for_change_or_timeout(&shutdown, current_interval)
-        } else if wait_for_shutdown_or_timeout(&shutdown, current_interval) {
-            NonUsnWaitResult::Shutdown
-        } else {
-            NonUsnWaitResult::Timeout
-        };
-
-        match wait_result {
-            NonUsnWaitResult::Shutdown => break,
-            NonUsnWaitResult::Timeout => {}
-            NonUsnWaitResult::Triggered => {
-                // External change detected — reset backoff to base interval.
-                current_interval = cadence.periodic_interval;
-                // Guardrail against scan thrash on chatty filesystems.
-                if wait_for_shutdown_or_timeout(&shutdown, cadence.min_trigger_gap) {
-                    break;
-                }
-            }
-        }
     }
 
     eprintln!("[SCAN] {}:\\ Fallback indexer stopped", drive_letter);

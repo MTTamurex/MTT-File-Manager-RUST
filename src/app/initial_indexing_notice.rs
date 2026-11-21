@@ -166,6 +166,7 @@ mod tests {
             ("loading_cache", 10),
             ("catching_up", 11),
             ("loading_sizes", 11),
+            ("filesystem_refresh", 12),
         ] {
             let mut status = volume("scanning", false);
             status.phase = phase.to_string();
