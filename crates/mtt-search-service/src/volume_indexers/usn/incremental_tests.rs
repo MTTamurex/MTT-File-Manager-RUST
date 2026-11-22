@@ -166,11 +166,28 @@ fn failed_batch_keeps_checkpoint_and_can_be_replayed_after_partial_apply() {
 #[test]
 fn empty_batch_advances_checkpoint_without_structural_changes() {
     let mut index = index();
+    index.binary_dirty = false;
     let mut cursor = 42;
     apply_incremental_records(&mut index, &[], 50, &mut cursor).unwrap();
     assert_eq!((index.last_usn, cursor), (50, 50));
     assert!(index.pending_additions.is_empty());
     assert!(index.pending_removals.is_empty());
+    assert!(
+        index.binary_dirty,
+        "the saved replay cursor must keep advancing"
+    );
+}
+
+#[test]
+fn unchanged_metrics_still_persist_the_resolution_of_a_saved_retry() {
+    let mut index = index();
+    assert!(index.insert_record(20, "file.txt", 5, false, false));
+    index.binary_dirty = false;
+    index.size_refresh_in_progress = true;
+    super::apply_metrics(&mut index, &[(20, Default::default())], vec![]);
+    assert!(index.binary_dirty);
+    assert!(!index.size_refresh_in_progress);
+    assert!(index.pending_size_refresh.is_empty());
 }
 
 #[test]

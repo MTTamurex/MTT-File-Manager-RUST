@@ -35,6 +35,8 @@ pub(crate) fn index_volume(
         return;
     }
     let startup_operation = crate::memory_trim::begin_active_operation("USN index startup");
+    let startup_time = std::time::Instant::now();
+    crate::startup_trace::event(Some(drive_letter), "startup_begin", &[]);
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
     let filesystem_fallback = filesystem_fallback::FilesystemFallback::new(
         volume,
@@ -78,6 +80,14 @@ pub(crate) fn index_volume(
         "[USN] {}:\\ Journal ID: {}, First USN: {}, Next USN: {}",
         drive_letter, journal_info.journal_id, journal_info.first_usn, journal_info.next_usn
     );
+    crate::startup_trace::event(
+        Some(drive_letter),
+        "journal_range",
+        &[
+            ("first", journal_info.first_usn as u64),
+            ("tail", journal_info.next_usn as u64),
+        ],
+    );
 
     let (cached_state, loaded_from_binary) = match (binary_candidate, sqlite_state) {
         (Some((bin_index, bin_state)), Some(sqlite_state))
@@ -87,6 +97,11 @@ pub(crate) fn index_volume(
                 &journal_info,
             ) =>
         {
+            crate::startup_trace::event(
+                Some(drive_letter),
+                "selected_sqlite_unreplayable_binary",
+                &[],
+            );
             eprintln!(
                 "[USN] {}:\\ Binary checkpoint cannot be replayed; using SQLite fallback (bin_journal={}, bin_usn={}, db_journal={}, db_usn={})",
                 drive_letter,
@@ -99,13 +114,20 @@ pub(crate) fn index_volume(
             (Some(sqlite_state), false)
         }
         (Some((bin_index, bin_state)), _) => {
+            crate::startup_trace::event(Some(drive_letter), "selected_binary", &[]);
             index = bin_index;
             index.volume_id = volume_id.clone();
             index.volume_serial = volume_serial;
             (Some(bin_state), true)
         }
-        (None, Some(sqlite_state)) => (Some(sqlite_state), false),
-        (None, None) => (None, false),
+        (None, Some(sqlite_state)) => {
+            crate::startup_trace::event(Some(drive_letter), "selected_sqlite_no_binary", &[]);
+            (Some(sqlite_state), false)
+        }
+        (None, None) => {
+            crate::startup_trace::event(Some(drive_letter), "no_cache_available", &[]);
+            (None, false)
+        }
     };
 
     let need_full_scan;
@@ -270,6 +292,11 @@ pub(crate) fn index_volume(
                             need_full_scan = false;
                         }
                         Err(e) => {
+                            crate::startup_trace::error(
+                                drive_letter,
+                                "startup_catch_up_failed",
+                                &e,
+                            );
                             indexing_progress.set_error(
                                 drive_letter,
                                 index.records.len() as u64,
@@ -339,6 +366,16 @@ pub(crate) fn index_volume(
     }
 
     drop(startup_operation);
+    crate::startup_trace::event(
+        Some(drive_letter),
+        "startup_publish",
+        &[
+            ("elapsed_ms", startup_time.elapsed().as_millis() as u64),
+            ("sizes_loaded", u64::from(index.sizes_loaded)),
+            ("pending_sizes", index.pending_size_refresh.len() as u64),
+            ("records", index.records.len() as u64),
+        ],
+    );
     ready::publish_and_run(
         drive_letter,
         index,

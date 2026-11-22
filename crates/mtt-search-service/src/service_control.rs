@@ -1,18 +1,16 @@
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use windows::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
 use windows_service::service::{
-    ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
-    ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
+    ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType,
 };
-use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
-use windows_service::service_dispatcher;
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+mod runtime;
+pub use runtime::run_as_service;
 
 const SERVICE_NAME: &str = "MTTFileManagerSearch";
 const SERVICE_DISPLAY_NAME: &str = "MTT File Manager Search Indexer";
@@ -400,60 +398,4 @@ pub fn uninstall_service() {
         Ok(_) => eprintln!("[SERVICE] '{}' uninstalled successfully.", SERVICE_NAME),
         Err(e) => eprintln!("[SERVICE] Failed to delete service: {}", e),
     }
-}
-
-/// Run as a Windows Service (called by SCM dispatcher).
-pub fn run_as_service() -> Result<(), String> {
-    service_dispatcher::start(SERVICE_NAME, service_main)
-        .map_err(|e| format!("Service dispatcher error: {}", e))
-}
-
-windows_service::define_windows_service!(service_main, handle_service_main);
-
-fn handle_service_main(_args: Vec<OsString>) {
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_clone = shutdown.clone();
-
-    let status_handle =
-        service_control_handler::register(SERVICE_NAME, move |control| match control {
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                shutdown_clone.store(true, Ordering::Relaxed);
-                ServiceControlHandlerResult::NoError
-            }
-            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NotImplemented,
-        });
-
-    let status_handle = match status_handle {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("[SERVICE] Failed to register control handler: {}", e);
-            return;
-        }
-    };
-
-    // Report "Running"
-    let _ = status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::Running,
-        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
-        exit_code: ServiceExitCode::Win32(0),
-        checkpoint: 0,
-        wait_hint: Duration::default(),
-        process_id: None,
-    });
-
-    // Run the indexer (blocks until shutdown)
-    crate::run_indexer(shutdown);
-
-    // Report "Stopped"
-    let _ = status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::Stopped,
-        controls_accepted: ServiceControlAccept::empty(),
-        exit_code: ServiceExitCode::Win32(0),
-        checkpoint: 0,
-        wait_hint: Duration::default(),
-        process_id: None,
-    });
 }

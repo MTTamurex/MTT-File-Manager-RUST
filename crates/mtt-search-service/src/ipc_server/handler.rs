@@ -657,6 +657,7 @@ pub(super) fn handle_client_with_verifier(
             let handle = match volume_indices::find_handle(indices, drive_letter) {
                 Some(h) => h,
                 None => {
+                    crate::startup_trace::query_state(drive_letter, 0, "folder_query_no_index");
                     let _ = send_response(
                         pipe,
                         &SearchResponse::Error("Volume not indexed".to_string()),
@@ -668,18 +669,21 @@ pub(super) fn handle_client_with_verifier(
             let (indexed_frn, has_pending_refreshes) = {
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
+                    crate::startup_trace::query_state(drive_letter, 1, "folder_query_volume_not_ready");
                     drop(vol);
                     let _ =
                         send_response(pipe, &SearchResponse::Error("Volume not ready".to_string()));
                     return;
                 }
                 if !vol.sizes_loaded {
+                    crate::startup_trace::query_state(drive_letter, 2, "folder_query_sizes_not_loaded");
                     drop(vol);
                     let _ =
                         send_response(pipe, &SearchResponse::Error("Sizes not loaded".to_string()));
                     return;
                 }
                 if vol.journal_refresh_in_progress {
+                    crate::startup_trace::query_state(drive_letter, 3, "folder_query_journal_pending");
                     drop(vol);
                     let _ = send_response(
                         pipe,
@@ -788,6 +792,7 @@ pub(super) fn handle_client_with_verifier(
 
             match result {
                 Ok((dir_frn, summary)) => {
+                    crate::startup_trace::query_state(drive_letter, 4, "folder_query_succeeded");
                     let (total_size, file_count, folder_count) = repair_suspicious_zero_folder_size(
                         &handle,
                         drive_letter,

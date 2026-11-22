@@ -58,6 +58,7 @@ pub(super) fn spawn_background_size_refresh(
             drive_letter,
         );
         let start = std::time::Instant::now();
+        crate::startup_trace::event(Some(drive_letter), "full_size_pass_started", &[]);
         let files_indexed = bg_handle.read().records.len() as u64;
         let bulk_result = super::volume_io::with_volume(drive_letter, &stop, |bg_volume| {
             crate::mft_reader::read_mft_sizes_bulk(
@@ -127,6 +128,14 @@ pub(super) fn spawn_background_size_refresh(
                     return;
                 }
                 super::persistence::flush_binary_snapshot_if_dirty(&bg_handle, drive_letter);
+                crate::startup_trace::event(
+                    Some(drive_letter),
+                    "full_size_pass_finished",
+                    &[
+                        ("elapsed_ms", start.elapsed().as_millis() as u64),
+                        ("applied", applied),
+                    ],
+                );
             }
             Err(e) => eprintln!(
                 "[MFT-SIZE] {}:\\ Bulk size extraction failed: {}, keeping sizes unloaded",

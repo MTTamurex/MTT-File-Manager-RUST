@@ -5,6 +5,7 @@ mod drive_health;
 mod file_index;
 mod fs_walker;
 mod index_db;
+mod indexer_threads;
 mod indexing_progress;
 mod ipc_authorization;
 mod ipc_server;
@@ -15,6 +16,7 @@ mod path_resolver;
 mod record_store;
 mod security_policy;
 mod service_control;
+mod startup_trace;
 mod usn_journal;
 mod volume_indexers;
 mod volume_indices;
@@ -115,7 +117,7 @@ fn main() {
 
             let _ = ctrlc_handler(shutdown_clone);
 
-            run_indexer(shutdown);
+            run_indexer(shutdown, || {});
         }
         _ => {
             // Normal service dispatch (called by Windows SCM)
@@ -161,7 +163,7 @@ fn ctrlc_handler(shutdown: Arc<AtomicBool>) -> Result<(), String> {
 }
 
 /// Main indexer loop. Shared between console mode and service mode.
-pub fn run_indexer(shutdown: Arc<AtomicBool>) {
+pub fn run_indexer(shutdown: Arc<AtomicBool>, mut report_stopping: impl FnMut()) {
     eprintln!("[SERVICE] mtt-search-service v2 (compact-arena index)");
     eprintln!(
         "[SERVICE] FileRecord size: {} bytes",
@@ -182,6 +184,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         indexing_progress.clone(),
         discovery_wake,
     );
+    let indexer_threads = Arc::new(indexer_threads::IndexerThreads::default());
 
     // Open persistence (needed by both IPC and indexers)
     let db_path = match index_db::get_db_path() {
@@ -195,6 +198,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         }
     };
     eprintln!("[SERVICE] Index database ready: {}", db_path.display());
+    startup_trace::init();
     let db = match index_db::IndexDb::open(&db_path) {
         Ok(db) => Arc::new(db),
         Err(e) => {
@@ -228,7 +232,8 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         let lifecycle = volume_lifecycle.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
-        std::thread::spawn(move || {
+        let workers = indexer_threads.clone();
+        let spawn_result = indexer_threads.spawn("volume-discovery".into(), move || {
             let mut handle_notifications =
                 device_notifications::VolumeHandleNotifications::default();
             let discovered =
@@ -241,6 +246,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                 &indexing_progress,
                 &db,
                 &mut handle_notifications,
+                &workers,
             );
 
             const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
@@ -265,9 +271,13 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                     &indexing_progress,
                     &db,
                     &mut handle_notifications,
+                    &workers,
                 );
             }
         });
+        if let Err(error) = spawn_result {
+            eprintln!("[SERVICE] Cannot start volume discovery: {error}");
+        }
     }
 
     // Start IPC server immediately (blocks until shutdown)
@@ -279,9 +289,15 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         indices.clone(),
         indexing_progress.clone(),
         shutdown.clone(),
-        volume_lifecycle,
+        volume_lifecycle.clone(),
     );
+    shutdown.store(true, Ordering::Release);
+    startup_trace::event(None, "shutdown_draining_threads", &[]);
+    report_stopping();
+    volume_lifecycle.wake_discovery();
     drop(device_notifications);
+    indexer_threads.shutdown(report_stopping);
+    startup_trace::event(None, "shutdown_threads_finished", &[]);
     eprintln!("[SERVICE] Shutting down...");
 }
 
@@ -313,11 +329,17 @@ fn spawn_indexers_for_discovered_volumes(
     indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     handle_notifications: &mut device_notifications::VolumeHandleNotifications,
+    workers: &Arc<indexer_threads::IndexerThreads>,
 ) {
     lifecycle.reconcile_discovered_volumes(&discovered);
     handle_notifications.reconcile(&discovered);
 
     for volume in discovered {
+        startup_trace::event(
+            Some(volume.drive_letter),
+            "discovered_volume",
+            &[("usn_supported", u64::from(volume.usn_supported))],
+        );
         if volume.volume_id.is_empty() {
             continue;
         }
@@ -335,6 +357,7 @@ fn spawn_indexers_for_discovered_volumes(
             indices.clone(),
             indexing_progress.clone(),
             db.clone(),
+            workers,
         );
     }
 }

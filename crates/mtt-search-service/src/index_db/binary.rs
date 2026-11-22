@@ -30,6 +30,10 @@ use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 use crate::record_store::RecordStore;
 
+mod pending_metrics;
+#[cfg(test)]
+mod replacement_tests;
+
 const MAGIC: &[u8; 8] = b"MTTIDX07";
 const LEGACY_V6_MAGIC: &[u8; 8] = b"MTTIDX06";
 const LEGACY_V5_MAGIC: &[u8; 8] = b"MTTIDX05";
@@ -72,7 +76,7 @@ struct Header {
     arena_size: u64,
     hardlink_entry_count: u64,
     reparse_count: u64,
-    /// Bits 0-3: completeness flags; bits 32-63: filesystem serial number.
+    /// Bits 0-4: completeness/retry flags; bits 32-63: filesystem serial number.
     flags: u64,
     /// On-disk compressed arena size in bytes. Equal to arena_size when uncompressed.
     compressed_arena_size: u64,
@@ -345,6 +349,9 @@ fn compact_arena_size(index: &VolumeIndex) -> Result<usize, String> {
 
 /// Save a VolumeIndex to a binary file atomically (write temp + rename).
 pub fn save(index: &VolumeIndex) -> Result<(), String> {
+    if index.size_refresh_in_progress {
+        return Err("Cannot snapshot an in-flight metric refresh".to_string());
+    }
     let path = index_path(index.drive_letter);
     let tmp_path = path.with_extension("bin.tmp");
 
@@ -383,9 +390,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     if index.reparse_data_complete {
         flags |= 2;
     }
-    if index.sizes_loaded {
-        flags |= 4 | SEQUENCE_AWARE_METRICS;
-    }
+    flags |= pending_metrics::flags(index);
     flags |= (index.volume_serial as u64) << 32;
 
     let header = Header {
@@ -422,6 +427,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
             )
         })?;
         let mut compact_rec = *rec;
+        pending_metrics::mark_record(index, frn, &mut compact_rec);
         compact_rec.name_offset = u32::try_from(compact_name_offset)
             .map_err(|_| "Compacted name offset exceeds u32".to_string())?;
         compact_name_offset = compact_name_offset
@@ -914,7 +920,7 @@ fn load_v7(
 }
 
 fn restore_size_state(index: &mut VolumeIndex, flags: u64) {
-    index.sizes_loaded = flags & 4 != 0 && flags & SEQUENCE_AWARE_METRICS != 0;
+    pending_metrics::restore(index, flags);
     // This is not an index reset: existing records, paths, journal cursor and
     // allocation values remain available until the size-only pass completes.
     index.binary_dirty |= flags & 4 != 0 && flags & SEQUENCE_AWARE_METRICS == 0;

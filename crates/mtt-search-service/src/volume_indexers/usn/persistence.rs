@@ -149,9 +149,18 @@ pub(super) fn flush_binary_snapshot_if_dirty(
     {
         let vol = handle.read();
         if !vol.binary_dirty {
+            crate::startup_trace::event(Some(drive_letter), "snapshot_clean", &[]);
             return true;
         }
-        if !vol.sizes_loaded || vol.has_pending_size_refreshes() {
+        if !vol.sizes_loaded || vol.size_refresh_in_progress {
+            crate::startup_trace::event(
+                Some(drive_letter),
+                "snapshot_deferred",
+                &[
+                    ("sizes_loaded", u64::from(vol.sizes_loaded)),
+                    ("in_flight", u64::from(vol.size_refresh_in_progress)),
+                ],
+            );
             return false;
         }
     }
@@ -165,16 +174,30 @@ pub(super) fn flush_binary_snapshot_if_dirty(
         if !vol.sizes_loaded {
             return false;
         }
-        if vol.has_pending_size_refreshes() {
+        if vol.size_refresh_in_progress {
             return false;
         }
 
+        crate::startup_trace::event(
+            Some(drive_letter),
+            "snapshot_save_started",
+            &[
+                ("checkpoint", vol.last_usn as u64),
+                ("pending_sizes", vol.pending_size_refresh.len() as u64),
+            ],
+        );
         match crate::index_db::binary::save_and_remap(&mut vol) {
             Ok(()) => {
+                crate::startup_trace::event(
+                    Some(drive_letter),
+                    "snapshot_save_finished",
+                    &[("checkpoint", vol.last_usn as u64)],
+                );
                 vol.binary_dirty = false;
                 true
             }
             Err(e) => {
+                crate::startup_trace::error(drive_letter, "snapshot_save_failed", &e);
                 eprintln!(
                     "[USN] {}:\\ Binary snapshot flush failed: {}",
                     drive_letter,

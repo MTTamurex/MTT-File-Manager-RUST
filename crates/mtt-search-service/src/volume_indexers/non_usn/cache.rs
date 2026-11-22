@@ -3,7 +3,18 @@ use crate::index_db::IndexDb;
 use crate::volume_indexers::IndexVolume;
 
 pub(super) fn matching_record_estimate(db: &IndexDb, volume: &IndexVolume) -> Option<usize> {
-    db.load_volume_state(volume.drive_letter)
+    let state = db.load_volume_state(volume.drive_letter);
+    crate::startup_trace::event(
+        Some(volume.drive_letter),
+        "fallback_cache_identity",
+        &[
+            ("metadata_exists", u64::from(state.is_some())),
+            ("serial_known", u64::from(volume.volume_serial != 0)),
+            ("serial_matches", u64::from(state.as_ref().is_some_and(|s| s.volume_serial == volume.volume_serial))),
+            ("identity_matches", u64::from(state.as_ref().is_some_and(|s| s.volume_id.eq_ignore_ascii_case(&volume.volume_id)))),
+        ],
+    );
+    state
         .filter(|state| {
             volume.volume_serial != 0
                 && state.volume_id.eq_ignore_ascii_case(&volume.volume_id)

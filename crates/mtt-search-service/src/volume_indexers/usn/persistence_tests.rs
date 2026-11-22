@@ -207,31 +207,54 @@ fn checkpoint_only_persist_advances_state_but_reports_no_structural_changes() {
 }
 
 #[test]
-fn binary_only_mode_defers_checkpoint_until_metrics_are_durable() {
-    for in_progress in [false, true] {
-        let fixture = TestDb::new();
-        let mut index = index();
-        assert!(index.insert_record(20, "file.txt", 5, false, false));
-        index.binary_dirty = true;
-        index.sizes_loaded = true;
-        if in_progress {
-            index.size_refresh_in_progress = true;
-        } else {
-            index.pending_size_refresh.insert(20);
-        }
-        let handle = handle_from(index);
-        let snapshot = take_pending_snapshot(&handle).unwrap();
-        assert!(!persist_pending_snapshot_with_mode(
-            &fixture.db,
-            &handle,
-            'R',
-            snapshot,
-            true
-        ));
-        assert!(fixture.db.load_volume_state('R').is_none());
-        assert!(handle.read().pending_additions.contains(&20));
-        assert!(handle.read().binary_dirty);
-    }
+fn binary_only_mode_defers_checkpoint_while_metric_batch_is_in_flight() {
+    let fixture = TestDb::new();
+    let mut index = index();
+    assert!(index.insert_record(20, "file.txt", 5, false, false));
+    index.binary_dirty = true;
+    index.sizes_loaded = true;
+    index.size_refresh_in_progress = true;
+    let handle = handle_from(index);
+    let snapshot = take_pending_snapshot(&handle).unwrap();
+    assert!(!persist_pending_snapshot_with_mode(
+        &fixture.db,
+        &handle,
+        'R',
+        snapshot,
+        true
+    ));
+    assert!(fixture.db.load_volume_state('R').is_none());
+    assert!(handle.read().pending_additions.contains(&20));
+    assert!(handle.read().binary_dirty);
+}
+
+#[test]
+fn pending_metric_retries_do_not_starve_the_durable_binary_checkpoint() {
+    crate::index_db::init_data_dir_for_tests();
+    let fixture = TestDb::new();
+    let mut index = index();
+    index.drive_letter = 'N';
+    index.volume_id = r"\\?\Volume{abcdef01-2345-6789-abcd-ef0123456789}\".into();
+    assert!(index.insert_record(20, "file.txt", 5, false, false));
+    index.sizes_loaded = true;
+    index.pending_size_refresh.insert(20);
+    index.last_usn = 100;
+    let handle = handle_from(index);
+    let snapshot = take_pending_snapshot(&handle).unwrap();
+    assert!(persist_pending_snapshot_with_mode(
+        &fixture.db,
+        &handle,
+        'N',
+        snapshot,
+        true
+    ));
+
+    assert_eq!(fixture.db.load_volume_state('N').unwrap().last_usn, 100);
+    let (loaded, state) = crate::index_db::binary::load('N').unwrap().unwrap();
+    assert_eq!(state.last_usn, 100);
+    assert!(loaded.sizes_loaded);
+    assert_eq!(loaded.pending_size_refresh, [20].into_iter().collect());
+    assert!(!handle.read().binary_dirty);
 }
 
 #[test]

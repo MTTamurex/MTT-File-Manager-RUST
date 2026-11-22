@@ -21,6 +21,7 @@ pub(super) fn build_and_persist(
         .ok_or_else(|| "MFT scan cancelled by volume removal".to_string())?;
     crate::memory_trim::log_process_memory(&format!("{}:\\ before full MFT scan", drive_letter));
     indexing_progress.set_scanning(drive_letter, 0, "scanning_mft");
+    crate::startup_trace::event(Some(drive_letter), "full_mft_scan_started", &[]);
     eprintln!("[USN] {}:\\ Starting bulk MFT read...", drive_letter);
     let start = std::time::Instant::now();
 

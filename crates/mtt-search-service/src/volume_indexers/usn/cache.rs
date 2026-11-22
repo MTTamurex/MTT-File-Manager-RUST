@@ -64,6 +64,19 @@ fn load_volume_cache_with(
                     volume_serial,
                 ) =>
             {
+                crate::startup_trace::event(
+                    Some(drive_letter),
+                    "binary_cache_loaded",
+                    &[
+                        ("checkpoint", binary_state.last_usn as u64),
+                        ("records", binary_index.records.len() as u64),
+                        ("sizes_loaded", u64::from(binary_index.sizes_loaded)),
+                        (
+                            "pending_sizes",
+                            binary_index.pending_size_refresh.len() as u64,
+                        ),
+                    ],
+                );
                 Some((
                     binary_index,
                     PersistedVolumeState {
@@ -79,14 +92,19 @@ fn load_volume_cache_with(
                 ))
             }
             Ok(Some((_binary_index, _binary_state))) => {
+                crate::startup_trace::event(Some(drive_letter), "binary_identity_rejected", &[]);
                 eprintln!(
                     "[USN] {}:\\ Binary snapshot volume identity mismatch; rebuilding from the current volume",
                     drive_letter
                 );
                 None
             }
-            Ok(None) => None,
+            Ok(None) => {
+                crate::startup_trace::event(Some(drive_letter), "binary_cache_unavailable", &[]);
+                None
+            }
             Err(error) => {
+                crate::startup_trace::error(drive_letter, "binary_load_failed", &error);
                 eprintln!(
                     "[USN] {}:\\ Binary index load failed ({}), trying SQLite",
                     drive_letter, error

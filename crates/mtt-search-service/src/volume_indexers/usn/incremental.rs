@@ -37,6 +37,8 @@ fn apply_incremental_records(
     index.journal_refresh_in_progress = true;
     crate::usn_journal::parse_usn_records(records, index, &mut 0, true)?;
     index.journal_refresh_in_progress = new_usn > *current_usn;
+    // Even a buffer without tracked changes advances the replay checkpoint.
+    index.binary_dirty |= index.last_usn != new_usn;
     index.last_usn = new_usn;
     *current_usn = new_usn;
     Ok(())
@@ -48,6 +50,8 @@ fn apply_metrics(
     mut unresolved: Vec<u64>,
 ) {
     let now = std::time::Instant::now();
+    // Resolving a saved retry changes snapshot state even if its size is unchanged.
+    index.binary_dirty |= !updates.is_empty();
     for (frn, metrics) in updates {
         index.update_file_metrics(*frn, *metrics, now);
     }

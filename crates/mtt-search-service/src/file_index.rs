@@ -51,7 +51,7 @@ pub struct FileRecord {
     pub name_len: u16,
     /// On-disk directory flag. Kept as a byte so every mmap bit pattern is valid.
     pub(crate) is_dir: u8,
-    /// Explicit padding byte.
+    /// Reserved byte; binary snapshots use it to mark a pending metric retry.
     pub _pad: u8,
 }
 
