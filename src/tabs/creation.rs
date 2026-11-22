@@ -1,71 +1,28 @@
 use super::{TabManager, TabState, MAX_TABS};
 
 impl TabManager {
-    pub(crate) fn can_replace_unpinned_tabs_with(&self, count: usize) -> bool {
-        let pinned_count = self.tabs.iter().filter(|tab| tab.pinned).count();
+    pub(crate) fn can_append_tabs(&self, count: usize) -> bool {
         count > 0
-            && count <= MAX_TABS.saturating_sub(pinned_count)
+            && count <= MAX_TABS.saturating_sub(self.tabs.len())
             && self.next_id.checked_add(count).is_some()
     }
 
-    /// Replace every unpinned workspace tab with the given paths. Capacity is
-    /// checked before any tab state is changed.
-    pub(crate) fn replace_unpinned_tabs_with(&mut self, paths: &[String]) -> bool {
-        if !self.can_replace_unpinned_tabs_with(paths.len()) {
-            return false;
+    /// Append fully prepared tabs without changing or removing existing tabs.
+    /// Returns the index of the first appended tab when capacity permits.
+    pub(crate) fn append_tabs_with_states(&mut self, mut tabs: Vec<TabState>) -> Option<usize> {
+        if !self.can_append_tabs(tabs.len()) {
+            return None;
         }
 
-        let (show_left_sidebar, show_preview_panel, collapse_tags, group_mode, group_descending) = {
-            let current = self.active();
-            (
-                current.show_left_sidebar,
-                current.show_preview_panel,
-                current.collapse_tags,
-                current.group_mode,
-                current.group_descending,
-            )
-        };
-        let first_id = self.next_id;
-        let mut new_tabs = Vec::with_capacity(paths.len());
-        for (offset, path) in paths.iter().enumerate() {
-            let mut tab = TabState::new_at_path(first_id + offset, path);
-            tab.show_left_sidebar = show_left_sidebar;
-            tab.show_preview_panel = show_preview_panel;
-            tab.collapse_tags = collapse_tags;
-            tab.group_mode = group_mode;
-            tab.group_descending = group_descending;
-            new_tabs.push(tab);
-        }
-
-        self.tabs.retain(|tab| tab.pinned);
-        let pinned_count = self.tabs.len();
-        self.tabs.extend(new_tabs);
-        self.next_id = first_id + paths.len();
-        self.active_tab = pinned_count;
-        true
-    }
-
-    /// Replace every unpinned workspace tab with fully prepared tab states.
-    /// Fresh ids are assigned so restored inner panel tabs and caches never
-    /// collide with tabs that already exist.
-    pub(crate) fn replace_unpinned_tabs_with_states(&mut self, mut tabs: Vec<TabState>) -> bool {
-        if !self.can_replace_unpinned_tabs_with(tabs.len()) {
-            return false;
-        }
-
+        let first_index = self.tabs.len();
         let first_id = self.next_id;
         for (offset, tab) in tabs.iter_mut().enumerate() {
             tab.id = first_id + offset;
             tab.pinned = false;
         }
-
-        self.tabs.retain(|tab| tab.pinned);
-        let pinned_count = self.tabs.len();
-        let restored_count = tabs.len();
         self.tabs.extend(tabs);
-        self.next_id = first_id + restored_count;
-        self.active_tab = pinned_count;
-        true
+        self.next_id = first_id + (self.tabs.len() - first_index);
+        Some(first_index)
     }
 
     /// Add a tab without disturbing the active tab or its live state.
@@ -135,77 +92,59 @@ mod tests {
     }
 
     #[test]
-    fn replacing_tabs_keeps_pinned_tabs_and_activates_the_group_first_path() {
-        let mut manager = TabManager::new_at_path(r"C:\Original");
-        manager.tabs[0].pinned = true;
-        manager.new_tab_at(r"D:\Old");
-        manager.new_tab_at(r"E:\Old");
-
-        assert!(
-            manager.replace_unpinned_tabs_with(&[r"F:\First".to_owned(), r"G:\Second".to_owned(),])
-        );
-        assert_eq!(manager.tabs.len(), 3);
-        assert!(manager.tabs[0].pinned);
-        assert_eq!(manager.tabs[0].path, r"C:\Original");
-        assert_eq!(manager.tabs[1].path, r"F:\First");
-        assert_eq!(manager.tabs[2].path, r"G:\Second");
-        assert_eq!(manager.active_tab, 1);
-    }
-
-    #[test]
-    fn replacing_tabs_with_prepared_states_keeps_pinned_tabs_and_assigns_fresh_ids() {
+    fn appending_prepared_tabs_preserves_existing_tabs_and_adds_after_them() {
         let mut manager = TabManager::new_at_path(r"C:\Users\user\Documents\Project");
         manager.tabs[0].pinned = true;
         manager.new_tab_at(r"D:\Videos\Folder");
+        let original_ids = manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let original_active = manager.active_tab;
 
-        let prepared = vec![
-            TabState::new_at_path(0, r"E:\Media\FolderA"),
-            TabState::new_at_path(0, r"F:\Media\FolderB"),
-        ];
-        assert!(manager.replace_unpinned_tabs_with_states(prepared));
+        let first_added = manager
+            .append_tabs_with_states(vec![
+                TabState::new_at_path(0, r"E:\Media\FolderA"),
+                TabState::new_at_path(0, r"F:\Media\FolderB"),
+            ])
+            .unwrap();
 
-        assert_eq!(manager.tabs.len(), 3);
+        assert_eq!(first_added, 2);
+        assert_eq!(manager.tabs.len(), 4);
+        assert_eq!(manager.tabs[0].id, original_ids[0]);
         assert!(manager.tabs[0].pinned);
+        assert_eq!(manager.tabs[1].id, original_ids[1]);
         assert_eq!(manager.tabs[0].path, r"C:\Users\user\Documents\Project");
-        assert_eq!(manager.tabs[1].path, r"E:\Media\FolderA");
-        assert_eq!(manager.tabs[2].path, r"F:\Media\FolderB");
-        assert_eq!(manager.tabs[1].id, 2);
-        assert_eq!(manager.tabs[2].id, 3);
-        assert_eq!(manager.active_tab, 1);
+        assert_eq!(manager.tabs[1].path, r"D:\Videos\Folder");
+        assert_eq!(manager.tabs[2].path, r"E:\Media\FolderA");
+        assert_eq!(manager.tabs[3].path, r"F:\Media\FolderB");
+        assert_eq!(manager.tabs[2].id, 2);
+        assert_eq!(manager.tabs[3].id, 3);
+        assert_eq!(manager.active_tab, original_active);
+        assert!(!manager.tabs[2].pinned);
+        assert!(!manager.tabs[3].pinned);
     }
 
     #[test]
-    fn replacing_tabs_with_prepared_states_respects_the_capacity_limit() {
+    fn append_over_capacity_leaves_all_existing_tabs_unchanged() {
         let mut manager = TabManager::new_at_path(r"C:\Users\user\Documents\Project");
-        manager.tabs[0].pinned = true;
-        for index in 1..MAX_TABS {
-            assert!(manager
-                .new_background_tab_at(&format!(r"C:\Users\user\Documents\Project\Folder{index}"))
-                .is_some());
-            manager.tabs[index].pinned = true;
+        while manager.tabs.len() < MAX_TABS - 1 {
+            manager.new_tab_at(r"D:\Videos\Folder");
         }
-
-        let prepared = vec![TabState::new_at_path(0, r"D:\Videos\Folder")];
-        assert!(!manager.replace_unpinned_tabs_with_states(prepared));
-        assert_eq!(manager.tabs.len(), MAX_TABS);
-        assert_eq!(manager.active_tab, 0);
-    }
-
-    #[test]
-    fn replacing_tabs_over_capacity_leaves_the_tab_set_unchanged() {
-        let mut manager = TabManager::new_at_path(r"C:\Pinned0");
-        manager.tabs[0].pinned = true;
-        for index in 1..MAX_TABS {
-            assert!(manager
-                .new_background_tab_at(&format!(r"C:\Pinned{index}"))
-                .is_some());
-            manager.tabs[index].pinned = true;
-        }
-        let original_paths: Vec<_> = manager.tabs.iter().map(|tab| tab.path.clone()).collect();
+        let original_paths = manager
+            .tabs
+            .iter()
+            .map(|tab| tab.path.clone())
+            .collect::<Vec<_>>();
+        let original_ids = manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
         let original_active = manager.active_tab;
         let original_next_id = manager.next_id;
 
-        assert!(!manager.replace_unpinned_tabs_with(&[r"D:\New".to_owned()]));
+        assert!(manager
+            .append_tabs_with_states(vec![
+                TabState::new_at_path(0, r"E:\Media\FolderA"),
+                TabState::new_at_path(0, r"E:\Media\FolderB"),
+            ])
+            .is_none());
+
+        assert_eq!(manager.tabs.len(), MAX_TABS - 1);
         assert_eq!(
             manager
                 .tabs
@@ -214,7 +153,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             original_paths
         );
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            original_ids
+        );
         assert_eq!(manager.active_tab, original_active);
         assert_eq!(manager.next_id, original_next_id);
+    }
+
+    #[test]
+    fn append_rejects_empty_groups_and_exhausted_ids_without_changes() {
+        let mut manager = TabManager::new();
+        assert_eq!(manager.append_tabs_with_states(Vec::new()), None);
+        manager.next_id = usize::MAX;
+        assert_eq!(
+            manager.append_tabs_with_states(vec![TabState::new_at_path(0, "C:\\")]),
+            None
+        );
+        assert_eq!(manager.tabs.len(), 1);
+        assert_eq!(manager.active_tab, 0);
+        assert_eq!(manager.next_id, usize::MAX);
     }
 }

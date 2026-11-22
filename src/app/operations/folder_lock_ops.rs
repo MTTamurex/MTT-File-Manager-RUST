@@ -39,13 +39,49 @@ fn resolve_folder_lock<'a>(
     })
 }
 
+fn restored_group_view_mode(
+    folder_locks: &HashMap<String, FolderLock>,
+    path: &str,
+    saved_view_mode: Option<&str>,
+    fallback_view_mode: crate::domain::file_entry::ViewMode,
+) -> (crate::domain::file_entry::ViewMode, bool) {
+    if let Some((_, lock)) = resolve_folder_lock(folder_locks, path) {
+        (lock.view_mode, true)
+    } else {
+        (
+            saved_view_mode
+                .map(crate::domain::file_entry::ViewMode::from_preference)
+                .unwrap_or(fallback_view_mode),
+            false,
+        )
+    }
+}
+
 impl ImageViewerApp {
     pub(crate) fn current_folder_lock_resolution(&self) -> Option<ResolvedFolderLock> {
-        resolve_folder_lock(&self.folder_locks, &self.navigation_state.current_path).map(
-            |(source_path, lock)| ResolvedFolderLock {
+        self.folder_lock_resolution_for_path(&self.navigation_state.current_path)
+    }
+
+    pub(crate) fn folder_lock_resolution_for_path(&self, path: &str) -> Option<ResolvedFolderLock> {
+        resolve_folder_lock(&self.folder_locks, path).map(|(source_path, lock)| {
+            ResolvedFolderLock {
                 source_path: source_path.to_owned(),
                 lock: lock.clone(),
-            },
+            }
+        })
+    }
+
+    pub(crate) fn group_restore_view_mode(
+        &self,
+        path: &str,
+        saved_view_mode: Option<&str>,
+        fallback_view_mode: crate::domain::file_entry::ViewMode,
+    ) -> (crate::domain::file_entry::ViewMode, bool) {
+        restored_group_view_mode(
+            &self.folder_locks,
+            path,
+            saved_view_mode,
+            fallback_view_mode,
         )
     }
 
@@ -310,5 +346,47 @@ mod tests {
         );
 
         assert!(resolve_folder_lock(&locks, "::computer::child").is_none());
+    }
+
+    #[test]
+    fn current_exact_or_inherited_lock_overrides_saved_group_view_mode() {
+        let mut locks = HashMap::new();
+        let mut lock = lock(FolderLockScope::Descendants);
+        lock.view_mode = ViewMode::Miller;
+        locks.insert(r"C:\Users\user\Documents\Project".to_owned(), lock);
+
+        for path in [
+            r"C:\Users\user\Documents\Project",
+            r"C:\Users\user\Documents\Project\Folder",
+        ] {
+            assert_eq!(
+                restored_group_view_mode(&locks, path, Some("list"), ViewMode::Grid),
+                (ViewMode::Miller, true)
+            );
+        }
+    }
+
+    #[test]
+    fn saved_group_view_mode_is_used_when_no_current_lock_applies() {
+        let locks = HashMap::new();
+
+        assert_eq!(
+            restored_group_view_mode(
+                &locks,
+                r"C:\Users\user\Documents\Project",
+                Some("list"),
+                ViewMode::Grid
+            ),
+            (ViewMode::List, false)
+        );
+        assert_eq!(
+            restored_group_view_mode(
+                &locks,
+                r"C:\Users\user\Documents\Project",
+                None,
+                ViewMode::Miller
+            ),
+            (ViewMode::Miller, false)
+        );
     }
 }

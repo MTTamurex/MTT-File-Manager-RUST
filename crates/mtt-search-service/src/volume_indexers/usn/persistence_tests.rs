@@ -5,6 +5,67 @@ use crate::volume_indexers::test_support::{index, TestDb};
 use crate::volume_indices::handle_from;
 
 #[test]
+fn rename_then_delete_does_not_leave_a_stale_sqlite_record() {
+    let fixture = TestDb::new();
+    let mut source = index();
+    assert!(source.insert_record(20, "file.txt", 5, false, false));
+    fixture.db.save_volume(&source, |_, _| {}).unwrap();
+    source.clear_pending();
+    assert!(source.move_record(20, "renamed.txt", 5, false, false));
+    source.remove_record(20);
+    source.last_usn = 50;
+    let handle = handle_from(source);
+    let snapshot = take_pending_snapshot(&handle).unwrap();
+    let _ = persist_pending_snapshot_with_mode(&fixture.db, &handle, 'R', snapshot, false);
+
+    let state = fixture.db.load_volume_state('R').unwrap();
+    let count: u64 = fixture
+        .sql
+        .query_row(
+            "SELECT COUNT(*) FROM file_records WHERE drive_letter = 'R'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, state.files_indexed);
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn replay_from_older_binary_removes_records_already_persisted_by_sqlite() {
+    let fixture = TestDb::new();
+    let mut older_binary = index();
+    assert!(older_binary.insert_record(10, "existing.txt", 5, false, false));
+    older_binary.clear_pending();
+    let mut newer_sqlite = index();
+    assert!(newer_sqlite.insert_record(10, "existing.txt", 5, false, false));
+    assert!(newer_sqlite.insert_record(20, "temporary.txt", 5, false, false));
+    newer_sqlite.last_usn = 46;
+    fixture.db.save_volume(&newer_sqlite, |_, _| {}).unwrap();
+
+    // The binary checkpoint precedes the temporary file's creation, while
+    // SQLite has already persisted it. Replay then observes its deletion.
+    assert!(older_binary.insert_record(20, "temporary.txt", 5, false, false));
+    older_binary.remove_record(20);
+    older_binary.last_usn = 50;
+    let handle = handle_from(older_binary);
+    let snapshot = take_pending_snapshot(&handle).unwrap();
+    let _ = persist_pending_snapshot_with_mode(&fixture.db, &handle, 'R', snapshot, false);
+
+    let state = fixture.db.load_volume_state('R').unwrap();
+    let count: u64 = fixture
+        .sql
+        .query_row(
+            "SELECT COUNT(*) FROM file_records WHERE drive_letter = 'R'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, state.files_indexed);
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn snapshot_captures_owned_rows_identity_and_checkpoint_before_draining() {
     let mut index = index();
     assert!(index.insert_record(20, "file 日本語.txt", 5, false, true));

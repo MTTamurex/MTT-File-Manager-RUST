@@ -510,11 +510,11 @@ impl VolumeIndex {
             }
         }
 
-        // If it was added since last persist, just undo the add (never reached DB).
-        // Otherwise mark for removal from DB.
-        if !self.pending_additions.remove(&frn) {
-            self.pending_removals.insert(frn);
-        }
+        // Pending additions include updates to persisted records, not just
+        // new files. SQLite may also be ahead of a replayed binary snapshot.
+        // Always retain the deletion; deleting a never-persisted FRN is safe.
+        self.pending_additions.remove(&frn);
+        self.pending_removals.insert(frn);
         self.binary_dirty = true;
     }
 

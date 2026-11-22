@@ -236,6 +236,7 @@ mod tests {
             active_tab: 0,
             tabs: vec![SavedGroupTab {
                 path: r"D:\Videos\Folder".to_owned(),
+                view_mode: Some("miller".to_owned()),
                 dual_panel: Some(SavedGroupDualPanel {
                     active: SavedGroupPanel::Right,
                     split_ratio: 0.65,
@@ -244,10 +245,12 @@ mod tests {
                         tabs: vec![
                             SavedGroupPanelTab {
                                 path: r"C:\Users\user\Documents\Project\FolderA".to_owned(),
+                                view_mode: Some("list".to_owned()),
                                 pinned: true,
                             },
                             SavedGroupPanelTab {
                                 path: r"C:\Users\user\Documents\Project\FolderB".to_owned(),
+                                view_mode: Some("column_list".to_owned()),
                                 pinned: false,
                             },
                         ],
@@ -256,6 +259,7 @@ mod tests {
                         active: 0,
                         tabs: vec![SavedGroupPanelTab {
                             path: r"D:\Videos\Folder".to_owned(),
+                            view_mode: Some("grid".to_owned()),
                             pinned: false,
                         }],
                     },
@@ -292,6 +296,7 @@ mod tests {
             active_tab: 0,
             tabs: vec![SavedGroupTab {
                 path: "folder".repeat(MAX_GROUP_TABS_JSON_BYTES / 6 + 1),
+                view_mode: Some("grid".to_owned()),
                 dual_panel: None,
             }],
         };

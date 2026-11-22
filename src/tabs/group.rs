@@ -21,6 +21,7 @@ impl TabManager {
                 .iter()
                 .map(|tab| SavedGroupTab {
                     path: tab.path.clone(),
+                    view_mode: Some(tab.view_mode.preference_value().to_owned()),
                     dual_panel: if tab.dual_panel_enabled {
                         tab.dual_panel_tabs
                             .as_ref()
@@ -50,6 +51,7 @@ impl SavedGroupPanelTabs {
                 .iter()
                 .map(|tab| SavedGroupPanelTab {
                     path: tab.snapshot.path.clone(),
+                    view_mode: Some(tab.snapshot.view_mode.preference_value().to_owned()),
                     pinned: tab.pinned,
                 })
                 .collect(),
@@ -82,6 +84,17 @@ impl TabState {
             self.navigation = NavigationHistory::new(path.clone());
             self.title = super::tab_title_for_path(&path);
         }
+        if let Some(active_tab) = match active {
+            ActivePanel::Left => left.active(),
+            ActivePanel::Right => right.active(),
+        } {
+            self.view_mode = active_tab.snapshot.view_mode;
+            self.sort_mode = active_tab.snapshot.sort_mode;
+            self.sort_descending = active_tab.snapshot.sort_descending;
+            self.folders_position = active_tab.snapshot.folders_position;
+            self.group_mode = active_tab.snapshot.group_mode;
+            self.group_descending = active_tab.snapshot.group_descending;
+        }
 
         self.dual_panel_enabled = true;
         self.dual_panel_active = active;
@@ -110,26 +123,41 @@ mod tests {
     #[test]
     fn saved_group_tabs_capture_dual_panel_inner_tabs_and_active_indices() {
         let mut manager = TabManager::new_at_path(r"E:\Media\Folder");
+        manager.active_mut().view_mode = crate::domain::file_entry::ViewMode::Miller;
         assert!(manager.new_tab_at(r"C:\Users\user\Documents\Project"));
         manager.switch_to(1);
         manager.active_mut().dual_panel_enabled = true;
         manager.active_mut().dual_panel_active = ActivePanel::Right;
         manager.active_mut().dual_panel_split_ratio = 0.65;
         manager.active_mut().path = r"D:\Videos\FolderB".to_owned();
+        manager.active_mut().view_mode = crate::domain::file_entry::ViewMode::ColumnList;
 
         let mut panels = DualPanelTabs::new(
-            snapshot(r"C:\Users\user\Documents\Project\FolderA"),
-            snapshot(r"D:\Videos\FolderA"),
+            {
+                let mut snapshot = snapshot(r"C:\Users\user\Documents\Project\FolderA");
+                snapshot.view_mode = crate::domain::file_entry::ViewMode::List;
+                snapshot
+            },
+            {
+                let mut snapshot = snapshot(r"D:\Videos\FolderA");
+                snapshot.view_mode = crate::domain::file_entry::ViewMode::Grid;
+                snapshot
+            },
         );
         panels
-            .add_background_tab(
-                ActivePanel::Left,
-                snapshot(r"C:\Users\user\Documents\Project\FolderB"),
-            )
+            .add_background_tab(ActivePanel::Left, {
+                let mut snapshot = snapshot(r"C:\Users\user\Documents\Project\FolderB");
+                snapshot.view_mode = crate::domain::file_entry::ViewMode::Miller;
+                snapshot
+            })
             .unwrap();
         panels.left.select(1);
         panels
-            .add_background_tab(ActivePanel::Right, snapshot(r"D:\Videos\FolderB"))
+            .add_background_tab(ActivePanel::Right, {
+                let mut snapshot = snapshot(r"D:\Videos\FolderB");
+                snapshot.view_mode = crate::domain::file_entry::ViewMode::List;
+                snapshot
+            })
             .unwrap();
         panels.right.select(1);
         panels.left.tabs[0].pinned = true;
@@ -140,7 +168,12 @@ mod tests {
         assert_eq!(saved.active_tab, 1);
         assert_eq!(saved.tabs.len(), 2);
         assert!(saved.tabs[0].dual_panel.is_none());
+        assert_eq!(saved.tabs[0].view_mode.as_deref(), Some("miller"));
         assert_eq!(saved.tabs[1].path, r"D:\Videos\FolderB");
+        assert_eq!(
+            saved.tabs[1].view_mode.as_deref().unwrap(),
+            crate::domain::file_entry::ViewMode::ColumnList.preference_value()
+        );
 
         let dual = saved.tabs[1].dual_panel.as_ref().unwrap();
         assert_eq!(dual.active, SavedGroupPanel::Right);
@@ -155,8 +188,11 @@ mod tests {
             dual.left.tabs[1].path,
             r"C:\Users\user\Documents\Project\FolderB"
         );
+        assert_eq!(dual.left.tabs[1].view_mode.as_deref(), Some("miller"));
         assert_eq!(dual.right.active, 1);
         assert_eq!(dual.right.tabs[1].path, r"D:\Videos\FolderB");
+        assert_eq!(dual.right.tabs[0].view_mode.as_deref(), Some("grid"));
+        assert_eq!(dual.right.tabs[1].view_mode.as_deref(), Some("list"));
     }
 
     #[test]
@@ -174,6 +210,43 @@ mod tests {
     }
 
     #[test]
+    fn legacy_saved_tabs_without_view_modes_remain_readable() {
+        let saved: SavedGroupTabs = serde_json::from_str(
+            r#"{"active_tab":0,"tabs":[{"path":"C:\\Users\\user\\Documents\\Project","dual_panel":null}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(saved.tabs[0].view_mode, None);
+        assert!(saved.tabs[0].dual_panel.is_none());
+    }
+
+    #[test]
+    fn legacy_panel_tabs_without_view_modes_remain_readable() {
+        let saved: SavedGroupTabs = serde_json::from_str(
+            r#"{
+                "active_tab": 0,
+                "tabs": [{
+                    "path": "C:\\",
+                    "dual_panel": {
+                        "active": "right",
+                        "split_ratio": 0.5,
+                        "left": {"active": 0, "tabs": [{"path": "C:\\", "pinned": true}]},
+                        "right": {"active": 0, "tabs": [{"path": "D:\\"}]}
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(saved.tabs[0].view_mode, None);
+        let dual = saved.tabs[0].dual_panel.as_ref().unwrap();
+        assert_eq!(dual.left.tabs[0].view_mode, None);
+        assert_eq!(dual.right.tabs[0].view_mode, None);
+        assert!(dual.left.tabs[0].pinned);
+        assert_eq!(dual.active, SavedGroupPanel::Right);
+    }
+
+    #[test]
     fn restoring_saved_dual_panel_reinstates_both_inner_sets_and_active_locations() {
         let saved = SavedGroupDualPanel {
             active: SavedGroupPanel::Right,
@@ -183,10 +256,12 @@ mod tests {
                 tabs: vec![
                     SavedGroupPanelTab {
                         path: r"C:\Users\user\Documents\Project\FolderA".to_owned(),
+                        view_mode: Some("grid".to_owned()),
                         pinned: false,
                     },
                     SavedGroupPanelTab {
                         path: r"C:\Users\user\Documents\Project\FolderB".to_owned(),
+                        view_mode: Some("list".to_owned()),
                         pinned: true,
                     },
                 ],
@@ -196,10 +271,12 @@ mod tests {
                 tabs: vec![
                     SavedGroupPanelTab {
                         path: r"D:\Videos\FolderA".to_owned(),
+                        view_mode: Some("column_list".to_owned()),
                         pinned: false,
                     },
                     SavedGroupPanelTab {
                         path: r"D:\Videos\FolderB".to_owned(),
+                        view_mode: Some("miller".to_owned()),
                         pinned: false,
                     },
                 ],
@@ -214,7 +291,20 @@ mod tests {
                 .map(|(index, tab)| PanelTab {
                     id: offset + index,
                     pinned: tab.pinned,
-                    snapshot: snapshot(&tab.path),
+                    snapshot: {
+                        let mut snapshot = snapshot(&tab.path);
+                        if let Some(view_mode) = &tab.view_mode {
+                            snapshot.view_mode =
+                                crate::domain::file_entry::ViewMode::from_preference(view_mode);
+                        }
+                        snapshot.sort_mode = crate::domain::file_entry::SortMode::Size;
+                        snapshot.sort_descending = true;
+                        snapshot.folders_position =
+                            crate::domain::file_entry::FoldersPosition::Last;
+                        snapshot.group_mode = crate::domain::file_entry::GroupMode::Type;
+                        snapshot.group_descending = true;
+                        snapshot
+                    },
                 })
                 .collect(),
         };
@@ -230,6 +320,15 @@ mod tests {
         assert_eq!(tab.dual_panel_active, ActivePanel::Right);
         assert_eq!(tab.path, r"D:\Videos\FolderB");
         assert_eq!(tab.path_input, tab.path);
+        assert_eq!(tab.view_mode, crate::domain::file_entry::ViewMode::Miller);
+        assert_eq!(tab.sort_mode, crate::domain::file_entry::SortMode::Size);
+        assert!(tab.sort_descending);
+        assert_eq!(
+            tab.folders_position,
+            crate::domain::file_entry::FoldersPosition::Last
+        );
+        assert_eq!(tab.group_mode, crate::domain::file_entry::GroupMode::Type);
+        assert!(tab.group_descending);
         assert!((tab.dual_panel_split_ratio - 0.9).abs() < f32::EPSILON);
         let panels = tab.dual_panel_tabs.as_ref().unwrap();
         assert_eq!(panels.left.active_tab, 1);
@@ -239,9 +338,21 @@ mod tests {
             r"C:\Users\user\Documents\Project\FolderB"
         );
         assert!(panels.left.tabs[1].pinned);
+        assert_eq!(
+            panels.left.tabs[1].snapshot.view_mode,
+            crate::domain::file_entry::ViewMode::List
+        );
         assert_eq!(panels.right.active_tab, 1);
         assert_eq!(panels.right.tabs.len(), 2);
         assert_eq!(panels.right.tabs[0].snapshot.path, r"D:\Videos\FolderA");
         assert_eq!(panels.right.tabs[1].snapshot.path, r"D:\Videos\FolderB");
+        assert_eq!(
+            panels.right.tabs[0].snapshot.view_mode,
+            crate::domain::file_entry::ViewMode::ColumnList
+        );
+        assert_eq!(
+            panels.right.tabs[1].snapshot.view_mode,
+            crate::domain::file_entry::ViewMode::Miller
+        );
     }
 }

@@ -24,6 +24,8 @@ pub struct SavedGroupTabs {
 pub struct SavedGroupTab {
     pub path: String,
     #[serde(default)]
+    pub view_mode: Option<String>,
+    #[serde(default)]
     pub dual_panel: Option<SavedGroupDualPanel>,
 }
 
@@ -52,6 +54,8 @@ pub struct SavedGroupPanelTabs {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedGroupPanelTab {
     pub path: String,
+    #[serde(default)]
+    pub view_mode: Option<String>,
     #[serde(default)]
     pub pinned: bool,
 }
@@ -104,6 +108,7 @@ mod tests {
             active: 5,
             tabs: vec![SavedGroupPanelTab {
                 path: path.to_owned(),
+                view_mode: Some("grid".to_owned()),
                 pinned: false,
             }],
         }
@@ -115,6 +120,7 @@ mod tests {
             active_tab: 9,
             tabs: vec![SavedGroupTab {
                 path: "C:\\Users\\user\\Documents\\Project".to_owned(),
+                view_mode: Some("list".to_owned()),
                 dual_panel: Some(SavedGroupDualPanel {
                     active: SavedGroupPanel::Right,
                     split_ratio: 4.0,
@@ -139,6 +145,7 @@ mod tests {
             active_tab: 0,
             tabs: vec![SavedGroupTab {
                 path: "C:\\Users\\user\\Documents\\Project".to_owned(),
+                view_mode: Some("grid".to_owned()),
                 dual_panel: Some(SavedGroupDualPanel {
                     active: SavedGroupPanel::Left,
                     split_ratio: 0.5,
@@ -163,6 +170,7 @@ mod tests {
                 active_tab: 0,
                 tabs: vec![SavedGroupTab {
                     path: "C:\\".to_owned(),
+                    view_mode: Some("grid".to_owned()),
                     dual_panel: Some(SavedGroupDualPanel {
                         active: SavedGroupPanel::Left,
                         split_ratio: ratio,

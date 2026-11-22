@@ -119,6 +119,7 @@ mod tests {
                 .iter()
                 .map(|path| SavedGroupPanelTab {
                     path: (*path).to_owned(),
+                    view_mode: Some("grid".to_owned()),
                     pinned: false,
                 })
                 .collect(),
@@ -140,10 +141,12 @@ mod tests {
                 tabs: vec![
                     SavedGroupTab {
                         path: r"C:\Users\user\Documents\Project".to_owned(),
+                        view_mode: Some("grid".to_owned()),
                         dual_panel: None,
                     },
                     SavedGroupTab {
                         path: r"D:\Videos\Folder".to_owned(),
+                        view_mode: Some("grid".to_owned()),
                         dual_panel: None,
                     },
                 ],
@@ -170,6 +173,7 @@ mod tests {
                 active_tab: 0,
                 tabs: vec![SavedGroupTab {
                     path: r"C:\Users\user\Documents\Project\FolderB".to_owned(),
+                    view_mode: Some("grid".to_owned()),
                     dual_panel: Some(SavedGroupDualPanel {
                         active: SavedGroupPanel::Left,
                         split_ratio: 0.5,
