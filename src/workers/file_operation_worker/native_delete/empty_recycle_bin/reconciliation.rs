@@ -1,9 +1,10 @@
-//! Reconcile the original selection against one fresh, read-only Shell enumeration.
+//! Reconcile selected identities against a fresh, read-only Shell enumeration.
 use super::{identity, tracking::Tracking};
 use crate::infrastructure::windows::recycle_bin::{self, RecycleBinShellItem};
 use std::collections::HashSet;
 use windows::core::Result;
 
+#[derive(Clone)]
 pub(super) struct Snapshot {
     // Parsing names identify namespace entries, not their original display names.
     // Keep them only in memory; never log names or paths.
@@ -21,10 +22,14 @@ impl Snapshot {
     }
 
     pub(super) fn reconcile(&self, tracking: &Tracking) {
+        self.reconcile_until(tracking, || false);
+    }
+
+    pub(super) fn reconcile_until(&self, tracking: &Tracking, stopped: impl Fn() -> bool) {
         self.reconcile_with(tracking, || {
             // Verification is read-only and must also run after cancellation to
             // count removals made before the operation stopped.
-            recycle_bin::enumerate_recycle_bin_shell_items(|| false)
+            recycle_bin::enumerate_recycle_bin_shell_items(stopped)
                 .map(|items| Self::capture(&items))
         });
     }
@@ -34,6 +39,9 @@ impl Snapshot {
             Ok(remaining) => remaining,
             Err(error) => {
                 // Failed/partial enumeration is not evidence that items vanished.
+                if super::tracking::is_cancellation(error.code()) {
+                    return;
+                }
                 log::warn!(
                     "[RecycleBin] Final verification unavailable: hresult=0x{:08X}",
                     error.code().0 as u32

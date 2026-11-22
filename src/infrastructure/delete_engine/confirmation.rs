@@ -9,6 +9,7 @@ use std::time::Duration;
 pub enum Kind {
     Recycle,
     Permanent,
+    SelectedRecycleBinItems,
     RecycleUnavailable,
     EmptyRecycleBin,
 }
@@ -140,6 +141,17 @@ pub(crate) fn ask_empty_recycle_bin(operation: &CopyOperation, total: usize) -> 
         deletion
             .confirmation
             .request(Kind::EmptyRecycleBin, &[], total, &operation.progress)
+    })
+}
+
+pub(crate) fn ask_selected_recycle_bin_items(operation: &CopyOperation, total: usize) -> bool {
+    operation.deletion.as_ref().is_some_and(|deletion| {
+        deletion.confirmation.request(
+            Kind::SelectedRecycleBinItems,
+            &[],
+            total,
+            &operation.progress,
+        )
     })
 }
 

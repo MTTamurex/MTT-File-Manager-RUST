@@ -5,7 +5,9 @@ use crate::infrastructure::delete_engine::confirmation;
 use crate::infrastructure::windows::recycle_bin;
 use std::sync::{atomic::Ordering, mpsc::Sender, Arc};
 mod identity;
+mod live_progress;
 mod reconciliation;
+mod selected_items;
 mod sink;
 mod tracking;
 
@@ -21,6 +23,14 @@ pub(super) fn try_handle(
         |hwnd| handle(hwnd, runtime),
         |hwnd| handle_shell(hwnd, sender, recycle_bin::empty_recycle_bin),
     )
+}
+
+pub(super) fn try_handle_selected(
+    request: &FileOperationRequest,
+    sender: &Sender<FileOperationResult>,
+    runtime: &Arc<CopyRuntime>,
+) -> bool {
+    selected_items::try_handle(request, sender, runtime)
 }
 
 fn try_handle_with(

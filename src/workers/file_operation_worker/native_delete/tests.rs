@@ -112,9 +112,8 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
 }
 
 #[test]
-fn recycle_bin_storage_keeps_shell_metadata_semantics() {
+fn recycle_bin_storage_keeps_shell_metadata_semantics_when_custom_engine_is_disabled() {
     let runtime = Arc::new(CopyRuntime::default());
-    runtime.enabled.store(true, Ordering::Relaxed);
     let (sender, _) = std::sync::mpsc::channel();
     let request = FileOperationRequest::delete_permanently(
         vec![PathBuf::from(r"C:\$Recycle.Bin\entry")],

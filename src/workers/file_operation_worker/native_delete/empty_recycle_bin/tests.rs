@@ -7,6 +7,7 @@ use windows::Win32::UI::Shell::{
     COPYENGINE_S_PENDING_DELETE, COPYENGINE_S_USER_RETRY,
 };
 mod mode;
+mod selected_items;
 mod status_results;
 
 fn batch(

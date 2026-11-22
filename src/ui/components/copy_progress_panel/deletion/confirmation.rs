@@ -8,7 +8,7 @@ pub(super) fn render(ui: &mut egui::Ui, operation: &CopyOperation, request: &Req
     let deletion = operation.deletion.as_ref().unwrap();
     let permanent = request.kind != Kind::Recycle;
     let message = match request.kind {
-        Kind::Permanent => t!(
+        Kind::Permanent | Kind::SelectedRecycleBinItems => t!(
             "operations.search_delete_permanent_confirm",
             count = request.total
         ),

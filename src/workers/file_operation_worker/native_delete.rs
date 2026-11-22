@@ -17,6 +17,9 @@ pub(super) fn try_handle(
     if empty_recycle_bin::try_handle(request, sender, runtime) {
         return true;
     }
+    if empty_recycle_bin::try_handle_selected(request, sender, runtime) {
+        return true;
+    }
     handle_with_confirmation(request, sender, runtime, confirmation::ask)
 }
 
