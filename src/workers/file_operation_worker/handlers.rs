@@ -45,30 +45,21 @@ pub(super) fn handle_delete(
                 return;
             }
 
-            let mut recycled_paths = Vec::new();
-            let mut shell_paths = Vec::new();
-            let mut recycle_batch = recycle_bin::RecycleCommitBatch::new(false);
-            for path in &valid_paths {
-                if recycle_batch.try_recycle(path, || false) {
-                    recycled_paths.push(path.clone());
-                } else {
-                    shell_paths.push(path.clone());
-                }
-            }
-
-            let existing_shell_paths: Vec<_> = shell_paths
+            let existing_shell_paths: Vec<_> = valid_paths
                 .iter()
                 .filter(|path| std::fs::symlink_metadata(path).is_ok())
                 .cloned()
                 .collect();
-            let shell_succeeded = shell_paths.is_empty()
-                || shell_operations::delete_items_with_shell(&shell_paths, hwnd.0);
+            let shell_succeeded = shell_operations::delete_items_with_shell(&valid_paths, hwnd.0);
             // SHFileOperation can remove some items before cancellation/failure.
             // Only report paths that existed before and are now definitely absent.
-            recycled_paths.extend(existing_shell_paths.into_iter().filter(|path| {
-                matches!(std::fs::symlink_metadata(path), Err(error)
-                    if error.kind() == std::io::ErrorKind::NotFound)
-            }));
+            let recycled_paths: Vec<_> = existing_shell_paths
+                .into_iter()
+                .filter(|path| {
+                    matches!(std::fs::symlink_metadata(path), Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound)
+                })
+                .collect();
             if !shell_succeeded && recycled_paths.is_empty() {
                 log::warn!(
                     "[FileOps] Delete cancelled or failed for {} paths",

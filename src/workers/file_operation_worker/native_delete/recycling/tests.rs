@@ -2,6 +2,27 @@ use super::*;
 use crate::infrastructure::copy_engine::CopyRuntime;
 
 #[test]
+fn cancellation_before_recycling_never_submits_items_or_requests_fallback() {
+    let paths = vec![PathBuf::from("source/file.txt")];
+    let runtime = CopyRuntime::default();
+    let job = runtime.start_delete(paths.clone(), false);
+    job.operation.progress.cancel();
+
+    let completed = run_with_recycler(
+        &paths,
+        &job.operation,
+        Arc::new(|_| panic!("cancelled operation must not report removals")),
+        &|_, _, _| panic!("cancelled operation must not request permanent deletion"),
+        |_, _, _| panic!("cancelled operation must not submit items to Shell"),
+    );
+
+    assert!(!completed);
+    let deletion = job.operation.deletion.as_ref().unwrap();
+    assert_eq!(deletion.removed.load(Ordering::Relaxed), 0);
+    assert_eq!(deletion.failures.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn unavailable_recycling_never_deletes_without_a_separate_permanent_answer() {
     for allow in [false, true] {
         let temp = tempfile::tempdir().unwrap();

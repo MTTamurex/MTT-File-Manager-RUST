@@ -19,55 +19,12 @@ pub(super) fn run(
     observer: RemovalObserver,
     confirm: &impl Fn(&CopyOperation, Kind, &[PathBuf]) -> bool,
 ) -> bool {
-    let mut recycle_batch =
-        crate::infrastructure::windows::recycle_bin::RecycleCommitBatch::new(true);
     run_with_recycler(
         paths,
         operation,
         observer,
         confirm,
-        |paths, operation, observer| {
-            let progress = operation.deletion.as_ref().unwrap();
-            let mut shell_paths = Vec::new();
-            for (index, path) in paths.iter().enumerate() {
-                if operation.progress.is_cancelled() {
-                    let pending = shell_paths
-                        .into_iter()
-                        .chain(paths[index..].iter().cloned())
-                        .collect();
-                    return Ok(recycle::BatchOutcome {
-                        pending,
-                        cancelled: true,
-                        ..Default::default()
-                    });
-                }
-                progress.set_current(Some(path));
-                if recycle_batch.try_recycle(path, || operation.progress.is_cancelled()) {
-                    progress.recycled();
-                    observer(path);
-                } else {
-                    if operation.progress.is_cancelled() {
-                        let pending = shell_paths
-                            .into_iter()
-                            .chain(paths[index..].iter().cloned())
-                            .collect();
-                        return Ok(recycle::BatchOutcome {
-                            pending,
-                            cancelled: true,
-                            ..Default::default()
-                        });
-                    }
-                    shell_paths.push(path.clone());
-                }
-            }
-            if shell_paths.is_empty() {
-                Ok(recycle::BatchOutcome::default())
-            } else {
-                // A partial Shell operation can also change bin occupancy.
-                recycle_batch.invalidate_after_shell();
-                recycle::delete(&shell_paths, hwnd, operation, observer)
-            }
-        },
+        |paths, operation, observer| recycle::delete(paths, hwnd, operation, observer),
     )
 }
 

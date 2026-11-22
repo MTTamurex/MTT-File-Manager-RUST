@@ -68,6 +68,9 @@ active, closing dismisses the retained results.
   `PreDeleteItem` guard. An item without `TSF_DELETE_RECYCLE_IF_POSSIBLE` is
   refused before deletion. Shell confirmation/error dialogs are suppressed;
   errors stop the operation, while system UAC prompts remain permitted.
+  All items are submitted to Shell; there is no direct same-volume recycling
+  path, manual Recycle Bin metadata creation, or move into its storage.
+  MTT's themed confirmation, progress, cancellation and results remain available.
 - If recycling is unavailable, Shell is stopped before MTT asks separately
   whether to permanently delete the remaining contents of that selected root.
   Consent to recycle never authorizes this fallback. The fallback warning offers
@@ -104,8 +107,11 @@ active, closing dismisses the retained results.
   Progress remains indeterminate while running: neither traversal discoveries
   nor Shell work units are advertised as a stable item total or byte throughput.
   Pause is not offered for deletion. Elapsed time freezes on completion.
-- Deleting existing Recycle Bin entries and emptying the bin keep the original
-  Shell mechanisms, preserving their metadata and confirmation behavior.
+- Deleting existing Recycle Bin entries uses the existing Shell mechanism.
+  Emptying the bin also uses Shell APIs, with themed confirmation, progress,
+  cancellation and results when the MTT engine is enabled, or native Windows
+  confirmation and progress otherwise. The themed operation permanently removes
+  the items captured for confirmation; cancellation does not restore removed items.
 - Active filenames are sampled only for display, at most every 300 ms, for both
   copies and deletions. Counters and operations are not throttled.
 - Automated deletion tests use owned synthetic temporary trees, simulated Shell

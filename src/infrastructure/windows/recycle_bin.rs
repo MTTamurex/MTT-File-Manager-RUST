@@ -13,7 +13,6 @@ use windows::Win32::UI::Shell::*;
 mod enumeration;
 mod notifications;
 mod operations;
-mod recycle_commit;
 
 // Property keys for Recycle Bin items.
 pub const PKEY_SIZE: PROPERTYKEY = PROPERTYKEY {
@@ -184,5 +183,3 @@ pub(crate) use notifications::{
     handle_change_message, register_change_notifications, take_change_notification,
     unregister_change_notifications, CHANGE_MESSAGE,
 };
-
-pub(crate) use recycle_commit::RecycleCommitBatch;
