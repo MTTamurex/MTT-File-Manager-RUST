@@ -428,6 +428,10 @@ impl ImageViewerApp {
 
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
+        prefs.push((
+            crate::gpu_backend::PREFERENCE_KEY,
+            self.gpu_adapter_preference.clone(),
+        ));
 
         prefs.push((
             "scroll_interpolation",

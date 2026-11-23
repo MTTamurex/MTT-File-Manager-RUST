@@ -15,6 +15,7 @@ pub fn run_viewer_native(
 ) -> eframe::Result<()> {
     let selection = backend::selection()
         .map_err(|error| eframe::Error::AppCreation(std::io::Error::other(error).into()))?;
+    backend::register_gpu_preference(selection.gpu_preference);
     run_with(
         app_name,
         options,
@@ -43,7 +44,7 @@ fn run_with<'app>(
         let attempt = || {
             run(
                 app_name,
-                options_for_backend(options.clone(), requested),
+                options_for_backend(options.clone(), requested, selection.gpu_preference),
                 Box::new(move |cc| {
                     let create = pending
                         .borrow_mut()
@@ -115,6 +116,7 @@ fn should_retry(error: &eframe::Error, creator_available: bool) -> bool {
 fn options_for_backend(
     mut options: eframe::NativeOptions,
     backend: GraphicsBackend,
+    gpu_preference: crate::gpu_backend::GpuPreference,
 ) -> eframe::NativeOptions {
     if backend == GraphicsBackend::Glow {
         options.renderer = eframe::Renderer::Glow;
@@ -136,7 +138,16 @@ fn options_for_backend(
             .dx12
             .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
     }
-    setup.power_preference = eframe::wgpu::PowerPreference::LowPower;
+    setup.power_preference = gpu_preference.power_preference();
+    setup.native_adapter_selector = crate::gpu_backend::adapter_selector(
+        match backend {
+            GraphicsBackend::Dx12 => None,
+            GraphicsBackend::Vulkan => Some("vulkan"),
+            GraphicsBackend::Glow => unreachable!(),
+        },
+        gpu_preference,
+        0,
+    );
     let default_descriptor = Arc::clone(&setup.device_descriptor);
     setup.device_descriptor = Arc::new(move |adapter| eframe::wgpu::DeviceDescriptor {
         memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,

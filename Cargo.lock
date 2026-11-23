@@ -3843,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-copy-engine"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "tempfile",
  "windows",
@@ -3851,7 +3851,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-file-manager"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "base64 0.22.1",
  "betteroffice-docx-edit",
@@ -3946,7 +3946,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "bincode",
  "serde",
@@ -3954,7 +3954,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "bincode",
  "libmimalloc-sys",

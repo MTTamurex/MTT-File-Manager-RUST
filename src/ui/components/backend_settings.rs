@@ -9,10 +9,18 @@ const BACKENDS: &[(&str, &str)] = &[
     ("glow", "OpenGL (fallback)"),
 ];
 
+const GPU_PREFERENCES: &[(&str, &str)] = &[
+    ("high_performance", "settings.gpu_high_performance"),
+    ("low_power", "settings.gpu_low_power"),
+    ("automatic", "settings.gpu_automatic"),
+];
+
 pub fn render_backend_settings_section(
     ui: &mut egui::Ui,
     active_backend: &str,
+    active_gpu_device: &str,
     gpu_backend_preference: &mut String,
+    gpu_adapter_preference: &mut String,
     scroll_interpolation_enabled: &mut bool,
 ) -> (bool, bool) {
     let mut backend_changed = false;
@@ -47,6 +55,18 @@ pub fn render_backend_settings_section(
                 .color(ui.visuals().hyperlink_color),
         );
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t!("settings.gpu_active")).color(theme::text_color(ui.ctx())));
+        ui.label(
+            RichText::new(if active_gpu_device.is_empty() {
+                t!("settings.gpu_active_unknown").to_string()
+            } else {
+                active_gpu_device.to_string()
+            })
+            .strong()
+            .color(ui.visuals().hyperlink_color),
+        );
+    });
     ui.add_space(12.0);
 
     // Backend selector
@@ -65,6 +85,40 @@ pub fn render_backend_settings_section(
         *gpu_backend_preference = BACKENDS[idx].0.to_string();
         backend_changed = true;
     }
+
+    ui.add_space(16.0);
+    ui.label(
+        RichText::new(t!("settings.gpu_preference_title"))
+            .size(14.0)
+            .strong()
+            .color(theme::text_color(ui.ctx())),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(t!("settings.gpu_preference_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(ui.ctx())),
+    );
+    ui.add_space(6.0);
+    let selected_gpu = GPU_PREFERENCES
+        .iter()
+        .position(|&(value, _)| value == gpu_adapter_preference.as_str())
+        .unwrap_or(0);
+    let gpu_labels: Vec<String> = GPU_PREFERENCES
+        .iter()
+        .map(|&(_, key)| t!(key).to_string())
+        .collect();
+    let gpu_label_refs: Vec<&str> = gpu_labels.iter().map(String::as_str).collect();
+    if let Some(idx) = settings_ui::choice_list(ui, &gpu_label_refs, selected_gpu) {
+        *gpu_adapter_preference = GPU_PREFERENCES[idx].0.to_string();
+        backend_changed = true;
+    }
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(t!("settings.gpu_glow_note"))
+            .size(12.0)
+            .color(ui.visuals().warn_fg_color),
+    );
 
     ui.add_space(16.0);
     ui.label(

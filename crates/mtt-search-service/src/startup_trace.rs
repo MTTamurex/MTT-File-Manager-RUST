@@ -2,8 +2,8 @@
 //! from indexed records are accepted by the event API.
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static OUTPUT: OnceLock<Option<Mutex<File>>> = OnceLock::new();
@@ -39,7 +39,10 @@ pub(crate) fn event(drive: Option<char>, name: &'static str, fields: &[(&'static
     let Some(Some(output)) = OUTPUT.get() else {
         return;
     };
-    if !crate::index_db::data_dir().join("startup_trace.enabled").is_file() {
+    if !crate::index_db::data_dir()
+        .join("startup_trace.enabled")
+        .is_file()
+    {
         return;
     }
     let timestamp = SystemTime::now()

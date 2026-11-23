@@ -6,6 +6,7 @@ pub mod disk_analyzer;
 pub mod docx_viewer;
 pub mod domain;
 pub mod embedded_assets; // Embedded resources for portable executable
+pub mod gpu_backend;
 pub mod image_viewer;
 pub mod infrastructure;
 pub mod pdf_viewer;

@@ -136,3 +136,27 @@ fn tab_preferences_load_independently_from_startup_location() {
         NewTabLocation::Current
     );
 }
+
+#[test]
+fn gpu_adapter_preference_defaults_and_loads_independently_from_renderer() {
+    let db = AppStateDb::new_in_memory().unwrap();
+    db.set_preference("language", "en").unwrap();
+    assert_eq!(
+        StartupPreferences::load(&db).gpu_adapter_preference,
+        "high_performance"
+    );
+    db.set_preference("gpu_backend", "vulkan").unwrap();
+    for value in ["low_power", "automatic", "high_performance"] {
+        db.set_preference(crate::gpu_backend::PREFERENCE_KEY, value)
+            .unwrap();
+        let loaded = StartupPreferences::load(&db);
+        assert_eq!(loaded.gpu_adapter_preference, value);
+        assert_eq!(loaded.gpu_backend_preference, "vulkan");
+    }
+    db.set_preference(crate::gpu_backend::PREFERENCE_KEY, "invalid")
+        .unwrap();
+    assert_eq!(
+        StartupPreferences::load(&db).gpu_adapter_preference,
+        "high_performance"
+    );
+}

@@ -39,6 +39,7 @@ pub(super) struct StartupPreferences {
     pub(super) clipboard_highlights: crate::ui::clipboard_feedback::HighlightPreferences,
     pub(super) interface_scale: f32,
     pub(super) gpu_backend_preference: String,
+    pub(super) gpu_adapter_preference: String,
     pub(super) scroll_interpolation_enabled: bool,
     pub(super) diagnostic_mode: bool,
     pub(super) diagnostic_mode_enabled_at: Option<SystemTime>,
@@ -257,6 +258,14 @@ impl StartupPreferences {
             })
             .unwrap_or_else(|| "auto".to_string());
 
+        let gpu_adapter_preference = crate::gpu_backend::GpuPreference::parse(
+            prefs
+                .get(crate::gpu_backend::PREFERENCE_KEY)
+                .map(String::as_str),
+        )
+        .key()
+        .to_string();
+
         let scroll_interpolation_enabled = prefs
             .get("scroll_interpolation")
             .map(|s| s != "false")
@@ -420,6 +429,7 @@ impl StartupPreferences {
             ),
             interface_scale,
             gpu_backend_preference,
+            gpu_adapter_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,

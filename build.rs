@@ -1,6 +1,15 @@
 fn main() {
     register_locale_rebuild_inputs();
 
+    // Unoptimized startup and UI frames can exceed MSVC's 1 MiB main-stack
+    // default. Reserve address space, not committed RAM, for debug builds only.
+    // Keep the event loop on the main thread and leave release builds unchanged.
+    if std::env::var("PROFILE").as_deref() == Ok("debug")
+        && std::env::var("TARGET").is_ok_and(|target| target.ends_with("-windows-msvc"))
+    {
+        println!("cargo:rustc-link-arg-bin=mtt-file-manager=/STACK:8388608");
+    }
+
     #[cfg(target_os = "windows")]
     stage_pdfium_runtime();
 

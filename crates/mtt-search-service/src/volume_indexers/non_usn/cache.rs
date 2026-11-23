@@ -10,8 +10,22 @@ pub(super) fn matching_record_estimate(db: &IndexDb, volume: &IndexVolume) -> Op
         &[
             ("metadata_exists", u64::from(state.is_some())),
             ("serial_known", u64::from(volume.volume_serial != 0)),
-            ("serial_matches", u64::from(state.as_ref().is_some_and(|s| s.volume_serial == volume.volume_serial))),
-            ("identity_matches", u64::from(state.as_ref().is_some_and(|s| s.volume_id.eq_ignore_ascii_case(&volume.volume_id)))),
+            (
+                "serial_matches",
+                u64::from(
+                    state
+                        .as_ref()
+                        .is_some_and(|s| s.volume_serial == volume.volume_serial),
+                ),
+            ),
+            (
+                "identity_matches",
+                u64::from(
+                    state
+                        .as_ref()
+                        .is_some_and(|s| s.volume_id.eq_ignore_ascii_case(&volume.volume_id)),
+                ),
+            ),
         ],
     );
     state

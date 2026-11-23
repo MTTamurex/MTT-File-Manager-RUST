@@ -240,7 +240,9 @@ pub fn render_settings_window(
                                             let (backend, interpolation) = crate::ui::components::backend_settings::render_backend_settings_section(
                                                 ui,
                                                 &app.active_gpu_backend,
+                                                &app.active_gpu_device,
                                                 &mut app.gpu_backend_preference,
+                                                &mut app.gpu_adapter_preference,
                                                 &mut app.scroll_interpolation_enabled,
                                             );
                                             backend_changed |= backend;

@@ -240,6 +240,7 @@ impl ImageViewerApp {
             clipboard_highlights,
             interface_scale,
             gpu_backend_preference,
+            gpu_adapter_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -883,6 +884,8 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
+            gpu_adapter_preference,
+            active_gpu_device: String::new(),
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -1119,6 +1122,7 @@ impl ImageViewerApp {
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
             app.active_gpu_backend = format!("{:?}", info.backend);
+            app.active_gpu_device = format!("{} ({:?})", info.name, info.device_type);
             let has_console = {
                 #[cfg(target_os = "windows")]
                 {

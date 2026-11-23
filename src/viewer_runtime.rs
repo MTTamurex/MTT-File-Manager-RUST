@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub(crate) mod backend;
+pub use backend::register_gpu_preference;
 #[cfg(target_os = "windows")]
 mod dx12_window;
 mod renderer;

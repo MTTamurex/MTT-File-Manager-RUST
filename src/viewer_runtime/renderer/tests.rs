@@ -28,6 +28,7 @@ fn glow_runner_preserves_window_and_one_shot_payload() {
         BackendSelection {
             candidates: vec![GraphicsBackend::Glow],
             inherited: true,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, options, create| {
             calls += 1;
@@ -72,6 +73,7 @@ fn wgpu_initialization_error_is_returned_without_retry() {
         BackendSelection {
             candidates: vec![GraphicsBackend::Dx12, GraphicsBackend::Glow],
             inherited: true,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, options, _| {
             calls += 1;
@@ -88,7 +90,11 @@ fn wgpu_initialization_error_is_returned_without_retry() {
 
 #[test]
 fn wgpu_configuration_keeps_viewers_lightweight_and_uses_dx12_on_windows() {
-    let options = options_for_backend(options(), GraphicsBackend::Dx12);
+    let options = options_for_backend(
+        options(),
+        GraphicsBackend::Dx12,
+        crate::gpu_backend::GpuPreference::LowPower,
+    );
     assert_eq!(options.renderer, eframe::Renderer::Wgpu);
     assert_eq!(options.multisampling, 0);
     assert_eq!(options.depth_buffer, 0);
@@ -123,7 +129,11 @@ fn wgpu_configuration_keeps_viewers_lightweight_and_uses_dx12_on_windows() {
 
 #[test]
 fn vulkan_configuration_excludes_other_backends() {
-    let options = options_for_backend(options(), GraphicsBackend::Vulkan);
+    let options = options_for_backend(
+        options(),
+        GraphicsBackend::Vulkan,
+        crate::gpu_backend::GpuPreference::LowPower,
+    );
     assert_eq!(options.renderer, eframe::Renderer::Wgpu);
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = options.wgpu_options.wgpu_setup else {
         panic!("viewer must create a graphics setup");
@@ -132,6 +142,31 @@ fn vulkan_configuration_excludes_other_backends() {
         setup.instance_descriptor.backends,
         eframe::wgpu::Backends::VULKAN
     );
+}
+
+#[test]
+fn viewers_apply_each_gpu_preference_to_both_wgpu_backends() {
+    use crate::gpu_backend::GpuPreference;
+    for backend in [GraphicsBackend::Dx12, GraphicsBackend::Vulkan] {
+        for preference in [
+            GpuPreference::HighPerformance,
+            GpuPreference::LowPower,
+            GpuPreference::Automatic,
+        ] {
+            let configured = options_for_backend(options(), backend, preference);
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = configured.wgpu_options.wgpu_setup
+            else {
+                panic!("viewer must create a graphics setup");
+            };
+            assert_eq!(setup.power_preference, preference.power_preference());
+            if preference == GpuPreference::Automatic || backend == GraphicsBackend::Vulkan {
+                assert!(setup.native_adapter_selector.is_none());
+            } else {
+                #[cfg(target_os = "windows")]
+                assert!(setup.native_adapter_selector.is_some());
+            }
+        }
+    }
 }
 
 #[test]
@@ -149,6 +184,7 @@ fn independent_launch_falls_back_before_creating_application() {
                 GraphicsBackend::Glow,
             ],
             inherited: false,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, options, create| {
             calls += 1;
@@ -180,6 +216,7 @@ fn runtime_graphics_errors_do_not_reopen_application() {
         BackendSelection {
             candidates: vec![GraphicsBackend::Glow, GraphicsBackend::Dx12],
             inherited: false,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, _, create| {
             calls += 1;
@@ -205,6 +242,7 @@ fn app_creation_error_does_not_trigger_fallback() {
         BackendSelection {
             candidates: vec![GraphicsBackend::Glow, GraphicsBackend::Dx12],
             inherited: false,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, _, create| {
             calls += 1;
@@ -228,6 +266,7 @@ fn unexpected_initialized_backend_is_rejected_before_app_creation() {
         BackendSelection {
             candidates: vec![GraphicsBackend::Dx12, GraphicsBackend::Glow],
             inherited: false,
+            gpu_preference: crate::gpu_backend::GpuPreference::default(),
         },
         |_, _, create| {
             calls += 1;

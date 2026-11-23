@@ -86,9 +86,11 @@ pub(crate) fn index_filesystem_fallback(
             return;
         };
         handle = Some(published);
-        crate::startup_trace::event(Some(drive_letter), "fallback_ready_cached", &[
-            ("records", cached_count as u64),
-        ]);
+        crate::startup_trace::event(
+            Some(drive_letter),
+            "fallback_ready_cached",
+            &[("records", cached_count as u64)],
+        );
         // The dispatcher marks a new worker as `starting`. Once the persisted
         // snapshot is published, clear that provisional state so clients see
         // the usable cached index as ready while the fallback scan is deferred.
@@ -139,9 +141,11 @@ pub(crate) fn index_filesystem_fallback(
 
         let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
         let scan_started = std::time::Instant::now();
-        crate::startup_trace::event(Some(drive_letter), "fallback_scan_started", &[
-            ("existing_cache", u64::from(handle.is_some())),
-        ]);
+        crate::startup_trace::event(
+            Some(drive_letter),
+            "fallback_scan_started",
+            &[("existing_cache", u64::from(handle.is_some()))],
+        );
         let Some(_build_permit) = super::wait_for_index_build(&shutdown) else {
             break;
         };
@@ -215,10 +219,14 @@ pub(crate) fn index_filesystem_fallback(
                     break;
                 };
                 handle = Some(published);
-                crate::startup_trace::event(Some(drive_letter), "fallback_ready_scanned", &[
-                    ("elapsed_ms", scan_started.elapsed().as_millis() as u64),
-                    ("records", records as u64),
-                ]);
+                crate::startup_trace::event(
+                    Some(drive_letter),
+                    "fallback_ready_scanned",
+                    &[
+                        ("elapsed_ms", scan_started.elapsed().as_millis() as u64),
+                        ("records", records as u64),
+                    ],
+                );
                 indexing_progress.clear(drive_letter);
                 crate::memory_trim::request_trim(format!("{}:\\ fallback scan", drive_letter));
 

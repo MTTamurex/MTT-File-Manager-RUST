@@ -669,21 +669,33 @@ pub(super) fn handle_client_with_verifier(
             let (indexed_frn, has_pending_refreshes) = {
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
-                    crate::startup_trace::query_state(drive_letter, 1, "folder_query_volume_not_ready");
+                    crate::startup_trace::query_state(
+                        drive_letter,
+                        1,
+                        "folder_query_volume_not_ready",
+                    );
                     drop(vol);
                     let _ =
                         send_response(pipe, &SearchResponse::Error("Volume not ready".to_string()));
                     return;
                 }
                 if !vol.sizes_loaded {
-                    crate::startup_trace::query_state(drive_letter, 2, "folder_query_sizes_not_loaded");
+                    crate::startup_trace::query_state(
+                        drive_letter,
+                        2,
+                        "folder_query_sizes_not_loaded",
+                    );
                     drop(vol);
                     let _ =
                         send_response(pipe, &SearchResponse::Error("Sizes not loaded".to_string()));
                     return;
                 }
                 if vol.journal_refresh_in_progress {
-                    crate::startup_trace::query_state(drive_letter, 3, "folder_query_journal_pending");
+                    crate::startup_trace::query_state(
+                        drive_letter,
+                        3,
+                        "folder_query_journal_pending",
+                    );
                     drop(vol);
                     let _ = send_response(
                         pipe,
