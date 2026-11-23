@@ -7,8 +7,11 @@ use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const POLL_INTERVAL: Duration = Duration::from_millis(300);
+const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const LISTENER_FALLBACK_INTERVAL: Duration = Duration::from_secs(2);
 
+mod listener;
 mod preferences;
 pub(crate) use preferences::{remember, HighlightPreferences, PREFERENCE_KEY};
 
@@ -24,6 +27,7 @@ struct Monitor {
     internal_operation: Option<(ClipboardOp, u64)>,
     loaded: bool,
     checked: Option<Instant>,
+    attempts: u32,
     pending: Option<mpsc::Receiver<Option<FileSnapshot>>>,
 }
 
@@ -39,6 +43,7 @@ impl Monitor {
             self.internal_operation = internal_operation;
             self.loaded = false;
             self.checked = None;
+            self.attempts = 0;
             // Hide stale markers immediately, without waiting for the worker.
             publish(ctx, &[], None);
         }
@@ -76,6 +81,7 @@ fn publish(ctx: &egui::Context, paths: &[std::path::PathBuf], operation: Option<
 }
 
 pub(crate) fn update(ctx: &egui::Context, clipboard: &ClipboardManager) {
+    listener::ensure_started(ctx);
     let sequence = windows_clipboard::clipboard_sequence_number();
     update_for_sequence(ctx, sequence, clipboard.visual_state(sequence));
 }
@@ -114,10 +120,11 @@ fn update_for_sequence(
     }
     let due = monitor
         .checked
-        .is_none_or(|last| last.elapsed() >= POLL_INTERVAL);
+        .is_none_or(|last| last.elapsed() >= retry_interval(monitor.attempts));
     if !monitor.loaded && monitor.pending.is_none() && due {
         monitor.checked = Some(Instant::now());
         if let Some(sequence) = sequence {
+            monitor.attempts = monitor.attempts.saturating_add(1);
             let (sender, receiver) = mpsc::channel();
             let wakeup = ctx.clone();
             if std::thread::Builder::new()
@@ -132,9 +139,47 @@ fn update_for_sequence(
             }
         }
     }
-    // Also observe changes while the pointer and keyboard are idle. No payload
-    // is read again until the sequence changes (except bounded busy retries).
-    ctx.request_repaint_after(POLL_INTERVAL);
+    // Native clipboard notifications wake the UI on content changes. Keep a
+    // slow polling fallback only when listener creation fails, or retry a
+    // snapshot that could not be read because another process held the clipboard.
+    if let Some(delay) = next_monitor_poll(
+        listener::is_active(),
+        sequence.is_some(),
+        monitor.loaded,
+        monitor.pending.is_some(),
+        monitor.checked.map(|last| last.elapsed()),
+        monitor.attempts,
+    ) {
+        ctx.request_repaint_after(delay);
+    }
+}
+
+fn next_monitor_poll(
+    listener_active: bool,
+    sequence_available: bool,
+    loaded: bool,
+    pending: bool,
+    since_checked: Option<Duration>,
+    attempts: u32,
+) -> Option<Duration> {
+    let retry = (sequence_available && !loaded && !pending).then(|| {
+        since_checked
+            .map(|elapsed| retry_interval(attempts).saturating_sub(elapsed))
+            .unwrap_or(Duration::ZERO)
+    });
+    if listener_active {
+        retry
+    } else {
+        Some(retry.map_or(LISTENER_FALLBACK_INTERVAL, |retry| {
+            retry.min(LISTENER_FALLBACK_INTERVAL)
+        }))
+    }
+}
+
+fn retry_interval(attempts: u32) -> Duration {
+    RETRY_INTERVAL
+        .saturating_mul(1u32 << attempts.saturating_sub(1).min(5))
+        .min(MAX_RETRY_INTERVAL)
 }
 
 pub(crate) fn operation(ctx: &egui::Context, path: &Path) -> Option<ClipboardOp> {

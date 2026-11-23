@@ -1,6 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::DriveInfo;
+use std::sync::Arc;
+
+pub(crate) mod hardware;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DriveInfoRefreshScope {
@@ -47,6 +50,7 @@ pub struct DriveInfoRefreshTracker {
     generation: u64,
     local: DriveInfoRefreshSlot,
     remote: DriveInfoRefreshSlot,
+    hardware: Arc<parking_lot::Mutex<hardware::HardwareSchedule>>,
 }
 
 impl DriveInfoRefreshTracker {
@@ -55,6 +59,7 @@ impl DriveInfoRefreshTracker {
             generation: 0,
             local: DriveInfoRefreshSlot::new(now),
             remote: DriveInfoRefreshSlot::new(now),
+            hardware: Arc::default(),
         }
     }
 
@@ -73,6 +78,7 @@ impl DriveInfoRefreshTracker {
 
     pub fn invalidate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.hardware.lock().invalidate(self.generation);
         self.local.rerun_requested = true;
         self.remote.rerun_requested = true;
     }
@@ -106,6 +112,10 @@ impl DriveInfoRefreshTracker {
 
     pub fn has_completed(&self, scope: DriveInfoRefreshScope) -> bool {
         self.slot(scope).has_completed
+    }
+
+    pub(crate) fn hardware_schedule(&self) -> Arc<parking_lot::Mutex<hardware::HardwareSchedule>> {
+        Arc::clone(&self.hardware)
     }
 
     fn slot(&self, scope: DriveInfoRefreshScope) -> &DriveInfoRefreshSlot {

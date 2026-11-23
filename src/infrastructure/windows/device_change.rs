@@ -29,6 +29,28 @@ static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 static DEVICE_LISTENER_THREAD_ID: OnceLock<u32> = OnceLock::new();
 static DEVICE_NOTIFICATION_HANDLE: Mutex<Option<DeviceNotificationHandle>> = Mutex::new(None);
 static REMOVED_VOLUMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static SYSTEM_THEME_CHANGE_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn notify_system_theme_changed() {
+    if SYSTEM_THEME_CHANGE_PENDING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_ok()
+    {
+        if let Some(ctx) = EGUI_CONTEXT.get() {
+            ctx.request_repaint();
+        }
+    }
+}
+
+pub(crate) fn take_system_theme_change() -> bool {
+    SYSTEM_THEME_CHANGE_PENDING.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
 
 pub(crate) fn notify_volume_removed(letter: char) {
     let letter = letter.to_ascii_uppercase();

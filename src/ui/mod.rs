@@ -23,6 +23,7 @@ pub mod navigation;
 pub(crate) mod new_tab_request;
 pub(crate) mod performance_diagnostics;
 pub mod preview_panel;
+pub(crate) mod repaint_diagnostics;
 pub mod sidebar;
 pub mod sidebar_cloud_roots;
 pub(crate) mod sidebar_network_locations;

@@ -228,6 +228,66 @@ fn local_feedback_updates_in_one_pass_without_spawning_a_reader() {
 }
 
 #[test]
+fn active_clipboard_listener_avoids_periodic_polling_after_snapshot() {
+    assert_eq!(next_monitor_poll(true, true, true, false, None, 1), None);
+    assert_eq!(next_monitor_poll(true, true, false, true, None, 1), None);
+    assert_eq!(
+        next_monitor_poll(
+            true,
+            true,
+            false,
+            false,
+            Some(Duration::from_millis(250)),
+            1
+        ),
+        Some(Duration::from_millis(750))
+    );
+    assert_eq!(next_monitor_poll(true, false, false, false, None, 0), None);
+}
+
+#[test]
+fn unavailable_clipboard_listener_uses_slow_fallback_polling() {
+    assert_eq!(
+        next_monitor_poll(false, true, true, false, None, 1),
+        Some(LISTENER_FALLBACK_INTERVAL)
+    );
+}
+
+#[test]
+fn failed_snapshot_reads_back_off_and_reset_on_a_clipboard_change() {
+    assert_eq!(retry_interval(1), Duration::from_secs(1));
+    assert_eq!(retry_interval(2), Duration::from_secs(2));
+    assert_eq!(retry_interval(4), Duration::from_secs(8));
+    assert_eq!(retry_interval(u32::MAX), MAX_RETRY_INTERVAL);
+    let ctx = egui::Context::default();
+    let mut monitor = Monitor {
+        sequence: Some(10),
+        attempts: 20,
+        checked: Some(Instant::now()),
+        ..Default::default()
+    };
+    monitor.observe(&ctx, Some(11), None);
+    assert_eq!(monitor.attempts, 0);
+    assert!(monitor.checked.is_none());
+    assert!(!monitor.loaded);
+}
+
+#[test]
+fn fallback_still_honors_a_shorter_snapshot_retry_deadline() {
+    assert_eq!(
+        next_monitor_poll(
+            false,
+            true,
+            false,
+            false,
+            Some(Duration::from_millis(750)),
+            1
+        ),
+        Some(Duration::from_millis(250))
+    );
+}
+
+#[test]
 fn feedback_border_preserves_selection_in_light_and_dark_themes() {
     for dark in [false, true] {
         for operation in [ClipboardOp::Copy, ClipboardOp::Move] {

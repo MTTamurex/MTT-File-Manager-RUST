@@ -16,6 +16,7 @@ use crate::workers::thumbnail::processing::get_bucket_size;
 use super::ImageViewerApp;
 
 pub(super) mod file_operation_memory;
+mod inactive_thumbnail_release;
 pub(super) mod startup_memory_trim;
 
 const BASE_PENDING_THUMBNAILS: usize = 64;
@@ -42,6 +43,7 @@ const IDLE_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 const IDLE_PENDING_THUMBNAILS: usize = 1;
 const NAVIGATION_RGBA_CACHE_ITEMS: usize = 32;
 const INACTIVE_THUMBNAIL_CACHE_ITEMS: usize = 1;
+
 const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
     Duration::from_millis(750),
     Duration::from_millis(2500),
@@ -1906,7 +1908,7 @@ impl ImageViewerApp {
         self.suppress_next_folder_preview_invalidation.clear();
         self.suppress_next_folder_preview_invalidation
             .shrink_to_fit();
-        self.selected_thumbnail = None;
+        let cleared_selection = self.selected_thumbnail.take().is_some();
 
         let old_texture_cap = self.cache_manager.texture_cache.cap().get();
         let old_folder_preview_cap = self.cache_manager.folder_preview_cache.cap().get();
@@ -1924,11 +1926,6 @@ impl ImageViewerApp {
             (0, 0)
         };
 
-        self.last_texture_cache_retune = Instant::now()
-            .checked_sub(Duration::from_secs(10))
-            .unwrap_or_else(Instant::now);
-        self.ui_ctx.request_repaint();
-
         let released_rgba_bytes = rgba_bytes_removed
             .saturating_add(pending_rgba_bytes)
             .saturating_add(receiver_rgba_bytes)
@@ -1943,6 +1940,13 @@ impl ImageViewerApp {
             || folder_preview_receiver_drained > 0
             || icon_evicted > 0
             || ext_icon_evicted > 0;
+
+        inactive_thumbnail_release::finish(
+            &self.ui_ctx,
+            &mut self.last_texture_cache_retune,
+            released_any,
+            cleared_selection,
+        );
 
         if released_any {
             log::debug!(

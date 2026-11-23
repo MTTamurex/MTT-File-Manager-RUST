@@ -10,6 +10,9 @@ mod drive_info_refresh;
 pub use drive_health::{
     DriveHealthRequestKind, DriveHealthResult, DriveHealthScheduler, ScheduledDriveHealthRequest,
 };
+pub(crate) use drive_info_refresh::hardware::HardwareSchedule;
+#[cfg(test)]
+pub(crate) use drive_info_refresh::tests_support;
 pub use drive_info_refresh::{
     apply_drive_health_snapshot, merge_drive_info_query, DriveInfoRefreshEntry,
     DriveInfoRefreshResult, DriveInfoRefreshScope, DriveInfoRefreshTracker,

@@ -216,8 +216,16 @@ pub const AUTO_RELOAD_MS: u64 = 200;
 /// `ThemePreference::System`, which swaps the active style bucket whenever the
 /// OS theme changes, silently discarding the visuals applied here.
 pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
+    apply_resolved_theme_visuals(ctx, mode, mode.resolve_dark());
+}
+
+/// Applies an already queried OS theme without reading the registry again.
+pub(crate) fn apply_system_theme_visuals(ctx: &egui::Context, dark: bool) {
+    apply_resolved_theme_visuals(ctx, ThemeMode::System, dark);
+}
+
+fn apply_resolved_theme_visuals(ctx: &egui::Context, mode: ThemeMode, dark: bool) {
     remember_mode(ctx, mode);
-    let dark = mode.resolve_dark();
     ctx.set_theme(if dark {
         egui::Theme::Dark
     } else {

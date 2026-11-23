@@ -11,10 +11,12 @@ use std::time::Duration;
 const FILE_OP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
 const PREFERENCES_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 const CLIPBOARD_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(3);
-const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+// Volume arrival/removal has an immediate WM_DEVICECHANGE path. Keep polling
+// only as a low-frequency fallback for missed notifications and network mounts.
+const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const BACKGROUND_MEMORY_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
-const SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 fn should_run_hidden_updates(viewport_visible: bool, minimized: bool) -> bool {
     !viewport_visible || minimized
@@ -80,6 +82,11 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
     deadline
 }
 
+fn changed_system_theme(current_dark: bool, apps_use_light_theme: Option<bool>) -> Option<bool> {
+    let dark = !apps_use_light_theme?;
+    (dark != current_dark).then_some(dark)
+}
+
 impl ImageViewerApp {
     fn request_next_background_repaint(&self, ctx: &egui::Context) {
         let local_scope = crate::app::drive_state::DriveInfoRefreshScope::Local;
@@ -112,16 +119,19 @@ impl ImageViewerApp {
 
     /// Keeps `ThemeMode::System` in sync with the Windows app mode.
     fn poll_system_theme(&mut self, ctx: &egui::Context) {
+        let notified = crate::infrastructure::windows::device_change::take_system_theme_change();
         if self.theme_mode != ThemeMode::System
-            || self.last_system_theme_poll.elapsed() < SYSTEM_THEME_POLL_INTERVAL
+            || (!notified && self.last_system_theme_poll.elapsed() < SYSTEM_THEME_POLL_INTERVAL)
         {
             return;
         }
         self.last_system_theme_poll = std::time::Instant::now();
-        let dark = crate::infrastructure::windows::windows_app_is_dark();
-        if dark != self.system_theme_dark {
+        if let Some(dark) = changed_system_theme(
+            self.system_theme_dark,
+            crate::infrastructure::windows::app_theme::read_windows_apps_use_light_theme(),
+        ) {
             self.system_theme_dark = dark;
-            crate::ui::theme::apply_theme_visuals(ctx, self.theme_mode);
+            crate::ui::theme::apply_system_theme_visuals(ctx, dark);
             ctx.request_repaint();
         }
     }
@@ -239,6 +249,7 @@ impl eframe::App for ImageViewerApp {
         let startup_fonts_ready = app::apply_ready_startup_fonts(self, ctx);
         app::lifecycle::handle_startup_sequence(self, ctx, startup_fonts_ready);
         app::lifecycle::track_window_state(self, ctx);
+        crate::ui::repaint_diagnostics::record_idle_logic(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
         self.ensure_window_handle(frame);
         // Transfers must complete even when the source is occluded/minimized
@@ -854,6 +865,7 @@ impl eframe::App for ImageViewerApp {
             );
         }
         crate::ui::performance_diagnostics::record_context(self, ctx);
+        crate::ui::repaint_diagnostics::record_idle_frame(self, ctx);
         diagnostic_frame.finish(self.is_loading_folder, self.items.len(), self.generation);
         self.last_ui_exit = Some(std::time::Instant::now());
     }
@@ -972,7 +984,7 @@ mod tests {
         let inputs = RepaintDeadlineInputs {
             preferences_save_elapsed: None,
             drive_bitmask_check_elapsed: Duration::from_secs(1),
-            drive_info_refresh_elapsed: Some(Duration::from_millis(4500)),
+            drive_info_refresh_elapsed: Some(Duration::from_millis(29_500)),
             ..idle_inputs()
         };
 
@@ -1010,13 +1022,37 @@ mod tests {
     }
 
     #[test]
-    fn idle_repaint_tracks_drive_bitmask_deadline() {
+    fn idle_repaint_uses_low_frequency_drive_and_theme_fallbacks() {
         let inputs = RepaintDeadlineInputs {
-            drive_bitmask_check_elapsed: Duration::from_millis(750),
+            drive_bitmask_check_elapsed: Duration::from_secs(5),
+            system_theme_poll_remaining: Some(Duration::from_secs(10)),
             ..idle_inputs()
         };
 
-        assert_eq!(next_background_repaint(inputs), Duration::from_millis(2250));
+        assert_eq!(next_background_repaint(inputs), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn idle_maintenance_does_not_restore_a_fast_polling_loop() {
+        assert_eq!(
+            next_background_repaint(idle_inputs()),
+            Duration::from_secs(30)
+        );
+        let inputs = RepaintDeadlineInputs {
+            drive_info_refresh_elapsed: Some(Duration::ZERO),
+            system_theme_poll_remaining: Some(Duration::from_secs(30)),
+            ..idle_inputs()
+        };
+        assert_eq!(next_background_repaint(inputs), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn failed_system_theme_read_preserves_current_theme() {
+        assert_eq!(changed_system_theme(true, None), None);
+        assert_eq!(changed_system_theme(false, Some(true)), None);
+        assert_eq!(changed_system_theme(true, Some(false)), None);
+        assert_eq!(changed_system_theme(false, Some(false)), Some(true));
+        assert_eq!(changed_system_theme(true, Some(true)), Some(false));
     }
 
     #[test]

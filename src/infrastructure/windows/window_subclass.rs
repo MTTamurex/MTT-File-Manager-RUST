@@ -31,7 +31,7 @@ use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindow
 use windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, MINMAXINFO, SWP_NOSIZE, WINDOWPOS, WM_CANCELMODE, WM_COPYDATA, WM_ENTERSIZEMOVE,
     WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN,
-    WM_PAINT, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
+    WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCOMMAND, WM_THEMECHANGED, WM_WINDOWPOSCHANGING,
 };
 
 #[cfg(test)]
@@ -312,6 +312,10 @@ extern "system" fn borderless_subclass_proc(
                 RemoveWindowSubclass(hwnd, Some(borderless_subclass_proc), BORDERLESS_SUBCLASS_ID);
             return DefSubclassProc(hwnd, msg, wparam, lparam);
         }
+    }
+
+    if msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED {
+        crate::infrastructure::windows::device_change::notify_system_theme_changed();
     }
 
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER

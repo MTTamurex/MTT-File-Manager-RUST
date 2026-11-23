@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn system_theme_uses_the_resolved_value_and_preserves_system_mode() {
+    let ctx = egui::Context::default();
+    for dark in [true, false, true] {
+        apply_system_theme_visuals(&ctx, dark);
+        assert_eq!(current_mode(&ctx), ThemeMode::System);
+        assert_eq!(ctx.global_style().visuals.dark_mode, dark);
+        assert_eq!(
+            ctx.global_style().visuals.panel_fill,
+            if dark {
+                egui::Visuals::dark().panel_fill
+            } else {
+                egui::Visuals::light().panel_fill
+            }
+        );
+    }
+}
+
+#[test]
 fn drive_usage_ratio_handles_capacity_boundaries() {
     assert_eq!(drive_usage_ratio(0, 0), None);
     assert_eq!(drive_usage_ratio(100, 100), Some(0.0));
