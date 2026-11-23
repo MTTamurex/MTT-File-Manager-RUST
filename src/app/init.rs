@@ -1150,6 +1150,13 @@ impl ImageViewerApp {
             log::info!("[GPU] {}", diag.trim());
         } else {
             app.active_gpu_backend = "glow".to_string();
+            if let Some(gl) = &cc.gl {
+                // GL_RENDERER reports the GPU renderer used by the active OpenGL context.
+                use eframe::glow::HasContext as _;
+                app.active_gpu_device = unsafe { gl.get_parameter_string(eframe::glow::RENDERER) }
+                    .trim()
+                    .to_string();
+            }
         }
 
         app.log_memory_snapshot("post-init");

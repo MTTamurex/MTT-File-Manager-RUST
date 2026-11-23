@@ -249,6 +249,8 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
 /// Returns the index of the clicked option, if any.
 pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Option<usize> {
     let dark_mode = ui.visuals().dark_mode;
+    let enabled = ui.is_enabled();
+    let disabled_visuals = ui.visuals().widgets.noninteractive;
     let mut activated = None;
     let mut focused = None;
     let mut option_ids = Vec::with_capacity(labels.len());
@@ -259,7 +261,11 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
             Vec2::new(ui.available_width(), OPTION_ROW_HEIGHT),
             Sense::click(),
         );
-        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let response = response.on_hover_cursor(if enabled {
+            egui::CursorIcon::PointingHand
+        } else {
+            egui::CursorIcon::Default
+        });
         option_ids.push(response.id);
         response.widget_info(|| {
             WidgetInfo::selected(
@@ -272,7 +278,15 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
-            if is_selected {
+            if !enabled {
+                painter.rect_filled(rect, 8.0, ui.visuals().widgets.inactive.bg_fill);
+                painter.rect_stroke(
+                    rect,
+                    8.0,
+                    ui.visuals().widgets.inactive.bg_stroke,
+                    StrokeKind::Inside,
+                );
+            } else if is_selected {
                 painter.rect_filled(rect, 8.0, accent_tint(ui.ctx()));
                 painter.rect_stroke(
                     rect,
@@ -312,7 +326,16 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
             }
 
             let radio_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
-            if is_selected {
+            if !enabled {
+                let muted = disabled_visuals
+                    .fg_stroke
+                    .color
+                    .gamma_multiply(ui.visuals().disabled_alpha);
+                painter.circle_stroke(radio_center, 7.0, Stroke::new(1.5, muted));
+                if is_selected {
+                    painter.circle_filled(radio_center, 3.5, muted);
+                }
+            } else if is_selected {
                 painter.circle_stroke(
                     radio_center,
                     7.0,
@@ -333,14 +356,22 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
                     ),
                 );
             }
+            let text_color = if enabled {
+                theme::text_color(ui.ctx())
+            } else {
+                disabled_visuals
+                    .fg_stroke
+                    .color
+                    .gamma_multiply(ui.visuals().disabled_alpha)
+            };
             painter.text(
                 Pos2::new(rect.min.x + 36.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 label,
                 egui::FontId::proportional(13.0),
-                theme::text_color(ui.ctx()),
+                text_color,
             );
-            if response.has_focus() {
+            if enabled && response.has_focus() {
                 paint_focus_outline(ui, rect, 8.0);
             }
         }
@@ -354,16 +385,18 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
         ui.add_space(6.0);
     }
 
-    if let Some(focused) = focused {
-        if let Some(target) = radio_arrow_target(
-            ui,
-            focused,
-            labels.len(),
-            &[egui::Key::ArrowUp, egui::Key::ArrowLeft],
-            &[egui::Key::ArrowDown, egui::Key::ArrowRight],
-        ) {
-            ui.memory_mut(|memory| memory.request_focus(option_ids[target]));
-            return (target != selected).then_some(target);
+    if enabled {
+        if let Some(focused) = focused {
+            if let Some(target) = radio_arrow_target(
+                ui,
+                focused,
+                labels.len(),
+                &[egui::Key::ArrowUp, egui::Key::ArrowLeft],
+                &[egui::Key::ArrowDown, egui::Key::ArrowRight],
+            ) {
+                ui.memory_mut(|memory| memory.request_focus(option_ids[target]));
+                return (target != selected).then_some(target);
+            }
         }
     }
     activated

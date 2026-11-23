@@ -46,33 +46,6 @@ pub fn render_backend_settings_section(
     );
     ui.add_space(10.0);
 
-    // Show currently active backend
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(t!("settings.backend_active")).color(theme::text_color(ui.ctx())));
-        ui.label(
-            RichText::new(active_backend)
-                .strong()
-                .color(ui.visuals().hyperlink_color),
-        );
-    });
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(t!("settings.gpu_active")).color(theme::text_color(ui.ctx())));
-        ui.label(
-            RichText::new(if active_gpu_device.is_empty() {
-                t!("settings.gpu_active_unknown").to_string()
-            } else {
-                active_gpu_device.to_string()
-            })
-            .strong()
-            .color(ui.visuals().hyperlink_color),
-        );
-    });
-    ui.add_space(12.0);
-
-    // Backend selector
-    ui.label(RichText::new(t!("settings.backend_select")).color(theme::text_color(ui.ctx())));
-    ui.add_space(6.0);
-
     let selected = BACKENDS
         .iter()
         .position(|&(value, _)| value == gpu_backend_preference.as_str())
@@ -85,6 +58,23 @@ pub fn render_backend_settings_section(
         *gpu_backend_preference = BACKENDS[idx].0.to_string();
         backend_changed = true;
     }
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t!("settings.backend_active")).color(theme::text_color(ui.ctx())));
+        let active_backend_label = if active_backend.eq_ignore_ascii_case("dx12") {
+            "DirectX 12"
+        } else if active_backend.eq_ignore_ascii_case("glow") {
+            "OpenGL"
+        } else {
+            active_backend
+        };
+        ui.label(
+            RichText::new(active_backend_label)
+                .strong()
+                .color(ui.visuals().hyperlink_color),
+        );
+    });
 
     ui.add_space(16.0);
     ui.label(
@@ -100,6 +90,12 @@ pub fn render_backend_settings_section(
             .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(6.0);
+    ui.label(
+        RichText::new(t!("settings.gpu_glow_note"))
+            .size(12.0)
+            .color(ui.visuals().warn_fg_color),
+    );
+    ui.add_space(14.0);
     let selected_gpu = GPU_PREFERENCES
         .iter()
         .position(|&(value, _)| value == gpu_adapter_preference.as_str())
@@ -109,16 +105,25 @@ pub fn render_backend_settings_section(
         .map(|&(_, key)| t!(key).to_string())
         .collect();
     let gpu_label_refs: Vec<&str> = gpu_labels.iter().map(String::as_str).collect();
-    if let Some(idx) = settings_ui::choice_list(ui, &gpu_label_refs, selected_gpu) {
-        *gpu_adapter_preference = GPU_PREFERENCES[idx].0.to_string();
-        backend_changed = true;
-    }
+    ui.add_enabled_ui(gpu_backend_preference != "glow", |ui| {
+        if let Some(idx) = settings_ui::choice_list(ui, &gpu_label_refs, selected_gpu) {
+            *gpu_adapter_preference = GPU_PREFERENCES[idx].0.to_string();
+            backend_changed = true;
+        }
+    });
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(t!("settings.gpu_glow_note"))
-            .size(12.0)
-            .color(ui.visuals().warn_fg_color),
-    );
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t!("settings.gpu_active")).color(theme::text_color(ui.ctx())));
+        ui.label(
+            RichText::new(if active_gpu_device.is_empty() {
+                t!("settings.gpu_active_unknown").to_string()
+            } else {
+                active_gpu_device.to_string()
+            })
+            .strong()
+            .color(ui.visuals().hyperlink_color),
+        );
+    });
 
     ui.add_space(16.0);
     ui.label(
@@ -146,13 +151,6 @@ pub fn render_backend_settings_section(
     ui.add_space(6.0);
     ui.label(
         RichText::new(t!("settings.graphics_interpolation_opengl_warning"))
-            .size(12.0)
-            .color(ui.visuals().warn_fg_color),
-    );
-
-    ui.add_space(12.0);
-    ui.label(
-        RichText::new(t!("settings.backend_restart_warning"))
             .size(12.0)
             .color(ui.visuals().warn_fg_color),
     );
