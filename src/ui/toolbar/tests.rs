@@ -21,6 +21,7 @@ struct ToolbarTestState {
     recent_paths: Vec<(String, String)>,
     svg_manager: SvgIconManager,
     copied_text: Option<String>,
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Default for ToolbarTestState {
@@ -35,6 +36,7 @@ impl Default for ToolbarTestState {
             recent_paths: vec![("Folder".to_owned(), "C:\\Folder".to_owned())],
             svg_manager: SvgIconManager::default(),
             copied_text: None,
+            shapes: Vec::new(),
         }
     }
 }
@@ -51,6 +53,7 @@ impl ToolbarTestState {
             recent_paths,
             svg_manager,
             copied_text,
+            shapes,
         } = self;
         let mut action = None;
         let output = ctx.run_ui(
@@ -64,6 +67,7 @@ impl ToolbarTestState {
                 action = render_toolbar(
                     ui,
                     "C:\\",
+                    &[],
                     &[],
                     None,
                     path_input,
@@ -94,6 +98,7 @@ impl ToolbarTestState {
                 None
             }
         });
+        *shapes = output.shapes;
         action
     }
 
@@ -105,6 +110,48 @@ impl ToolbarTestState {
             .char_range()
             .unwrap()
     }
+}
+
+#[test]
+fn history_close_is_centered_and_closes_without_cancelling_editing() {
+    let mut state = ToolbarTestState {
+        path_input: r"C:\Folder".into(),
+        is_editing_path: true,
+        show_address_history_menu: true,
+        address_bar_focus_request: true,
+        ..Default::default()
+    };
+    state.render(Vec::new());
+    let close_center = state
+        .shapes
+        .iter()
+        .find_map(|shape| {
+            if let egui::Shape::LineSegment { points, stroke } = &shape.shape {
+                let delta = points[1] - points[0];
+                if stroke.width == 1.5 && delta == Vec2::new(8.0, 8.0) {
+                    return Some(points[0] + delta * 0.5);
+                }
+            }
+            None
+        })
+        .expect("address close icon should be painted");
+    // The address bar is 26 px high, centered on the 30 px toolbar row.
+    assert!((close_center.y - 15.0).abs() <= 1.0, "{close_center:?}");
+    state.render(vec![Event::PointerMoved(close_center)]);
+    for pressed in [true, false] {
+        let action = state.render(vec![Event::PointerButton {
+            pos: close_center,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!matches!(action, Some(ToolbarAction::CancelPathInput)));
+    }
+    assert!(!state.show_address_history_menu);
+    assert!(state.is_editing_path);
+    assert_eq!(state.path_input, r"C:\Folder");
+    state.render(vec![Event::Text("x".into())]);
+    assert_eq!(state.path_input, "x");
 }
 
 #[test]

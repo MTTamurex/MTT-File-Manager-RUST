@@ -52,6 +52,43 @@ pub(super) fn breadcrumb_segments(
     })
 }
 
+pub(super) fn decorate_drive_segments(
+    current_path: &str,
+    segments: &mut Vec<(String, String)>,
+    cloud_roots: &[CloudRoot],
+    disks: &[(String, String)],
+) {
+    if segments.is_empty()
+        || cloud_roots
+            .iter()
+            .any(|root| contains(&root.path, current_path))
+    {
+        return;
+    }
+
+    let bytes = current_path.as_bytes();
+    if bytes.len() < 3 || bytes[1] != b':' || !matches!(bytes[2], b'\\' | b'/') {
+        return;
+    }
+    let drive_root = &current_path[..3];
+    if normalized(&segments[0].1) != normalized(drive_root) {
+        return;
+    }
+
+    if let Some((_, label)) = disks.iter().find(|(path, label)| {
+        normalized(path) == normalized(drive_root) && !label.trim().is_empty()
+    }) {
+        segments[0].0 = label.clone();
+    }
+    segments.insert(
+        0,
+        (
+            rust_i18n::t!("nav.computer").to_string(),
+            crate::domain::special_paths::COMPUTER_VIEW_ID.to_string(),
+        ),
+    );
+}
+
 fn build_segments(
     current_path: &str,
     cloud_root: Option<&CloudRoot>,
@@ -213,6 +250,86 @@ mod tests {
                 breadcrumb_segments(path, &[]),
                 vec![("server".into(), path.into())]
             );
+        }
+    }
+
+    #[test]
+    fn ordinary_drive_breadcrumbs_show_computer_and_volume_label() {
+        let mut segments = build_segments(r"D:\Folder", None, |_| None);
+        decorate_drive_segments(
+            r"D:\Folder",
+            &mut segments,
+            &[],
+            &[(r"D:\".into(), "Archive (D:)".into())],
+        );
+        assert_eq!(
+            segments,
+            vec![
+                (
+                    rust_i18n::t!("nav.computer").to_string(),
+                    crate::domain::special_paths::COMPUTER_VIEW_ID.to_string()
+                ),
+                ("Archive (D:)".into(), r"D:\".into()),
+                ("Folder".into(), r"D:\Folder".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn cloud_and_special_roots_keep_their_existing_breadcrumbs() {
+        let cloud_root = cloud();
+        let mut cloud_segments = build_segments(r"C:\Cloud\Folder", Some(&cloud_root), |_| None);
+        let original_cloud = cloud_segments.clone();
+        decorate_drive_segments(
+            r"C:\Cloud\Folder",
+            &mut cloud_segments,
+            &[cloud_root],
+            &[(r"C:\".into(), "System (C:)".into())],
+        );
+        assert_eq!(cloud_segments, original_cloud);
+
+        let mut special_segments =
+            build_segments(r"C:\Users\user\Documents\Folder", None, |path| {
+                (path == Path::new(r"C:\Users\user\Documents")).then(|| "Documents".into())
+            });
+        let original_special = special_segments.clone();
+        decorate_drive_segments(
+            r"C:\Users\user\Documents\Folder",
+            &mut special_segments,
+            &[],
+            &[(r"C:\".into(), "System (C:)".into())],
+        );
+        assert_eq!(special_segments, original_special);
+    }
+
+    #[test]
+    fn drive_labels_refresh_without_changing_the_path_or_cloud_cache() {
+        let path = r"D:\Folder";
+        for label in ["Archive (D:)", "Data (D:)"] {
+            let mut segments = breadcrumb_segments(path, &[]);
+            decorate_drive_segments(path, &mut segments, &[], &[("d:/".into(), label.into())]);
+            assert_eq!(segments[1], (label.into(), r"D:\".into()));
+            assert_eq!(segments[2].1, path);
+        }
+        for disks in [vec![], vec![(r"D:\".into(), " ".into())]] {
+            let mut segments = breadcrumb_segments(path, &[]);
+            decorate_drive_segments(path, &mut segments, &[], &disks);
+            assert_eq!(segments[1], ("D:".into(), r"D:\".into()));
+        }
+        assert_eq!(breadcrumb_segments(path, &[])[0].0, "D:");
+    }
+
+    #[test]
+    fn drive_root_is_decorated_but_unc_share_is_not() {
+        let mut segments = build_segments(r"D:\", None, |_| None);
+        decorate_drive_segments(r"D:\", &mut segments, &[], &[]);
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[1], ("D:".into(), r"D:\".into()));
+        for path in [r"\\server", r"\\server\share\Folder"] {
+            let mut segments = build_segments(path, None, |_| None);
+            let original = segments.clone();
+            decorate_drive_segments(path, &mut segments, &[], &[]);
+            assert_eq!(segments, original);
         }
     }
 }
