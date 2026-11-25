@@ -787,6 +787,8 @@ pub struct ImageViewerApp {
     pub active_gpu_device: String,
     /// Name of the GPU driving the monitor when it differs from the rendering GPU.
     pub gpu_cross_adapter_display: Option<String>,
+    /// Vulkan on an Intel GPU: the driver presents windowed frames by GDI copy.
+    pub gpu_vulkan_copy_present: bool,
     pub scroll_interpolation_enabled: bool,
     pub diagnostic_mode: bool,
     pub diagnostic_mode_enabled_at: Option<SystemTime>,

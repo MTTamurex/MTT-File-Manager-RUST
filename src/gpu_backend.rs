@@ -254,6 +254,16 @@ fn adapter_summary(adapter: &wgpu::Adapter) -> String {
     )
 }
 
+const INTEL_PCI_VENDOR_ID: u32 = 0x8086;
+
+/// Intel's Windows Vulkan driver presents windowed swapchains by GDI copy
+/// ("Composed: Copy with GPU GDI" in PresentMon). Measured on a UHD 730: ~30
+/// of 60 frames reached the screen and DWM spent ~10 ms per frame copying,
+/// while DirectX 12 on the same GPU used hardware independent flip.
+pub fn vulkan_presents_by_copy(backend: wgpu::Backend, vendor: u32) -> bool {
+    backend == wgpu::Backend::Vulkan && vendor == INTEL_PCI_VENDOR_ID
+}
+
 static RENDER_ADAPTER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Name of the wgpu adapter rendering the main window, once it is known.
@@ -395,6 +405,13 @@ mod tests {
                 cfg!(target_os = "windows")
             );
         }
+    }
+
+    #[test]
+    fn only_vulkan_on_intel_is_flagged_as_copy_presentation() {
+        assert!(vulkan_presents_by_copy(wgpu::Backend::Vulkan, 0x8086));
+        assert!(!vulkan_presents_by_copy(wgpu::Backend::Dx12, 0x8086));
+        assert!(!vulkan_presents_by_copy(wgpu::Backend::Vulkan, 0x10de));
     }
 
     #[test]

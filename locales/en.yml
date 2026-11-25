@@ -731,6 +731,7 @@ settings:
   gpu_active: "Active GPU:"
   gpu_active_unknown: "OpenGL renderer unavailable"
   gpu_cross_adapter_warning: "⚠ The monitor is connected to %{display}. Rendering on another GPU copies every frame between adapters, which can make scrolling stutter. Prefer Automatic or connect the monitor to the rendering GPU."
+  vulkan_intel_copy_warning: "⚠ On Intel graphics, the Vulkan driver presents frames by copying them, so only about half of them reach the screen and scrolling stutters. DirectX 12 is recommended on this GPU."
   gpu_preference_title: "GPU preference"
   gpu_preference_description: "Choose which adapter MTT should prefer. Requires restarting the application. If the preferred GPU is unavailable or incompatible, another will be used; check the active GPU below."
   gpu_high_performance: "High performance (prefer dedicated GPU)"

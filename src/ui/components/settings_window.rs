@@ -239,9 +239,12 @@ pub fn render_settings_window(
                                         SettingsSection::Graphics => {
                                             let (backend, interpolation) = crate::ui::components::backend_settings::render_backend_settings_section(
                                                 ui,
-                                                &app.active_gpu_backend,
-                                                &app.active_gpu_device,
-                                                app.gpu_cross_adapter_display.as_deref(),
+                                                crate::ui::components::backend_settings::ActiveGraphics {
+                                                    backend: &app.active_gpu_backend,
+                                                    device: &app.active_gpu_device,
+                                                    cross_adapter_display: app.gpu_cross_adapter_display.as_deref(),
+                                                    vulkan_copy_present: app.gpu_vulkan_copy_present,
+                                                },
                                                 &mut app.gpu_backend_preference,
                                                 &mut app.gpu_adapter_preference,
                                                 &mut app.scroll_interpolation_enabled,

@@ -15,15 +15,29 @@ const GPU_PREFERENCES: &[(&str, &str)] = &[
     ("automatic", "settings.gpu_automatic"),
 ];
 
+/// Read-only facts about the renderer this process is running with.
+pub struct ActiveGraphics<'a> {
+    pub backend: &'a str,
+    pub device: &'a str,
+    /// GPU driving the monitor, when it is not the rendering GPU.
+    pub cross_adapter_display: Option<&'a str>,
+    /// Vulkan on Intel: frames are presented by GDI copy.
+    pub vulkan_copy_present: bool,
+}
+
 pub fn render_backend_settings_section(
     ui: &mut egui::Ui,
-    active_backend: &str,
-    active_gpu_device: &str,
-    cross_adapter_display: Option<&str>,
+    active: ActiveGraphics<'_>,
     gpu_backend_preference: &mut String,
     gpu_adapter_preference: &mut String,
     scroll_interpolation_enabled: &mut bool,
 ) -> (bool, bool) {
+    let ActiveGraphics {
+        backend: active_backend,
+        device: active_gpu_device,
+        cross_adapter_display,
+        vulkan_copy_present,
+    } = active;
     let mut backend_changed = false;
     let mut interpolation_changed = false;
 
@@ -76,6 +90,14 @@ pub fn render_backend_settings_section(
                 .color(ui.visuals().hyperlink_color),
         );
     });
+    if vulkan_copy_present {
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(t!("settings.vulkan_intel_copy_warning"))
+                .size(12.0)
+                .color(ui.visuals().warn_fg_color),
+        );
+    }
 
     ui.add_space(16.0);
     ui.label(
