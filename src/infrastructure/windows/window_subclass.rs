@@ -318,6 +318,19 @@ extern "system" fn borderless_subclass_proc(
         crate::infrastructure::windows::device_change::notify_system_theme_changed();
     }
 
+    // Owned popups (the docked video surface) track the client area.
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_MOVE
+        && !unsafe { IsIconic(hwnd).as_bool() }
+    {
+        super::owned_surface::on_owner_moved(super::owned_surface::client_origin_from_move_lparam(
+            lparam.0,
+        ));
+    }
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_SHOWWINDOW && lparam.0 == 0 {
+        // lParam == 0: an explicit ShowWindow call, not an owner minimize/restore.
+        super::owned_surface::on_owner_visibility(wparam.0 != 0);
+    }
+
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER
         && wparam.0 == super::system_tray::coordinator::TIMER_ID
     {

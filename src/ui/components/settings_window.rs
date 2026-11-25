@@ -241,6 +241,7 @@ pub fn render_settings_window(
                                                 ui,
                                                 &app.active_gpu_backend,
                                                 &app.active_gpu_device,
+                                                app.gpu_cross_adapter_display.as_deref(),
                                                 &mut app.gpu_backend_preference,
                                                 &mut app.gpu_adapter_preference,
                                                 &mut app.scroll_interpolation_enabled,

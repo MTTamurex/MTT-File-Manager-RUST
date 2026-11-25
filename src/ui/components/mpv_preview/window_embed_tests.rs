@@ -1,4 +1,4 @@
-use super::{overlay_pixel_regions, PixelRoundedRect};
+use super::{overlay_pixel_regions, popup_clip, PixelRoundedRect};
 use eframe::egui;
 
 fn popup_overlay(rect: egui::Rect) -> crate::ui::video_overlay::VideoOverlay {
@@ -70,7 +70,8 @@ mod native {
             };
             let mut surface = VideoSurface::new();
             surface.main_hwnd = Some(parent);
-            surface.mpv_hwnd = Some(super::super::create_surface_window(parent).unwrap());
+            surface.popup = false;
+            surface.mpv_hwnd = Some(super::super::create_surface_window(parent, false).unwrap());
             Self { surface }
         }
 
@@ -158,7 +159,7 @@ mod native {
         let fixture = SurfaceFixture::new();
         let mut preview = MpvPreview::new("video.mp4".into());
         let parent = fixture.surface.main_hwnd().unwrap();
-        let child = super::super::create_surface_window(parent).unwrap();
+        let child = super::super::create_surface_window(parent, false).unwrap();
         preview.surface.main_hwnd = Some(parent);
         preview.surface.mpv_hwnd = Some(child);
         let ctx = egui::Context::default();
@@ -209,7 +210,7 @@ mod native {
         preview.set_visibility(true);
 
         let parent = fixture.surface.main_hwnd().unwrap();
-        let child = super::super::create_surface_window(parent).unwrap();
+        let child = super::super::create_surface_window(parent, false).unwrap();
         preview.surface.main_hwnd = Some(parent);
         preview.surface.mpv_hwnd = Some(child);
         let ctx = egui::Context::default();
@@ -323,4 +324,80 @@ mod native {
             0
         );
     }
+
+    #[test]
+    fn popup_surface_is_owned_and_follows_the_owner_client_area() {
+        use crate::infrastructure::windows::owned_surface;
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER, WS_POPUP};
+
+        let owner = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("static"),
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                640,
+                480,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("create hidden test owner")
+        };
+        let mut surface = VideoSurface::new();
+        surface.main_hwnd = Some(owner);
+        surface.popup = true;
+        let popup = super::super::create_surface_window(owner, true).unwrap();
+        surface.mpv_hwnd = Some(popup);
+
+        let style = unsafe { GetWindowLongPtrW(popup, GWL_STYLE) as u32 };
+        assert_ne!(style & WS_POPUP.0, 0);
+        assert_eq!(style & WS_CHILD.0, 0);
+        assert_eq!(unsafe { GetWindow(popup, GW_OWNER) }.unwrap(), owner);
+
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(320.0, 180.0));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| surface.sync_rect(ui, rect));
+        let origin = surface.client_origin().unwrap();
+        let mut bounds = RECT::default();
+        unsafe { GetWindowRect(popup, &mut bounds).unwrap() };
+        assert_eq!((bounds.left, bounds.top), (origin.0 + 20, origin.1 + 30));
+
+        // The owner's WM_MOVE handler repositions it without an egui pass.
+        owned_surface::on_owner_moved((1000, 500));
+        unsafe { GetWindowRect(popup, &mut bounds).unwrap() };
+        assert_eq!((bounds.left, bounds.top), (1020, 530));
+
+        surface.destroy();
+        unsafe {
+            let _ = DestroyWindow(owner);
+        }
+    }
+}
+
+#[test]
+fn popup_inside_the_client_area_needs_no_clip() {
+    assert_eq!(popup_clip((10, 20, 300, 200), (800, 600)), None);
+}
+
+#[test]
+fn popup_is_clipped_to_the_client_area_on_every_edge() {
+    // Overhangs right and bottom.
+    assert_eq!(
+        popup_clip((700, 500, 300, 200), (800, 600)),
+        Some((0, 0, 100, 100))
+    );
+    // Overhangs left and top.
+    assert_eq!(
+        popup_clip((-50, -20, 300, 200), (800, 600)),
+        Some((50, 20, 300, 200))
+    );
+    // Entirely outside: an empty region hides it.
+    assert_eq!(
+        popup_clip((900, 10, 300, 200), (800, 600)),
+        Some((0, 0, 0, 200))
+    );
 }

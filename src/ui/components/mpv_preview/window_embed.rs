@@ -3,32 +3,47 @@ use eframe::egui;
 #[cfg(target_os = "windows")]
 use windows::core::w;
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, POINT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, UpdateWindow,
-    RGN_DIFF,
+    ClientToScreen, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn,
+    UpdateWindow, RGN_DIFF,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, SW_HIDE, SW_SHOW, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 #[cfg(target_os = "windows")]
-fn create_surface_window(parent: HWND) -> windows::core::Result<HWND> {
+fn create_surface_window(parent: HWND, popup: bool) -> windows::core::Result<HWND> {
     use windows::Win32::System::SystemServices::SS_BLACKRECT;
 
+    // Popup experiment: an owned, never-activated top-level window. DWM then
+    // composes the video like the detached player instead of re-composing the
+    // main window at the video's cadence. `parent` becomes the owner.
+    let (ex_style, style) = if popup {
+        (
+            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            WS_POPUP | WS_CLIPCHILDREN,
+        )
+    } else {
+        (
+            WINDOW_EX_STYLE::default(),
+            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        )
+    };
     // A default STATIC has no opaque video background. Keep the surface hidden
     // until it is positioned, and let STATIC paint black until MPV takes over.
     unsafe {
         CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
+            ex_style,
             w!("static"),
             w!(""),
-            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WINDOW_STYLE(SS_BLACKRECT.0),
+            style | WINDOW_STYLE(SS_BLACKRECT.0),
             0,
             0,
             1,
@@ -50,6 +65,12 @@ pub struct VideoSurface {
     mpv_hwnd: Option<HWND>,
     main_hwnd: Option<HWND>,
     last_rect: egui::Rect,
+    /// Screen position of the main window's client origin (popup host only).
+    last_client_origin: Option<(i32, i32)>,
+    popup: bool,
+    /// Visible part of a popup host inside the main client area, in window
+    /// coordinates; `None` when the whole surface is inside.
+    clip: Option<(i32, i32, i32, i32)>,
     last_overlay_regions: Option<Vec<PixelRoundedRect>>,
     visible: std::cell::Cell<bool>,
 }
@@ -67,6 +88,22 @@ struct PixelRoundedRect {
     right: i32,
     bottom: i32,
     corner_diameter: i32,
+}
+
+/// Part of a popup surface `(x, y, width, height)` (client coordinates) that
+/// lies inside a client area of `client_size`, in surface coordinates.
+/// `None` when nothing needs clipping.
+#[cfg(any(target_os = "windows", test))]
+fn popup_clip(
+    (x, y, width, height): (i32, i32, i32, i32),
+    (client_width, client_height): (i32, i32),
+) -> Option<(i32, i32, i32, i32)> {
+    let left = (-x).clamp(0, width);
+    let top = (-y).clamp(0, height);
+    let right = (client_width - x).clamp(left, width);
+    let bottom = (client_height - y).clamp(top, height);
+    (left != 0 || top != 0 || right != width || bottom != height)
+        .then_some((left, top, right, bottom))
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -124,9 +161,25 @@ impl VideoSurface {
             mpv_hwnd: None,
             main_hwnd: None,
             last_rect: egui::Rect::NAN,
+            last_client_origin: None,
+            popup: super::host_tuning::PreviewHostTuning::from_env().popup,
+            clip: None,
             last_overlay_regions: None,
             visible: std::cell::Cell::new(false),
         }
+    }
+
+    /// Screen position of the main window's client area (popup host only; a
+    /// child window is positioned in client coordinates).
+    fn client_origin(&self) -> Option<(i32, i32)> {
+        if !self.popup {
+            return Some((0, 0));
+        }
+        let main = self.main_hwnd?;
+        let mut origin = POINT { x: 0, y: 0 };
+        unsafe { ClientToScreen(main, &mut origin) }
+            .as_bool()
+            .then_some((origin.x, origin.y))
     }
 
     /// Captures the main application HWND from the eframe::Frame (called once).
@@ -161,7 +214,7 @@ impl VideoSurface {
             return;
         };
 
-        match create_surface_window(parent) {
+        match create_surface_window(parent, self.popup) {
             Ok(h_video) => {
                 self.mpv_hwnd = Some(h_video);
                 self.reset_rect();
@@ -174,22 +227,59 @@ impl VideoSurface {
     /// Synchronizes the child window position/size with the egui allocated rect.
     /// Only calls MoveWindow when position/size actually changes (~95% reduction).
     pub fn sync_rect(&mut self, ui: &egui::Ui, rect: egui::Rect) {
-        if rect == self.last_rect {
+        // A popup must also follow the main window when it moves on screen.
+        let origin = self.client_origin();
+        if rect == self.last_rect && origin == self.last_client_origin {
             return;
         }
 
+        if rect != self.last_rect {
+            self.last_overlay_regions = None;
+        }
         self.last_rect = rect;
-        self.last_overlay_regions = None;
+        self.last_client_origin = origin;
 
         if let Some(h_video) = self.mpv_hwnd {
+            let (origin_x, origin_y) = origin.unwrap_or((0, 0));
             let factor = ui.ctx().pixels_per_point();
-            let x = (rect.min.x * factor) as i32;
-            let y = (rect.min.y * factor) as i32;
+            let client_x = (rect.min.x * factor) as i32;
+            let client_y = (rect.min.y * factor) as i32;
             let w = (rect.width() * factor) as i32;
             let h = (rect.height() * factor) as i32;
+            if self.popup {
+                crate::infrastructure::windows::owned_surface::set_offset(
+                    h_video,
+                    (client_x, client_y),
+                );
+                // A child was clipped to the client area by Windows; a popup
+                // must be clipped explicitly (e.g. a floating player dragged
+                // partly outside the main window).
+                let clip = self.main_hwnd.and_then(|main| {
+                    let mut client = windows::Win32::Foundation::RECT::default();
+                    unsafe {
+                        windows::Win32::UI::WindowsAndMessaging::GetClientRect(main, &mut client)
+                    }
+                    .ok()?;
+                    popup_clip(
+                        (client_x, client_y, w.max(1), h.max(1)),
+                        (client.right, client.bottom),
+                    )
+                });
+                if clip != self.clip {
+                    self.clip = clip;
+                    self.last_overlay_regions = None;
+                }
+            }
             unsafe {
                 // PERF: MoveWindow only called when position/size changes (~95% reduction)
-                let _ = MoveWindow(h_video, x, y, w.max(1), h.max(1), true);
+                let _ = MoveWindow(
+                    h_video,
+                    client_x + origin_x,
+                    client_y + origin_y,
+                    w.max(1),
+                    h.max(1),
+                    true,
+                );
             }
         }
     }
@@ -201,8 +291,17 @@ impl VideoSurface {
         let visible = visible && self.last_rect.is_positive();
         if let Some(hwnd) = self.mpv_hwnd {
             if self.visible.replace(visible) != visible {
+                // While the main window is hidden (tray), only record the wish;
+                // the owner's WM_SHOWWINDOW shows the popup again.
+                if self.popup
+                    && !crate::infrastructure::windows::owned_surface::set_wants_visible(
+                        hwnd, visible,
+                    )
+                {
+                    return;
+                }
                 unsafe {
-                    let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+                    let _ = ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
                     if visible {
                         // Paint the fallback now, not in a later message-loop iteration.
                         let _ = UpdateWindow(hwnd);
@@ -229,12 +328,13 @@ impl VideoSurface {
         }
 
         let applied = unsafe {
-            if regions.is_empty() {
+            if regions.is_empty() && self.clip.is_none() {
                 SetWindowRgn(hwnd, None, true) != 0
             } else {
                 let width = ((self.last_rect.width() * pixels_per_point) as i32).max(1);
                 let height = ((self.last_rect.height() * pixels_per_point) as i32).max(1);
-                let window_region = CreateRectRgn(0, 0, width, height);
+                let (left, top, right, bottom) = self.clip.unwrap_or((0, 0, width, height));
+                let window_region = CreateRectRgn(left, top, right, bottom);
                 if window_region.is_invalid() {
                     false
                 } else {
@@ -311,6 +411,7 @@ impl VideoSurface {
     pub fn destroy(&mut self) {
         self.visible.set(false);
         if let Some(hwnd) = self.mpv_hwnd.take() {
+            crate::infrastructure::windows::owned_surface::untrack(hwnd);
             unsafe {
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 let _ = DestroyWindow(hwnd);

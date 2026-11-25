@@ -103,6 +103,10 @@ coverage/
 !/vendor/winit/**
 /vendor/winit/Cargo.lock
 /vendor/winit/target/
+!/vendor/egui-wgpu/
+!/vendor/egui-wgpu/**
+/vendor/egui-wgpu/Cargo.lock
+/vendor/egui-wgpu/target/
 
 # ============================================
 # Other Project-Specific Files

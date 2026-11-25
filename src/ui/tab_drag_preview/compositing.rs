@@ -1,4 +1,5 @@
-//! Alpha-capable rendering is shared by all eframe viewports, including the root.
+//! The root swapchain is opaque on wgpu (vendor/egui-wgpu/PATCHES.md); Glow still
+//! shares one alpha-capable config with the root, so it paints an opaque background.
 use eframe::egui;
 
 pub(crate) fn paint_root_background(ui: &egui::Ui) {

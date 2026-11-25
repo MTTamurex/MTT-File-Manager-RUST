@@ -72,7 +72,12 @@ fn run_with<'app>(
             )
         };
         #[cfg(target_os = "windows")]
-        let result = if requested == GraphicsBackend::Dx12 {
+        // Viewers always used no-redirection DComp windows; only the HWND swapchain
+        // experiment needs a regular window.
+        let result = if requested == GraphicsBackend::Dx12
+            && crate::gpu_backend::tuning::PresentTuning::from_env().swapchain
+                != crate::gpu_backend::tuning::Dx12Swapchain::Hwnd
+        {
             winit::platform::windows::with_direct_composition_window(attempt)
         } else {
             attempt()
@@ -122,6 +127,7 @@ fn options_for_backend(
         options.renderer = eframe::Renderer::Glow;
         return options;
     }
+    let tuning = crate::gpu_backend::tuning::PresentTuning::from_env();
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = match backend {
         GraphicsBackend::Dx12 => eframe::wgpu::Backends::DX12,
@@ -136,7 +142,7 @@ fn options_for_backend(
             .instance_descriptor
             .backend_options
             .dx12
-            .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+            .presentation_system = tuning.dx12_presentation_system();
     }
     setup.power_preference = gpu_preference.power_preference();
     setup.native_adapter_selector = crate::gpu_backend::adapter_selector(
@@ -150,11 +156,12 @@ fn options_for_backend(
     );
     let default_descriptor = Arc::clone(&setup.device_descriptor);
     setup.device_descriptor = Arc::new(move |adapter| eframe::wgpu::DeviceDescriptor {
-        memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
+        memory_hints: tuning.memory_hints(),
         ..default_descriptor(adapter)
     });
     options.renderer = eframe::Renderer::Wgpu;
     options.wgpu_options = eframe::egui_wgpu::WgpuConfiguration {
+        surface: tuning.surface_config(),
         wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(setup),
         ..Default::default()
     };

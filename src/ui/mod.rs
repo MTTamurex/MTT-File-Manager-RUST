@@ -14,6 +14,7 @@ pub(crate) mod drive_health_badge;
 pub(crate) mod folder_appearance;
 pub(crate) mod folder_group_tooltip;
 pub mod fonts;
+pub(crate) mod frame_timing;
 pub mod global_search_overlay;
 
 pub mod icon_loader;

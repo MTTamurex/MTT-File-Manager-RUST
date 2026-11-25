@@ -159,7 +159,8 @@ fn viewers_apply_each_gpu_preference_to_both_wgpu_backends() {
                 panic!("viewer must create a graphics setup");
             };
             assert_eq!(setup.power_preference, preference.power_preference());
-            if preference == GpuPreference::Automatic || backend == GraphicsBackend::Vulkan {
+            // Automatic selects the display's GPU on every backend.
+            if preference != GpuPreference::Automatic && backend == GraphicsBackend::Vulkan {
                 assert!(setup.native_adapter_selector.is_none());
             } else {
                 #[cfg(target_os = "windows")]

@@ -62,6 +62,17 @@ impl MpvPreview {
                     if let Err(e) = m.set_property("hwdec", "d3d11va") {
                         log::warn!("[MpvPreview] Failed to set hwdec=d3d11va: {:?}", e);
                     }
+                    let host_tuning = super::host_tuning::PreviewHostTuning::from_env();
+                    log::info!("[MpvPreview] host tuning: {}", host_tuning.summary());
+                    if let Some(flip) = host_tuning.flip {
+                        let _ = m.set_property("d3d11-flip", flip);
+                    }
+                    if host_tuning.follow_render_adapter {
+                        if let Some(name) = crate::gpu_backend::render_adapter_name() {
+                            // mpv matches this against the DXGI adapter description.
+                            let _ = m.set_property("d3d11-adapter", name);
+                        }
+                    }
 
                     // Use a balanced baseline profile for 4K stability.
                     // display-resample + interpolation can overload some GPUs in fullscreen.

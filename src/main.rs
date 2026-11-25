@@ -227,6 +227,7 @@ fn native_options_for_renderer(
     viewport: egui::ViewportBuilder,
     renderer: StartupRenderer,
     gpu_preference: mtt_file_manager::gpu_backend::GpuPreference,
+    tuning: mtt_file_manager::gpu_backend::tuning::PresentTuning,
 ) -> eframe::NativeOptions {
     if renderer == StartupRenderer::Glow {
         log::info!("[STARTUP] Using Glow (OpenGL) renderer");
@@ -261,26 +262,28 @@ fn native_options_for_renderer(
         .instance_descriptor
         .backend_options
         .dx12
-        .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+        .presentation_system = tuning.dx12_presentation_system();
     wgpu_setup.power_preference = gpu_preference.power_preference();
     wgpu_setup.native_adapter_selector = native_adapter_selector;
-    wgpu_setup.device_descriptor = std::sync::Arc::new(|_adapter| eframe::wgpu::DeviceDescriptor {
-        label: Some("mtt-file-manager wgpu device"),
-        required_features: eframe::wgpu::Features::default(),
-        required_limits: eframe::wgpu::Limits {
-            max_texture_dimension_2d:
-                mtt_file_manager::gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
-            ..eframe::wgpu::Limits::default()
-        },
-        memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
-        ..Default::default()
-    });
+    wgpu_setup.device_descriptor =
+        std::sync::Arc::new(move |_adapter| eframe::wgpu::DeviceDescriptor {
+            label: Some("mtt-file-manager wgpu device"),
+            required_features: eframe::wgpu::Features::default(),
+            required_limits: eframe::wgpu::Limits {
+                max_texture_dimension_2d:
+                    mtt_file_manager::gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
+                ..eframe::wgpu::Limits::default()
+            },
+            memory_hints: tuning.memory_hints(),
+            ..Default::default()
+        });
 
     eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
         persist_window: false,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            surface: tuning.surface_config(),
             wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
             ..Default::default()
         },
@@ -295,22 +298,35 @@ fn run_main_app_attempt(
     startup_folder: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
     mtt_file_manager::viewer_runtime::register_gpu_preference(gpu_preference);
+    let tuning = mtt_file_manager::gpu_backend::tuning::PresentTuning::from_env();
+    log::info!("[STARTUP] GPU present tuning: {}", tuning.summary());
     let app_started = std::rc::Rc::new(std::cell::Cell::new(false));
     let app_started_in_creator = std::rc::Rc::clone(&app_started);
-    let result = eframe::run_native(
-        "MTT File Manager",
-        native_options_for_renderer(viewport, renderer, gpu_preference),
-        Box::new(move |cc| {
-            app_started_in_creator.set(true);
-            let app_new_start = Instant::now();
-            let app = ImageViewerApp::new_with_startup_folder(cc, startup_folder.clone());
-            log::info!(
-                "[STARTUP] ImageViewerApp initialization elapsed_ms={}",
-                app_new_start.elapsed().as_millis()
-            );
-            Ok(Box::new(app))
-        }),
-    );
+    let options = native_options_for_renderer(viewport, renderer, gpu_preference, tuning);
+    let run = move || {
+        eframe::run_native(
+            "MTT File Manager",
+            options,
+            Box::new(move |cc| {
+                app_started_in_creator.set(true);
+                let app_new_start = Instant::now();
+                let app = ImageViewerApp::new_with_startup_folder(cc, startup_folder.clone());
+                log::info!(
+                    "[STARTUP] ImageViewerApp initialization elapsed_ms={}",
+                    app_new_start.elapsed().as_millis()
+                );
+                Ok(Box::new(app))
+            }),
+        )
+    };
+    // Every window this event loop creates (root and child viewports) presents
+    // through the same DX12 DirectComposition swapchain kind.
+    let result =
+        if renderer == StartupRenderer::Automatic && tuning.dx12_without_redirection_bitmap() {
+            winit::platform::windows::with_direct_composition_window(run)
+        } else {
+            run()
+        };
     (result, app_started.get())
 }
 
@@ -758,9 +774,12 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_min_inner_size([800.0, 520.0])
         .with_title("MTT File Manager")
-        // eframe selects an alpha-capable GPU config once, shared by child viewports.
-        // The main UI remains opaque; only floating tab previews use transparency.
-        .with_transparent(true)
+        // Lets child viewports (the floating tab preview) be alpha-composited. The
+        // vendored egui-wgpu keeps the root swapchain itself opaque (PATCHES.md).
+        .with_transparent(
+            mtt_file_manager::gpu_backend::tuning::PresentTuning::from_env()
+                .main_window_transparent,
+        )
         .with_app_id(APP_ID)
         .with_decorations(false) // Borderless window - resize handled by native subclass
         .with_resizable(true); // Enable resize (handled by WM_NCHITTEST subclass)
@@ -853,6 +872,7 @@ mod tests {
                     eframe::egui::ViewportBuilder::default(),
                     renderer,
                     preference,
+                    mtt_file_manager::gpu_backend::tuning::PresentTuning::default(),
                 );
                 let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) =
                     options.wgpu_options.wgpu_setup
@@ -868,7 +888,7 @@ mod tests {
                         mtt_file_manager::gpu_backend::parse_renderer_preference(None)
                     }
                 );
-                if preference == GpuPreference::Automatic || renderer == StartupRenderer::Vulkan {
+                if preference != GpuPreference::Automatic && renderer == StartupRenderer::Vulkan {
                     assert!(setup.native_adapter_selector.is_none());
                 } else {
                     #[cfg(target_os = "windows")]

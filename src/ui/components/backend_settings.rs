@@ -19,6 +19,7 @@ pub fn render_backend_settings_section(
     ui: &mut egui::Ui,
     active_backend: &str,
     active_gpu_device: &str,
+    cross_adapter_display: Option<&str>,
     gpu_backend_preference: &mut String,
     gpu_adapter_preference: &mut String,
     scroll_interpolation_enabled: &mut bool,
@@ -124,6 +125,14 @@ pub fn render_backend_settings_section(
             .color(ui.visuals().hyperlink_color),
         );
     });
+    if let Some(display) = cross_adapter_display {
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(t!("settings.gpu_cross_adapter_warning", display = display))
+                .size(12.0)
+                .color(ui.visuals().warn_fg_color),
+        );
+    }
 
     ui.add_space(16.0);
     ui.label(

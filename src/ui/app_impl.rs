@@ -245,6 +245,7 @@ impl eframe::App for ImageViewerApp {
         // Real inter-frame interval tracking (captures hitches that stable_dt
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
         self.track_frame_interval();
+        crate::ui::frame_timing::record_frame(self, ctx, frame);
         // Startup must advance while the root viewport is still hidden.
         let startup_fonts_ready = app::apply_ready_startup_fonts(self, ctx);
         app::lifecycle::handle_startup_sequence(self, ctx, startup_fonts_ready);

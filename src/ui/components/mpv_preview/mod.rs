@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 
 mod docked_filters;
+mod host_tuning;
 mod lifecycle;
 mod osc_input;
 mod playback_state;

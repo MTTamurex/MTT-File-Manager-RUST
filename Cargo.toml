@@ -188,6 +188,7 @@ betteroffice-opc = { path = "vendor/betteroffice-opc" }
 betteroffice-docx-raster = { path = "vendor/betteroffice-docx-raster" }
 betteroffice-docx-edit = { path = "vendor/betteroffice-docx-edit" }
 winit = { path = "vendor/winit" }
+egui-wgpu = { path = "vendor/egui-wgpu" }
 
 [[bench]]
 name = "image_viewer_decode"

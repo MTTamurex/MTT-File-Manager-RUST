@@ -886,6 +886,7 @@ impl ImageViewerApp {
             gpu_backend_preference,
             gpu_adapter_preference,
             active_gpu_device: String::new(),
+            gpu_cross_adapter_display: None,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -1158,6 +1159,8 @@ impl ImageViewerApp {
                     .to_string();
             }
         }
+        app.gpu_cross_adapter_display =
+            crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);
 
         app.log_memory_snapshot("post-init");
 
