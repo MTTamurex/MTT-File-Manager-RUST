@@ -1159,6 +1159,8 @@ impl ImageViewerApp {
                     .trim()
                     .to_string();
             }
+            #[cfg(target_os = "windows")]
+            crate::gpu_backend::make_glow_root_window_opaque(cc);
         }
         app.gpu_cross_adapter_display =
             crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);

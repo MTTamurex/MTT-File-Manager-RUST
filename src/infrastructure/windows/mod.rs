@@ -54,6 +54,7 @@ pub mod system_spec;
 pub(crate) mod system_tray;
 pub mod window_corners;
 pub mod window_focus;
+pub mod window_opacity;
 pub mod window_placement;
 pub mod window_subclass;
 

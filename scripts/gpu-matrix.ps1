@@ -37,8 +37,10 @@ $all = [ordered]@{
     video_child     = @{ MTT_MPV_PREVIEW_HOST = 'child' }
     video_noflip    = @{ MTT_MPV_PREVIEW_HOST = 'child'; MTT_MPV_PREVIEW_FLIP = 'no' }
     video_adapter   = @{ MTT_MPV_PREVIEW_ADAPTER = 'render' }
+    # Glow renderer only: restore DWM alpha composition of the main window.
+    gl_root_alpha   = @{ MTT_GL_ROOT_ALPHA = '1' }
 }
-$knobs = 'MTT_DX12_SWAPCHAIN', 'MTT_MAIN_TRANSPARENT', 'MTT_WGPU_LATENCY', 'MTT_WGPU_PRESENT', 'MTT_WGPU_MEMHINT', 'MTT_WGPU_ROOT_ALPHA', 'MTT_MPV_PREVIEW_HOST', 'MTT_MPV_PREVIEW_FLIP', 'MTT_MPV_PREVIEW_ADAPTER'
+$knobs = 'MTT_DX12_SWAPCHAIN', 'MTT_MAIN_TRANSPARENT', 'MTT_WGPU_LATENCY', 'MTT_WGPU_PRESENT', 'MTT_WGPU_MEMHINT', 'MTT_WGPU_ROOT_ALPHA', 'MTT_MPV_PREVIEW_HOST', 'MTT_MPV_PREVIEW_FLIP', 'MTT_MPV_PREVIEW_ADAPTER', 'MTT_GL_ROOT_ALPHA'
 
 if (-not (Test-Path $Exe)) { throw "Executable not found: $Exe (build with: cargo build --release)" }
 $exeDir = Split-Path -Parent (Resolve-Path $Exe)

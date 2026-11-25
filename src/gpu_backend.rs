@@ -280,21 +280,11 @@ pub fn log_display_adapter_topology(
     active_gpu_device: &str,
 ) -> Option<String> {
     use crate::infrastructure::windows::gpu_topology;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     if let Some(render_state) = &cc.wgpu_render_state {
         let _ = RENDER_ADAPTER_NAME.set(render_state.adapter.get_info().name);
     }
-    let hwnd = cc
-        .window_handle()
-        .ok()
-        .and_then(|handle| match handle.as_raw() {
-            RawWindowHandle::Win32(handle) => {
-                Some(windows::Win32::Foundation::HWND(handle.hwnd.get() as _))
-            }
-            _ => None,
-        });
-    let Some(display) = hwnd
+    let Some(display) = root_hwnd(cc)
         .and_then(gpu_topology::display_adapter_for_window)
         .or_else(gpu_topology::primary_display_adapter)
     else {
@@ -320,6 +310,43 @@ pub fn log_display_adapter_topology(
     } else {
         log::info!("{message}");
         None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn root_hwnd(cc: &eframe::CreationContext<'_>) -> Option<windows::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    cc.window_handle()
+        .ok()
+        .and_then(|handle| match handle.as_raw() {
+            RawWindowHandle::Win32(handle) => {
+                Some(windows::Win32::Foundation::HWND(handle.hwnd.get() as _))
+            }
+            _ => None,
+        })
+}
+
+/// The root window is created transparent so the tab-drag preview viewport can
+/// share an alpha-capable GL config, which makes winit enable DWM blur-behind on
+/// it. DWM then alpha-blends the whole main window every frame; on an
+/// integrated GPU that costs the frame rate while scrolling. The main UI paints
+/// an opaque background, so drop the blur-behind (wgpu does the equivalent via
+/// an opaque swapchain, see vendor/egui-wgpu/PATCHES.md).
+#[cfg(target_os = "windows")]
+pub fn make_glow_root_window_opaque(cc: &eframe::CreationContext<'_>) {
+    use crate::infrastructure::windows::window_opacity;
+
+    if std::env::var(window_opacity::GL_ROOT_ALPHA_ENV).as_deref() == Ok("1") {
+        log::info!("[GPU] Glow main window keeps DWM alpha composition (MTT_GL_ROOT_ALPHA=1)");
+        return;
+    }
+    match root_hwnd(cc) {
+        Some(hwnd) => {
+            window_opacity::disable_blur_behind(hwnd);
+            log::info!("[GPU] Glow main window composed as opaque by DWM");
+        }
+        None => log::warn!("[GPU] Glow main window handle unavailable; DWM alpha stays enabled"),
     }
 }
 
