@@ -21,8 +21,8 @@ pub struct ActiveGraphics<'a> {
     pub device: &'a str,
     /// GPU driving the monitor, when it is not the rendering GPU.
     pub cross_adapter_display: Option<&'a str>,
-    /// Vulkan on Intel: frames are presented by GDI copy.
-    pub vulkan_copy_present: bool,
+    /// The rendering adapter is an Intel iGPU; Vulkan on it presents frames by GDI copy.
+    pub intel_integrated_render: bool,
 }
 
 pub fn render_backend_settings_section(
@@ -36,7 +36,7 @@ pub fn render_backend_settings_section(
         backend: active_backend,
         device: active_gpu_device,
         cross_adapter_display,
-        vulkan_copy_present,
+        intel_integrated_render,
     } = active;
     let mut backend_changed = false;
     let mut interpolation_changed = false;
@@ -60,6 +60,16 @@ pub fn render_backend_settings_section(
             .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(10.0);
+    let vulkan_on_intel_igpu = intel_integrated_render
+        && (active_backend.eq_ignore_ascii_case("vulkan") || gpu_backend_preference == "vulkan");
+    if vulkan_on_intel_igpu {
+        ui.label(
+            RichText::new(t!("settings.vulkan_intel_copy_warning"))
+                .size(12.0)
+                .color(ui.visuals().warn_fg_color),
+        );
+        ui.add_space(ui.text_style_height(&egui::TextStyle::Body));
+    }
 
     let selected = BACKENDS
         .iter()
@@ -90,14 +100,6 @@ pub fn render_backend_settings_section(
                 .color(ui.visuals().hyperlink_color),
         );
     });
-    if vulkan_copy_present {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(t!("settings.vulkan_intel_copy_warning"))
-                .size(12.0)
-                .color(ui.visuals().warn_fg_color),
-        );
-    }
 
     ui.add_space(16.0);
     ui.label(

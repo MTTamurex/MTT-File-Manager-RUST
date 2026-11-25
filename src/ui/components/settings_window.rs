@@ -243,7 +243,7 @@ pub fn render_settings_window(
                                                     backend: &app.active_gpu_backend,
                                                     device: &app.active_gpu_device,
                                                     cross_adapter_display: app.gpu_cross_adapter_display.as_deref(),
-                                                    vulkan_copy_present: app.gpu_vulkan_copy_present,
+                                                    intel_integrated_render: app.gpu_intel_integrated_render,
                                                 },
                                                 &mut app.gpu_backend_preference,
                                                 &mut app.gpu_adapter_preference,

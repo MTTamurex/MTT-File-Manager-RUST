@@ -264,6 +264,11 @@ pub fn vulkan_presents_by_copy(backend: wgpu::Backend, vendor: u32) -> bool {
     backend == wgpu::Backend::Vulkan && vendor == INTEL_PCI_VENDOR_ID
 }
 
+/// Whether the adapter is an Intel integrated GPU (iGPU), regardless of backend.
+pub fn is_intel_integrated_gpu(vendor: u32, device_type: wgpu::DeviceType) -> bool {
+    vendor == INTEL_PCI_VENDOR_ID && device_type == wgpu::DeviceType::IntegratedGpu
+}
+
 static RENDER_ADAPTER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Name of the wgpu adapter rendering the main window, once it is known.
@@ -432,6 +437,19 @@ mod tests {
                 cfg!(target_os = "windows")
             );
         }
+    }
+
+    #[test]
+    fn only_intel_integrated_gpus_are_detected_as_igpu() {
+        assert!(is_intel_integrated_gpu(
+            0x8086,
+            wgpu::DeviceType::IntegratedGpu
+        ));
+        assert!(!is_intel_integrated_gpu(0x8086, wgpu::DeviceType::DiscreteGpu));
+        assert!(!is_intel_integrated_gpu(
+            0x10de,
+            wgpu::DeviceType::IntegratedGpu
+        ));
     }
 
     #[test]
