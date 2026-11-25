@@ -887,7 +887,6 @@ impl ImageViewerApp {
             gpu_adapter_preference,
             active_gpu_device: String::new(),
             gpu_cross_adapter_display: None,
-            gpu_intel_integrated_render: false,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -1166,10 +1165,6 @@ impl ImageViewerApp {
             crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
-            app.gpu_intel_integrated_render = crate::gpu_backend::is_intel_integrated_gpu(
-                info.vendor,
-                info.device_type,
-            );
             if crate::gpu_backend::vulkan_presents_by_copy(info.backend, info.vendor) {
                 log::warn!(
                     "[GPU] Vulkan on an Intel GPU: windowed frames are presented by GDI copy (about half reach the screen); DirectX 12 presents by flip"

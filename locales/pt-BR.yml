@@ -722,7 +722,7 @@ settings:
   gpu_active: "GPU ativa:"
   gpu_active_unknown: "Renderizador OpenGL indisponível"
   gpu_cross_adapter_warning: "⚠ O monitor está conectado em %{display}. Renderizar em outra GPU copia cada frame entre adaptadores, o que pode causar lag no scroll. Prefira Automática ou conecte o monitor na GPU que renderiza."
-  vulkan_intel_copy_warning: "⚠ Em GPUs Intel, o driver Vulkan apresenta os frames por cópia, então só cerca da metade chega à tela e o scroll fica com lag. Recomendamos DirectX 12 nesta GPU."
+  vulkan_limitations_tooltip: "O Vulkan funciona melhor numa GPU dedicada com o monitor conectado nela. Limitações conhecidas no Windows:\n• Gráficos integrados Intel: o driver apresenta os frames por cópia, então só cerca da metade chega à tela e o scroll fica com lag.\n• Monitor conectado numa GPU diferente da que renderiza: cada frame é copiado entre as GPUs; depois de uns 10 segundos ocioso a GPU reduz os clocks, e ao voltar o scroll fica a 30 fps por alguns segundos.\nO DirectX 12 não tem essas limitações."
   gpu_preference_title: "Preferência de GPU"
   gpu_preference_description: "Escolha qual adaptador o MTT deve priorizar. Requer reiniciar o aplicativo. Se a GPU preferida não for compatível ou não estiver disponível, outra será usada; confira a GPU ativa abaixo."
   gpu_high_performance: "Alto desempenho (priorizar GPU dedicada)"

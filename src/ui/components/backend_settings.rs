@@ -21,8 +21,6 @@ pub struct ActiveGraphics<'a> {
     pub device: &'a str,
     /// GPU driving the monitor, when it is not the rendering GPU.
     pub cross_adapter_display: Option<&'a str>,
-    /// The rendering adapter is an Intel iGPU; Vulkan on it presents frames by GDI copy.
-    pub intel_integrated_render: bool,
 }
 
 pub fn render_backend_settings_section(
@@ -36,7 +34,6 @@ pub fn render_backend_settings_section(
         backend: active_backend,
         device: active_gpu_device,
         cross_adapter_display,
-        intel_integrated_render,
     } = active;
     let mut backend_changed = false;
     let mut interpolation_changed = false;
@@ -60,17 +57,6 @@ pub fn render_backend_settings_section(
             .color(theme::secondary_text_color(ui.ctx())),
     );
     ui.add_space(10.0);
-    let vulkan_on_intel_igpu = intel_integrated_render
-        && (active_backend.eq_ignore_ascii_case("vulkan") || gpu_backend_preference == "vulkan");
-    if vulkan_on_intel_igpu {
-        ui.label(
-            RichText::new(t!("settings.vulkan_intel_copy_warning"))
-                .size(12.0)
-                .color(ui.visuals().warn_fg_color),
-        );
-        ui.add_space(ui.text_style_height(&egui::TextStyle::Body));
-    }
-
     let selected = BACKENDS
         .iter()
         .position(|&(value, _)| value == gpu_backend_preference.as_str())
@@ -79,7 +65,12 @@ pub fn render_backend_settings_section(
         .iter()
         .map(|&(_, display_name)| display_name)
         .collect();
-    if let Some(idx) = settings_ui::choice_list(ui, &labels, selected) {
+    let vulkan_limitations = t!("settings.vulkan_limitations_tooltip");
+    let warnings: Vec<Option<&str>> = BACKENDS
+        .iter()
+        .map(|&(value, _)| (value == "vulkan").then_some(vulkan_limitations.as_ref()))
+        .collect();
+    if let Some(idx) = settings_ui::choice_list_with_warnings(ui, &labels, selected, &warnings) {
         *gpu_backend_preference = BACKENDS[idx].0.to_string();
         backend_changed = true;
     }
