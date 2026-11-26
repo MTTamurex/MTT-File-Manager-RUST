@@ -380,6 +380,12 @@ fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Chi
     if source.is_optical_disc() {
         cmd.arg("--optical-disc");
     }
+    if let Some(adapter) = crate::gpu_backend::render_adapter_name() {
+        cmd.env(
+            crate::ui::components::mpv::video_gpu::VIDEO_GPU_ENV,
+            adapter,
+        );
+    }
 
     let spawn_result = cmd.spawn();
 
@@ -816,6 +822,10 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
         osc_script_opts.push_str(",osc-opticaldisc=yes");
     }
 
+    let requested_gpu = std::env::var(crate::ui::components::mpv::video_gpu::VIDEO_GPU_ENV).ok();
+    let video_gpu =
+        crate::ui::components::mpv::video_gpu::VideoGpu::resolve(requested_gpu.as_deref());
+
     // Create mpv with initializer options (set before mpv_initialize).
     let mpv = mpv::Mpv::with_initializer(|init| {
         // Load config FIRST so mpv.conf (vo, gpu-api, hwdec, etc.) is applied.
@@ -943,6 +953,7 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
     let _ = mpv.set_property("gpu-api", "d3d11");
     let _ = mpv.set_property("gpu-context", "d3d11");
     let _ = mpv.set_property("hwdec", "d3d11va");
+    video_gpu.apply(&mpv);
 
     // Playback stability
     let _ = mpv.set_property("video-sync", "audio");

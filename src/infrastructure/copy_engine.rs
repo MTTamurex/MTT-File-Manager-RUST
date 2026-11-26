@@ -62,6 +62,8 @@ impl CopyOperation {
 #[derive(Default)]
 pub struct CopyRuntime {
     pub enabled: AtomicBool,
+    /// Recycle-Bin deletions run without a prompt; permanent ones still ask.
+    pub skip_recycle_confirmation: AtomicBool,
     pub(crate) empty_recycle_bin_running: AtomicBool,
     pub delete_activity: Arc<crate::infrastructure::delete_engine::activity::DeleteActivity>,
     next_id: AtomicU64,

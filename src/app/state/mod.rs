@@ -787,6 +787,8 @@ pub struct ImageViewerApp {
     pub active_gpu_device: String,
     /// Name of the GPU driving the monitor when it differs from the rendering GPU.
     pub gpu_cross_adapter_display: Option<String>,
+    /// The system has exactly one hardware GPU, so the GPU preference has no effect.
+    pub gpu_single_adapter: bool,
     pub scroll_interpolation_enabled: bool,
     pub diagnostic_mode: bool,
     pub diagnostic_mode_enabled_at: Option<SystemTime>,

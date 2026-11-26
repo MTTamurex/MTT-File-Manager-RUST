@@ -112,6 +112,34 @@ fn permanent_delete_requires_confirmation_and_reports_actual_removed_entries() {
 }
 
 #[test]
+fn skipping_recycle_confirmation_never_skips_permanent_confirmation() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source");
+    std::fs::create_dir_all(&source).unwrap();
+    let request = FileOperationRequest::delete_permanently(vec![source.clone()], HWND::default());
+    let runtime = Arc::new(CopyRuntime::default());
+    runtime.enabled.store(true, Ordering::Relaxed);
+    runtime
+        .skip_recycle_confirmation
+        .store(true, Ordering::Relaxed);
+    let (sender, _receiver) = std::sync::mpsc::channel();
+    let asked = std::sync::atomic::AtomicBool::new(false);
+    assert!(handle_with_confirmation(
+        &request,
+        &sender,
+        &runtime,
+        |_, kind, _| {
+            assert_eq!(kind, confirmation::Kind::Permanent);
+            asked.store(true, Ordering::Relaxed);
+            false
+        }
+    ));
+    assert!(asked.load(Ordering::Relaxed));
+    assert!(source.exists());
+    temp.close().unwrap();
+}
+
+#[test]
 fn recycle_bin_storage_keeps_shell_metadata_semantics_when_custom_engine_is_disabled() {
     let runtime = Arc::new(CopyRuntime::default());
     let (sender, _) = std::sync::mpsc::channel();

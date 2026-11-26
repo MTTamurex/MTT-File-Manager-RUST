@@ -27,6 +27,7 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
         &app.file_operation_state.copy_runtime,
         &mut jobs,
         app.explorer_preferences.auto_dismiss_successful_transfers,
+        app.explorer_preferences.auto_dismiss_successful_deletions,
     );
     app.file_operation_state
         .copy_panel
@@ -86,13 +87,19 @@ pub fn render(app: &mut ImageViewerApp, ctx: &egui::Context) {
 fn dismiss_successful_transfers(
     runtime: &CopyRuntime,
     jobs: &mut Vec<(u64, std::sync::Arc<CopyOperation>)>,
-    enabled: bool,
+    dismiss_transfers: bool,
+    dismiss_deletions: bool,
 ) {
-    if !enabled {
+    if !dismiss_transfers && !dismiss_deletions {
         return;
     }
     jobs.retain(|(id, operation)| {
-        let completed_successfully = operation.deletion.is_none()
+        let enabled = if operation.deletion.is_some() {
+            dismiss_deletions
+        } else {
+            dismiss_transfers
+        };
+        let completed_successfully = enabled
             && operation
                 .outcome()
                 .is_some_and(|outcome| outcome.kind == OutcomeKind::Completed);

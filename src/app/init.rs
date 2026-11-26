@@ -272,6 +272,10 @@ impl ImageViewerApp {
             explorer_preferences.native_copy_engine,
             std::sync::atomic::Ordering::Relaxed,
         );
+        copy_runtime.skip_recycle_confirmation.store(
+            !explorer_preferences.confirm_recycle_delete,
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
         crate::domain::date_format::set_date_format(date_format);
 
@@ -887,6 +891,7 @@ impl ImageViewerApp {
             gpu_adapter_preference,
             active_gpu_device: String::new(),
             gpu_cross_adapter_display: None,
+            gpu_single_adapter: false,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -1163,6 +1168,11 @@ impl ImageViewerApp {
         }
         app.gpu_cross_adapter_display =
             crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);
+        #[cfg(target_os = "windows")]
+        {
+            app.gpu_single_adapter =
+                crate::infrastructure::windows::gpu_topology::hardware_adapter_count() == Some(1);
+        }
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
             if crate::gpu_backend::vulkan_presents_by_copy(info.backend, info.vendor) {

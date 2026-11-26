@@ -67,12 +67,7 @@ impl MpvPreview {
                     if let Some(flip) = host_tuning.flip {
                         let _ = m.set_property("d3d11-flip", flip);
                     }
-                    if host_tuning.follow_render_adapter {
-                        if let Some(name) = crate::gpu_backend::render_adapter_name() {
-                            // mpv matches this against the DXGI adapter description.
-                            let _ = m.set_property("d3d11-adapter", name);
-                        }
-                    }
+                    Self::video_gpu().apply(&m);
 
                     // Use a balanced baseline profile for 4K stability.
                     // display-resample + interpolation can overload some GPUs in fullscreen.

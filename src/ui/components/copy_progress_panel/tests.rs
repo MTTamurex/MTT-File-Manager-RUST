@@ -55,10 +55,10 @@ fn auto_dismiss_removes_only_successful_copy_and_move_results_when_enabled() {
     let active_copy = runtime.start(vec![PathBuf::from("source/active.txt")], "target".into());
 
     let mut jobs = runtime.jobs();
-    dismiss_successful_transfers(&runtime, &mut jobs, false);
+    dismiss_successful_transfers(&runtime, &mut jobs, false, false);
     assert_eq!(jobs.len(), 6);
 
-    dismiss_successful_transfers(&runtime, &mut jobs, true);
+    dismiss_successful_transfers(&runtime, &mut jobs, true, false);
     assert_eq!(jobs.len(), 4);
     for expected in [
         &successful_deletion.operation,
@@ -76,6 +76,36 @@ fn auto_dismiss_removes_only_successful_copy_and_move_results_when_enabled() {
     assert!(!jobs
         .iter()
         .any(|(_, operation)| Arc::ptr_eq(operation, &successful_move.operation)));
+}
+
+#[test]
+fn auto_dismiss_removes_only_successful_deletions_when_enabled() {
+    use crate::infrastructure::copy_engine::{Outcome, OutcomeKind};
+    use std::path::PathBuf;
+
+    let runtime = CopyRuntime::default();
+    let successful = runtime.start_delete(vec![PathBuf::from("source/delete.txt")], false);
+    successful.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+    let failed = runtime.start_delete(vec![PathBuf::from("source/failed.txt")], false);
+    failed.finish(Outcome {
+        kind: OutcomeKind::Failed,
+        message: None,
+    });
+    let copy = runtime.start(vec![PathBuf::from("source/copy.txt")], "target".into());
+    copy.finish(Outcome {
+        kind: OutcomeKind::Completed,
+        message: None,
+    });
+
+    let mut jobs = runtime.jobs();
+    dismiss_successful_transfers(&runtime, &mut jobs, false, true);
+    assert_eq!(jobs.len(), 2);
+    assert!(jobs
+        .iter()
+        .all(|(_, operation)| !std::sync::Arc::ptr_eq(operation, &successful.operation)));
 }
 
 #[test]

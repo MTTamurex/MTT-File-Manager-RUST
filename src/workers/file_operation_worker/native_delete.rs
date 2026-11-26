@@ -95,7 +95,9 @@ fn handle_with_confirmation(
         } else {
             confirmation::Kind::Recycle
         };
-        if !confirm(operation, kind, &paths) || operation.progress.is_cancelled() {
+        let skip = kind == confirmation::Kind::Recycle
+            && runtime.skip_recycle_confirmation.load(Ordering::Relaxed);
+        if (!skip && !confirm(operation, kind, &paths)) || operation.progress.is_cancelled() {
             job.finish(Outcome {
                 kind: OutcomeKind::Cancelled,
                 message: Some(rust_i18n::t!("delete_engine.cancelled").to_string()),

@@ -9,7 +9,6 @@
 
 pub(crate) const HOST_ENV: &str = "MTT_MPV_PREVIEW_HOST";
 pub(crate) const FLIP_ENV: &str = "MTT_MPV_PREVIEW_FLIP";
-pub(crate) const ADAPTER_ENV: &str = "MTT_MPV_PREVIEW_ADAPTER";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PreviewHostTuning {
@@ -18,8 +17,6 @@ pub(crate) struct PreviewHostTuning {
     pub popup: bool,
     /// `Some(false)` sets mpv `d3d11-flip=no` (blt-model swapchain).
     pub flip: Option<bool>,
-    /// Make mpv render on the same GPU as the app instead of the default adapter.
-    pub follow_render_adapter: bool,
 }
 
 impl Default for PreviewHostTuning {
@@ -27,7 +24,6 @@ impl Default for PreviewHostTuning {
         Self {
             popup: true,
             flip: None,
-            follow_render_adapter: false,
         }
     }
 }
@@ -47,23 +43,17 @@ impl PreviewHostTuning {
                 Some("1" | "yes") => Some(true),
                 _ => None,
             },
-            follow_render_adapter: value(ADAPTER_ENV).as_deref() == Some("render"),
         }
     }
 
     pub(crate) fn summary(self) -> String {
         format!(
-            "host={} flip={} adapter={}",
+            "host={} flip={}",
             if self.popup { "popup" } else { "child" },
             match self.flip {
                 Some(true) => "yes",
                 Some(false) => "no",
                 None => "default",
-            },
-            if self.follow_render_adapter {
-                "render"
-            } else {
-                "default"
             }
         )
     }
@@ -93,7 +83,6 @@ mod tests {
                 match name {
                     HOST_ENV => "Popup",
                     FLIP_ENV => "no",
-                    ADAPTER_ENV => "render",
                     _ => return None,
                 }
                 .to_string(),
@@ -101,6 +90,5 @@ mod tests {
         });
         assert!(tuning.popup);
         assert_eq!(tuning.flip, Some(false));
-        assert!(tuning.follow_render_adapter);
     }
 }

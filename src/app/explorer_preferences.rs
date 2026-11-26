@@ -38,6 +38,8 @@ pub struct ExplorerPreferences {
     pub sidebar_unified_scroll: bool,
     pub native_copy_engine: bool,
     pub auto_dismiss_successful_transfers: bool,
+    pub confirm_recycle_delete: bool,
+    pub auto_dismiss_successful_deletions: bool,
 }
 
 impl Default for ExplorerPreferences {
@@ -48,6 +50,8 @@ impl Default for ExplorerPreferences {
             sidebar_unified_scroll: false,
             native_copy_engine: false,
             auto_dismiss_successful_transfers: false,
+            confirm_recycle_delete: true,
+            auto_dismiss_successful_deletions: false,
         }
     }
 }
@@ -88,10 +92,18 @@ impl ExplorerPreferences {
                 .get("auto_dismiss_successful_transfers")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(false),
+            confirm_recycle_delete: prefs
+                .get("confirm_recycle_delete")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(true),
+            auto_dismiss_successful_deletions: prefs
+                .get("auto_dismiss_successful_deletions")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(false),
         }
     }
 
-    pub(crate) fn preferences(self) -> [(&'static str, String); 5] {
+    pub(crate) fn preferences(self) -> [(&'static str, String); 7] {
         [
             (
                 "list_column_size_mode",
@@ -102,6 +114,14 @@ impl ExplorerPreferences {
             (
                 "auto_dismiss_successful_transfers",
                 self.auto_dismiss_successful_transfers.to_string(),
+            ),
+            (
+                "confirm_recycle_delete",
+                self.confirm_recycle_delete.to_string(),
+            ),
+            (
+                "auto_dismiss_successful_deletions",
+                self.auto_dismiss_successful_deletions.to_string(),
             ),
             (
                 "sidebar_unified_scroll",
@@ -131,6 +151,8 @@ mod tests {
             ("sidebar_unified_scroll".into(), "invalid".into()),
             ("native_copy_engine".into(), "invalid".into()),
             ("auto_dismiss_successful_transfers".into(), "invalid".into()),
+            ("confirm_recycle_delete".into(), "invalid".into()),
+            ("auto_dismiss_successful_deletions".into(), "invalid".into()),
         ]);
         assert_eq!(
             ExplorerPreferences::load(&prefs),
@@ -183,6 +205,8 @@ mod tests {
                             sidebar_unified_scroll,
                             native_copy_engine: false,
                             auto_dismiss_successful_transfers,
+                            confirm_recycle_delete: !auto_dismiss_successful_transfers,
+                            auto_dismiss_successful_deletions: auto_dismiss_successful_transfers,
                         };
                         let prefs = options
                             .preferences()
@@ -212,6 +236,8 @@ mod tests {
             sidebar_unified_scroll: true,
             native_copy_engine: true,
             auto_dismiss_successful_transfers: true,
+            confirm_recycle_delete: false,
+            auto_dismiss_successful_deletions: true,
         };
         for (key, value) in options.preferences() {
             db.set_preference(key, &value).unwrap();

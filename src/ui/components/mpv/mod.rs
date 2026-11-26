@@ -14,3 +14,4 @@ pub mod playback;
 pub mod state;
 mod timeline;
 pub mod utils;
+pub mod video_gpu;

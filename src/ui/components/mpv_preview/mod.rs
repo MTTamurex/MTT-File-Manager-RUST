@@ -149,6 +149,17 @@ impl MpvPreview {
             .find(|dir| dir.join("scripts").join("modernH.lua").is_file())
     }
 
+    /// The app's rendering GPU never changes while it runs, so DXGI is queried once.
+    fn video_gpu() -> &'static crate::ui::components::mpv::video_gpu::VideoGpu {
+        static VIDEO_GPU: std::sync::OnceLock<crate::ui::components::mpv::video_gpu::VideoGpu> =
+            std::sync::OnceLock::new();
+        VIDEO_GPU.get_or_init(|| {
+            crate::ui::components::mpv::video_gpu::VideoGpu::resolve(
+                crate::gpu_backend::render_adapter_name(),
+            )
+        })
+    }
+
     fn create_mpv_instance() -> Result<mpv::Mpv, mpv::Error> {
         if MPV_OSC_POC_ENABLED {
             let config_dir = Self::resolve_mpv_ui_config_dir();

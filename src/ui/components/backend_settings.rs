@@ -21,6 +21,8 @@ pub struct ActiveGraphics<'a> {
     pub device: &'a str,
     /// GPU driving the monitor, when it is not the rendering GPU.
     pub cross_adapter_display: Option<&'a str>,
+    /// Only one hardware GPU exists, so the GPU preference cannot change anything.
+    pub single_adapter: bool,
 }
 
 pub fn render_backend_settings_section(
@@ -34,6 +36,7 @@ pub fn render_backend_settings_section(
         backend: active_backend,
         device: active_gpu_device,
         cross_adapter_display,
+        single_adapter,
     } = active;
     let mut backend_changed = false;
     let mut interpolation_changed = false;
@@ -121,7 +124,7 @@ pub fn render_backend_settings_section(
         .map(|&(_, key)| t!(key).to_string())
         .collect();
     let gpu_label_refs: Vec<&str> = gpu_labels.iter().map(String::as_str).collect();
-    ui.add_enabled_ui(gpu_backend_preference != "glow", |ui| {
+    ui.add_enabled_ui(gpu_backend_preference != "glow" && !single_adapter, |ui| {
         if let Some(idx) = settings_ui::choice_list(ui, &gpu_label_refs, selected_gpu) {
             *gpu_adapter_preference = GPU_PREFERENCES[idx].0.to_string();
             backend_changed = true;
