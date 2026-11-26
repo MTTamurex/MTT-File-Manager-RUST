@@ -9,7 +9,8 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_ERROR_NOT_FOUND,
+    CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIFactory6, DXGI_ADAPTER_FLAG_SOFTWARE,
+    DXGI_ERROR_NOT_FOUND, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, DXGI_GPU_PREFERENCE_MINIMUM_POWER,
 };
 use windows::Win32::Graphics::Gdi::{
     MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITOR_DEFAULTTOPRIMARY,
@@ -88,6 +89,36 @@ pub fn display_adapter_for_monitor(monitor: HMONITOR) -> Option<DisplayAdapter> 
 pub fn primary_display_adapter() -> Option<DisplayAdapter> {
     let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
     display_adapter_for_monitor(monitor)
+}
+
+/// First hardware adapter in Windows' high-performance or minimum-power order
+/// (the same ranking as Settings > Display > Graphics).
+pub fn adapter_by_power_preference(high_performance: bool) -> Option<DisplayAdapter> {
+    let preference = if high_performance {
+        DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE
+    } else {
+        DXGI_GPU_PREFERENCE_MINIMUM_POWER
+    };
+    unsafe {
+        let factory: IDXGIFactory6 = CreateDXGIFactory1().ok()?;
+        let mut adapter_index = 0u32;
+        while let Ok(adapter) =
+            factory.EnumAdapterByGpuPreference::<IDXGIAdapter1>(adapter_index, preference)
+        {
+            adapter_index += 1;
+            let Ok(desc) = adapter.GetDesc1() else {
+                continue;
+            };
+            if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 == 0 {
+                return Some(DisplayAdapter {
+                    name: adapter_name(&desc.Description),
+                    vendor_id: desc.VendorId,
+                    device_id: desc.DeviceId,
+                });
+            }
+        }
+        None
+    }
 }
 
 /// Adapter driving the monitor that currently holds most of `hwnd`.

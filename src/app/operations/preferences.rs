@@ -432,6 +432,10 @@ impl ImageViewerApp {
             crate::gpu_backend::PREFERENCE_KEY,
             self.gpu_adapter_preference.clone(),
         ));
+        prefs.push((
+            crate::ui::components::mpv::video_gpu::PREFERENCE_KEY,
+            self.video_gpu_preference.key().to_string(),
+        ));
 
         prefs.push((
             "scroll_interpolation",

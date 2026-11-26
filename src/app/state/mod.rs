@@ -784,6 +784,7 @@ pub struct ImageViewerApp {
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
     pub gpu_adapter_preference: String,
+    pub video_gpu_preference: crate::ui::components::mpv::video_gpu::VideoGpuPreference,
     pub active_gpu_device: String,
     /// Name of the GPU driving the monitor when it differs from the rendering GPU.
     pub gpu_cross_adapter_display: Option<String>,

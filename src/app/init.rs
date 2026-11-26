@@ -241,6 +241,7 @@ impl ImageViewerApp {
             interface_scale,
             gpu_backend_preference,
             gpu_adapter_preference,
+            video_gpu_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
@@ -889,6 +890,7 @@ impl ImageViewerApp {
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
             gpu_adapter_preference,
+            video_gpu_preference,
             active_gpu_device: String::new(),
             gpu_cross_adapter_display: None,
             gpu_single_adapter: false,
@@ -1168,6 +1170,7 @@ impl ImageViewerApp {
         }
         app.gpu_cross_adapter_display =
             crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);
+        app.video_gpu_preference.set_current();
         #[cfg(target_os = "windows")]
         {
             app.gpu_single_adapter =

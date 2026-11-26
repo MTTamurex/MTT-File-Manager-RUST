@@ -25,6 +25,7 @@ pub struct SettingsWindowOutput {
     pub startup_date_changed: bool,
     pub backend_changed: bool,
     pub interpolation_changed: bool,
+    pub video_gpu_changed: bool,
     pub shortcuts_changed: bool,
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
@@ -74,6 +75,7 @@ pub fn render_settings_window(
     let mut theme_changed = false;
     let mut startup_date_changed = false;
     let mut backend_changed = false;
+    let mut video_gpu_changed = false;
     let mut interpolation_changed = false;
     let mut shortcuts_changed = false;
     let mut quick_access_changed = false;
@@ -250,6 +252,11 @@ pub fn render_settings_window(
                                             );
                                             backend_changed |= backend;
                                             interpolation_changed |= interpolation;
+                                            video_gpu_changed |= crate::ui::components::video_gpu_settings::render_video_gpu_section(
+                                                ui,
+                                                &mut app.video_gpu_preference,
+                                                app.gpu_single_adapter,
+                                            );
                                         }
                                         SettingsSection::Shortcuts => {
                                             shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
@@ -305,6 +312,7 @@ pub fn render_settings_window(
         startup_date_changed,
         backend_changed,
         interpolation_changed,
+        video_gpu_changed,
         shortcuts_changed,
         quick_access_changed,
         recycle_bin_changed,

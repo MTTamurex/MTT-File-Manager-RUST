@@ -43,6 +43,7 @@ impl MpvPreview {
 
         // Init MPV and child window
         if self.mpv.is_none() {
+            let video_gpu = crate::ui::components::mpv::video_gpu::VideoGpu::from_settings();
             match Self::create_mpv_instance() {
                 Ok(m) => {
                     let m = Arc::new(m);
@@ -67,7 +68,7 @@ impl MpvPreview {
                     if let Some(flip) = host_tuning.flip {
                         let _ = m.set_property("d3d11-flip", flip);
                     }
-                    Self::video_gpu().apply(&m);
+                    video_gpu.apply(&m);
 
                     // Use a balanced baseline profile for 4K stability.
                     // display-resample + interpolation can overload some GPUs in fullscreen.

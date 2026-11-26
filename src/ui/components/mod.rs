@@ -38,6 +38,7 @@ pub mod tag_settings;
 #[cfg(feature = "online-updates")]
 pub(crate) mod update_settings;
 pub mod video_controls_state;
+pub mod video_gpu_settings;
 pub mod virtual_drive_settings;
 
 pub use media_preview::MediaPreview;

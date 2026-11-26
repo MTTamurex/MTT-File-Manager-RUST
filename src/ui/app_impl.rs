@@ -694,6 +694,11 @@ impl eframe::App for ImageViewerApp {
                 self.save_preferences();
                 self.save_preferences_async();
             }
+            if output.video_gpu_changed {
+                self.video_gpu_preference.set_current();
+                self.save_preferences();
+                self.save_preferences_async();
+            }
             if output.shortcuts_changed {
                 self.save_preferences();
                 self.save_preferences_async();

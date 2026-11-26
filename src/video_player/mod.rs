@@ -380,7 +380,9 @@ fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Chi
     if source.is_optical_disc() {
         cmd.arg("--optical-disc");
     }
-    if let Some(adapter) = crate::gpu_backend::render_adapter_name() {
+    if let Some(adapter) =
+        crate::ui::components::mpv::video_gpu::VideoGpuPreference::current().adapter_name()
+    {
         cmd.env(
             crate::ui::components::mpv::video_gpu::VIDEO_GPU_ENV,
             adapter,
