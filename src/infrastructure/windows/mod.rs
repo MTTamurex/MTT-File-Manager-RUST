@@ -3,6 +3,7 @@
 
 pub mod app_instances;
 pub mod app_theme;
+pub mod bitlocker;
 pub mod bitmap_conversion;
 pub mod codec_registry;
 pub(crate) mod column_properties;

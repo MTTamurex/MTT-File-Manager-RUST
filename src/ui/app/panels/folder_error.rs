@@ -9,6 +9,7 @@ pub(super) fn render(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let message = match error.kind {
         FolderLoadErrorKind::AccessDenied => rust_i18n::t!("panels.folder_access_denied"),
         FolderLoadErrorKind::NotFound => rust_i18n::t!("panels.folder_not_found"),
+        FolderLoadErrorKind::LockedVolume => rust_i18n::t!("panels.drive_locked"),
         FolderLoadErrorKind::Other => rust_i18n::t!("panels.folder_load_failed"),
     };
     let pending = app.folder_access_pending();

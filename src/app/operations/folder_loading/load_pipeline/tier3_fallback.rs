@@ -321,7 +321,11 @@ pub(super) fn run_tier3_fallback(
             }
             Err(error) => {
                 let base_path_buf = PathBuf::from(base_path);
-                let failure = if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+                let failure = if crate::infrastructure::windows::bitlocker::is_locked_volume_error(
+                    error.code(),
+                ) {
+                    crate::app::state::FolderLoadError::locked_volume(base_path_buf)
+                } else if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
                     crate::app::state::FolderLoadError::access_denied(base_path_buf)
                 } else if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
                     log::warn!(

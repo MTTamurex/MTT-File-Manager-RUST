@@ -921,6 +921,7 @@ panels:
   folder_access_failed: "Não foi possível conceder acesso (erro %{code}). A pasta pode exigir uma alteração manual de permissões."
   folder_not_found: "Pasta não encontrada"
   folder_load_failed: "Não foi possível abrir esta pasta"
+  drive_locked: "Esta unidade está bloqueada pelo BitLocker"
   updating: "Atualizando..."
   no_selection: "Nenhum item selecionado"
   select_hint: "Selecione algo para ver detalhes"

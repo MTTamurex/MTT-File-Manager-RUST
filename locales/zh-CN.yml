@@ -921,6 +921,7 @@ panels:
   folder_access_failed: "无法授予访问权限（错误 %{code}）。可能需要手动更改文件夹权限。"
   folder_not_found: "文件夹不存在"
   folder_load_failed: "无法打开该文件夹"
+  drive_locked: "此驱动器已被 BitLocker 锁定"
   updating: "正在更新..."
   no_selection: "未选中任何项目"
   select_hint: "请选中项目查看详情"

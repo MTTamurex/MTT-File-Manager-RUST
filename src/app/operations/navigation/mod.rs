@@ -77,6 +77,15 @@ impl ImageViewerApp {
         );
     }
 
+    pub(in crate::app) fn launch_drive_unlock(path: &Path) {
+        use crate::infrastructure::windows::{bitlocker, drives};
+        if let Some(root) = drives::normalize_drive_root_path(path) {
+            if let Err(error) = bitlocker::unlock_drive(&root) {
+                log::warn!("[BITLOCKER] Failed to launch unlock wizard: {error}");
+            }
+        }
+    }
+
     pub fn navigate_to(&mut self, path: &str) {
         self.navigate_to_impl(path, true);
     }
@@ -93,6 +102,14 @@ impl ImageViewerApp {
 
         // If we're already at this path, do nothing
         if self.navigation_state.current_path == normalized_path {
+            // Re-clicking a locked drive (e.g. after cancelling the password
+            // prompt) opens the unlock dialog again, like Explorer does.
+            let locked = self.folder_load_error.as_ref().is_some_and(|error| {
+                error.kind == crate::app::state::FolderLoadErrorKind::LockedVolume
+            });
+            if locked {
+                Self::launch_drive_unlock(Path::new(&normalized_path));
+            }
             return;
         }
         if protect_pin && self.redirect_pinned_navigation(&normalized_path) {
@@ -137,6 +154,11 @@ impl ImageViewerApp {
         self.navigation_state
             .navigation
             .navigate_to(normalized_path.clone());
+
+        self.pending_unlock_prompt = crate::infrastructure::windows::drives::is_drive_root_path(
+            &destination_path,
+        )
+        .then(|| destination_path.clone());
 
         self.navigation_state.current_path = normalized_path.clone();
         self.navigation_state.path_input = normalized_path.clone();

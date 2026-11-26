@@ -197,7 +197,23 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui:
                                 &path,
                             );
 
-                        if crate::domain::network_path::unc_server_name(&expanded_path).is_some()
+                        // A mounted but locked BitLocker drive is not "existing" for the
+                        // filesystem probe, yet it is listed as a logical drive.
+                        let is_mounted_drive =
+                            crate::infrastructure::windows::drives::normalize_drive_root_path(
+                                std::path::Path::new(&expanded_path),
+                            )
+                            .is_some_and(|root| {
+                                app.drive_state.disks.iter().any(|(disk, _)| {
+                                    crate::infrastructure::windows::drives::normalize_drive_root_path(
+                                        std::path::Path::new(disk),
+                                    )
+                                    .is_some_and(|d| d.eq_ignore_ascii_case(&root))
+                                })
+                            });
+
+                        if is_mounted_drive
+                            || crate::domain::network_path::unc_server_name(&expanded_path).is_some()
                             || crate::infrastructure::onedrive::fast_path_exists(
                                 std::path::Path::new(&expanded_path),
                             )

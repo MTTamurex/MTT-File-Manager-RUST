@@ -642,6 +642,7 @@ impl ImageViewerApp {
             pending_auto_reload: false,
             pending_list_column_autofit: true,
             skip_next_auto_reload: false,
+            pending_unlock_prompt: None,
             watcher_cooldown_until: None,
             onedrive_pin_reload_pending: Arc::new(AtomicBool::new(false)),
             watcher_fallback_polling: false,

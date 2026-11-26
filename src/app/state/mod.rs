@@ -153,6 +153,7 @@ pub struct ItemsRebuildSignature {
 pub enum FolderLoadErrorKind {
     AccessDenied,
     NotFound,
+    LockedVolume,
     Other,
 }
 
@@ -176,6 +177,14 @@ impl FolderLoadError {
         Self {
             path,
             kind: FolderLoadErrorKind::NotFound,
+            message: None,
+        }
+    }
+
+    pub fn locked_volume(path: PathBuf) -> Self {
+        Self {
+            path,
+            kind: FolderLoadErrorKind::LockedVolume,
             message: None,
         }
     }
@@ -498,6 +507,9 @@ pub struct ImageViewerApp {
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
+    /// Drive root the user explicitly navigated to; consumed by the first
+    /// locked-volume failure so watcher reloads never re-open the unlock dialog.
+    pub pending_unlock_prompt: Option<PathBuf>,
     /// One-shot flag: auto-fit list view column widths to content on the next
     /// list view render. Set after session restore, folder navigation and when
     /// dual panel is disabled so widths match the content and panel size.

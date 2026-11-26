@@ -301,6 +301,17 @@ impl ImageViewerApp {
                     self.folder_load_error = None;
                     self.navigate_to_nearest_valid_ancestor();
                 }
+                FolderLoadErrorKind::LockedVolume => {
+                    self.pending_auto_reload = false;
+                    self.skip_next_auto_reload = false;
+                    let requested = self.pending_unlock_prompt.take().is_some_and(|path| {
+                        Self::normalize_for_match(&path) == Self::normalize_for_match(&failure.path)
+                    });
+                    if requested {
+                        Self::launch_drive_unlock(&failure.path);
+                    }
+                    self.apply_folder_load_error_to_current_panel(failure);
+                }
                 FolderLoadErrorKind::AccessDenied | FolderLoadErrorKind::Other => {
                     self.pending_auto_reload = false;
                     self.skip_next_auto_reload = false;

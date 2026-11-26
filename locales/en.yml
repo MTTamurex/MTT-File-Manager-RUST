@@ -921,6 +921,7 @@ panels:
   folder_access_failed: "Could not grant access (error %{code}). The folder may require a manual permissions change."
   folder_not_found: "Folder not found"
   folder_load_failed: "Could not open this folder"
+  drive_locked: "This drive is locked by BitLocker"
   updating: "Updating..."
   no_selection: "No item selected"
   select_hint: "Select something to see details"
