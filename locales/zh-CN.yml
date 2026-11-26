@@ -730,7 +730,6 @@ settings:
   backend_active: "当前后端："
   gpu_active: "当前 GPU："
   gpu_active_unknown: "OpenGL 渲染器不可用"
-  gpu_cross_adapter_warning: "⚠ 显示器连接在 %{display} 上。在另一块 GPU 上渲染时，每一帧都需要在适配器之间复制，可能导致滚动卡顿。建议选择“自动”，或将显示器连接到负责渲染的 GPU。"
   vulkan_limitations_tooltip: "Vulkan 在连接显示器的独立显卡上效果最佳。Windows 上的已知限制：\n• Intel 集成显卡：驱动通过复制方式呈现帧，只有约一半能显示到屏幕上，滚动会卡顿。\n• 显示器连接在与渲染 GPU 不同的 GPU 上：每一帧都要在 GPU 之间复制；应用空闲约 10 秒后 GPU 会降低频率，返回时滚动会在几秒内以 30 fps 运行。\nDirectX 12 没有这些限制。"
   gpu_preference_title: "GPU 首选项"
   gpu_preference_description: "选择 MTT 优先使用的显卡。需要重启应用。如果首选显卡不可用或不兼容，将使用其他显卡；请查看下方的当前 GPU。"

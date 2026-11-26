@@ -19,8 +19,6 @@ const GPU_PREFERENCES: &[(&str, &str)] = &[
 pub struct ActiveGraphics<'a> {
     pub backend: &'a str,
     pub device: &'a str,
-    /// GPU driving the monitor, when it is not the rendering GPU.
-    pub cross_adapter_display: Option<&'a str>,
     /// Only one hardware GPU exists, so the GPU preference cannot change anything.
     pub single_adapter: bool,
 }
@@ -35,7 +33,6 @@ pub fn render_backend_settings_section(
     let ActiveGraphics {
         backend: active_backend,
         device: active_gpu_device,
-        cross_adapter_display,
         single_adapter,
     } = active;
     let mut backend_changed = false;
@@ -143,14 +140,6 @@ pub fn render_backend_settings_section(
             .color(ui.visuals().hyperlink_color),
         );
     });
-    if let Some(display) = cross_adapter_display {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(t!("settings.gpu_cross_adapter_warning", display = display))
-                .size(12.0)
-                .color(ui.visuals().warn_fg_color),
-        );
-    }
 
     ui.add_space(16.0);
     ui.label(

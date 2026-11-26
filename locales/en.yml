@@ -730,7 +730,6 @@ settings:
   backend_active: "Active Backend:"
   gpu_active: "Active GPU:"
   gpu_active_unknown: "OpenGL renderer unavailable"
-  gpu_cross_adapter_warning: "⚠ The monitor is connected to %{display}. Rendering on another GPU copies every frame between adapters, which can make scrolling stutter. Prefer Automatic or connect the monitor to the rendering GPU."
   vulkan_limitations_tooltip: "Vulkan works best on a dedicated GPU with the monitor connected to it. Known limitations on Windows:\n• Intel integrated graphics: the driver presents frames by copying them, so only about half reach the screen and scrolling stutters.\n• Monitor connected to a different GPU than the one rendering: every frame is copied between GPUs; after about 10 seconds idle the GPU lowers its clocks, and scrolling runs at 30 fps for a few seconds when you return.\nDirectX 12 does not have these limitations."
   gpu_preference_title: "GPU preference"
   gpu_preference_description: "Choose which adapter MTT should prefer. Requires restarting the application. If the preferred GPU is unavailable or incompatible, another will be used; check the active GPU below."
