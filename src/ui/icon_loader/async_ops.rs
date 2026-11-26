@@ -197,13 +197,15 @@ impl IconLoader {
             return None;
         }
 
-        if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
-            return Some(icon.clone());
+        // A stale icon (e.g. drive unlocked) stays visible while it is reloaded.
+        let cached_icon = self.drive_icon_cache.get(&cache_key).cloned();
+        if cached_icon.is_some() && !self.stale_drive_icons.contains(&cache_key) {
+            return cached_icon;
         }
 
         // Already loading in background - wait for result
         if self.loading_drive_icons.contains(&cache_key) {
-            return None;
+            return cached_icon;
         }
 
         // Spawn background extraction (non-blocking, bounded)
@@ -212,7 +214,7 @@ impl IconLoader {
         let active = self.auxiliary_icon_threads.clone();
 
         if !super::try_reserve_auxiliary_icon_thread(&active) {
-            return None;
+            return cached_icon;
         }
 
         self.loading_drive_icons.insert(cache_key.clone());
@@ -244,7 +246,7 @@ impl IconLoader {
             log::error!("[Icon] Failed to spawn folder-path-icon-worker: {}", error);
         }
 
-        None
+        cached_icon
     }
 
     /// Gets a provider-registered folder icon for an operational folder path.

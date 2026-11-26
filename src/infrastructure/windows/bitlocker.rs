@@ -32,11 +32,19 @@ pub fn unlock_drive(root: &str) -> io::Result<()> {
         .filter(|c| c.is_ascii_alphabetic())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid drive root"))?;
     let system = system_directory()?;
-    Command::new(system.join("bdeunlock.exe"))
+    let mut child = Command::new(system.join("bdeunlock.exe"))
         .arg(format!("{}:", letter.to_ascii_uppercase()))
         .current_dir(&system)
-        .spawn()
-        .map(|_| ())
+        .spawn()?;
+    // Unlocking a mounted volume raises no device arrival event, so refresh
+    // drive icons and lists once the wizard closes.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        // Give the Shell a moment to publish the new lock state.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        crate::infrastructure::windows::device_change::notify_volume_state_changed();
+    });
+    Ok(())
 }
 
 #[cfg(test)]

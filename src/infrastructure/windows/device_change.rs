@@ -69,6 +69,17 @@ pub(crate) fn notify_volume_removed(letter: char) {
     }
 }
 
+/// Signals that a volume changed state without a device arrival/removal
+/// (e.g. a BitLocker unlock), so drive lists and Shell icons get refreshed.
+pub(crate) fn notify_volume_state_changed() {
+    if let Some(sender) = DEVICE_EVENT_SENDER.get() {
+        let _ = sender.send(());
+    }
+    if let Some(ctx) = EGUI_CONTEXT.get() {
+        ctx.request_repaint();
+    }
+}
+
 pub(crate) fn take_removed_volumes() -> Vec<String> {
     let mask = REMOVED_VOLUMES.swap(0, std::sync::atomic::Ordering::AcqRel);
     (0..26)
