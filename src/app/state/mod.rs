@@ -668,6 +668,8 @@ pub struct ImageViewerApp {
 
     // 3-stage startup: hidden -> maximize/resize -> reveal
     pub startup_tick: usize,
+    /// DWM cloak hiding startup geometry changes until the final frame is painted.
+    pub(crate) startup_cloak: Option<crate::ui::app::startup_cloak::StartupCloak>,
 
     // Window/layout persistence and list column widths
     pub layout: LayoutState,

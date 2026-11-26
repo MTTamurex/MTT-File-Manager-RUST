@@ -749,6 +749,7 @@ impl ImageViewerApp {
 
             // 3-stage startup counter
             startup_tick: 0,
+            startup_cloak: None,
 
             // STARTUP OPTIMIZATION: Async Font Loader
             font_loader_rx: Some(font_rx),

@@ -63,7 +63,14 @@ pub fn handle_startup_sequence(
             // Frame 1: Apply saved theme before anything else
             crate::ui::theme::apply_theme_visuals(ctx, app.theme_mode);
 
-            // Frame 1: Apply saved geometry while window is hidden
+            // Frame 1: Apply saved geometry while window is hidden. Maximizing
+            // a hidden window shows it, so cloak it first.
+            if let Some(hwnd) = app.native_hwnd {
+                app.startup_cloak = crate::ui::app::startup_cloak::StartupCloak::begin(
+                    hwnd,
+                    app.layout.saved_is_maximized,
+                );
+            }
             if app.layout.saved_is_maximized {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
             } else {

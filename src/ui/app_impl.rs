@@ -246,13 +246,16 @@ impl eframe::App for ImageViewerApp {
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
         self.track_frame_interval();
         crate::ui::frame_timing::record_frame(self, ctx, frame);
+        // The startup sequence needs the HWND to cloak the window before
+        // its first geometry change.
+        self.ensure_window_handle(frame);
         // Startup must advance while the root viewport is still hidden.
         let startup_fonts_ready = app::apply_ready_startup_fonts(self, ctx);
         app::lifecycle::handle_startup_sequence(self, ctx, startup_fonts_ready);
+        app::release_startup_cloak_when_painted(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
         crate::ui::repaint_diagnostics::record_idle_logic(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
-        self.ensure_window_handle(frame);
         // Transfers must complete even when the source is occluded/minimized
         // and eframe only runs logic, not its tab-bar UI.
         self.poll_tab_transfer(ctx);

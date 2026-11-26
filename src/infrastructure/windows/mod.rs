@@ -53,6 +53,7 @@ pub mod sync_roots;
 pub mod system_info;
 pub mod system_spec;
 pub(crate) mod system_tray;
+pub mod window_cloak;
 pub mod window_corners;
 pub mod window_focus;
 pub mod window_opacity;
