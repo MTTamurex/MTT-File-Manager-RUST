@@ -1,14 +1,15 @@
 use eframe::egui;
 
+#[cfg(any(target_os = "windows", test))]
+use crate::infrastructure::windows::surface_region::Cutout;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::{owned_surface, surface_region};
 #[cfg(target_os = "windows")]
 use windows::core::w;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{HWND, POINT};
 #[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn,
-    UpdateWindow, RGN_DIFF,
-};
+use windows::Win32::Graphics::Gdi::{ClientToScreen, UpdateWindow};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 #[cfg(target_os = "windows")]
@@ -67,11 +68,10 @@ pub struct VideoSurface {
     last_rect: egui::Rect,
     /// Screen position of the main window's client origin (popup host only).
     last_client_origin: Option<(i32, i32)>,
+    /// Anchor and client size (physical pixels) of the last popup layout.
+    last_placement: Option<(owned_surface::Anchor, (i32, i32))>,
     popup: bool,
-    /// Visible part of a popup host inside the main client area, in window
-    /// coordinates; `None` when the whole surface is inside.
-    clip: Option<(i32, i32, i32, i32)>,
-    last_overlay_regions: Option<Vec<PixelRoundedRect>>,
+    last_overlay_regions: Option<Vec<Cutout>>,
     visible: std::cell::Cell<bool>,
 }
 
@@ -81,40 +81,14 @@ pub struct VideoSurface {
 }
 
 #[cfg(any(target_os = "windows", test))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct PixelRoundedRect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-    corner_diameter: i32,
-}
-
-/// Part of a popup surface `(x, y, width, height)` (client coordinates) that
-/// lies inside a client area of `client_size`, in surface coordinates.
-/// `None` when nothing needs clipping.
-#[cfg(any(target_os = "windows", test))]
-fn popup_clip(
-    (x, y, width, height): (i32, i32, i32, i32),
-    (client_width, client_height): (i32, i32),
-) -> Option<(i32, i32, i32, i32)> {
-    let left = (-x).clamp(0, width);
-    let top = (-y).clamp(0, height);
-    let right = (client_width - x).clamp(left, width);
-    let bottom = (client_height - y).clamp(top, height);
-    (left != 0 || top != 0 || right != width || bottom != height)
-        .then_some((left, top, right, bottom))
-}
-
-#[cfg(any(target_os = "windows", test))]
 fn rounded_rect_to_pixels(
     rect: egui::Rect,
     corner_radius: f32,
     video_left: i32,
     video_top: i32,
     pixels_per_point: f32,
-) -> PixelRoundedRect {
-    PixelRoundedRect {
+) -> Cutout {
+    Cutout {
         left: (rect.left() * pixels_per_point).floor() as i32 - video_left,
         top: (rect.top() * pixels_per_point).floor() as i32 - video_top,
         right: (rect.right() * pixels_per_point).ceil() as i32 - video_left,
@@ -128,7 +102,7 @@ fn overlay_pixel_regions(
     video_rect: egui::Rect,
     overlays: &[crate::ui::video_overlay::VideoOverlay],
     pixels_per_point: f32,
-) -> Vec<PixelRoundedRect> {
+) -> Vec<Cutout> {
     if !video_rect.is_positive() || pixels_per_point <= 0.0 {
         return Vec::new();
     }
@@ -162,8 +136,8 @@ impl VideoSurface {
             main_hwnd: None,
             last_rect: egui::Rect::NAN,
             last_client_origin: None,
+            last_placement: None,
             popup: super::host_tuning::PreviewHostTuning::from_env().popup,
-            clip: None,
             last_overlay_regions: None,
             visible: std::cell::Cell::new(false),
         }
@@ -224,12 +198,23 @@ impl VideoSurface {
         }
     }
 
-    /// Synchronizes the child window position/size with the egui allocated rect.
-    /// Only calls MoveWindow when position/size actually changes (~95% reduction).
-    pub fn sync_rect(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+    /// Synchronizes the native window position/size with the egui allocated
+    /// rect. `anchor` says how a popup host follows the main window's client
+    /// area when it changes size before the next layout.
+    pub fn sync_rect(&mut self, ui: &egui::Ui, rect: egui::Rect, anchor: owned_surface::Anchor) {
+        let factor = ui.ctx().pixels_per_point();
         // A popup must also follow the main window when it moves on screen.
         let origin = self.client_origin();
-        if rect == self.last_rect && origin == self.last_client_origin {
+        let viewport = ui.ctx().viewport_rect();
+        let client_size = (
+            (viewport.width() * factor).round() as i32,
+            (viewport.height() * factor).round() as i32,
+        );
+        let placement = self.popup.then_some((anchor, client_size));
+        if rect == self.last_rect
+            && origin == self.last_client_origin
+            && placement == self.last_placement
+        {
             return;
         }
 
@@ -238,49 +223,31 @@ impl VideoSurface {
         }
         self.last_rect = rect;
         self.last_client_origin = origin;
+        self.last_placement = placement;
 
-        if let Some(h_video) = self.mpv_hwnd {
-            let (origin_x, origin_y) = origin.unwrap_or((0, 0));
-            let factor = ui.ctx().pixels_per_point();
-            let client_x = (rect.min.x * factor) as i32;
-            let client_y = (rect.min.y * factor) as i32;
-            let w = (rect.width() * factor) as i32;
-            let h = (rect.height() * factor) as i32;
-            if self.popup {
-                crate::infrastructure::windows::owned_surface::set_offset(
-                    h_video,
-                    (client_x, client_y),
-                );
-                // A child was clipped to the client area by Windows; a popup
-                // must be clipped explicitly (e.g. a floating player dragged
-                // partly outside the main window).
-                let clip = self.main_hwnd.and_then(|main| {
-                    let mut client = windows::Win32::Foundation::RECT::default();
-                    unsafe {
-                        windows::Win32::UI::WindowsAndMessaging::GetClientRect(main, &mut client)
-                    }
-                    .ok()?;
-                    popup_clip(
-                        (client_x, client_y, w.max(1), h.max(1)),
-                        (client.right, client.bottom),
-                    )
-                });
-                if clip != self.clip {
-                    self.clip = clip;
-                    self.last_overlay_regions = None;
-                }
-            }
-            unsafe {
-                // PERF: MoveWindow only called when position/size changes (~95% reduction)
-                let _ = MoveWindow(
-                    h_video,
-                    client_x + origin_x,
-                    client_y + origin_y,
-                    w.max(1),
-                    h.max(1),
-                    true,
-                );
-            }
+        let Some(h_video) = self.mpv_hwnd else {
+            return;
+        };
+        let position = ((rect.min.x * factor) as i32, (rect.min.y * factor) as i32);
+        let size = (
+            ((rect.width() * factor) as i32).max(1),
+            ((rect.height() * factor) as i32).max(1),
+        );
+        match (self.popup, self.main_hwnd) {
+            (true, Some(main)) => owned_surface::place(
+                h_video,
+                main,
+                owned_surface::Layout {
+                    position,
+                    size,
+                    client_size,
+                    anchor,
+                },
+            ),
+            // A child is positioned in client coordinates and clipped by Windows.
+            _ => unsafe {
+                let _ = MoveWindow(h_video, position.0, position.1, size.0, size.1, true);
+            },
         }
     }
 
@@ -327,48 +294,18 @@ impl VideoSurface {
             return;
         }
 
-        let applied = unsafe {
-            if regions.is_empty() && self.clip.is_none() {
-                SetWindowRgn(hwnd, None, true) != 0
-            } else {
-                let width = ((self.last_rect.width() * pixels_per_point) as i32).max(1);
-                let height = ((self.last_rect.height() * pixels_per_point) as i32).max(1);
-                let (left, top, right, bottom) = self.clip.unwrap_or((0, 0, width, height));
-                let window_region = CreateRectRgn(left, top, right, bottom);
-                if window_region.is_invalid() {
-                    false
-                } else {
-                    for rect in &regions {
-                        let overlay_region = CreateRoundRectRgn(
-                            rect.left,
-                            rect.top,
-                            rect.right,
-                            rect.bottom,
-                            rect.corner_diameter,
-                            rect.corner_diameter,
-                        );
-                        if !overlay_region.is_invalid() {
-                            let _ = CombineRgn(
-                                Some(window_region),
-                                Some(window_region),
-                                Some(overlay_region),
-                                RGN_DIFF,
-                            );
-                            let _ = DeleteObject(overlay_region.into());
-                        }
-                    }
-
-                    if SetWindowRgn(hwnd, Some(window_region), true) != 0 {
-                        // Windows owns window_region after a successful call.
-                        true
-                    } else {
-                        let _ = DeleteObject(window_region.into());
-                        false
-                    }
-                }
-            }
+        // A popup's region also carries its clip, which changes with the main
+        // window: the registry owns it.
+        let applied = if self.popup {
+            owned_surface::set_cutouts(hwnd, regions.clone());
+            true
+        } else {
+            let size = (
+                (self.last_rect.width() * pixels_per_point) as i32,
+                (self.last_rect.height() * pixels_per_point) as i32,
+            );
+            surface_region::apply(hwnd, size, None, &regions)
         };
-
         if applied {
             self.last_overlay_regions = Some(regions);
         }
@@ -455,7 +392,12 @@ impl VideoSurface {
 
     pub fn ensure_child_window(&mut self, _mpv: &mpv::Mpv) {}
 
-    pub fn sync_rect(&mut self, _ui: &egui::Ui, rect: egui::Rect) {
+    pub fn sync_rect(
+        &mut self,
+        _ui: &egui::Ui,
+        rect: egui::Rect,
+        _anchor: crate::infrastructure::windows::owned_surface::Anchor,
+    ) {
         if rect != self.last_rect {
             self.last_rect = rect;
         }

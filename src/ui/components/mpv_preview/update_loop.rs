@@ -120,7 +120,7 @@ impl MpvPreview {
             self.surface.ensure_child_window(m);
         }
         // Never start loading into an unpositioned, default-sized native window.
-        self.surface.sync_rect(ui, rect);
+        self.surface.sync_rect(ui, rect, self.surface_anchor());
 
         if let Some(m) = self.mpv.clone() {
             self.sync_fullscreen_from_mpv(ui, &m);
@@ -249,5 +249,17 @@ impl MpvPreview {
 
         // Context menu removed - controls now in control bar.
         self.set_visibility(self.is_visible);
+    }
+
+    /// How the native surface follows a main-window resize until the next
+    /// layout: the preview panel is docked to the right edge, a detached
+    /// window keeps its position and fullscreen fills the viewport.
+    fn surface_anchor(&self) -> crate::infrastructure::windows::owned_surface::Anchor {
+        use crate::infrastructure::windows::owned_surface::Anchor;
+        match self.mode {
+            VideoMode::Docked => Anchor::TopRight,
+            VideoMode::Detached => Anchor::TopLeft,
+            VideoMode::Fullscreen => Anchor::Fill,
+        }
     }
 }

@@ -325,17 +325,23 @@ extern "system" fn borderless_subclass_proc(
         crate::infrastructure::windows::device_change::notify_system_theme_changed();
     }
 
-    // Owned popups (the docked video surface) track the client area.
-    if msg == windows::Win32::UI::WindowsAndMessaging::WM_MOVE
+    // Owned popups (the docked video surface) track the client area as soon
+    // as it moves or resizes, before egui lays out the next frame.
+    if (msg == windows::Win32::UI::WindowsAndMessaging::WM_MOVE || msg == WM_SIZE)
         && !unsafe { IsIconic(hwnd).as_bool() }
     {
-        super::owned_surface::on_owner_moved(super::owned_surface::client_origin_from_move_lparam(
-            lparam.0,
-        ));
+        super::owned_surface::on_owner_geometry(hwnd);
     }
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_SHOWWINDOW && lparam.0 == 0 {
         // lParam == 0: an explicit ShowWindow call, not an owner minimize/restore.
         super::owned_surface::on_owner_visibility(wparam.0 != 0);
+    }
+
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER
+        && wparam.0 == super::owned_surface::TRANSITION_TIMER_ID
+    {
+        super::owned_surface::end_size_transition(hwnd, IS_IN_SIZE_MOVE.load(Ordering::Acquire));
+        return LRESULT(0);
     }
 
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER
@@ -452,6 +458,7 @@ extern "system" fn borderless_subclass_proc(
     if msg == WM_EXITSIZEMOVE {
         let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+        super::owned_surface::schedule_end_size_transition(hwnd);
         redraw_suppression::end_caption_move(hwnd);
         return result;
     }
@@ -486,6 +493,19 @@ extern "system" fn borderless_subclass_proc(
                     (*window_pos).cy = (*window_pos).cy.max(MIN_TRACK_HEIGHT_PX);
                 }
             }
+        }
+    }
+
+    // Before a size change is applied, host the video surface as a child so
+    // it moves in step with the window.
+    if msg == WM_WINDOWPOSCHANGING {
+        let window_pos = lparam.0 as *const WINDOWPOS;
+        if !window_pos.is_null() {
+            super::owned_surface::on_owner_pos_changing(
+                hwnd,
+                unsafe { &*window_pos },
+                IS_IN_SIZE_MOVE.load(Ordering::Acquire),
+            );
         }
     }
 

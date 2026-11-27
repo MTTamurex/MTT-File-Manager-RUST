@@ -49,6 +49,7 @@ pub mod shell_new;
 pub mod shell_operations;
 pub(crate) mod shell_transfer;
 pub mod shortcuts;
+pub mod surface_region;
 pub mod sync_roots;
 pub mod system_info;
 pub mod system_spec;

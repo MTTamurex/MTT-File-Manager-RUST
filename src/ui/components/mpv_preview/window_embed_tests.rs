@@ -1,4 +1,6 @@
-use super::{overlay_pixel_regions, popup_clip, PixelRoundedRect};
+use super::overlay_pixel_regions;
+use crate::infrastructure::windows::owned_surface::Anchor;
+use crate::infrastructure::windows::surface_region::Cutout;
 use eframe::egui;
 
 fn popup_overlay(rect: egui::Rect) -> crate::ui::video_overlay::VideoOverlay {
@@ -15,7 +17,7 @@ fn converts_overlay_intersection_to_video_local_pixels() {
 
     assert_eq!(
         overlay_pixel_regions(video, &[popup_overlay(overlay_rect)], 1.5),
-        vec![PixelRoundedRect {
+        vec![Cutout {
             left: 225,
             top: -38,
             right: 375,
@@ -112,7 +114,7 @@ mod native {
         let ctx = egui::Context::default();
         let rect = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(320.0, 180.0));
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            fixture.surface.sync_rect(ui, rect);
+            fixture.surface.sync_rect(ui, rect, Anchor::TopLeft);
         });
         assert_eq!(fixture.style() & WS_VISIBLE.0, 0);
         fixture.surface.set_visible(true);
@@ -167,6 +169,7 @@ mod native {
             preview.surface.sync_rect(
                 ui,
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 180.0)),
+                Anchor::TopLeft,
             );
         });
         preview.first_frame_ready.store(true, Ordering::Release);
@@ -218,6 +221,7 @@ mod native {
             preview.surface.sync_rect(
                 ui,
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 180.0)),
+                Anchor::TopLeft,
             );
         });
 
@@ -286,6 +290,7 @@ mod native {
             preview.surface.sync_rect(
                 ui,
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 180.0)),
+                Anchor::TopLeft,
             );
         });
         preview.mpv = Some(mpv.clone());
@@ -328,7 +333,11 @@ mod native {
     #[test]
     fn popup_surface_is_owned_and_follows_the_owner_client_area() {
         use crate::infrastructure::windows::owned_surface;
-        use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER, WS_POPUP};
+        use windows::Win32::Graphics::Gdi::{GetWindowRgnBox, GDI_REGION_TYPE};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetClientRect, GetParent, GetWindow, SetWindowPos, GW_OWNER, SWP_NOACTIVATE,
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WINDOWPOS, WS_POPUP,
+        };
 
         let owner = unsafe {
             CreateWindowExW(
@@ -358,46 +367,119 @@ mod native {
         assert_eq!(style & WS_CHILD.0, 0);
         assert_eq!(unsafe { GetWindow(popup, GW_OWNER) }.unwrap(), owner);
 
+        let client_size = || {
+            let mut client = RECT::default();
+            unsafe { GetClientRect(owner, &mut client).unwrap() };
+            (client.right, client.bottom)
+        };
+        let bounds = || {
+            let mut bounds = RECT::default();
+            unsafe { GetWindowRect(popup, &mut bounds).unwrap() };
+            (
+                bounds.left,
+                bounds.top,
+                bounds.right - bounds.left,
+                bounds.bottom - bounds.top,
+            )
+        };
+        let (width, height) = client_size();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width as f32, height as f32),
+            )),
+            ..Default::default()
+        };
+        // Docked to the right edge: its right side is 20 px from the client's.
+        let rect = egui::Rect::from_min_size(
+            egui::pos2((width - 340) as f32, 30.0),
+            egui::vec2(320.0, 180.0),
+        );
         let ctx = egui::Context::default();
-        let rect = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(320.0, 180.0));
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| surface.sync_rect(ui, rect));
+        let _ = ctx.run_ui(input, |ui| surface.sync_rect(ui, rect, Anchor::TopRight));
         let origin = surface.client_origin().unwrap();
-        let mut bounds = RECT::default();
-        unsafe { GetWindowRect(popup, &mut bounds).unwrap() };
-        assert_eq!((bounds.left, bounds.top), (origin.0 + 20, origin.1 + 30));
+        assert_eq!(bounds(), (origin.0 + width - 340, origin.1 + 30, 320, 180));
 
-        // The owner's WM_MOVE handler repositions it without an egui pass.
-        owned_surface::on_owner_moved((1000, 500));
-        unsafe { GetWindowRect(popup, &mut bounds).unwrap() };
-        assert_eq!((bounds.left, bounds.top), (1020, 530));
+        // The owner's WM_MOVE/WM_SIZE handler re-projects it without an egui
+        // pass: moved and 200 px wider, it keeps the distance to the right edge.
+        unsafe {
+            SetWindowPos(
+                owner,
+                None,
+                100,
+                50,
+                840,
+                480,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .unwrap();
+        }
+        owned_surface::on_owner_geometry(owner);
+        let origin = surface.client_origin().unwrap();
+        let (width, _) = client_size();
+        assert_eq!(bounds(), (origin.0 + width - 340, origin.1 + 30, 320, 180));
+
+        // Narrower than the video: the part outside the client area is clipped.
+        unsafe {
+            SetWindowPos(
+                owner,
+                None,
+                100,
+                50,
+                300,
+                480,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .unwrap();
+        }
+        owned_surface::on_owner_geometry(owner);
+        let (width, _) = client_size();
+        let mut region = RECT::default();
+        assert_ne!(
+            unsafe { GetWindowRgnBox(popup, &mut region) },
+            GDI_REGION_TYPE(0)
+        );
+        assert_eq!((region.left, region.right), (340 - width, 320));
+
+        // A size change hosts it as a child for the duration of the transition.
+        let style = || unsafe { GetWindowLongPtrW(popup, GWL_STYLE) as u32 };
+        let resize = WINDOWPOS {
+            hwnd: owner,
+            x: 100,
+            y: 50,
+            cx: 900,
+            cy: 480,
+            ..Default::default()
+        };
+        owned_surface::on_owner_pos_changing(owner, &resize, true);
+        assert_ne!(style() & WS_CHILD.0, 0);
+        assert_eq!(style() & WS_POPUP.0, 0);
+        assert_eq!(unsafe { GetParent(popup) }.unwrap(), owner);
+        owned_surface::end_size_transition(owner, true);
+        assert_ne!(style() & WS_CHILD.0, 0, "still inside the size/move loop");
+        // Hidden owners keep the child too; show it off-screen to settle.
+        owned_surface::end_size_transition(owner, false);
+        assert_ne!(style() & WS_CHILD.0, 0, "owner is hidden");
+        unsafe {
+            SetWindowPos(
+                owner,
+                None,
+                -20000,
+                -20000,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+            .unwrap();
+        }
+        owned_surface::end_size_transition(owner, false);
+        assert_ne!(style() & WS_POPUP.0, 0);
+        assert_eq!(style() & WS_CHILD.0, 0);
+        assert_eq!(unsafe { GetWindow(popup, GW_OWNER) }.unwrap(), owner);
 
         surface.destroy();
         unsafe {
             let _ = DestroyWindow(owner);
         }
     }
-}
-
-#[test]
-fn popup_inside_the_client_area_needs_no_clip() {
-    assert_eq!(popup_clip((10, 20, 300, 200), (800, 600)), None);
-}
-
-#[test]
-fn popup_is_clipped_to_the_client_area_on_every_edge() {
-    // Overhangs right and bottom.
-    assert_eq!(
-        popup_clip((700, 500, 300, 200), (800, 600)),
-        Some((0, 0, 100, 100))
-    );
-    // Overhangs left and top.
-    assert_eq!(
-        popup_clip((-50, -20, 300, 200), (800, 600)),
-        Some((50, 20, 300, 200))
-    );
-    // Entirely outside: an empty region hides it.
-    assert_eq!(
-        popup_clip((900, 10, 300, 200), (800, 600)),
-        Some((0, 0, 0, 200))
-    );
 }
