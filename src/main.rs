@@ -309,6 +309,10 @@ fn run_main_app_attempt(
             options,
             Box::new(move |cc| {
                 app_started_in_creator.set(true);
+                log::info!(
+                    "[STARTUP-TIMELINE] graphics ready, app init begins t_ms={}",
+                    mtt_file_manager::app::startup_timeline::elapsed_ms()
+                );
                 let app_new_start = Instant::now();
                 let app = ImageViewerApp::new_with_startup_folder(cc, startup_folder.clone());
                 log::info!(
@@ -362,6 +366,7 @@ fn run_main_app_with_fallback(
 }
 
 fn main() -> eframe::Result<()> {
+    mtt_file_manager::app::startup_timeline::start();
     shell_maintenance::run_if_requested();
     let startup_start = Instant::now();
     // SEC: Remove the current working directory from the default DLL search order.
@@ -716,6 +721,7 @@ fn main() -> eframe::Result<()> {
         mtt_file_manager::infrastructure::windows::app_instances::ALLOW_MULTIPLE_INSTANCES_KEY,
         mtt_file_manager::app::instance_sessions::KEY,
         "startup_location",
+        mtt_file_manager::app::startup_font_prefetch::PREFERENCE_KEY,
     ]);
     use mtt_file_manager::infrastructure::windows::app_instances;
     if !app_instances::allows_multiple_instances(
@@ -749,6 +755,13 @@ fn main() -> eframe::Result<()> {
 
     log::info!("MTT File Manager starting");
     start_temporary_startup_priority_boost();
+    // Load fonts while the GPU device and window are being created.
+    mtt_file_manager::app::startup_font_prefetch::start(
+        instance_prefs
+            .get(mtt_file_manager::app::startup_font_prefetch::PREFERENCE_KEY)
+            .cloned()
+            .unwrap_or_default(),
+    );
 
     // Initialize codec name cache (queries Windows Registry on-demand)
     mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();

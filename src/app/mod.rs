@@ -46,9 +46,11 @@ pub mod organizer_state;
 pub mod settings_window_geometry;
 pub mod shortcuts;
 pub mod startup_folder;
+pub mod startup_font_prefetch;
 pub mod startup_location;
 #[cfg(test)]
 mod startup_preferences_tests;
+pub mod startup_timeline;
 pub mod state;
 pub mod tab_preferences;
 pub mod tab_transfer;

@@ -48,12 +48,10 @@ pub fn release_startup_cloak_when_painted(app: &mut ImageViewerApp, ctx: &egui::
         return;
     };
 
-    let ready = ctx.input(|i| {
-        let viewport = i.viewport();
-        viewport.visible() == Some(true)
-            && (!cloak.expect_maximized || viewport.maximized == Some(true))
-    });
-    if ready {
+    // Frames painted before the reveal tick may still use fallback fonts.
+    if app.startup_tick >= crate::ui::app::lifecycle::STARTUP_REVEAL_TICK
+        && is_at_final_geometry(cloak.hwnd, cloak.expect_maximized)
+    {
         cloak.ready_frames = cloak.ready_frames.saturating_add(1);
     }
 
@@ -67,11 +65,23 @@ pub fn release_startup_cloak_when_painted(app: &mut ImageViewerApp, ctx: &egui::
         log::warn!("[STARTUP] Failed to uncloak main window");
     }
     log::info!(
-        "[STARTUP] main window uncloaked ready_frames={} elapsed_ms={}",
+        "[STARTUP-TIMELINE] main window uncloaked ready_frames={} cloak_ms={} t_ms={}",
         cloak.ready_frames,
-        elapsed.as_millis()
+        elapsed.as_millis(),
+        crate::app::startup_timeline::elapsed_ms()
     );
     app.startup_cloak = None;
+}
+
+/// Reads the native window state. egui's `ViewportInfo::visible()` cannot be
+/// used: winit never reports occlusion on Windows, so it stays `None`.
+fn is_at_final_geometry(hwnd: HWND, expect_maximized: bool) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible, IsZoomed};
+    unsafe {
+        IsWindowVisible(hwnd).as_bool()
+            && !IsIconic(hwnd).as_bool()
+            && (!expect_maximized || IsZoomed(hwnd).as_bool())
+    }
 }
 
 fn should_release(ready_frames: u8, elapsed: Duration) -> bool {

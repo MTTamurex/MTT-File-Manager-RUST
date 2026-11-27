@@ -51,6 +51,10 @@ impl ImageViewerApp {
                 }
 
                 crate::infrastructure::windows::system_tray::coordinator::initialize(hwnd);
+                log::info!(
+                    "[STARTUP-TIMELINE] tray initialized t_ms={}",
+                    crate::app::startup_timeline::elapsed_ms()
+                );
                 if let Err(error) =
                     crate::infrastructure::windows::recycle_bin::register_change_notifications(hwnd)
                 {

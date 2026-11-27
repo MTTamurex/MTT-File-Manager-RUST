@@ -2,7 +2,7 @@ use crate::app::ImageViewerApp;
 use crate::infrastructure::onedrive;
 use eframe::egui;
 
-const STARTUP_REVEAL_TICK: usize = 2;
+pub(crate) const STARTUP_REVEAL_TICK: usize = 2;
 const OPENGL_TEXTURE_FLUSH_ENV: &str = "MTT_OPENGL_FLUSH_TEXTURES";
 
 fn environment_flag_enabled(name: &str) -> bool {
@@ -60,6 +60,10 @@ pub fn handle_startup_sequence(
         app.startup_tick += 1;
 
         if app.startup_tick == 1 {
+            log::info!(
+                "[STARTUP-TIMELINE] tick 1 (cloak + geometry) t_ms={}",
+                crate::app::startup_timeline::elapsed_ms()
+            );
             // Frame 1: Apply saved theme before anything else
             crate::ui::theme::apply_theme_visuals(ctx, app.theme_mode);
 
@@ -134,7 +138,10 @@ pub fn handle_startup_sequence(
                 app.tray_exit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            log::info!("[STARTUP] first visible startup frame completed");
+            log::info!(
+                "[STARTUP-TIMELINE] tick 2 (Visible sent) t_ms={}",
+                crate::app::startup_timeline::elapsed_ms()
+            );
         }
 
         // Keep the loop running fast during startup

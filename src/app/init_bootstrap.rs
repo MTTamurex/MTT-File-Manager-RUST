@@ -21,12 +21,11 @@ use std::time::Instant;
 use super::folder_size_state::FolderSizeMessage;
 use super::init_preferences::StartupPreferences;
 use super::init_workers::{
-    spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
-    spawn_disk_cache_invalidation_worker, spawn_file_hash_worker, spawn_file_icon_cache_gc_worker,
-    spawn_file_operation_worker, spawn_folder_preview_workers, spawn_folder_size_batch_worker,
-    spawn_folder_size_worker, spawn_global_search_worker, spawn_icon_worker,
-    spawn_live_file_size_worker, spawn_metadata_worker, spawn_prefetching_workers,
-    PrefetchWorkerHandles,
+    spawn_consistency_probe_worker, spawn_cover_worker, spawn_disk_cache_invalidation_worker,
+    spawn_file_hash_worker, spawn_file_icon_cache_gc_worker, spawn_file_operation_worker,
+    spawn_folder_preview_workers, spawn_folder_size_batch_worker, spawn_folder_size_worker,
+    spawn_global_search_worker, spawn_icon_worker, spawn_live_file_size_worker,
+    spawn_metadata_worker, spawn_prefetching_workers, PrefetchWorkerHandles,
 };
 use super::state::{FolderLoadError, InactiveItemsRebuildResult, ItemsRebuildResult};
 
@@ -399,7 +398,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
     let startup_preferences = StartupPreferences::load(&app_state_db);
-    let font_rx = spawn_async_font_loader(
+    let font_rx = crate::app::startup_font_prefetch::take_or_spawn(
         app_state_db
             .get_preference(crate::ui::fonts::selection::PREFERENCE_KEY)
             .unwrap_or_default(),

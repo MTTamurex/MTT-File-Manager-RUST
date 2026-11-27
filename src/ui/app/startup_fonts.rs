@@ -17,6 +17,10 @@ pub(crate) fn apply_ready_startup_fonts(app: &mut ImageViewerApp, ctx: &egui::Co
             );
             crate::ui::fonts::selection::flush_font_updates(ctx);
             app.font_loader_rx = None;
+            log::info!(
+                "[STARTUP-TIMELINE] fonts installed t_ms={}",
+                crate::app::startup_timeline::elapsed_ms()
+            );
             true
         }
         Some(Err(TryRecvError::Empty)) => false,
