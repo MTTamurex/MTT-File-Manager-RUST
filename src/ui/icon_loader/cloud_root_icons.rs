@@ -108,10 +108,21 @@ impl IconLoader {
         self.loading_drive_icons.insert(cache_key.clone());
         let thread_cache_key = cache_key.clone();
         let thread_active = active.clone();
+        let stamps = self.cloud_icon_stamps.clone();
+        let refresh = cached_icon.is_some();
         let spawn_result = std::thread::Builder::new()
             .name("cloud-root-icon-worker".to_string())
             .spawn(move || {
                 let _guard = super::ThreadCountGuard(thread_active);
+                let stamp = super::cloud_icon_stamps::icon_file_stamp(resource_path.as_deref());
+                if stamps.record_and_check_unchanged(&thread_cache_key, stamp) && refresh {
+                    // No data on a refresh keeps the cached texture on screen.
+                    let _ = tx.send(AsyncIconResult {
+                        key: thread_cache_key,
+                        data: None,
+                    });
+                    return;
+                }
                 let _com = super::ComStaGuard::new();
                 let data = (|| {
                     if let Some(resource) = resource.as_ref() {

@@ -18,6 +18,7 @@ use crate::domain::file_entry::IconSize;
 use crate::infrastructure::windows;
 
 mod async_ops;
+mod cloud_icon_stamps;
 mod cloud_root_icons;
 mod file_icons;
 mod folder_navigation_icons;
@@ -265,6 +266,8 @@ pub struct IconLoader {
     stale_drive_icons: HashSet<String>,
     /// Pixels behind each asynchronously uploaded drive/cloud icon texture.
     drive_icon_fingerprints: refresh_fingerprint::IconFingerprints,
+    /// Icon files behind cloud-root icons, to skip unchanged refreshes.
+    cloud_icon_stamps: cloud_icon_stamps::CloudIconStamps,
     /// Folder paths that should use a provider icon resource instead of the
     /// generic folder icon (e.g. Google Drive target resolved from a `.lnk`).
     registered_folder_icon_resources: HashMap<String, String>,
@@ -312,6 +315,7 @@ impl IconLoader {
             loading_drive_icons: HashSet::new(),
             stale_drive_icons: HashSet::new(),
             drive_icon_fingerprints: Default::default(),
+            cloud_icon_stamps: Default::default(),
             registered_folder_icon_resources: HashMap::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
@@ -329,6 +333,7 @@ impl IconLoader {
         self.failed_drive_icons.clear();
         self.stale_drive_icons.clear();
         self.drive_icon_fingerprints.clear();
+        self.cloud_icon_stamps.clear();
         self.extension_cache.clear();
         // NOTE: folder_icon_texture is NOT cleared — it's a static custom composed
         // graphic set once at startup (back+front+paper_sheet layers).

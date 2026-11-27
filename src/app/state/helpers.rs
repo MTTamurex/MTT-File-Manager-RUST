@@ -18,6 +18,7 @@ use super::ImageViewerApp;
 pub(super) mod file_operation_memory;
 mod idle_memory_trim;
 mod inactive_thumbnail_release;
+mod post_trim_present;
 pub(super) mod startup_memory_trim;
 
 const BASE_PENDING_THUMBNAILS: usize = 64;
@@ -1977,6 +1978,7 @@ impl ImageViewerApp {
     }
 
     fn run_memory_maintenance_impl(&mut self, force: bool) {
+        post_trim_present::register(&self.ui_ctx);
         self.run_startup_memory_trim();
         if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
             self.refresh_working_set_trim_blocker(false);
@@ -2558,6 +2560,9 @@ fn request_process_working_set_trim_series_with_completion(
                     }
                     break;
                 }
+            }
+            if trimmed_any {
+                post_trim_present::present_after_trim();
             }
             if let Some(completion) = completion {
                 let completed = trimmed_any
