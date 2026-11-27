@@ -19,6 +19,9 @@ struct SurfaceState {
     resizing: bool,
     needs_reconfigure: bool,
     needs_recreate: bool,
+    /// MTT patch: signature of the frame currently shown by this surface, or
+    /// `None` when its contents are unknown (new or reconfigured swapchain).
+    last_presented: std::cell::Cell<Option<(u64, u64)>>,
 }
 
 /// Everything you need to paint egui with [`wgpu`] on [`winit`].
@@ -98,6 +101,8 @@ impl Painter {
         config: &SurfaceConfig,
     ) {
         profiling::function_scope!();
+        // Reconfiguring may discard the swapchain contents: repaint next frame.
+        surface_state.last_presented.set(None);
 
         let SurfaceConfig {
             present_mode,
@@ -302,6 +307,7 @@ impl Painter {
                 resizing,
                 needs_reconfigure: false,
                 needs_recreate: false,
+                last_presented: std::cell::Cell::new(None),
             },
         );
         let Some(width) = NonZeroU32::new(width) else {
@@ -545,6 +551,34 @@ impl Painter {
             return vsync_sec;
         };
 
+        // MTT patch (see PATCHES.md): an identical frame is already on screen,
+        // so skip the buffer uploads, the render pass and the present.
+        let present_epoch = crate::frame_skip::present_epoch();
+        let frame_signature = self.surfaces.get(&viewport_id).and_then(|surface_state| {
+            crate::frame_skip::frame_signature(
+                [surface_state.width, surface_state.height],
+                pixels_per_point,
+                clear_color,
+                clipped_primitives,
+            )
+        });
+        if self
+            .surfaces
+            .get(&viewport_id)
+            .is_some_and(|surface_state| {
+                !surface_state.needs_reconfigure
+                    && crate::frame_skip::can_skip_frame(
+                        frame_signature,
+                        present_epoch,
+                        surface_state.last_presented.get(),
+                        !textures_delta.is_empty(),
+                        capture,
+                    )
+            })
+        {
+            return vsync_sec;
+        }
+
         let mut render_queue_guard = RendererQueueGuard {
             queue: &render_state.queue,
             commands_submitted: false,
@@ -614,6 +648,7 @@ impl Painter {
                 frame
             }
             other => {
+                surface_state.last_presented.set(None);
                 match (*self.config.on_surface_status)(&other) {
                     SurfaceErrorAction::Reconfigure => {
                         Self::configure_surface(surface_state, render_state, &self.config.surface);
@@ -773,6 +808,9 @@ impl Painter {
             output_frame.present();
             vsync_sec += start.elapsed().as_secs_f32();
         }
+        surface_state
+            .last_presented
+            .set(frame_signature.map(|signature| (signature, present_epoch)));
 
         vsync_sec
     }
@@ -804,6 +842,8 @@ impl Painter {
         // TODO(emilk): something here?
     }
 }
+
+pub use crate::frame_skip::{invalidate_presented_frames, set_identical_frame_skip};
 
 /// MTT patch: `MTT_WGPU_ROOT_ALPHA=1` restores upstream behavior (an
 /// alpha-composited root swapchain) for A/B measurements.

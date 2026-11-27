@@ -103,13 +103,13 @@ pub(crate) fn slice_layout_job(
     let mut sliced = egui::text::LayoutJob::default();
     let first_section = job
         .sections
-        .partition_point(|section| section.byte_range.end.0 as usize <= range.start);
+        .partition_point(|section| section.byte_range.end.0 <= range.start);
     for section in &job.sections[first_section..] {
-        if section.byte_range.start.0 as usize >= range.end {
+        if section.byte_range.start.0 >= range.end {
             break;
         }
-        let start = range.start.max(section.byte_range.start.0 as usize);
-        let end = range.end.min(section.byte_range.end.0 as usize);
+        let start = range.start.max(section.byte_range.start.0);
+        let end = range.end.min(section.byte_range.end.0);
         if start < end {
             sliced.append(&job.text[start..end], 0.0, section.format.clone());
         }
@@ -139,10 +139,16 @@ pub(crate) fn apply_syntax_colors(
         job.sections.get(job_section_index),
         syntax_job.sections.get(syntax_section_index),
     ) {
-        let start = (job_section.byte_range.start.0 as usize)
-            .max(syntax_section.byte_range.start.0 as usize);
-        let end =
-            (job_section.byte_range.end.0 as usize).min(syntax_section.byte_range.end.0 as usize);
+        let start = job_section
+            .byte_range
+            .start
+            .0
+            .max(syntax_section.byte_range.start.0);
+        let end = job_section
+            .byte_range
+            .end
+            .0
+            .min(syntax_section.byte_range.end.0);
 
         if start < end {
             let mut format = job_section.format.clone();

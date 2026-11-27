@@ -756,12 +756,17 @@ pub struct ImageViewerApp {
     pub last_texture_cache_retune: Instant,
     pub last_user_activity: Instant,
     pub(crate) startup_memory_trim: helpers::startup_memory_trim::StartupMemoryTrim,
+    /// Idle anchor (latest of user activity / restore) whose idle working-set
+    /// trim has already been evaluated; prevents repeated idle wakeups.
+    pub(crate) idle_trim_evaluated_for: Option<Instant>,
     /// The monitor remains active for the full minimized lifetime. `pending`
     /// tracks whether the current rise still needs a successful trim.
     pub background_memory_trim_active: bool,
     pub background_memory_trim_pending: bool,
     pub background_memory_trim_success_baseline: u64,
     pub background_memory_trim_last_stable_working_set_bytes: u64,
+    /// Whether the window was minimized or hidden to the tray last frame.
+    pub(crate) was_backgrounded: bool,
     pub background_memory_diagnostic_last_log: Instant,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state

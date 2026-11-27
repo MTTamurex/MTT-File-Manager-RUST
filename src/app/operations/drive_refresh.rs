@@ -143,6 +143,17 @@ impl ImageViewerApp {
     }
 
     fn request_drive_info_refresh(&mut self, scope: DriveInfoRefreshScope) {
+        self.spawn_drive_info_refresh(scope, false);
+    }
+
+    /// Timer-driven refresh. After the first completed pass, an unchanged
+    /// result is consumed by the next scheduled pass instead of waking the UI.
+    fn request_periodic_drive_info_refresh(&mut self, scope: DriveInfoRefreshScope) {
+        let quiet = self.drive_state.drive_info_refresh.has_completed(scope);
+        self.spawn_drive_info_refresh(scope, quiet);
+    }
+
+    fn spawn_drive_info_refresh(&mut self, scope: DriveInfoRefreshScope, quiet: bool) {
         let Some(generation) = self.drive_state.drive_info_refresh.begin(scope) else {
             return;
         };
@@ -159,6 +170,7 @@ impl ImageViewerApp {
             tx: self.drive_state.drive_info_tx.clone(),
             ctx: self.ui_ctx.clone(),
             hardware: self.drive_state.drive_info_refresh.hardware_schedule(),
+            quiet,
         });
     }
 
@@ -177,7 +189,7 @@ impl ImageViewerApp {
                 self.reload_drive_list_async();
             } else if drive_full_refresh_is_due(self.drive_state.last_drive_full_refresh, now) {
                 self.drive_state.last_drive_full_refresh = now;
-                self.reload_drive_list_async();
+                self.reload_drive_list_quietly();
             }
         }
 
@@ -193,7 +205,7 @@ impl ImageViewerApp {
                     .elapsed(DriveInfoRefreshScope::Local)
                     >= Duration::from_millis(DRIVE_INFO_REFRESH_INTERVAL_MS)
             {
-                self.request_drive_info_refresh(DriveInfoRefreshScope::Local);
+                self.request_periodic_drive_info_refresh(DriveInfoRefreshScope::Local);
             }
             if !self
                 .drive_state
@@ -205,7 +217,7 @@ impl ImageViewerApp {
                     .elapsed(DriveInfoRefreshScope::Remote)
                     >= Duration::from_millis(REMOTE_DRIVE_INFO_REFRESH_INTERVAL_MS)
             {
-                self.request_drive_info_refresh(DriveInfoRefreshScope::Remote);
+                self.request_periodic_drive_info_refresh(DriveInfoRefreshScope::Remote);
             }
         }
     }

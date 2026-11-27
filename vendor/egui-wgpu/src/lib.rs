@@ -37,6 +37,9 @@ pub mod capture;
 #[cfg(feature = "winit")]
 pub mod winit;
 
+#[cfg(feature = "winit")]
+mod frame_skip;
+
 use std::sync::Arc;
 
 use epaint::mutex::RwLock;

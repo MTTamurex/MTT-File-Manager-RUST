@@ -155,10 +155,9 @@ impl ImageViewerApp {
             .navigation
             .navigate_to(normalized_path.clone());
 
-        self.pending_unlock_prompt = crate::infrastructure::windows::drives::is_drive_root_path(
-            &destination_path,
-        )
-        .then(|| destination_path.clone());
+        self.pending_unlock_prompt =
+            crate::infrastructure::windows::drives::is_drive_root_path(&destination_path)
+                .then(|| destination_path.clone());
 
         self.navigation_state.current_path = normalized_path.clone();
         self.navigation_state.path_input = normalized_path.clone();

@@ -35,6 +35,7 @@ struct RepaintDeadlineInputs {
     drive_health_wakeup_in: Option<Duration>,
     background_memory_monitor_active: bool,
     system_theme_poll_remaining: Option<Duration>,
+    idle_trim_wakeup_in: Option<Duration>,
 }
 
 fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duration {
@@ -78,6 +79,9 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
     if let Some(remaining) = inputs.system_theme_poll_remaining {
         deadline = deadline.min(remaining);
     }
+    if let Some(remaining) = inputs.idle_trim_wakeup_in {
+        deadline = deadline.min(remaining);
+    }
 
     deadline
 }
@@ -113,6 +117,7 @@ impl ImageViewerApp {
             system_theme_poll_remaining: (self.theme_mode == ThemeMode::System).then(|| {
                 SYSTEM_THEME_POLL_INTERVAL.saturating_sub(self.last_system_theme_poll.elapsed())
             }),
+            idle_trim_wakeup_in: self.idle_trim_wakeup_in(),
         });
         ctx.request_repaint_after(deadline);
     }
@@ -170,6 +175,10 @@ impl ImageViewerApp {
         diagnostic_stage.lap("background_drive_requests");
         #[cfg(feature = "online-updates")]
         self.poll_updates(ctx);
+        // Consume finished scans first: quiet periodic results do not wake the
+        // UI, and a pending slot left unconsumed would skip the next refresh.
+        self.poll_drive_scan();
+        self.poll_drive_info();
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
         }
@@ -177,8 +186,6 @@ impl ImageViewerApp {
 
         let t2 = std::time::Instant::now();
         diagnostic_stage.lap("background_poll_results");
-        self.poll_drive_scan();
-        self.poll_drive_info();
         self.poll_drive_health();
         self.dispatch_drive_health_requests();
         self.validate_tab_tree_reveals();
@@ -985,6 +992,7 @@ mod tests {
             drive_health_wakeup_in: None,
             background_memory_monitor_active: false,
             system_theme_poll_remaining: None,
+            idle_trim_wakeup_in: None,
         }
     }
 
@@ -1062,6 +1070,16 @@ mod tests {
         assert_eq!(changed_system_theme(true, Some(false)), None);
         assert_eq!(changed_system_theme(false, Some(false)), Some(true));
         assert_eq!(changed_system_theme(true, Some(true)), Some(false));
+    }
+
+    #[test]
+    fn pending_idle_trim_schedules_a_single_earlier_wakeup() {
+        let inputs = RepaintDeadlineInputs {
+            idle_trim_wakeup_in: Some(Duration::from_secs(8)),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_secs(8));
     }
 
     #[test]

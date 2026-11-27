@@ -37,6 +37,7 @@ pub(super) struct Recorder {
 }
 
 impl Recorder {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn record(
         &mut self,
         session: u64,

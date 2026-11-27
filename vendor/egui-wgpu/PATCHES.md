@@ -15,3 +15,32 @@ With an opaque root swapchain the same scenario ran at a steady 60 fps.
 `Painter::install_surface` therefore requests premultiplied/postmultiplied alpha
 only for non-root viewports. Set `MTT_WGPU_ROOT_ALPHA=1` to restore the upstream
 behavior for comparison.
+
+# Local identical-frame skip patch
+
+Background bookkeeping (drive polling, memory maintenance, worker results)
+wakes eframe for a UI pass even when nothing on screen changes. Upstream renders
+and presents every such frame, which shows up as periodic GPU activity while the
+app sits idle in the background, on both adapters when the render and display
+GPUs differ.
+
+`Painter::paint_and_update_textures` now hashes everything that determines a
+surface's pixels (`src/frame_skip.rs`: size, pixels-per-point, clear color, clip
+rects, texture ids, vertices and indices). When the hash matches the frame last
+presented on that surface, no texture changed, no screenshot is requested, no
+paint callback is present and the surface needs no reconfiguration, the frame
+is skipped before any buffer upload, swapchain acquire or present. The
+compositor keeps showing the last presented image. Any surface (re)configure or
+acquire failure clears the stored hash, so the next frame always paints.
+
+DWM does not keep the presented image across every window-manager transition:
+after minimize/restore an unpainted window shows nothing. The skip is therefore
+opt-in (`winit::set_identical_frame_skip`) and each stored hash carries a global
+present epoch. A host that enables the skip must call
+`winit::invalidate_presented_frames` whenever the OS may need new pixels. MTT
+enables it from the main window subclass, which invalidates on `WM_SIZE`,
+`WM_SHOWWINDOW`, `WM_DISPLAYCHANGE`, `WM_DPICHANGED` and `WM_PAINT` with a real
+update region. Viewer processes do not opt in and keep upstream behavior.
+
+Set `MTT_WGPU_PRESENT_UNCHANGED=1` to restore the upstream behavior for
+comparison.

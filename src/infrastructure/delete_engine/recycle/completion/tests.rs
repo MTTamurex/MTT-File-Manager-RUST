@@ -89,7 +89,9 @@ fn actual_sink_callbacks_count_a_recycled_item_after_source_disappears_even_on_c
         let sink: IFileOperationProgressSink = super::super::Sink {
             operation: job.operation.clone(),
             removed: Arc::new(|_| {}),
-            tracking: Arc::new(super::super::BatchTracking::new(&[source.clone()])),
+            tracking: Arc::new(super::super::BatchTracking::new(std::slice::from_ref(
+                &source,
+            ))),
             completed: completion.clone(),
         }
         .into();

@@ -16,6 +16,7 @@ use crate::workers::thumbnail::processing::get_bucket_size;
 use super::ImageViewerApp;
 
 pub(super) mod file_operation_memory;
+mod idle_memory_trim;
 mod inactive_thumbnail_release;
 pub(super) mod startup_memory_trim;
 
@@ -1359,9 +1360,7 @@ impl ImageViewerApp {
             return;
         }
         self.log_background_memory_diagnostic_if_due();
-        if crate::infrastructure::windows::window_subclass::layout_phase()
-            != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
-        {
+        if !crate::infrastructure::windows::window_subclass::is_backgrounded() {
             return;
         }
         self.discard_background_thumbnail_results();
@@ -2209,11 +2208,15 @@ impl ImageViewerApp {
         working_set_trim_blocked: bool,
     ) {
         if !self.uses_aggressive_gpu_memory_policy()
-            || working_set_trim_blocked
-            || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
+            || !self.idle_trim_delay_elapsed()
             || self.last_restore_time.elapsed() < WORKING_SET_TRIM_MIN_INTERVAL
-            || working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
         {
+            return;
+        }
+        // The idle deadline was reached: stop requesting dedicated wakeups for
+        // this idle period. A blocked trim is retried when work completes.
+        self.mark_idle_trim_evaluated();
+        if working_set_trim_blocked || working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES {
             return;
         }
 
@@ -2600,31 +2603,44 @@ fn process_working_set_trim_disabled() -> bool {
 
 #[cfg(target_os = "windows")]
 fn trim_process_working_set(reason: &str, scheduled_epoch: u64, require_minimized: bool) -> bool {
+    use windows::Win32::System::Memory::{
+        GetProcessHeap, HeapCompact, SetProcessWorkingSetSizeEx, HEAP_FLAGS,
+        SETPROCESSWORKINGSETSIZEEX_FLAGS,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    let trim_allowed = || {
+        !working_set_trim_cancelled(
+            WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
+            WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
+            scheduled_epoch,
+        ) && (!require_minimized
+            || crate::infrastructure::windows::window_subclass::is_backgrounded())
+    };
+    if !trim_allowed() {
+        return false;
+    }
+
+    let trim_started = Instant::now();
+    let before = current_process_memory_snapshot();
+    // Rust's global allocator uses the process heap; coalescing it returns free
+    // blocks to the OS so the trim also lowers committed memory. It never pages
+    // anything out, so it runs outside the execution lock that a native restore
+    // waits on.
+    if let Ok(heap) = unsafe { GetProcessHeap() } {
+        if unsafe { HeapCompact(heap, HEAP_FLAGS(0)) } == 0 {
+            log::debug!("[MEMORY] process heap compaction reported no free block");
+        }
+    }
+
     let _execution_guard = working_set_trim_execution_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if working_set_trim_cancelled(
-        WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
-        WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
-        scheduled_epoch,
-    ) {
-        return false;
-    }
-    if require_minimized
-        && crate::infrastructure::windows::window_subclass::layout_phase()
-            != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
-    {
+    if !trim_allowed() {
         return false;
     }
 
     unsafe {
-        use windows::Win32::System::Memory::{
-            SetProcessWorkingSetSizeEx, SETPROCESSWORKINGSETSIZEEX_FLAGS,
-        };
-        use windows::Win32::System::Threading::GetCurrentProcess;
-
-        let trim_started = Instant::now();
-        let before = current_process_memory_snapshot();
         let process = GetCurrentProcess();
         match SetProcessWorkingSetSizeEx(
             process,

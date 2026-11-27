@@ -45,6 +45,7 @@ fn task() -> (Refresh, mpsc::Receiver<DriveInfoRefreshResult>, FakeQueries) {
         tx,
         ctx: egui::Context::default(),
         hardware: Arc::default(),
+        quiet: false,
     };
     let queries = FakeQueries {
         fail: false,
@@ -170,4 +171,24 @@ fn panic_still_emits_completion() {
     queries.fail = true;
     refresh.run(&queries);
     assert!(rx.recv().unwrap().complete);
+}
+
+#[test]
+fn quiet_completion_wakes_the_ui_only_after_a_published_change() {
+    assert!(completion_wakes_ui(false, false));
+    assert!(completion_wakes_ui(true, true));
+    assert!(!completion_wakes_ui(true, false));
+}
+
+#[test]
+fn quiet_refresh_reports_whether_anything_was_published() {
+    let (mut refresh, rx, queries) = task();
+    refresh.quiet = true;
+    refresh.disks[0].1 = Some(cached());
+    assert!(!refresh.query(&queries));
+    assert!(rx.try_iter().next().is_none());
+
+    let (refresh, rx, queries) = task();
+    assert!(refresh.query(&queries));
+    assert!(rx.try_iter().any(|result| !result.entries.is_empty()));
 }

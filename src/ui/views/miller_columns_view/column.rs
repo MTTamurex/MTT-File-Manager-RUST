@@ -69,6 +69,7 @@ pub struct MillerColumnContext<'a> {
     pub scroll_interpolation_enabled: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_row(
     ui: &mut Ui,
     index: usize,
@@ -304,6 +305,7 @@ pub(super) fn render_row(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn interaction(
     index: usize,
     item: &FileEntry,

@@ -869,6 +869,7 @@ impl ImageViewerApp {
             last_texture_cache_retune: Instant::now(),
             last_user_activity: Instant::now(),
             startup_memory_trim: initial_restore_time.into(),
+            idle_trim_evaluated_for: None,
 
             // INACTIVITY RECOVERY
             last_restore_time: initial_restore_time,
@@ -1007,6 +1008,7 @@ impl ImageViewerApp {
             background_memory_trim_pending: false,
             background_memory_trim_success_baseline: 0,
             background_memory_trim_last_stable_working_set_bytes: 0,
+            was_backgrounded: false,
             background_memory_diagnostic_last_log: Instant::now(),
         };
 

@@ -9,6 +9,7 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows as windows_infra;
 
 mod computer;
+mod drive_scan_wake;
 mod recycle_bin;
 
 impl ImageViewerApp {
@@ -67,6 +68,16 @@ impl ImageViewerApp {
 
     /// Launches a background thread to scan drives. Non-blocking.
     pub fn reload_drive_list_async(&mut self) {
+        self.spawn_drive_list_scan(None);
+    }
+
+    /// Periodic fallback scan: an unchanged drive list does not wake the UI.
+    pub(crate) fn reload_drive_list_quietly(&mut self) {
+        let baseline = drive_scan_wake::DriveScanBaseline::capture(&self.drive_state);
+        self.spawn_drive_list_scan(Some(baseline));
+    }
+
+    fn spawn_drive_list_scan(&mut self, baseline: Option<drive_scan_wake::DriveScanBaseline>) {
         if self.drive_state.drive_scan_pending {
             return; // Already scanning
         }
@@ -82,8 +93,10 @@ impl ImageViewerApp {
                 network_locations: windows_infra::network_locations::get_network_locations(),
                 unavailable_label_roots,
             };
-            let _ = tx.send(scan_result);
-            ctx.request_repaint();
+            let wake_ui = drive_scan_wake::scan_wakes_ui(baseline.as_ref(), &scan_result);
+            if tx.send(scan_result).is_ok() && wake_ui {
+                ctx.request_repaint();
+            }
         });
     }
 

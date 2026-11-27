@@ -70,16 +70,29 @@ impl IconLoader {
         // many drive/folder icon results arrive simultaneously.
         const MAX_ASYNC_ICON_UPLOADS: usize = 8;
         let mut uploads = 0usize;
-        let mut received_any = false;
+        let mut visible_change = false;
         while uploads < MAX_ASYNC_ICON_UPLOADS {
             let Ok(result) = self.icon_result_rx.try_recv() else {
                 break;
             };
-            received_any = true;
             self.loading_drive_icons.remove(&result.key);
             let was_refresh = self.stale_drive_icons.remove(&result.key);
             match result.data {
                 Some((rgba_data, width, height)) => {
+                    let jumbo = result.key.ends_with("_Jumbo");
+                    let pixels = super::refresh_fingerprint::fingerprint(width, height, &rgba_data);
+                    // A refresh that re-extracted the same image keeps the
+                    // texture on screen: no upload, no repaint.
+                    if !jumbo
+                        && self.drive_icon_fingerprints.unchanged(
+                            &result.key,
+                            self.drive_icon_cache.peek(&result.key),
+                            pixels,
+                        )
+                    {
+                        continue;
+                    }
+                    visible_change = true;
                     let texture = ctx.load_texture(
                         format!("async_icon_{}", result.key),
                         egui::ColorImage::from_rgba_unmultiplied(
@@ -90,9 +103,11 @@ impl IconLoader {
                     );
                     // Jumbo file icon results go into icon_cache (LRU) so
                     // get_or_load_icon_sized finds them on subsequent frames.
-                    if result.key.ends_with("_Jumbo") {
+                    if jumbo {
                         self.icon_cache.put(result.key, texture);
                     } else {
+                        self.drive_icon_fingerprints
+                            .record(result.key.clone(), pixels, &texture);
                         self.drive_icon_cache.put(result.key, texture);
                     }
                     uploads += 1;
@@ -100,11 +115,12 @@ impl IconLoader {
                 None => {
                     if !was_refresh || self.drive_icon_cache.peek(&result.key).is_none() {
                         self.failed_drive_icons.put(result.key, ());
+                        visible_change = true;
                     }
                 }
             }
         }
-        if received_any {
+        if visible_change {
             ctx.request_repaint();
         }
     }

@@ -103,6 +103,7 @@ pub(crate) fn handle_callback(hwnd: HWND, event: LPARAM) {
 
 pub(crate) fn hide_window(hwnd: HWND) {
     coordinator::mark_hidden();
+    super::window_subclass::mark_hidden_to_tray(hwnd);
     unsafe {
         let _ = ShowWindow(hwnd, SW_HIDE);
     }
@@ -110,6 +111,8 @@ pub(crate) fn hide_window(hwnd: HWND) {
 
 pub(crate) fn show_window(hwnd: HWND) {
     coordinator::mark_visible();
+    // Stop an in-flight background trim before the window pages back in.
+    crate::app::state::cancel_pending_working_set_trim_for_native_restore();
     unsafe {
         if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);

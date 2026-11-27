@@ -118,8 +118,8 @@ fn empty_recycle_bin_preference_change_during_execution_does_not_run_another_ope
             &request(),
             &sender,
             &runtime,
-            &operation,
-            &operation,
+            operation,
+            operation,
         ));
         assert_eq!(calls.get(), 1);
         assert_eq!(runtime.enabled.load(Ordering::Relaxed), !enabled);

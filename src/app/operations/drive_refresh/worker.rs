@@ -18,6 +18,10 @@ pub(super) struct Refresh {
     pub tx: mpsc::Sender<DriveInfoRefreshResult>,
     pub ctx: egui::Context,
     pub hardware: Arc<parking_lot::Mutex<HardwareSchedule>>,
+    /// Periodic refresh: completion without any published change does not wake
+    /// the UI. The next scheduled pass consumes it, so an idle window does not
+    /// render (and present on the GPU) an identical frame.
+    pub quiet: bool,
 }
 
 pub(super) fn spawn(refresh: Refresh) {
@@ -30,7 +34,7 @@ pub(super) fn spawn(refresh: Refresh) {
         .spawn(move || refresh.run(&NativeQueries))
     {
         log::error!("[DRIVE-REFRESH] Failed to start worker: {error}");
-        complete(&tx, &ctx, scope, generation);
+        complete(&tx, &ctx, scope, generation, true);
     }
 }
 
@@ -64,12 +68,23 @@ impl Queries for NativeQueries {
 
 impl Refresh {
     fn run(self, queries: &impl Queries) {
-        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.query(queries))).is_err() {
-            log::error!("[DRIVE-REFRESH] Volume info worker panicked");
-        }
+        let published_any =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.query(queries))) {
+                Ok(published_any) => published_any,
+                Err(_) => {
+                    log::error!("[DRIVE-REFRESH] Volume info worker panicked");
+                    true
+                }
+            };
         // Completion is required even without visual changes or after panic:
         // consuming it releases the tracker slot and unblocks startup/preloads.
-        complete(&self.tx, &self.ctx, self.scope, self.generation);
+        complete(
+            &self.tx,
+            &self.ctx,
+            self.scope,
+            self.generation,
+            completion_wakes_ui(self.quiet, published_any),
+        );
     }
 
     fn publish(&self, entry: DriveInfoRefreshEntry) -> bool {
@@ -89,7 +104,9 @@ impl Refresh {
         true
     }
 
-    fn query(&self, queries: &impl Queries) {
+    /// Returns whether any changed entry was published.
+    fn query(&self, queries: &impl Queries) -> bool {
+        let mut published_any = false;
         let mut hardware_jobs = Vec::new();
         for (path, cached) in &self.disks {
             let drive_type = queries.drive_type(path);
@@ -122,9 +139,11 @@ impl Refresh {
                 entry.capacity_query_succeeded,
             )
             .is_some()
-                && !self.publish(entry)
             {
-                return;
+                if !self.publish(entry) {
+                    return published_any;
+                }
+                published_any = true;
             }
             // Metadata cadence is independent of completeness of cached fields.
             // Empty/partial responses therefore recover, while complete ones
@@ -157,13 +176,19 @@ impl Refresh {
             };
             // Compare merged values, but transmit only queried fields: including
             // the old cache would overwrite newer capacity or health metadata.
-            if merge_changed_drive_info(cached.as_ref(), entry.info.clone(), false).is_some()
-                && !self.publish(entry)
-            {
-                return;
+            if merge_changed_drive_info(cached.as_ref(), entry.info.clone(), false).is_some() {
+                if !self.publish(entry) {
+                    return published_any;
+                }
+                published_any = true;
             }
         }
+        published_any
     }
+}
+
+fn completion_wakes_ui(quiet: bool, published_any: bool) -> bool {
+    !quiet || published_any
 }
 
 fn empty_info(drive_type: DriveType) -> DriveInfo {
@@ -189,6 +214,7 @@ fn complete(
     ctx: &egui::Context,
     scope: DriveInfoRefreshScope,
     generation: u64,
+    wake_ui: bool,
 ) {
     if tx
         .send(DriveInfoRefreshResult {
@@ -198,6 +224,7 @@ fn complete(
             complete: true,
         })
         .is_ok()
+        && wake_ui
     {
         ctx.request_repaint_after(DRIVE_INFO_REPAINT_COALESCE);
     }

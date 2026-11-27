@@ -275,6 +275,19 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         app.dismiss_context_menu();
     }
 
+    // Hiding to the tray (SW_HIDE) never minimizes the window, so background
+    // memory maintenance follows either state instead of only minimization.
+    let backgrounded =
+        is_minimized || crate::infrastructure::windows::window_subclass::is_backgrounded();
+    if backgrounded != app.was_backgrounded {
+        app.was_backgrounded = backgrounded;
+        if backgrounded {
+            app.begin_background_memory_trim();
+        } else {
+            app.cancel_background_memory_trim();
+        }
+    }
+
     // Handle minimization state changes - CRITICAL for OneDrive thread management
     if minimized_changed {
         app.layout.saved_is_minimized = is_minimized;
@@ -284,9 +297,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             log::info!("[LIFECYCLE] App minimized - canceling OneDrive operations");
             // Track when we were minimized to calculate inactivity duration on restore
             app.last_restore_time = std::time::Instant::now();
-            app.begin_background_memory_trim();
         } else {
-            app.cancel_background_memory_trim();
             // Calculate how long the app was minimized
             let minimized_secs = app.last_restore_time.elapsed().as_secs_f64();
             app.minimized_duration_secs = minimized_secs;

@@ -136,7 +136,7 @@ fn automatic_reveal_replaces_the_previous_path_but_preserves_preexisting_expansi
     let next_target = next_folder.join("Leaf");
     tree.children.insert(
         root.into(),
-        vec![node(Path::new("C:\\Folder")), node(&next_folder)],
+        vec![node(Path::new("C:\\Folder")), node(next_folder)],
     );
     tree.children
         .insert(next_folder.into(), vec![node(&next_target)]);

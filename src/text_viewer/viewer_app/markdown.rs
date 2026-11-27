@@ -78,7 +78,8 @@ impl MarkdownDocument {
         // Footnote references need document-wide parser context. Keep these
         // documents intact rather than silently turning references into plain text.
         if has_footnotes {
-            blocks = vec![0..source.len()];
+            blocks.clear();
+            blocks.push(0..source.len());
             references.clear();
         }
         Self {

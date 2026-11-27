@@ -22,6 +22,7 @@ mod cloud_root_icons;
 mod file_icons;
 mod folder_navigation_icons;
 mod network_location_icons;
+mod refresh_fingerprint;
 mod special_icons;
 #[cfg(test)]
 mod test_support;
@@ -262,6 +263,8 @@ pub struct IconLoader {
     loading_drive_icons: HashSet<String>,
     /// Drive icons that must be re-extracted while their current texture remains visible.
     stale_drive_icons: HashSet<String>,
+    /// Pixels behind each asynchronously uploaded drive/cloud icon texture.
+    drive_icon_fingerprints: refresh_fingerprint::IconFingerprints,
     /// Folder paths that should use a provider icon resource instead of the
     /// generic folder icon (e.g. Google Drive target resolved from a `.lnk`).
     registered_folder_icon_resources: HashMap<String, String>,
@@ -308,6 +311,7 @@ impl IconLoader {
             ),
             loading_drive_icons: HashSet::new(),
             stale_drive_icons: HashSet::new(),
+            drive_icon_fingerprints: Default::default(),
             registered_folder_icon_resources: HashMap::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
@@ -324,6 +328,7 @@ impl IconLoader {
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
         self.stale_drive_icons.clear();
+        self.drive_icon_fingerprints.clear();
         self.extension_cache.clear();
         // NOTE: folder_icon_texture is NOT cleared — it's a static custom composed
         // graphic set once at startup (back+front+paper_sheet layers).

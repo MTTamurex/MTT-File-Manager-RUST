@@ -279,9 +279,10 @@ mod tests {
     #[test]
     fn snapshot_filter_observes_cancellation_without_returning_partial_selection() {
         let path = PathBuf::from(r"C:\$Recycle.Bin\entry");
+        let snapshot = vec![path.clone()];
         let result = select_from_snapshot(
-            &[path.clone()],
-            vec![path],
+            std::slice::from_ref(&path),
+            snapshot,
             |path| path.to_str().map(str::to_owned),
             || true,
         );

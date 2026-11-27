@@ -36,16 +36,12 @@ impl LiveProgress {
             .name("recycle-bin-progress".into())
             .spawn(move || {
                 let _com = ComApartmentGuard::init_sta_best_effort();
-                loop {
-                    match receiver.recv_timeout(INTERVAL) {
-                        Err(RecvTimeoutError::Timeout) => {
-                            if worker_stopped.load(Ordering::Acquire) {
-                                break;
-                            }
-                            reconcile(&worker_stopped);
-                        }
-                        Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                // A message or a disconnected sender both stop the worker.
+                while let Err(RecvTimeoutError::Timeout) = receiver.recv_timeout(INTERVAL) {
+                    if worker_stopped.load(Ordering::Acquire) {
+                        break;
                     }
+                    reconcile(&worker_stopped);
                 }
             })?;
         Ok(Self {

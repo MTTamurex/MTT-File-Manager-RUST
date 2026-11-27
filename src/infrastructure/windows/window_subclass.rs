@@ -17,7 +17,9 @@
 //! - Windows needs edge codes (HTLEFT, HTRIGHT, etc.) for resize cursors/behavior
 //! - During minimize, client area is 0x0 which corrupts egui layout calculations
 
+mod background;
 mod hit_test;
+mod present_invalidation;
 mod redraw_suppression;
 
 use std::collections::VecDeque;
@@ -34,6 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCOMMAND, WM_THEMECHANGED, WM_WINDOWPOSCHANGING,
 };
 
+pub use background::{is_backgrounded, mark_hidden_to_tray};
 #[cfg(test)]
 pub(crate) use hit_test::is_caption_drag_region_active;
 pub use hit_test::{
@@ -257,6 +260,7 @@ pub fn install_borderless_subclass(hwnd: HWND) -> bool {
     };
 
     if result.as_bool() {
+        present_invalidation::enable();
         true
     } else {
         // Roll back the claim so a future caller may retry.
@@ -306,6 +310,7 @@ extern "system" fn borderless_subclass_proc(
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
         SIZE_MOVE_STARTED.store(false, Ordering::SeqCst);
         redraw_suppression::reset_for_destroy();
+        present_invalidation::disable();
         SUBCLASS_INSTALLED.store(false, Ordering::Release);
         unsafe {
             let _ =
@@ -313,6 +318,8 @@ extern "system" fn borderless_subclass_proc(
             return DefSubclassProc(hwnd, msg, wparam, lparam);
         }
     }
+
+    present_invalidation::observe(hwnd, msg);
 
     if msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED {
         crate::infrastructure::windows::device_change::notify_system_theme_changed();

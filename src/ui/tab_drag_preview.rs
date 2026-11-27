@@ -104,6 +104,7 @@ impl TabDragPreview {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_at_gap_on_axis(
         &self,
         ui: &egui::Ui,
