@@ -249,6 +249,7 @@ impl eframe::App for ImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let _diagnostic_logic = crate::infrastructure::diagnostic_logger::SlowScope::new("logic");
         self.poll_default_file_manager_action();
+        crate::gpu_backend::glow_pacing::wait_for_previous_present(frame);
         // Real inter-frame interval tracking (captures hitches that stable_dt
         // smooths away, e.g. stalls in the previous frame's paint/swap phase).
         self.track_frame_interval();

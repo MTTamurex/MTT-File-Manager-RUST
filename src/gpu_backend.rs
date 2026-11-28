@@ -3,6 +3,7 @@ use eframe::{egui_wgpu, wgpu};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 
+pub mod glow_pacing;
 pub mod intel_vulkan;
 pub mod tuning;
 
