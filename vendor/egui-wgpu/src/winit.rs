@@ -808,6 +808,9 @@ impl Painter {
             output_frame.present();
             vsync_sec += start.elapsed().as_secs_f32();
         }
+        if viewport_id == ViewportId::ROOT {
+            crate::present_record::record_root_present([surface_state.width, surface_state.height]);
+        }
         surface_state
             .last_presented
             .set(frame_signature.map(|signature| (signature, present_epoch)));
@@ -844,6 +847,7 @@ impl Painter {
 }
 
 pub use crate::frame_skip::{invalidate_presented_frames, set_identical_frame_skip};
+pub use crate::present_record::last_root_present_size;
 
 /// MTT patch: `MTT_WGPU_ROOT_ALPHA=1` restores upstream behavior (an
 /// alpha-composited root swapchain) for A/B measurements.

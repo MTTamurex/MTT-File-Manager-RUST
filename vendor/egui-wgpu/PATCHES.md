@@ -44,3 +44,15 @@ update region. Viewer processes do not opt in and keep upstream behavior.
 
 Set `MTT_WGPU_PRESENT_UNCHANGED=1` to restore the upstream behavior for
 comparison.
+
+# Local root present size record
+
+The host cloaks its main window during startup and reveals it once a frame
+exists at the final window size. Counting egui passes is not enough: a pass can
+run before the swapchain is reconfigured to the new size, and with a copy-based
+present (Vulkan on Intel, "Composed: Copy with GPU GDI") the screen keeps
+showing the previous, smaller frame after the reveal.
+
+`Painter::paint_and_update_textures` records the surface size of every frame
+presented on the root viewport (`src/present_record.rs`), and
+`winit::last_root_present_size` exposes it to the host.

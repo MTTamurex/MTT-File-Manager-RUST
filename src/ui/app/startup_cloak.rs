@@ -5,6 +5,11 @@
 //! maximize before it is hidden again and revealed. The window is therefore
 //! DWM-cloaked before its first geometry command and uncloaked only after a
 //! frame has been painted while visible at the final geometry.
+//!
+//! With wgpu the frame must also have been presented at the current client
+//! size: a pass can run before the swapchain follows the maximize, and with a
+//! copy-based present (Vulkan on Intel) the screen would keep showing the
+//! smaller startup frame after the reveal.
 
 use crate::app::ImageViewerApp;
 use crate::infrastructure::windows::window_cloak::set_window_cloaked;
@@ -49,8 +54,10 @@ pub fn release_startup_cloak_when_painted(app: &mut ImageViewerApp, ctx: &egui::
     };
 
     // Frames painted before the reveal tick may still use fallback fonts.
+    let uses_wgpu = !app.active_gpu_backend.eq_ignore_ascii_case("glow");
     if app.startup_tick >= crate::ui::app::lifecycle::STARTUP_REVEAL_TICK
         && is_at_final_geometry(cloak.hwnd, cloak.expect_maximized)
+        && (!uses_wgpu || presented_at_client_size(cloak.hwnd))
     {
         cloak.ready_frames = cloak.ready_frames.saturating_add(1);
     }
@@ -65,9 +72,11 @@ pub fn release_startup_cloak_when_painted(app: &mut ImageViewerApp, ctx: &egui::
         log::warn!("[STARTUP] Failed to uncloak main window");
     }
     log::info!(
-        "[STARTUP-TIMELINE] main window uncloaked ready_frames={} cloak_ms={} t_ms={}",
+        "[STARTUP-TIMELINE] main window uncloaked ready_frames={} cloak_ms={} client={:?} presented={:?} t_ms={}",
         cloak.ready_frames,
         elapsed.as_millis(),
+        client_size(cloak.hwnd),
+        eframe::egui_wgpu::winit::last_root_present_size(),
         crate::app::startup_timeline::elapsed_ms()
     );
     app.startup_cloak = None;
@@ -84,13 +93,36 @@ fn is_at_final_geometry(hwnd: HWND, expect_maximized: bool) -> bool {
     }
 }
 
+fn client_size(hwnd: HWND) -> Option<[u32; 2]> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    let mut rect = RECT::default();
+    unsafe { GetClientRect(hwnd, &mut rect) }.ok()?;
+    Some([
+        (rect.right - rect.left).max(0) as u32,
+        (rect.bottom - rect.top).max(0) as u32,
+    ])
+}
+
+/// Whether the last frame on screen was rendered at the window's current size.
+fn presented_at_client_size(hwnd: HWND) -> bool {
+    present_matches_client(
+        eframe::egui_wgpu::winit::last_root_present_size(),
+        client_size(hwnd),
+    )
+}
+
+fn present_matches_client(presented: Option<[u32; 2]>, client: Option<[u32; 2]>) -> bool {
+    matches!((presented, client), (Some(p), Some(c)) if p == c)
+}
+
 fn should_release(ready_frames: u8, elapsed: Duration) -> bool {
     ready_frames >= READY_FRAMES_TO_REVEAL || elapsed >= MAX_CLOAK_DURATION
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{should_release, MAX_CLOAK_DURATION};
+    use super::{present_matches_client, should_release, MAX_CLOAK_DURATION};
     use std::time::Duration;
 
     #[test]
@@ -98,6 +130,20 @@ mod tests {
         assert!(!should_release(0, Duration::ZERO));
         assert!(!should_release(1, Duration::from_millis(10)));
         assert!(should_release(2, Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn needs_a_present_at_the_current_client_size() {
+        assert!(present_matches_client(
+            Some([2560, 1369]),
+            Some([2560, 1369])
+        ));
+        assert!(!present_matches_client(
+            Some([1280, 720]),
+            Some([2560, 1369])
+        ));
+        assert!(!present_matches_client(None, Some([2560, 1369])));
+        assert!(!present_matches_client(Some([2560, 1369]), None));
     }
 
     #[test]

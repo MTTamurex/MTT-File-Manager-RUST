@@ -39,6 +39,7 @@ pub mod winit;
 
 #[cfg(feature = "winit")]
 mod frame_skip;
+mod present_record;
 
 use std::sync::Arc;
 
