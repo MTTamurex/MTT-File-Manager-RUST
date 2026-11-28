@@ -116,3 +116,13 @@ fn independent_viewer_uses_saved_gpu_preference() {
         assert_eq!(selection.gpu_preference, preference);
     }
 }
+
+#[test]
+fn vulkan_first_keeps_the_other_fallbacks_in_order() {
+    use GraphicsBackend::*;
+    assert_eq!(
+        vulkan_first(vec![Dx12, Vulkan, Glow]),
+        vec![Vulkan, Dx12, Glow]
+    );
+    assert_eq!(vulkan_first(vec![Glow]), vec![Glow]);
+}

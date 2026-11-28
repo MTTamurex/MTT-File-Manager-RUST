@@ -3,6 +3,8 @@ use eframe::{egui_wgpu, wgpu};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 
+pub mod display_guard;
+pub mod intel_vulkan;
 pub mod tuning;
 
 pub const PREFERENCE_KEY: &str = "gpu_adapter_preference";
@@ -78,20 +80,26 @@ pub fn adapter_selector(
             return None;
         }
     }
-    if renderer_preference == Some("vulkan") {
-        return None;
-    }
-
     #[cfg(target_os = "windows")]
     {
+        let backend = if renderer_preference == Some("vulkan") {
+            wgpu::Backend::Vulkan
+        } else {
+            wgpu::Backend::Dx12
+        };
         Some(windows_gpu_adapter_selector(
             gpu_preference,
+            backend,
             required_texture_dimension,
         ))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (gpu_preference, required_texture_dimension);
+        let _ = (
+            renderer_preference,
+            gpu_preference,
+            required_texture_dimension,
+        );
         None
     }
 }
@@ -99,23 +107,54 @@ pub fn adapter_selector(
 #[cfg(target_os = "windows")]
 fn windows_gpu_adapter_selector(
     preference: GpuPreference,
+    backend: wgpu::Backend,
     required_texture_dimension: u32,
 ) -> egui_wgpu::NativeAdapterSelectorMethod {
     Arc::new(move |adapters, compatible_surface| {
-        let adapter = adapters
+        let candidates: Vec<&wgpu::Adapter> = adapters
             .iter()
             .filter(|adapter| {
-                let info = adapter.get_info();
-                info.backend == wgpu::Backend::Dx12
-                    && match compatible_surface {
-                        Some(surface) => adapter.is_surface_supported(surface),
-                        None => true,
-                    }
+                adapter.get_info().backend == backend
+                    && compatible_surface
+                        .is_none_or(|surface| adapter.is_surface_supported(surface))
                     && adapter.limits().max_texture_dimension_2d >= required_texture_dimension
             })
-            .min_by_key(|adapter| device_type_rank(adapter.get_info().device_type, preference));
+            .collect();
+        let identities: Vec<AdapterIdentity> = candidates
+            .iter()
+            .map(|adapter| {
+                let info = adapter.get_info();
+                AdapterIdentity {
+                    vendor: info.vendor,
+                    device: info.device,
+                    device_type: info.device_type,
+                }
+            })
+            .collect();
+        let preferred = identities
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, identity)| device_type_rank(identity.device_type, preference))
+            .map(|(index, _)| index);
 
-        if let Some(adapter) = adapter {
+        if let Some(preferred) = preferred {
+            let adapter = candidates[preferred];
+            let display = crate::infrastructure::windows::gpu_topology::primary_display_adapter();
+            let display_ids = display.as_ref().map(|d| (d.vendor_id, d.device_id));
+            if let Some(index) =
+                display_guard::other_display_adapter(&identities, preferred, display_ids)
+            {
+                log::warn!(
+                    "[STARTUP] GPU preference {} selects {}, which does not drive the monitor (display adapter: {})",
+                    preference.key(),
+                    adapter_summary(adapter),
+                    adapter_summary(candidates[index])
+                );
+                display_guard::record_mismatch(display_guard::DisplayAdapterMismatch {
+                    preferred: adapter.get_info().name,
+                    display: candidates[index].get_info().name,
+                });
+            }
             log::info!(
                 "[STARTUP] GPU adapter selected for preference {}: {}",
                 preference.key(),
@@ -125,7 +164,7 @@ fn windows_gpu_adapter_selector(
         }
 
         Err(format!(
-            "no compatible DirectX 12 adapter matched GPU preference {}; available adapters: {}",
+            "no compatible {backend:?} adapter matched GPU preference {}; available adapters: {}",
             preference.key(),
             if adapters.is_empty() {
                 "(none)".to_string()
@@ -257,9 +296,12 @@ fn adapter_summary(adapter: &wgpu::Adapter) -> String {
 const INTEL_PCI_VENDOR_ID: u32 = 0x8086;
 
 /// Intel's Windows Vulkan driver presents windowed swapchains by GDI copy
-/// ("Composed: Copy with GPU GDI" in PresentMon). Measured on a UHD 730: ~30
-/// of 60 frames reached the screen and DWM spent ~10 ms per frame copying,
-/// while DirectX 12 on the same GPU used hardware independent flip.
+/// ("Composed: Copy with GPU GDI" in PresentMon), while DirectX 12 on the same
+/// GPU uses hardware independent flip. Measured on a UHD 730 driving the
+/// monitor: with the main window alpha-composited by DWM, 15% of the frames
+/// never reached the screen; composed as opaque (`make_root_window_opaque`),
+/// all of them did. DirectX 12 is not an alternative there: its present leaks
+/// memory (see `intel_vulkan`).
 pub fn vulkan_presents_by_copy(backend: wgpu::Backend, vendor: u32) -> bool {
     backend == wgpu::Backend::Vulkan && vendor == INTEL_PCI_VENDOR_ID
 }
@@ -328,25 +370,35 @@ fn root_hwnd(cc: &eframe::CreationContext<'_>) -> Option<windows::Win32::Foundat
 }
 
 /// The root window is created transparent so the tab-drag preview viewport can
-/// share an alpha-capable GL config, which makes winit enable DWM blur-behind on
-/// it. DWM then alpha-blends the whole main window every frame; on an
-/// integrated GPU that costs the frame rate while scrolling. The main UI paints
-/// an opaque background, so drop the blur-behind (wgpu does the equivalent via
-/// an opaque swapchain, see vendor/egui-wgpu/PATCHES.md).
+/// be alpha-composited, which makes winit enable DWM blur-behind on it. DWM then
+/// alpha-blends the whole main window every frame. The main UI paints an opaque
+/// background, so drop the blur-behind when it costs frames:
+/// - Glow has no per-surface alpha mode, and on an integrated GPU the blend
+///   costs the frame rate while scrolling.
+/// - Vulkan on Intel presents by GDI copy; with the blend, DWM saturated a UHD
+///   730 and 15% of the frames never reached the screen (0% without it).
+///
+/// DirectX 12 presents by flip through an opaque swapchain (see
+/// vendor/egui-wgpu/PATCHES.md), so it keeps the window as created.
 #[cfg(target_os = "windows")]
-pub fn make_glow_root_window_opaque(cc: &eframe::CreationContext<'_>) {
+pub fn make_root_window_opaque(cc: &eframe::CreationContext<'_>, renderer: &str) {
     use crate::infrastructure::windows::window_opacity;
 
-    if std::env::var(window_opacity::GL_ROOT_ALPHA_ENV).as_deref() == Ok("1") {
-        log::info!("[GPU] Glow main window keeps DWM alpha composition (MTT_GL_ROOT_ALPHA=1)");
+    if std::env::var(window_opacity::ROOT_ALPHA_ENV).as_deref() == Ok("1") {
+        log::info!(
+            "[GPU] {renderer} main window keeps DWM alpha composition ({}=1)",
+            window_opacity::ROOT_ALPHA_ENV
+        );
         return;
     }
     match root_hwnd(cc) {
         Some(hwnd) => {
             window_opacity::disable_blur_behind(hwnd);
-            log::info!("[GPU] Glow main window composed as opaque by DWM");
+            log::info!("[GPU] {renderer} main window composed as opaque by DWM");
         }
-        None => log::warn!("[GPU] Glow main window handle unavailable; DWM alpha stays enabled"),
+        None => {
+            log::warn!("[GPU] {renderer} main window handle unavailable; DWM alpha stays enabled")
+        }
     }
 }
 

@@ -2,15 +2,17 @@
 //!
 //! winit implements window transparency on Windows with
 //! `DwmEnableBlurBehindWindow` and an empty region, which makes DWM blend the
-//! whole window with what is behind it on every frame. The Glow renderer has
-//! no per-surface alpha mode (unlike the wgpu swapchain), so the main window
-//! has to drop the blur-behind itself to be composed as opaque.
+//! whole window with what is behind it on every frame. Renderers whose present
+//! goes through that blend (Glow, which has no per-surface alpha mode, and
+//! Vulkan, which Intel presents by GDI copy) drop the blur-behind on the main
+//! window so it is composed as opaque.
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_ENABLE, DWM_BLURBEHIND};
 
-/// Set to `1` to keep the Glow main window alpha-composited (measurement only).
-pub const GL_ROOT_ALPHA_ENV: &str = "MTT_GL_ROOT_ALPHA";
+/// Set to `1` to keep the Glow or Vulkan main window alpha-composited
+/// (measurement only).
+pub const ROOT_ALPHA_ENV: &str = "MTT_GL_ROOT_ALPHA";
 
 /// Disable the blur-behind that winit enabled for a transparent window, so DWM
 /// composes it as an opaque surface. Best-effort: failures are only logged.

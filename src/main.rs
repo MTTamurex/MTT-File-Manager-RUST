@@ -211,10 +211,17 @@ impl StartupRenderer {
     }
 }
 
-fn startup_renderers(preference: Option<&str>) -> &'static [StartupRenderer] {
+fn startup_renderers(preference: Option<&str>, vulkan_first: bool) -> &'static [StartupRenderer] {
     match preference {
         Some("vulkan") => &[StartupRenderer::Vulkan, StartupRenderer::Glow],
         Some("glow") => &[StartupRenderer::Glow],
+        // Intel's DirectX 12 driver leaks memory on every present
+        // (see gpu_backend::intel_vulkan); DirectX 12 stays as the fallback.
+        _ if vulkan_first => &[
+            StartupRenderer::Vulkan,
+            StartupRenderer::Automatic,
+            StartupRenderer::Glow,
+        ],
         _ => &[
             StartupRenderer::Automatic,
             StartupRenderer::Vulkan,
@@ -340,7 +347,9 @@ fn run_main_app_with_fallback(
     gpu_preference: mtt_file_manager::gpu_backend::GpuPreference,
     startup_folder: Option<PathBuf>,
 ) -> (eframe::Result<()>, bool) {
-    let renderers = startup_renderers(preference);
+    let vulkan_first =
+        mtt_file_manager::gpu_backend::intel_vulkan::prefers_vulkan(preference, gpu_preference);
+    let renderers = startup_renderers(preference, vulkan_first);
     for (index, renderer) in renderers.iter().copied().enumerate() {
         let (result, app_started) = run_main_app_attempt(
             viewport.clone(),
@@ -853,23 +862,43 @@ mod tests {
     #[test]
     fn automatic_renderer_has_vulkan_and_glow_fallbacks() {
         assert_eq!(
-            startup_renderers(Some("auto")),
+            startup_renderers(Some("auto"), false),
             &[
                 StartupRenderer::Automatic,
                 StartupRenderer::Vulkan,
                 StartupRenderer::Glow,
             ]
         );
-        assert_eq!(startup_renderers(None), startup_renderers(Some("auto")));
+        assert_eq!(
+            startup_renderers(None, false),
+            startup_renderers(Some("auto"), false)
+        );
+    }
+
+    #[test]
+    fn automatic_renderer_on_intel_tries_vulkan_before_directx_12() {
+        assert_eq!(
+            startup_renderers(Some("auto"), true),
+            &[
+                StartupRenderer::Vulkan,
+                StartupRenderer::Automatic,
+                StartupRenderer::Glow,
+            ]
+        );
     }
 
     #[test]
     fn explicit_renderer_only_falls_back_to_more_compatible_options() {
-        assert_eq!(
-            startup_renderers(Some("vulkan")),
-            &[StartupRenderer::Vulkan, StartupRenderer::Glow]
-        );
-        assert_eq!(startup_renderers(Some("glow")), &[StartupRenderer::Glow]);
+        for vulkan_first in [false, true] {
+            assert_eq!(
+                startup_renderers(Some("vulkan"), vulkan_first),
+                &[StartupRenderer::Vulkan, StartupRenderer::Glow]
+            );
+            assert_eq!(
+                startup_renderers(Some("glow"), vulkan_first),
+                &[StartupRenderer::Glow]
+            );
+        }
     }
 
     #[test]
@@ -901,12 +930,10 @@ mod tests {
                         mtt_file_manager::gpu_backend::parse_renderer_preference(None)
                     }
                 );
-                if preference != GpuPreference::Automatic && renderer == StartupRenderer::Vulkan {
-                    assert!(setup.native_adapter_selector.is_none());
-                } else {
-                    #[cfg(target_os = "windows")]
-                    assert!(setup.native_adapter_selector.is_some());
-                }
+                // MTT selects the adapter on both backends, so it can warn when
+                // the preferred GPU does not drive the monitor.
+                #[cfg(target_os = "windows")]
+                assert!(setup.native_adapter_selector.is_some());
             }
         }
     }

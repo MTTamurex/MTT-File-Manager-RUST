@@ -159,13 +159,10 @@ fn viewers_apply_each_gpu_preference_to_both_wgpu_backends() {
                 panic!("viewer must create a graphics setup");
             };
             assert_eq!(setup.power_preference, preference.power_preference());
-            // Automatic selects the display's GPU on every backend.
-            if preference != GpuPreference::Automatic && backend == GraphicsBackend::Vulkan {
-                assert!(setup.native_adapter_selector.is_none());
-            } else {
-                #[cfg(target_os = "windows")]
-                assert!(setup.native_adapter_selector.is_some());
-            }
+            // Every preference selects through MTT, so a preferred GPU that does
+            // not drive the monitor can be replaced on both backends.
+            #[cfg(target_os = "windows")]
+            assert!(setup.native_adapter_selector.is_some());
         }
     }
 }

@@ -142,14 +142,34 @@ pub(super) fn selection() -> Result<BackendSelection, String> {
     }
     let preference = super::read_pref_readonly("gpu_backend");
     let gpu_preference = super::read_pref_readonly(crate::gpu_backend::PREFERENCE_KEY);
-    select(
+    let mut selection = select(
         None,
         None,
         preference.as_deref(),
         None,
         None,
         gpu_preference.as_deref(),
-    )
+    )?;
+    // Same rule as the manager: Intel's DirectX 12 driver leaks on every present.
+    if crate::gpu_backend::intel_vulkan::prefers_vulkan(
+        preference.as_deref(),
+        selection.gpu_preference,
+    ) {
+        selection.candidates = vulkan_first(selection.candidates);
+    }
+    Ok(selection)
+}
+
+/// Moves Vulkan ahead of the other candidates, keeping their order.
+fn vulkan_first(mut candidates: Vec<GraphicsBackend>) -> Vec<GraphicsBackend> {
+    if let Some(index) = candidates
+        .iter()
+        .position(|backend| *backend == GraphicsBackend::Vulkan)
+    {
+        let vulkan = candidates.remove(index);
+        candidates.insert(0, vulkan);
+    }
+    candidates
 }
 
 pub(crate) fn requested_backend() -> Result<GraphicsBackend, String> {

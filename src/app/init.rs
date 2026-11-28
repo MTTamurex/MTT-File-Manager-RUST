@@ -896,6 +896,8 @@ impl ImageViewerApp {
             video_gpu_preference,
             active_gpu_device: String::new(),
             gpu_cross_adapter_display: None,
+            gpu_display_mismatch_notice:
+                crate::gpu_backend::display_guard::display_adapter_mismatch().cloned(),
             gpu_single_adapter: false,
             scroll_interpolation_enabled,
             diagnostic_mode,
@@ -1160,6 +1162,10 @@ impl ImageViewerApp {
                 std::time::SystemTime::now(),
             );
             log::info!("[GPU] {}", diag.trim());
+            #[cfg(target_os = "windows")]
+            if info.backend == eframe::wgpu::Backend::Vulkan {
+                crate::gpu_backend::make_root_window_opaque(cc, "Vulkan");
+            }
         } else {
             app.active_gpu_backend = "glow".to_string();
             if let Some(gl) = &cc.gl {
@@ -1170,13 +1176,16 @@ impl ImageViewerApp {
                     .to_string();
             }
             #[cfg(target_os = "windows")]
-            crate::gpu_backend::make_glow_root_window_opaque(cc);
+            crate::gpu_backend::make_root_window_opaque(cc, "Glow");
         }
         app.gpu_cross_adapter_display =
             crate::gpu_backend::log_display_adapter_topology(cc, &app.active_gpu_device);
         app.video_gpu_preference.set_current();
         #[cfg(target_os = "windows")]
         {
+            crate::infrastructure::windows::window_subclass::set_cross_adapter_presentation(
+                app.gpu_cross_adapter_display.is_some(),
+            );
             app.gpu_single_adapter =
                 crate::infrastructure::windows::gpu_topology::hardware_adapter_count() == Some(1);
         }
@@ -1184,7 +1193,7 @@ impl ImageViewerApp {
             let info = render_state.adapter.get_info();
             if crate::gpu_backend::vulkan_presents_by_copy(info.backend, info.vendor) {
                 log::warn!(
-                    "[GPU] Vulkan on an Intel GPU: windowed frames are presented by GDI copy (about half reach the screen); DirectX 12 presents by flip"
+                    "[GPU] Vulkan on an Intel GPU: windowed frames are presented by GDI copy; the main window is composed as opaque so DWM keeps up"
                 );
             }
         }

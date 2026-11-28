@@ -763,6 +763,8 @@ impl eframe::App for ImageViewerApp {
             crate::ui::components::tag_cascade_modal::render_tag_cascade_modal(self, ctx);
         }
 
+        crate::ui::components::gpu_display_mismatch_modal::render(self, ctx);
+
         // 14. Notifications
         crate::ui::components::copy_progress_panel::render(self, ctx);
         app::notifications::render_notifications(self, ctx);

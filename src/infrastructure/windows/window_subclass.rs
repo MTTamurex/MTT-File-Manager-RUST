@@ -20,6 +20,7 @@
 mod background;
 mod hit_test;
 mod present_invalidation;
+pub use present_invalidation::set_cross_adapter_presentation;
 mod redraw_suppression;
 
 use std::collections::VecDeque;
