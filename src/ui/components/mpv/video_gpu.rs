@@ -68,6 +68,8 @@ pub struct VideoGpu {
     /// Value for mpv's `d3d11-adapter`; `None` keeps D3D11's default adapter.
     d3d11_adapter: Option<String>,
     rtx_supported: bool,
+    /// Shares system memory with the CPU, so heavy videos get a lighter profile.
+    integrated: bool,
 }
 
 impl VideoGpu {
@@ -85,26 +87,32 @@ impl VideoGpu {
             .map(str::to_owned);
         let adapter = gpu_topology::mpv_d3d11_adapter(d3d11_adapter.as_deref());
         let rtx_supported = adapter.as_ref().is_some_and(|a| a.is_nvidia_rtx());
+        let integrated = adapter.as_ref().is_some_and(|a| a.is_integrated());
         log::info!(
-            "[VIDEO-GPU] requested={} resolved={} rtx_vsr_hdr={}",
+            "[VIDEO-GPU] requested={} resolved={} rtx_vsr_hdr={} integrated={}",
             d3d11_adapter.as_deref().unwrap_or("default"),
             adapter.as_ref().map_or("unknown", |a| a.name.as_str()),
-            rtx_supported
+            rtx_supported,
+            integrated
         );
         Self {
             d3d11_adapter,
             rtx_supported,
+            integrated,
         }
     }
 
     /// Sets `d3d11-adapter` and publishes `user-data/vsr/rtx-supported` for
-    /// vsr.lua and the OSC. Call before `loadfile` so the VO opens on this GPU.
+    /// vsr.lua and the OSC, plus `user-data/mtt/integrated-gpu` for the
+    /// `igpu-heavy-video` auto-profile in mpv.conf. Call before `loadfile` so
+    /// the VO opens on this GPU.
     pub fn apply(&self, mpv: &mpv::Mpv) {
         if let Some(name) = &self.d3d11_adapter {
             // mpv matches this against the start of the DXGI adapter description.
             let _ = mpv.set_property("d3d11-adapter", name.as_str());
         }
         let _ = mpv.set_property("user-data/vsr/rtx-supported", self.rtx_supported);
+        let _ = mpv.set_property("user-data/mtt/integrated-gpu", self.integrated);
     }
 }
 

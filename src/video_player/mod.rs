@@ -371,6 +371,12 @@ fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Chi
     };
 
     let mut cmd = Command::new(exe);
+    // Below normal so the player's decode threads yield the CPU to the main
+    // window's UI thread when both compete.
+    std::os::windows::process::CommandExt::creation_flags(
+        &mut cmd,
+        windows::Win32::System::Threading::BELOW_NORMAL_PRIORITY_CLASS.0,
+    );
     cmd.arg("--video-player")
         .arg(path)
         .arg("--position")

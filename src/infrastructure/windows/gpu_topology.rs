@@ -6,8 +6,15 @@
 //! engine in Task Manager), which is expensive on desktop systems that are not
 //! configured as hybrid (Optimus-style) graphics.
 
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Foundation::POINT;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use windows::Win32::Foundation::{HMODULE, HWND, POINT};
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11CreateDevice, ID3D11Device, D3D11_CREATE_DEVICE_FLAG, D3D11_FEATURE_D3D11_OPTIONS2,
+    D3D11_FEATURE_DATA_D3D11_OPTIONS2, D3D11_SDK_VERSION,
+};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIFactory6, DXGI_ADAPTER_FLAG_SOFTWARE,
     DXGI_ERROR_NOT_FOUND, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, DXGI_GPU_PREFERENCE_MINIMUM_POWER,
@@ -35,6 +42,69 @@ impl DisplayAdapter {
     /// NVIDIA RTX GPUs are the ones that run RTX Video Super Resolution and RTX HDR.
     pub fn is_nvidia_rtx(&self) -> bool {
         self.vendor_id == NVIDIA_PCI_VENDOR_ID && self.name.to_ascii_uppercase().contains("RTX")
+    }
+
+    /// Whether this is an integrated GPU (Intel iGPU, AMD APU), i.e. one that
+    /// shares system memory with the CPU. Probed once per adapter through a
+    /// throwaway D3D11 device, then cached, because the docked player resolves
+    /// its GPU on the UI thread.
+    pub fn is_integrated(&self) -> bool {
+        static CACHE: OnceLock<Mutex<HashMap<(u32, u32), bool>>> = OnceLock::new();
+        let key = (self.vendor_id, self.device_id);
+        let cache = CACHE.get_or_init(Default::default);
+        if let Some(integrated) = cache.lock().ok().and_then(|c| c.get(&key).copied()) {
+            return integrated;
+        }
+        let integrated = probe_unified_memory(key).unwrap_or(false);
+        if let Ok(mut cache) = cache.lock() {
+            cache.insert(key, integrated);
+        }
+        integrated
+    }
+}
+
+/// `UnifiedMemoryArchitecture` of the first hardware adapter with this PCI
+/// vendor/device ID. Unlike a dedicated-VRAM threshold, this also holds for
+/// AMD APUs, which reserve a large memory carve-out.
+fn probe_unified_memory((vendor_id, device_id): (u32, u32)) -> Option<bool> {
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        let mut adapter_index = 0u32;
+        let adapter = loop {
+            let adapter = factory.EnumAdapters1(adapter_index).ok()?;
+            adapter_index += 1;
+            let Ok(desc) = adapter.GetDesc1() else {
+                continue;
+            };
+            if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 == 0
+                && desc.VendorId == vendor_id
+                && desc.DeviceId == device_id
+            {
+                break adapter;
+            }
+        };
+        let mut device: Option<ID3D11Device> = None;
+        D3D11CreateDevice(
+            &adapter,
+            D3D_DRIVER_TYPE_UNKNOWN,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_FLAG(0),
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            None,
+        )
+        .ok()?;
+        let mut options = D3D11_FEATURE_DATA_D3D11_OPTIONS2::default();
+        device?
+            .CheckFeatureSupport(
+                D3D11_FEATURE_D3D11_OPTIONS2,
+                (&mut options as *mut D3D11_FEATURE_DATA_D3D11_OPTIONS2).cast(),
+                std::mem::size_of_val(&options) as u32,
+            )
+            .ok()?;
+        Some(options.UnifiedMemoryArchitecture.as_bool())
     }
 }
 
