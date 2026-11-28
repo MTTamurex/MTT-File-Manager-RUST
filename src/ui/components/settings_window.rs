@@ -244,10 +244,8 @@ pub fn render_settings_window(
                                                 crate::ui::components::backend_settings::ActiveGraphics {
                                                     backend: &app.active_gpu_backend,
                                                     device: &app.active_gpu_device,
-                                                    single_adapter: app.gpu_single_adapter,
                                                 },
                                                 &mut app.gpu_backend_preference,
-                                                &mut app.gpu_adapter_preference,
                                                 &mut app.scroll_interpolation_enabled,
                                             );
                                             backend_changed |= backend;

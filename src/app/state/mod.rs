@@ -802,15 +802,10 @@ pub struct ImageViewerApp {
     // GPU backend: active backend name (from adapter info, read-only) and user preference
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
-    pub gpu_adapter_preference: String,
     pub video_gpu_preference: crate::ui::components::mpv::video_gpu::VideoGpuPreference,
     pub active_gpu_device: String,
     /// Name of the GPU driving the monitor when it differs from the rendering GPU.
     pub gpu_cross_adapter_display: Option<String>,
-    /// The preferred GPU does not drive the monitor, and the warning has not
-    /// been dismissed in this session.
-    pub gpu_display_mismatch_notice:
-        Option<crate::gpu_backend::display_guard::DisplayAdapterMismatch>,
     /// The system has exactly one hardware GPU, so the GPU preference has no effect.
     pub gpu_single_adapter: bool,
     pub scroll_interpolation_enabled: bool,

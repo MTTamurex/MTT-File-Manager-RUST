@@ -9,9 +9,8 @@
 //! composed as opaque, reaches the screen at the full refresh rate.
 //!
 //! The renderer is created before any adapter exists, so the render GPU is
-//! predicted from DXGI the same way the adapter selector will choose it.
-
-use super::GpuPreference;
+//! read from DXGI as the GPU driving the primary monitor, which is the one the
+//! adapter selector picks.
 
 const INTEL_PCI_VENDOR_ID: u32 = 0x8086;
 
@@ -26,30 +25,24 @@ fn vulkan_first(renderer_preference: Option<&str>, render_vendor: Option<u32>) -
     renderer_is_automatic(renderer_preference) && render_vendor == Some(INTEL_PCI_VENDOR_ID)
 }
 
-/// PCI vendor of the GPU that `gpu_preference` will render on.
+/// PCI vendor of the GPU the window will render on.
 #[cfg(target_os = "windows")]
-fn predicted_render_vendor(gpu_preference: GpuPreference) -> Option<u32> {
-    use crate::infrastructure::windows::gpu_topology;
-
-    let adapter = match gpu_preference {
-        GpuPreference::Automatic => gpu_topology::primary_display_adapter(),
-        GpuPreference::HighPerformance => gpu_topology::adapter_by_power_preference(true),
-        GpuPreference::LowPower => gpu_topology::adapter_by_power_preference(false),
-    };
-    adapter.map(|adapter| adapter.vendor_id)
+fn predicted_render_vendor() -> Option<u32> {
+    crate::infrastructure::windows::gpu_topology::primary_display_adapter()
+        .map(|adapter| adapter.vendor_id)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn predicted_render_vendor(_gpu_preference: GpuPreference) -> Option<u32> {
+fn predicted_render_vendor() -> Option<u32> {
     None
 }
 
 /// Whether an automatic renderer choice should start with Vulkan because the
 /// render GPU is Intel.
-pub fn prefers_vulkan(renderer_preference: Option<&str>, gpu_preference: GpuPreference) -> bool {
+pub fn prefers_vulkan(renderer_preference: Option<&str>) -> bool {
     // Checked first so an explicit choice never queries DXGI.
     renderer_is_automatic(renderer_preference)
-        && vulkan_first(renderer_preference, predicted_render_vendor(gpu_preference))
+        && vulkan_first(renderer_preference, predicted_render_vendor())
 }
 
 #[cfg(test)]

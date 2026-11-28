@@ -6,7 +6,6 @@ use rust_i18n::t;
 
 fn label_key(preference: VideoGpuPreference) -> &'static str {
     match preference {
-        VideoGpuPreference::FollowApp => "settings.video_gpu_follow_app",
         VideoGpuPreference::HighPerformance => "settings.gpu_high_performance",
         VideoGpuPreference::LowPower => "settings.gpu_low_power",
         VideoGpuPreference::Automatic => "settings.gpu_automatic",

@@ -429,10 +429,6 @@ impl ImageViewerApp {
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
         prefs.push((
-            crate::gpu_backend::PREFERENCE_KEY,
-            self.gpu_adapter_preference.clone(),
-        ));
-        prefs.push((
             crate::ui::components::mpv::video_gpu::PREFERENCE_KEY,
             self.video_gpu_preference.key().to_string(),
         ));

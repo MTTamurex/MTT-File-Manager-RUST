@@ -14,7 +14,7 @@ const OPTION_ROW_HEIGHT: f32 = 36.0;
 mod headers;
 pub use headers::subsection_header;
 mod choice_list;
-pub use choice_list::{choice_list, choice_list_with_warnings};
+pub use choice_list::choice_list;
 
 fn accent_tint(ctx: &egui::Context) -> Color32 {
     if let Some(p) = theme::current_palette(ctx) {

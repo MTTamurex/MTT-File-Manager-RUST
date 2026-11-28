@@ -13,8 +13,6 @@ pub const VIDEO_GPU_ENV: &str = "MTT_VIDEO_GPU_ADAPTER";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VideoGpuPreference {
-    /// The GPU the app renders on.
-    FollowApp,
     HighPerformance,
     LowPower,
     /// The GPU driving the monitor, so video frames are never copied between GPUs.
@@ -23,16 +21,12 @@ pub enum VideoGpuPreference {
 }
 
 impl VideoGpuPreference {
-    pub const ALL: [Self; 4] = [
-        Self::FollowApp,
-        Self::HighPerformance,
-        Self::LowPower,
-        Self::Automatic,
-    ];
+    pub const ALL: [Self; 3] = [Self::HighPerformance, Self::LowPower, Self::Automatic];
 
+    /// Unknown values, including the removed `follow_app`, fall back to
+    /// Automatic.
     pub fn parse(value: Option<&str>) -> Self {
         match value {
-            Some("follow_app") => Self::FollowApp,
             Some("high_performance") => Self::HighPerformance,
             Some("low_power") => Self::LowPower,
             _ => Self::Automatic,
@@ -41,7 +35,6 @@ impl VideoGpuPreference {
 
     pub fn key(self) -> &'static str {
         match self {
-            Self::FollowApp => "follow_app",
             Self::HighPerformance => "high_performance",
             Self::LowPower => "low_power",
             Self::Automatic => "automatic",
@@ -58,13 +51,9 @@ impl VideoGpuPreference {
         CURRENT.store(self as u8, Ordering::Relaxed);
     }
 
-    /// Name for mpv's `d3d11-adapter`; `None` keeps D3D11's default adapter
-    /// (also the case for `FollowApp` on OpenGL, whose GPU is unknown).
+    /// Name for mpv's `d3d11-adapter`; `None` keeps D3D11's default adapter.
     pub fn adapter_name(self) -> Option<String> {
         let adapter = match self {
-            Self::FollowApp => {
-                return crate::gpu_backend::render_adapter_name().map(str::to_owned);
-            }
             Self::HighPerformance => gpu_topology::adapter_by_power_preference(true),
             Self::LowPower => gpu_topology::adapter_by_power_preference(false),
             Self::Automatic => gpu_topology::primary_display_adapter(),
@@ -131,6 +120,10 @@ mod tests {
         );
         assert_eq!(
             VideoGpuPreference::parse(Some("invalid")),
+            VideoGpuPreference::Automatic
+        );
+        assert_eq!(
+            VideoGpuPreference::parse(Some("follow_app")),
             VideoGpuPreference::Automatic
         );
         for preference in VideoGpuPreference::ALL {

@@ -341,7 +341,6 @@ pub const ICON_VIEW_DETAILS: &str = "view_details";
 pub const ICON_VIEW_MILLER: &str = "view_miller";
 pub const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
 pub const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)
-pub const ICON_WARNING: &str = "\u{EA21}"; // Warning (alert-line)
 
 #[cfg(test)]
 mod tests;

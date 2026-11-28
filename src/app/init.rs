@@ -240,7 +240,6 @@ impl ImageViewerApp {
             clipboard_highlights,
             interface_scale,
             gpu_backend_preference,
-            gpu_adapter_preference,
             video_gpu_preference,
             scroll_interpolation_enabled,
             diagnostic_mode,
@@ -892,12 +891,9 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
-            gpu_adapter_preference,
             video_gpu_preference,
             active_gpu_device: String::new(),
             gpu_cross_adapter_display: None,
-            gpu_display_mismatch_notice:
-                crate::gpu_backend::display_guard::display_adapter_mismatch().cloned(),
             gpu_single_adapter: false,
             scroll_interpolation_enabled,
             diagnostic_mode,

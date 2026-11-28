@@ -2,26 +2,11 @@
 
 use super::{accent_tint, hover_fill, paint_focus_outline, radio_arrow_target, OPTION_ROW_HEIGHT};
 use crate::ui::theme;
-use eframe::egui::{
-    self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType,
-};
-
-const WARNING_ICON_SIZE: f32 = 15.0;
+use eframe::egui::{self, Color32, Pos2, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType};
 
 /// Vertical list of radio-style option rows.
 /// Returns the index of the clicked option, if any.
 pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Option<usize> {
-    choice_list_with_warnings(ui, labels, selected, &[])
-}
-
-/// [`choice_list`] where `warnings[i]`, when set, adds a warning icon after
-/// option `i`'s label; hovering the icon shows the text as a tooltip.
-pub fn choice_list_with_warnings(
-    ui: &mut egui::Ui,
-    labels: &[&str],
-    selected: usize,
-    warnings: &[Option<&str>],
-) -> Option<usize> {
     let dark_mode = ui.visuals().dark_mode;
     let enabled = ui.is_enabled();
     let disabled_visuals = ui.visuals().widgets.noninteractive;
@@ -67,18 +52,6 @@ pub fn choice_list_with_warnings(
             rect.min.x + 36.0,
             rect.center().y - label_galley.size().y / 2.0,
         );
-        let warning_icon = warnings.get(i).copied().flatten().map(|warning| {
-            let icon_rect = Rect::from_center_size(
-                Pos2::new(
-                    label_pos.x + label_galley.size().x + 6.0 + WARNING_ICON_SIZE / 2.0,
-                    rect.center().y,
-                ),
-                Vec2::splat(WARNING_ICON_SIZE),
-            );
-            ui.interact(icon_rect, response.id.with("warning"), Sense::hover())
-                .on_hover_text(warning);
-            icon_rect
-        });
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -161,15 +134,6 @@ pub fn choice_list_with_warnings(
                 );
             }
             painter.galley(label_pos, label_galley, text_color);
-            if let Some(icon_rect) = warning_icon {
-                painter.text(
-                    icon_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    theme::ICON_WARNING,
-                    egui::FontId::new(WARNING_ICON_SIZE, egui::FontFamily::Name("icons".into())),
-                    ui.visuals().warn_fg_color,
-                );
-            }
             if enabled && response.has_focus() {
                 paint_focus_outline(ui, rect, 8.0);
             }
